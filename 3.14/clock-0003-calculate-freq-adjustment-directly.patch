@@ -1,0 +1,179 @@
+
+After working with Mirolsav's simulator and his initial patch,
+I've grown more comfortable with his approach of calculating
+the freq adjustment directly using a division, rather then
+trying to aproximate it over a number of ticks.
+
+Part of the rational here is that now the error adjustment
+is very small (only a 0 or 1 unit adjustment to the multiplier)
+it can take quite some time to reduce any accumulated error.
+
+The approximation method strains this, since it takes
+log(adjustment) number of updates to approximate, and we can
+accumulate quite a bit of error in that period.
+
+The downside with this approach is it requires doing a 64bit
+divide and a few multiplies to properly make and apply the
+calculation, which will occur about every second or whenever
+the ntp_tick_length() value is adjusted.
+
+The positive side of this approach is that we see very small
+error accumulation.
+
+I do have some concern that compared with the simulator, the
+scale of the error without this patch in the real world will
+be hard to ever observe, the extra overhead of the computation
+(particularly on 32bit systems) won't actually provide a benefit.
+
+Cc: Miroslav Lichvar <mlichvar@redhat.com>
+Cc: Richard Cochran <richardcochran@gmail.com>
+Cc: Prarit Bhargava <prarit@redhat.com>
+Signed-off-by: John Stultz <john.stultz@linaro.org>
+---
+ include/linux/timekeeper_internal.h |  2 ++
+ kernel/time/timekeeping.c           | 67 +++++++++++++------------------------
+ 2 files changed, 25 insertions(+), 44 deletions(-)
+
+diff --git a/include/linux/timekeeper_internal.h b/include/linux/timekeeper_internal.h
+index 4fddf6c..03e5dff 100644
+--- a/include/linux/timekeeper_internal.h
++++ b/include/linux/timekeeper_internal.h
+@@ -48,6 +48,8 @@ struct timekeeper {
+ 	 * ntp shifted nano seconds. */
+ 	u32			ntp_error_shift;
+ 
++	/* Mult adjustment being applied to correct freq error */
++	u32			ntp_freq_mult;
+ 	/* Mult adjustment being applied to correct ntp_error */
+ 	u32			ntp_err_mult;
+ 
+diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
+index 846603e..27c54a6 100644
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -149,6 +149,7 @@ static void tk_setup_internals(struct timekeeper *tk, struct clocksource *clock)
+ 	 * to counteract clock drifting.
+ 	 */
+ 	tk->mult = clock->mult;
++	tk->ntp_freq_mult = clock->mult;
+ 	tk->ntp_err_mult = 0;
+ }
+ 
+@@ -1058,20 +1059,20 @@ device_initcall(timekeeping_init_ops);
+  */
+ static __always_inline void timekeeping_apply_adjustment(struct timekeeper *tk,
+ 							 s64 offset,
+-							 bool negative,
+-							 int adj_scale)
++							 int adj)
+ {
+ 	s64 interval = tk->cycle_interval;
+-	s32 mult_adj = 1;
+ 
+-	if (negative) {
+-		mult_adj = -mult_adj;
++	if (!adj)
++		return;
++
++	if (unlikely(abs(adj) > 1)) {
++		interval *= adj;
++		offset  *= adj;
++	} else if (adj < 0) {
+ 		interval = -interval;
+ 		offset  = -offset;
+ 	}
+-	mult_adj <<= adj_scale;
+-	interval <<= adj_scale;
+-	offset <<= adj_scale;
+ 
+ 	/*
+ 	 * So the following can be confusing.
+@@ -1079,7 +1080,7 @@ static __always_inline void timekeeping_apply_adjustment(struct timekeeper *tk,
+ 	 * To keep things simple, lets assume mult_adj == 1 for now.
+ 	 *
+ 	 * When mult_adj != 1, remember that the interval and offset values
+-	 * have been appropriately scaled so the math is the same.
++	 * have been appropriately multiplied so the math is the same.
+ 	 *
+ 	 * The basic idea here is that we're increasing the multiplier
+ 	 * by one, this causes the xtime_interval to be incremented by
+@@ -1122,7 +1123,7 @@ static __always_inline void timekeeping_apply_adjustment(struct timekeeper *tk,
+ 	 *
+ 	 * XXX - TODO: Doc ntp_error calculation.
+ 	 */
+-	tk->mult += mult_adj;
++	tk->mult += adj;
+ 	tk->xtime_interval += interval;
+ 	tk->xtime_nsec -= offset;
+ 	tk->ntp_error -= (interval - offset) << tk->ntp_error_shift;
+@@ -1135,36 +1136,13 @@ static __always_inline void timekeeping_apply_adjustment(struct timekeeper *tk,
+ static __always_inline void timekeeping_freqadjust(struct timekeeper *tk,
+ 							s64 offset)
+ {
+-	s64 interval = tk->cycle_interval;
+-	s64 xinterval = tk->xtime_interval;
+-	s64 tick_error;
+-	bool negative;
+-	u32 adj;
+-
+-	/* Remove any current error adj from freq calculation */
+-	if (tk->ntp_err_mult)
+-		xinterval -= tk->cycle_interval;
+-
+-	tk->ntp_tick = ntp_tick_length();
+-
+-	/* Calculate current error per tick */
+-	tick_error = ntp_tick_length() >> tk->ntp_error_shift;
+-	tick_error -= (xinterval + tk->xtime_remainder);
++	s64 tick_ns;
+ 
+-	/* Don't worry about correcting it if its small */
+-	if (likely((tick_error >= 0) && (tick_error <= interval)))
++	if (likely(tk->ntp_tick == ntp_tick_length()))
+ 		return;
+-
+-	/* preserve the direction of correction */
+-	negative = (tick_error < 0);
+-
+-	/* Sort out the magnitude of the correction */
+-	tick_error = abs(tick_error);
+-	for (adj = 0; tick_error > interval; adj++)
+-		tick_error >>= 1;
+-
+-	/* scale the corrections */
+-	timekeeping_apply_adjustment(tk, offset, negative, adj);
++	tk->ntp_tick = ntp_tick_length();
++	tick_ns = (tk->ntp_tick >> tk->ntp_error_shift) - tk->xtime_remainder;
++	tk->ntp_freq_mult = div64_u64(tick_ns, tk->cycle_interval);
+ }
+ 
+ /*
+@@ -1173,18 +1151,19 @@ static __always_inline void timekeeping_freqadjust(struct timekeeper *tk,
+  */
+ static void timekeeping_adjust(struct timekeeper *tk, s64 offset)
+ {
++	u32 new_mult;
++
+ 	/* Correct for the current frequency error */
+ 	timekeeping_freqadjust(tk, offset);
+ 
+ 	/* Next make a small adjustment to fix any cumulative error */
+-	if (!tk->ntp_err_mult && (tk->ntp_error > 0)) {
++	if (tk->ntp_error > 0)
+ 		tk->ntp_err_mult = 1;
+-		timekeeping_apply_adjustment(tk, offset, 0, 0);
+-	} else if (tk->ntp_err_mult && (tk->ntp_error <= 0)) {
+-		/* Undo any existing error adjustment */
+-		timekeeping_apply_adjustment(tk, offset, 1, 0);
++	else
+ 		tk->ntp_err_mult = 0;
+-	}
++
++	new_mult = tk->ntp_freq_mult + tk->ntp_err_mult;
++	timekeeping_apply_adjustment(tk, offset, new_mult - tk->mult);
+ 
+ 	if (unlikely(tk->clock->maxadj &&
+ 		(tk->mult > tk->clock->mult + tk->clock->maxadj))) {
+-- 
+1.9.1
+
