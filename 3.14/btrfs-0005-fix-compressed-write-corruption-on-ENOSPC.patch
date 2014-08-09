@@ -1,0 +1,37 @@
+
+When failing to allocate space for the whole compressed extent, we'll
+fallback to uncompressed IO, but we've forgotten to redirty the pages
+which belong to this compressed extent, and these 'clean' pages will
+simply skip 'submit' part and go to endio directly, at last we got data
+corruption as we write nothing.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/inode.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 3668048..8ea7610 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -709,6 +709,18 @@ retry:
+ 				unlock_extent(io_tree, async_extent->start,
+ 					      async_extent->start +
+ 					      async_extent->ram_size - 1);
++
++				/*
++				 * we need to redirty the pages if we decide to
++				 * fallback to uncompressed IO, otherwise we
++				 * will not submit these pages down to lower
++				 * layers.
++				 */
++				extent_range_redirty_for_io(inode,
++						async_extent->start,
++						async_extent->start +
++						async_extent->ram_size - 1);
++
+ 				goto retry;
+ 			}
+ 			goto out_free;
+-- 
+1.8.1.4
