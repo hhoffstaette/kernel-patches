@@ -24,7 +24,7 @@ normal setting with lots of running background tasks/daemons.
 Index: linux-3.15.5-ck1/kernel/sched/bfs.c
 ===================================================================
 --- linux-3.15.5-ck1.orig/kernel/sched/bfs.c	2014-08-10 22:11:14.867751246 +1000
-+++ linux-3.15.5-ck1/kernel/sched/bfs.c	2014-08-10 22:11:15.172751246 +1000
++++ linux-3.15.5-ck1/kernel/sched/bfs.c	2014-08-12 11:26:36.480936005 +1000
 @@ -98,9 +98,16 @@
  #define is_rt_policy(policy)	((policy) == SCHED_FIFO || \
  					(policy) == SCHED_RR)
@@ -213,12 +213,14 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
  		if (can_preempt(p, highest_prio, highest_prio_rq->rq_deadline))
  			resched_task(highest_prio_rq->curr);
  	}
-@@ -2946,6 +3034,19 @@ static void time_slice_expired(struct ta
+@@ -2946,6 +3034,21 @@ static void time_slice_expired(struct ta
  {
  	p->time_slice = timeslice();
  	p->deadline = grq.niffies + task_deadline_diff(p);
 +#ifdef CONFIG_SMT_NICE
-+	if (rt_task(p))
++	if (!p->mm)
++		p->smt_bias = 0;
++	else if (rt_task(p))
 +		p->smt_bias = 1 << 30;
 +	else if (task_running_iso(p))
 +		p->smt_bias = 1 << 29;
@@ -233,7 +235,7 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
  }
  
  /*
-@@ -3074,6 +3175,10 @@ task_struct *earliest_deadline_task(stru
+@@ -3074,6 +3177,10 @@ task_struct *earliest_deadline_task(stru
  			if (needs_other_cpu(p, cpu))
  				continue;
  
@@ -244,7 +246,7 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
  			/*
  			 * Soft affinity happens here by not scheduling a task
  			 * with its sticky flag set that ran on a different CPU
-@@ -3158,6 +3263,9 @@ static inline void set_rq_task(struct rq
+@@ -3158,6 +3265,9 @@ static inline void set_rq_task(struct rq
  	rq->rq_last_ran = p->last_ran = rq->clock_task;
  	rq->rq_policy = p->policy;
  	rq->rq_prio = p->prio;
@@ -254,15 +256,15 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
  	if (p != rq->idle)
  		rq->rq_running = true;
  	else
-@@ -3168,8 +3276,59 @@ static void reset_rq_task(struct rq *rq,
+@@ -3168,8 +3278,63 @@ static void reset_rq_task(struct rq *rq,
  {
  	rq->rq_policy = p->policy;
  	rq->rq_prio = p->prio;
 +#ifdef CONFIG_SMT_NICE
 +	rq->rq_smt_bias = p->smt_bias;
 +#endif
-+}
-+
+ }
+ 
 +#ifdef CONFIG_SMT_NICE
 +/* Iterate over smt siblings when we've scheduled a process on cpu and decide
 + * whether they should continue running or be descheduled. */
@@ -277,14 +279,18 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
 +		if (other_cpu == cpu)
 +			continue;
 +		rq = cpu_rq(other_cpu);
++		if (rq_idle(rq))
++			continue;
++		if (!rq->online)
++			continue;
 +		p = rq->curr;
 +		if (smt_should_schedule(p, cpu)) {
 +			set_tsk_need_resched(p);
 +			__send_other_resched(p, other_cpu);
 +		}
 +	}
- }
- 
++}
++
 +static void wake_smt_siblings(int cpu)
 +{
 +	int other_cpu;
@@ -314,7 +320,7 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
  /*
   * schedule() is the main scheduler function.
   *
-@@ -3303,6 +3462,7 @@ need_resched:
+@@ -3303,6 +3468,7 @@ need_resched:
  				* again.
  				*/
  				set_rq_task(rq, prev);
@@ -322,7 +328,7 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
  				grq_unlock_irq();
  				goto rerun_prev_unlocked;
  			} else
-@@ -3336,6 +3496,10 @@ need_resched:
+@@ -3336,6 +3502,10 @@ need_resched:
  		if (rt_task(next))
  			unstick_task(rq, prev);
  		set_rq_task(rq, next);
@@ -333,7 +339,7 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
  		grq.nr_switches++;
  		prev->on_cpu = false;
  		next->on_cpu = true;
-@@ -3352,8 +3516,10 @@ need_resched:
+@@ -3352,8 +3522,10 @@ need_resched:
  		cpu = smp_processor_id();
  		rq = cpu_rq(cpu);
  		idle = rq->idle;
@@ -345,7 +351,7 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
  
  rerun_prev_unlocked:
  	sched_preempt_enable_no_resched();
-@@ -4833,6 +4999,9 @@ void init_idle(struct task_struct *idle,
+@@ -4833,6 +5005,9 @@ void init_idle(struct task_struct *idle,
  	idle->state = TASK_RUNNING;
  	/* Setting prio to illegal value shouldn't matter when never queued */
  	idle->prio = PRIO_LIMIT;
