@@ -1,3 +1,7 @@
+From 2ff37151dc1e1dd06b682a3df9d5faa5f72376db Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Thu, 24 Jul 2014 22:48:05 +0800
+Subject: Btrfs: fix compressed write corruption on enospc
 
 When failing to allocate space for the whole compressed extent, we'll
 fallback to uncompressed IO, but we've forgotten to redirty the pages
@@ -6,15 +10,14 @@ simply skip 'submit' part and go to endio directly, at last we got data
 corruption as we write nothing.
 
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
----
- fs/btrfs/inode.c | 12 ++++++++++++
- 1 file changed, 12 insertions(+)
+Tested-By: Martin Steigerwald <martin@lichtvoll.de>
+Signed-off-by: Chris Mason <clm@fb.com>
 
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index 3668048..8ea7610 100644
+index 89ef7a7..cb4797f 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -709,6 +709,18 @@ retry:
+@@ -723,6 +723,18 @@ retry:
  				unlock_extent(io_tree, async_extent->start,
  					      async_extent->start +
  					      async_extent->ram_size - 1);
@@ -34,4 +37,5 @@ index 3668048..8ea7610 100644
  			}
  			goto out_free;
 -- 
-1.8.1.4
+cgit v0.10.1
+

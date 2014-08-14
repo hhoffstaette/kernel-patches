@@ -1,0 +1,35 @@
+From 680e16f8bce330f1a023940df626e1d7441c2556 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Wed, 23 Jul 2014 14:39:35 +0200
+Subject: btrfs: wake up transaction thread from SYNC_FS ioctl
+
+The transaction thread may want to do more work, namely it pokes the
+cleaner ktread that will start processing uncleaned subvols.
+
+This can be triggered by user via the 'btrfs fi sync' command, otherwise
+there was a delay up to 30 seconds before the cleaner started to clean
+old snapshots.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index e5de840..2a30ac1 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -5314,6 +5314,12 @@ long btrfs_ioctl(struct file *file, unsigned int
+ 		if (ret)
+ 			return ret;
+ 		ret = btrfs_sync_fs(file->f_dentry->d_sb, 1);
++		/*
++		 * The transaction thread may want to do more work,
++		 * namely it pokes the cleaner ktread that will start
++		 * processing uncleaned subvols.
++		 */
++		wake_up_process(root->fs_info->transaction_kthread);
+ 		return ret;
+ 	}
+ 	case BTRFS_IOC_START_SYNC:
+-- 
+cgit v0.10.1
+

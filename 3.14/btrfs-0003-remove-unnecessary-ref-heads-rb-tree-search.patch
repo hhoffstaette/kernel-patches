@@ -1,0 +1,43 @@
+From 6103fb43fbc6d1caa78f26a1d0aa3d1a4525cea5 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Wed, 12 Feb 2014 15:07:52 +0000
+Subject: Btrfs: remove unnecessary ref heads rb tree search
+
+When we didn't find the exact ref head we were looking for, if
+return_bigger != 0 we set a new search key to match either the
+next node after the last one we found or the first one in the
+ref heads rb tree, and then did another full tree search. For both
+cases this ended up being pointless as we would end up returning
+an entry we already had before repeating the search.
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/delayed-ref.c b/fs/btrfs/delayed-ref.c
+index f3bff89..56cdfe9 100644
+--- a/fs/btrfs/delayed-ref.c
++++ b/fs/btrfs/delayed-ref.c
+@@ -205,7 +205,6 @@ find_ref_head(struct rb_root *root, u64 bytenr,
+ 	struct btrfs_delayed_ref_head *entry;
+ 	int cmp = 0;
+ 
+-again:
+ 	n = root->rb_node;
+ 	entry = NULL;
+ 	while (n) {
+@@ -234,9 +233,9 @@ again:
+ 				n = rb_first(root);
+ 			entry = rb_entry(n, struct btrfs_delayed_ref_head,
+ 					 href_node);
+-			bytenr = entry->node.bytenr;
+-			return_bigger = 0;
+-			goto again;
++			if (last)
++				*last = entry;
++			return entry;
+ 		}
+ 		return entry;
+ 	}
+-- 
+cgit v0.10.1
+

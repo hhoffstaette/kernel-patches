@@ -1,3 +1,7 @@
+From 98ce2deda23a303682a4253f3016a1436f4b2735 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Thu, 17 Jul 2014 16:08:36 +0800
+Subject: Btrfs: fix abnormal long waiting in fsync
 
 xfstests generic/127 detected this problem.
 
@@ -23,15 +27,7 @@ btrfs_wait_logged_extents() to fix that.
 
 Reviewed-by: Miao Xie <miaox@cn.fujitsu.com>
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
----
-v3:
-   Add a check for IO_DONE flag to avoid unnecessary flush.
-v2: 
-   Move flush part into btrfs_wait_logged_extents() to get the flush range
-   more precise.
-
- fs/btrfs/ordered-data.c | 11 +++++++++++
- 1 file changed, 11 insertions(+)
+Signed-off-by: Chris Mason <clm@fb.com>
 
 diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
 index e12441c..7187b14 100644
@@ -58,5 +54,5 @@ index e12441c..7187b14 100644
  		spin_lock_irq(&log->log_extents_lock[index]);
  	}
 -- 
-1.8.1.4
+cgit v0.10.1
 

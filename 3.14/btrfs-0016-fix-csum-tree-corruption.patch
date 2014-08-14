@@ -1,3 +1,7 @@
+From 8c399324712236b2d45cdfd47d3f8d91aaaa0231 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Sat, 9 Aug 2014 21:22:27 +0100
+Subject: Btrfs: fix csum tree corruption, duplicate and outdated checksums
 
 Under rare circumstances we can end up leaving 2 versions of a checksum
 for the same file extent range.
@@ -79,12 +83,10 @@ or 40169472 (the last 3 4kb blocks of file data), will get the old checksums.
 
 Cc: stable@vger.kernel.org
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
----
- fs/btrfs/file-item.c | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+Signed-off-by: Chris Mason <clm@fb.com>
 
 diff --git a/fs/btrfs/file-item.c b/fs/btrfs/file-item.c
-index a1f97de..7897dcd 100644
+index 37387ee..783a943 100644
 --- a/fs/btrfs/file-item.c
 +++ b/fs/btrfs/file-item.c
 @@ -746,7 +746,7 @@ again:
@@ -97,4 +99,5 @@ index a1f97de..7897dcd 100644
  		btrfs_item_key_to_cpu(path->nodes[0], &found_key, slot);
  		if (found_key.objectid != BTRFS_EXTENT_CSUM_OBJECTID ||
 -- 
-1.9.1
+cgit v0.10.1
+

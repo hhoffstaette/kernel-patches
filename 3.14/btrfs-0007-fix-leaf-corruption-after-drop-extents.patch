@@ -1,3 +1,7 @@
+From 0b43e04f700bce8eecf3581612e9d3e15bf258bc Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Mon, 9 Jun 2014 11:04:49 +0800
+Subject: Btrfs: fix leaf corruption after __btrfs_drop_extents
 
 Several reports about leaf corruption has been floating on the list, one of them
 points to __btrfs_drop_extents(), and we find that the leaf becomes corrupted
@@ -21,18 +25,23 @@ it has dropped all extent matched the required range and finish_ordered_io can
 safely insert a new extent, but it actually doesn't and ends up a leaf
 corruption.
 
+One may be asking that why our locking on extent io tree doesn't work as
+expected, ie. it should avoid this kind of race situation.  But in
+__btrfs_drop_extents(), we don't always find extents which are included within
+our locking range, IOW, extents can start before our searching start, in this
+case locking on extent io tree doesn't protect us from the race.
+
 This takes the special case into account.
 
+Reviewed-by: Filipe Manana <fdmanana@gmail.com>
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
----
- fs/btrfs/ctree.c | 18 ++++++++++++++++++
- 1 file changed, 18 insertions(+)
+Signed-off-by: Chris Mason <clm@fb.com>
 
 diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
-index 1bcfcdb..bbb256c 100644
+index 4eada52..aeab453 100644
 --- a/fs/btrfs/ctree.c
 +++ b/fs/btrfs/ctree.c
-@@ -5736,6 +5736,24 @@ again:
+@@ -5718,6 +5718,24 @@ again:
  		ret = 0;
  		goto done;
  	}
@@ -58,4 +67,5 @@ index 1bcfcdb..bbb256c 100644
  	while (level < BTRFS_MAX_LEVEL) {
  		if (!path->nodes[level]) {
 -- 
-1.8.1.4
+cgit v0.10.1
+

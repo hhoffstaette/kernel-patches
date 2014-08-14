@@ -1,3 +1,7 @@
+From f207476a990af8c2573a25ce4c23ac606d3dd637 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Thu, 7 Aug 2014 12:00:44 +0100
+Subject: Btrfs: fix hole detection during file fsync
 
 The file hole detection logic during a file fsync wasn't correct,
 because it didn't look back (in a previous leaf) for the last file
@@ -116,13 +120,7 @@ Test:
     exit
 
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
----
-
-V2: Updated commit message, fixed a couple typos, grammar and a more
-    clear explanation of the problem.
-
- fs/btrfs/tree-log.c | 17 +++++++++++++----
- 1 file changed, 13 insertions(+), 4 deletions(-)
+Signed-off-by: Chris Mason <clm@fb.com>
 
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
 index df332dd..5a917a6 100644
@@ -174,4 +172,5 @@ index df332dd..5a917a6 100644
  	/*
  	 * Need to let the callers know we dropped the path so they should
 -- 
-1.9.1
+cgit v0.10.1
+

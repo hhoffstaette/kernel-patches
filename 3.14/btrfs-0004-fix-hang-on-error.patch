@@ -1,3 +1,7 @@
+From 61391d562229ed94899ed4b4973dc2f0c015292a Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Fri, 9 May 2014 17:17:40 +0100
+Subject: Btrfs: fix hang on error (such as ENOSPC) when writing extent pages
 
 When running low on available disk space and having several processes
 doing buffered file IO, I got the following trace in dmesg:
@@ -100,24 +104,13 @@ all pages in the page vector even if an error happens only for some
 of them, so that ordered extents end up released.
 
 Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
----
-
-V2: Grab error from `em` pointer if available, do the error check and
-    end_extent_writepage call before unlocking the page (just like
-    end_bio_extent_writepage does).
-
-V3: Make extent_write_cache_pages not stop processing remaining pages
-    in the page vector if __extent_writepage returns an error for some
-    page, so that ordered extents end up being processed and released.
-
- fs/btrfs/extent_io.c | 16 +++++++++++-----
- 1 file changed, 11 insertions(+), 5 deletions(-)
+Signed-off-by: Chris Mason <clm@fb.com>
 
 diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
-index 0c43896..4468afd 100644
+index 3955e47..fa31c8d 100644
 --- a/fs/btrfs/extent_io.c
 +++ b/fs/btrfs/extent_io.c
-@@ -3284,6 +3284,7 @@ static int __extent_writepage(struct page *page, struct writeback_control *wbc,
+@@ -3278,6 +3278,7 @@ static int __extent_writepage(struct page *page, struct writeback_control *wbc,
  				     end - cur + 1, 1);
  		if (IS_ERR_OR_NULL(em)) {
  			SetPageError(page);
@@ -125,7 +118,7 @@ index 0c43896..4468afd 100644
  			break;
  		}
  
-@@ -3370,13 +3371,17 @@ done:
+@@ -3364,13 +3365,17 @@ done:
  		set_page_writeback(page);
  		end_page_writeback(page);
  	}
@@ -144,7 +137,7 @@ index 0c43896..4468afd 100644
  }
  
  static int eb_wait(void *word)
-@@ -3699,6 +3704,7 @@ static int extent_write_cache_pages(struct extent_io_tree *tree,
+@@ -3690,6 +3695,7 @@ static int extent_write_cache_pages(struct extent_io_tree *tree,
  	struct inode *inode = mapping->host;
  	int ret = 0;
  	int done = 0;
@@ -152,7 +145,7 @@ index 0c43896..4468afd 100644
  	int nr_to_write_done = 0;
  	struct pagevec pvec;
  	int nr_pages;
-@@ -3785,8 +3791,8 @@ retry:
+@@ -3776,8 +3782,8 @@ retry:
  				unlock_page(page);
  				ret = 0;
  			}
@@ -163,7 +156,7 @@ index 0c43896..4468afd 100644
  
  			/*
  			 * the filesystem may choose to bump up nr_to_write.
-@@ -3798,7 +3804,7 @@ retry:
+@@ -3789,7 +3795,7 @@ retry:
  		pagevec_release(&pvec);
  		cond_resched();
  	}
@@ -172,7 +165,7 @@ index 0c43896..4468afd 100644
  		/*
  		 * We hit the last page and there is more work to be done: wrap
  		 * back to the start of the file
-@@ -3808,7 +3814,7 @@ retry:
+@@ -3799,7 +3805,7 @@ retry:
  		goto retry;
  	}
  	btrfs_add_delayed_iput(inode);
@@ -182,5 +175,5 @@ index 0c43896..4468afd 100644
  
  static void flush_epd_write_bio(struct extent_page_data *epd)
 -- 
-1.9.1
+cgit v0.10.1
 
