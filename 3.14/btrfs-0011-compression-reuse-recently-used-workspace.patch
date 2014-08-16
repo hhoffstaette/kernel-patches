@@ -1,0 +1,29 @@
+From c39aa7056f50fa7b49265ea35c0f3eddb7c7be68 Mon Sep 17 00:00:00 2001
+From: Sergey Senozhatsky <sergey.senozhatsky@gmail.com>
+Date: Wed, 25 Jun 2014 00:00:44 +0900
+Subject: btrfs compression: reuse recently used workspace
+
+Add compression `workspace' in free_workspace() to
+`idle_workspace' list head, instead of tail. So we have
+better chances to reuse most recently used `workspace'.
+
+Signed-off-by: Sergey Senozhatsky <sergey.senozhatsky@gmail.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/compression.c b/fs/btrfs/compression.c
+index 92371c4..1daea0b 100644
+--- a/fs/btrfs/compression.c
++++ b/fs/btrfs/compression.c
+@@ -821,7 +821,7 @@ static void free_workspace(int type, struct list_head *workspace)
+ 
+ 	spin_lock(workspace_lock);
+ 	if (*num_workspace < num_online_cpus()) {
+-		list_add_tail(workspace, idle_workspace);
++		list_add(workspace, idle_workspace);
+ 		(*num_workspace)++;
+ 		spin_unlock(workspace_lock);
+ 		goto wake;
+-- 
+cgit v0.10.1
+
