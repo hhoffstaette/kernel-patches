@@ -24,7 +24,7 @@ normal setting with lots of running background tasks/daemons.
 Index: linux-3.15.5-ck1/kernel/sched/bfs.c
 ===================================================================
 --- linux-3.15.5-ck1.orig/kernel/sched/bfs.c	2014-08-10 22:11:14.867751246 +1000
-+++ linux-3.15.5-ck1/kernel/sched/bfs.c	2014-08-12 11:26:36.480936005 +1000
++++ linux-3.15.5-ck1/kernel/sched/bfs.c	2014-08-15 22:36:14.873564235 +1000
 @@ -98,9 +98,16 @@
  #define is_rt_policy(policy)	((policy) == SCHED_FIFO || \
  					(policy) == SCHED_RR)
@@ -121,7 +121,7 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
 +	int best_bias;
 +
 +	/* Kernel threads always run */
-+	if (!p->mm)
++	if (unlikely(!p->mm))
 +		return true;
 +	if (rt_task(p))
 +		return true;
@@ -284,7 +284,7 @@ Index: linux-3.15.5-ck1/kernel/sched/bfs.c
 +		if (!rq->online)
 +			continue;
 +		p = rq->curr;
-+		if (smt_should_schedule(p, cpu)) {
++		if (!smt_should_schedule(p, cpu)) {
 +			set_tsk_need_resched(p);
 +			__send_other_resched(p, other_cpu);
 +		}
