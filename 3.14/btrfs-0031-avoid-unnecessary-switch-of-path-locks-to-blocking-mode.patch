@@ -1,0 +1,38 @@
+From da8c0d935fc829d650fe857081b5452eecddf176 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Mon, 28 Jul 2014 19:37:17 +0100
+Subject: Btrfs: avoid unnecessary switch of path locks to blocking mode
+
+If we need to cow a node, increase the write lock level and retry the
+tree search, there's no point of changing the node locks in our path
+to blocking mode, as we only waste time and unnecessarily wake up other
+tasks waiting on the spinning locks (just to block them again shortly
+after) because we release our path before repeating the tree search.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index bd0ae3e..783ea3b 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -2792,8 +2792,6 @@ again:
+ 			if (!should_cow_block(trans, root, b))
+ 				goto cow_done;
+ 
+-			btrfs_set_path_blocking(p);
+-
+ 			/*
+ 			 * must have write locks on this node and the
+ 			 * parent
+@@ -2807,6 +2805,7 @@ again:
+ 				goto again;
+ 			}
+ 
++			btrfs_set_path_blocking(p);
+ 			err = btrfs_cow_block(trans, root, b,
+ 					      p->nodes[level + 1],
+ 					      p->slots[level + 1], &b);
+-- 
+cgit v0.10.1
+
