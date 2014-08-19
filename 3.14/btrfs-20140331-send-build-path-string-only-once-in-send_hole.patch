@@ -1,0 +1,38 @@
+From c715e155c94ba0b3657820d676ec3c7213a5ce81 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Mon, 31 Mar 2014 14:52:14 +0100
+Subject: Btrfs: send, build path string only once in send_hole
+
+There's no point building the path string in each iteration of the
+send_hole loop, as it produces always the same string.
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index e8e9f35..1ac3ca9 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -4436,6 +4436,9 @@ static int send_hole(struct send_ctx *sctx, u64 end)
+ 	p = fs_path_alloc();
+ 	if (!p)
+ 		return -ENOMEM;
++	ret = get_cur_path(sctx, sctx->cur_ino, sctx->cur_inode_gen, p);
++	if (ret < 0)
++		goto tlv_put_failure;
+ 	memset(sctx->read_buf, 0, BTRFS_SEND_READ_SIZE);
+ 	while (offset < end) {
+ 		len = min_t(u64, end - offset, BTRFS_SEND_READ_SIZE);
+@@ -4443,9 +4446,6 @@ static int send_hole(struct send_ctx *sctx, u64 end)
+ 		ret = begin_cmd(sctx, BTRFS_SEND_C_WRITE);
+ 		if (ret < 0)
+ 			break;
+-		ret = get_cur_path(sctx, sctx->cur_ino, sctx->cur_inode_gen, p);
+-		if (ret < 0)
+-			break;
+ 		TLV_PUT_PATH(sctx, BTRFS_SEND_A_PATH, p);
+ 		TLV_PUT_U64(sctx, BTRFS_SEND_A_FILE_OFFSET, offset);
+ 		TLV_PUT(sctx, BTRFS_SEND_A_DATA, sctx->read_buf, len);
+-- 
+cgit v0.10.1
+

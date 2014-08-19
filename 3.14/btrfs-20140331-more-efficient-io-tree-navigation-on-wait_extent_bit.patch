@@ -1,0 +1,39 @@
+From c50d3e71c3d0378bcc9e116f48dab4148854a7bb Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Mon, 31 Mar 2014 14:53:25 +0100
+Subject: Btrfs: more efficient io tree navigation on wait_extent_bit
+
+If we don't reschedule use rb_next to find the next extent state
+instead of a full tree search, which is more efficient and safe
+since we didn't release the io tree's lock.
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index d35a3ca..0c43896 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -749,6 +749,7 @@ again:
+ 		 * our range starts
+ 		 */
+ 		node = tree_search(tree, start);
++process_node:
+ 		if (!node)
+ 			break;
+ 
+@@ -769,7 +770,10 @@ again:
+ 		if (start > end)
+ 			break;
+ 
+-		cond_resched_lock(&tree->lock);
++		if (!cond_resched_lock(&tree->lock)) {
++			node = rb_next(node);
++			goto process_node;
++		}
+ 	}
+ out:
+ 	spin_unlock(&tree->lock);
+-- 
+cgit v0.10.1
+
