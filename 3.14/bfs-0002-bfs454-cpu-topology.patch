@@ -1,3 +1,4 @@
+
 The locality code was not correctly picking up the relationships between CPUs properly.
 Fix it and display locality in dmesg.
 
@@ -14,15 +15,6 @@ Index: linux-3.15-ck1/kernel/sched/bfs.c
 ===================================================================
 --- linux-3.15-ck1.orig/kernel/sched/bfs.c	2014-07-03 22:45:12.000000000 +0300
 +++ linux-3.15-ck1/kernel/sched/bfs.c	2014-07-03 23:13:25.558679430 +0300
-@@ -125,7 +125,7 @@
- 
- void print_scheduler_version(void)
- {
--	printk(KERN_INFO "BFS CPU scheduler v0.447 by Con Kolivas.\n");
-+	printk(KERN_INFO "BFS CPU scheduler v0.449 by Con Kolivas.\n");
- }
- 
- /*
 @@ -1915,7 +1915,7 @@
  	preempt_enable();
  #endif
