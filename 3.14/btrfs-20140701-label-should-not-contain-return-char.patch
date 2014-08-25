@@ -1,0 +1,119 @@
+From 1ba967da3d3e5e14b05fbb22490c9912dcfc4172 Mon Sep 17 00:00:00 2001
+From: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Date: Tue, 1 Jul 2014 17:00:07 +0900
+Subject: btrfs: label should not contain return char
+
+Although Anand once sent the following two patches,
+
+ - [PATCH 1/2 v4] btrfs: label should not contain return char
+ - [PATCH 2/2 v4] btrfs: usage error should not be logged into system
+   log
+
+only the latter patch was merged to mason/for-linus and 3.16-rc3
+as 402a0f4 (by accident?). It results in that the former patch can't
+be cleanly applied to 3.16-rc3.
+
+I fixed this problem, wrote a reproducer, and tested it.
+
+From: Anand Jain <Anand.Jain@oracle.com>
+
+generally if you use
+  echo "test" > /sys/fs/btrfs/<fsid>/label
+it would introduce return char at the end and it can not
+be part of the label. The correct command is
+  echo -n "test" > /sys/fs/btrfs/<fsid>/label
+
+This patch will check for this user error
+
+reproducer.sh:
+Reviewed-by: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+
+===============================================================================
+
+TEST_DEV=/dev/vdb
+TEST_DIR=/home/sat/mnt
+
+umount /home/sat/mnt
+
+mkfs.btrfs -f $TEST_DEV
+UUID=$(btrfs fi show $TEST_DEV | head -1 | sed -e 's/.*uuid: \([-0-9a-z]*\)$/\1/')
+mount $TEST_DEV $TEST_DIR
+LABELFILE=/sys/fs/btrfs/$UUID/label
+
+echo "Test for empty label..." >&2
+LINES="$(cat $LABELFILE | wc -l | awk '{print $1}')"
+RET=0
+
+if [ $LINES -eq 0 ] ; then
+    echo '[PASS] Trailing \n is removed correctly.' >&2
+else
+    echo '[FAIL] Trailing \n still exists.' >&2
+    RET=1
+fi
+
+echo "Test for non-empty label..." >&2
+
+echo testlabel >$LABELFILE
+LINES="$(cat $LABELFILE | wc -l | awk '{print $1}')"
+
+if [ $LINES -eq 1 ] ; then
+    echo '[PASS] Trailing \n is removed correctly.' >&2
+else
+    echo '[FAIL] Trailing \n still exists.' >&2
+    RET=1
+fi
+
+exit $RET
+===============================================================================
+
+Signed-off-by: Anand Jain <Anand.Jain@oracle.com>
+Signed-off-by: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Reviewed-by: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Tested-by: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 7869936..d9c3ec6 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -363,7 +363,8 @@ static ssize_t btrfs_label_show(struct kobject *kobj,
+ 				struct kobj_attribute *a, char *buf)
+ {
+ 	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
+-	return snprintf(buf, PAGE_SIZE, "%s\n", fs_info->super_copy->label);
++	char *label = fs_info->super_copy->label;
++	return snprintf(buf, PAGE_SIZE, label[0] ? "%s\n" : "%s", label);
+ }
+ 
+ static ssize_t btrfs_label_store(struct kobject *kobj,
+@@ -374,8 +375,15 @@ static ssize_t btrfs_label_store(struct kobject *kobj,
+ 	struct btrfs_trans_handle *trans;
+ 	struct btrfs_root *root = fs_info->fs_root;
+ 	int ret;
++	size_t p_len;
+ 
+-	if (len >= BTRFS_LABEL_SIZE)
++	/*
++	 * p_len is the len until the first occurrence of either
++	 * '\n' or '\0'
++	 */
++	p_len = strcspn(buf, "\n");
++
++	if (p_len >= BTRFS_LABEL_SIZE)
+ 		return -EINVAL;
+ 
+ 	trans = btrfs_start_transaction(root, 0);
+@@ -383,7 +391,8 @@ static ssize_t btrfs_label_store(struct kobject *kobj,
+ 		return PTR_ERR(trans);
+ 
+ 	spin_lock(&root->fs_info->super_lock);
+-	strcpy(fs_info->super_copy->label, buf);
++	memset(fs_info->super_copy->label, 0, BTRFS_LABEL_SIZE);
++	memcpy(fs_info->super_copy->label, buf, p_len);
+ 	spin_unlock(&root->fs_info->super_lock);
+ 	ret = btrfs_commit_transaction(trans, root);
+ 
+-- 
+cgit v0.10.1
+
