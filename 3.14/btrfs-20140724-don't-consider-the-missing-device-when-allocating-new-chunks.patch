@@ -1,0 +1,61 @@
+From 700b8c47cd052159480d59e01b039634e1e0982f Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Thu, 24 Jul 2014 11:37:14 +0800
+Subject: Btrfs: don't consider the missing device when allocating new chunks
+
+The original code allocated new chunks by the number of the writable devices
+and missing devices to make sure that any RAID levels on a degraded FS continue
+to be honored, but it introduced a problem that it stopped us to allocating
+new chunks, the steps to reproduce is following:
+
+ # mkfs.btrfs -m raid1 -d raid1 -f <dev0> <dev1>
+ # mkfs.btrfs -f <dev1>			//Removing <dev1> from the original fs
+ # mount -o degraded <dev0> <mnt>
+ # dd if=/dev/null of=<mnt>/tmpfile bs=1M
+
+It is because we allocate new chunks only on the writable devices, if we take
+the number of missing devices into account, and want to allocate new chunks
+with higher RAID level, we will fail becaue we don't have enough writable
+device. Fix it by ignoring the number of missing devices when allocating
+new chunks.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 591893f..faa79d5 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3586,13 +3586,7 @@ static u64 get_restripe_target(struct btrfs_fs_info *fs_info, u64 flags)
+  */
+ static u64 btrfs_reduce_alloc_profile(struct btrfs_root *root, u64 flags)
+ {
+-	/*
+-	 * we add in the count of missing devices because we want
+-	 * to make sure that any RAID levels on a degraded FS
+-	 * continue to be honored.
+-	 */
+-	u64 num_devices = root->fs_info->fs_devices->rw_devices +
+-		root->fs_info->fs_devices->missing_devices;
++	u64 num_devices = root->fs_info->fs_devices->rw_devices;
+ 	u64 target;
+ 	u64 tmp;
+ 
+@@ -8179,13 +8173,7 @@ static u64 update_block_group_flags(struct btrfs_root *root, u64 flags)
+ 	if (stripped)
+ 		return extended_to_chunk(stripped);
+ 
+-	/*
+-	 * we add in the count of missing devices because we want
+-	 * to make sure that any RAID levels on a degraded FS
+-	 * continue to be honored.
+-	 */
+-	num_devices = root->fs_info->fs_devices->rw_devices +
+-		root->fs_info->fs_devices->missing_devices;
++	num_devices = root->fs_info->fs_devices->rw_devices;
+ 
+ 	stripped = BTRFS_BLOCK_GROUP_RAID0 |
+ 		BTRFS_BLOCK_GROUP_RAID5 | BTRFS_BLOCK_GROUP_RAID6 |
+-- 
+cgit v0.10.1
+
