@@ -1,0 +1,30 @@
+From 69611ac810af8e88eeb5ebd851589a0e8cc90860 Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Thu, 3 Jul 2014 18:22:12 +0800
+Subject: Btrfs: fix unzeroed members in fs_devices when creating a fs from
+ seed fs
+
+We forgot to zero some members in fs_devices when we create new fs_devices
+from the one of the seed fs. It would cause the problem that we got wrong
+chunk profile when allocating chunks. Fix it.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 5700ab0..50edbbc 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1988,6 +1988,9 @@ static int btrfs_prepare_sprout(struct btrfs_root *root)
+ 	fs_devices->seeding = 0;
+ 	fs_devices->num_devices = 0;
+ 	fs_devices->open_devices = 0;
++	fs_devices->missing_devices = 0;
++	fs_devices->num_can_discard = 0;
++	fs_devices->rotating = 0;
+ 	fs_devices->seed = seed_devices;
+ 
+ 	generate_random_uuid(fs_devices->fsid);
+-- 
+cgit v0.10.1
+
