@@ -1,4 +1,9 @@
 
+From: John Stultz <john.stultz <at> linaro.org>
+Subject: [PATCH 1/3] [RFC] timekeeping: Rework frequency adjustments to work better w/ nohz
+Newsgroups: gmane.linux.kernel
+Date: 2014-05-17 00:56:42 GMT
+
 The existing timekeeping_adjust logic has always been complicated
 to understand. Further, since it was developed prior to NOHZ becoming
 common, its not surprising it performs poorly when NOHZ is enabled.
@@ -33,11 +38,11 @@ performed closer to his original implementation.
 
 I'd be very interested in feedback, thoughts, and testing.
 
-Cc: Miroslav Lichvar <mlichvar@redhat.com>
-Cc: Richard Cochran <richardcochran@gmail.com>
-Cc: Prarit Bhargava <prarit@redhat.com>
-Reported-by: Miroslav Lichvar <mlichvar@redhat.com>
-Signed-off-by: John Stultz <john.stultz@linaro.org>
+Cc: Miroslav Lichvar <mlichvar <at> redhat.com>
+Cc: Richard Cochran <richardcochran <at> gmail.com>
+Cc: Prarit Bhargava <prarit <at> redhat.com>
+Reported-by: Miroslav Lichvar <mlichvar <at> redhat.com>
+Signed-off-by: John Stultz <john.stultz <at> linaro.org>
 ---
  include/linux/timekeeper_internal.h |   3 +
  kernel/time/timekeeping.c           | 193 ++++++++++++++++--------------------
@@ -47,10 +52,10 @@ diff --git a/include/linux/timekeeper_internal.h b/include/linux/timekeeper_inte
 index c1825eb..4d398f1 100644
 --- a/include/linux/timekeeper_internal.h
 +++ b/include/linux/timekeeper_internal.h
-@@ -41,6 +41,9 @@ struct timekeeper {
+ <at>  <at>  -41,6 +41,9  <at>  <at>  struct timekeeper {
  	 * ntp shifted nano seconds. */
  	u32			ntp_error_shift;
- 
+
 +	/* Mult adjustment being applied to correct ntp_error */
 +	u32			ntp_err_mult;
 +
@@ -61,21 +66,21 @@ diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
 index 63f9ed7..d46bda2 100644
 --- a/kernel/time/timekeeping.c
 +++ b/kernel/time/timekeeping.c
-@@ -148,6 +148,7 @@ static void tk_setup_internals(struct timekeeper *tk, struct clocksource *clock)
+ <at>  <at>  -148,6 +148,7  <at>  <at>  static void tk_setup_internals(struct timekeeper *tk, struct clocksource *clock)
  	 * to counteract clock drifting.
  	 */
  	tk->mult = clock->mult;
 +	tk->ntp_err_mult = 0;
  }
- 
+
  /* Timekeeper helper functions. */
-@@ -1049,125 +1050,34 @@ static int __init timekeeping_init_ops(void)
+ <at>  <at>  -1049,125 +1050,34  <at>  <at>  static int __init timekeeping_init_ops(void)
  	register_syscore_ops(&timekeeping_syscore_ops);
  	return 0;
  }
 -
  device_initcall(timekeeping_init_ops);
- 
+
  /*
 - * If the error is already larger, we look ahead even further
 - * to compensate for late or lost adjustments.
@@ -108,7 +113,7 @@ index 63f9ed7..d46bda2 100644
 -		error2 >>= 2;
 +	s64 interval = tk->cycle_interval;
 +	s32 mult_adj = 1;
- 
+
 -	/*
 -	 * Now calculate the error in (1 << look_ahead) ticks, but first
 -	 * remove the single look ahead already included in the error.
@@ -140,7 +145,7 @@ index 63f9ed7..d46bda2 100644
 +	mult_adj <<= adj_scale;
 +	interval <<= adj_scale;
 +	offset <<= adj_scale;
- 
+
 -/*
 - * Adjust the multiplier to reduce the error value,
 - * this is optimized for the most common adjustments of -1,0,1,
@@ -211,7 +216,7 @@ index 63f9ed7..d46bda2 100644
  	 * have been appropriately scaled so the math is the same.
  	 *
  	 * The basic idea here is that we're increasing the multiplier
-@@ -1211,12 +1121,76 @@ static void timekeeping_adjust(struct timekeeper *tk, s64 offset)
+ <at>  <at>  -1211,12 +1121,76  <at>  <at>  static void timekeeping_adjust(struct timekeeper *tk, s64 offset)
  	 *
  	 * XXX - TODO: Doc ntp_error calculation.
  	 */
@@ -285,19 +290,18 @@ index 63f9ed7..d46bda2 100644
 +			tk->clock->name, (long)tk->mult,
 +			(long)tk->clock->mult + tk->clock->maxadj);
 +	}
- 
+
 -out_adjust:
  	/*
  	 * It may be possible that when we entered this function, xtime_nsec
  	 * was very small.  Further, if we're slightly speeding the clocksource
-@@ -1236,7 +1210,6 @@ out_adjust:
+ <at>  <at>  -1236,7 +1210,6  <at>  <at>  out_adjust:
  		tk->xtime_nsec = 0;
  		tk->ntp_error += neg << tk->ntp_error_shift;
  	}
 -
  }
- 
+
  /**
 -- 
 1.9.1
-
