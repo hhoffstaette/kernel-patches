@@ -391,7 +391,7 @@ Index: linux-3.15.5-ck1/arch/x86/Kconfig
  
 +config SMT_NICE
 +	bool "SMT (Hyperthreading) aware nice priority and policy support"
-+	depends on X86_HT && SCHED_BFS
++	depends on X86_HT && SCHED_BFS && SCHED_SMT
 +	default y
 +	---help---
 +	  Enabling Hyperthreading on Intel CPUs decreases the effectiveness
