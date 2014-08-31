@@ -1,0 +1,28 @@
+From c4a050bbbb5d7dab03aa720af36d8e91ed7f2ec8 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Fri, 14 Mar 2014 16:36:53 -0400
+Subject: Btrfs: abort the transaction when we don't find our extent ref
+
+I'm not sure why we weren't aborting here in the first place, it is obviously a
+bad time from the fact that we print the leaf and yell loudly about it.  Fix
+this up, otherwise we panic because our path could be pointing into oblivion.
+Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 1341163..1306487 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -5745,6 +5745,8 @@ static int __btrfs_free_extent(struct btrfs_trans_handle *trans,
+ 			"unable to find ref byte nr %llu parent %llu root %llu  owner %llu offset %llu",
+ 			bytenr, parent, root_objectid, owner_objectid,
+ 			owner_offset);
++		btrfs_abort_transaction(trans, extent_root, ret);
++		goto out;
+ 	} else {
+ 		btrfs_abort_transaction(trans, extent_root, ret);
+ 		goto out;
+-- 
+cgit v0.10.1

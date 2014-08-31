@@ -1,0 +1,44 @@
+From b88935bf9822cda58fd70dffe8e016d448757d40 Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Thu, 6 Mar 2014 13:54:58 +0800
+Subject: Btrfs: remove the unnecessary flush when preparing the pages
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 006cf9f..b2143b8 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1360,11 +1360,11 @@ lock_and_cleanup_extent_if_need(struct inode *inode, struct page **pages,
+ 		struct btrfs_ordered_extent *ordered;
+ 		lock_extent_bits(&BTRFS_I(inode)->io_tree,
+ 				 start_pos, last_pos, 0, cached_state);
+-		ordered = btrfs_lookup_first_ordered_extent(inode, last_pos);
++		ordered = btrfs_lookup_ordered_range(inode, start_pos,
++						     last_pos - start_pos + 1);
+ 		if (ordered &&
+ 		    ordered->file_offset + ordered->len > start_pos &&
+ 		    ordered->file_offset <= last_pos) {
+-			btrfs_put_ordered_extent(ordered);
+ 			unlock_extent_cached(&BTRFS_I(inode)->io_tree,
+ 					     start_pos, last_pos,
+ 					     cached_state, GFP_NOFS);
+@@ -1372,12 +1372,9 @@ lock_and_cleanup_extent_if_need(struct inode *inode, struct page **pages,
+ 				unlock_page(pages[i]);
+ 				page_cache_release(pages[i]);
+ 			}
+-			ret = btrfs_wait_ordered_range(inode, start_pos,
+-						last_pos - start_pos + 1);
+-			if (ret)
+-				return ret;
+-			else
+-				return -EAGAIN;
++			btrfs_start_ordered_extent(inode, ordered, 1);
++			btrfs_put_ordered_extent(ordered);
++			return -EAGAIN;
+ 		}
+ 		if (ordered)
+ 			btrfs_put_ordered_extent(ordered);
+-- 
+cgit v0.10.1

@@ -1,0 +1,46 @@
+From 24af7dd1881f9f5c13c7d82e22d7858137383766 Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Thu, 6 Mar 2014 13:55:00 +0800
+Subject: Btrfs: reclaim delalloc metadata more aggressively
+
+generic/074 in xfstests failed sometimes because of the enospc error,
+the reason of this problem is that we just reclaimed the space we need
+from the reserved space for delalloc, and then tried to reserve the space,
+but if some task did no-flush reservation between the above reclamation
+and reservation,
+	Task1			Task2
+	shrink_delalloc()
+	reclaim 1 block
+	(The space that can
+	 be reserved now is 1
+	 block)
+				do no-flush reservation
+				reserve 1 block
+				(The space that can
+				 be reserved now is 0
+				 block)
+	reserving 1 block failed
+the reservation of Task1 failed, but in fact, there was enough space to
+reserve if we could reclaim more space before.
+
+Fix this problem by the aggressive reclamation of the reserved delalloc
+metadata space.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 5608b4f..5c0c545 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -4174,7 +4174,7 @@ static int flush_space(struct btrfs_root *root,
+ 		break;
+ 	case FLUSH_DELALLOC:
+ 	case FLUSH_DELALLOC_WAIT:
+-		shrink_delalloc(root, num_bytes, orig_bytes,
++		shrink_delalloc(root, num_bytes * 2, orig_bytes,
+ 				state == FLUSH_DELALLOC_WAIT);
+ 		break;
+ 	case ALLOC_CHUNK:
+-- 
+cgit v0.10.1

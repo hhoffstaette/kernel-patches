@@ -1,0 +1,57 @@
+From 6baa4293af8abe95018e911c3df60ed5bfacc76f Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Thu, 20 Feb 2014 21:15:25 +0000
+Subject: Btrfs: correctly determine if blocks are shared in btrfs_compare_trees
+
+Just comparing the pointers (logical disk addresses) of the btree nodes is
+not completely bullet proof, we have to check if their generation numbers
+match too.
+
+It is guaranteed that a COW operation will result in a block with a different
+logical disk address than the original block's address, but over time we can
+reuse that former logical disk address.
+
+For example, creating a 2Gb filesystem on a loop device, and having a script
+running in a loop always updating the access timestamp of a file, resulted in
+the same logical disk address being reused for the same fs btree block in about
+only 4 minutes.
+
+This could make us skip entire subtrees when doing an incremental send (which
+is currently the only user of btrfs_compare_trees). However the odds of getting
+2 blocks at the same tree level, with the same logical disk address, equal first
+slot keys and different generations, should hopefully be very low.
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index cbd3a7d..88d1b1e 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -5376,6 +5376,8 @@ int btrfs_compare_trees(struct btrfs_root *left_root,
+ 	int advance_right;
+ 	u64 left_blockptr;
+ 	u64 right_blockptr;
++	u64 left_gen;
++	u64 right_gen;
+ 	u64 left_start_ctransid;
+ 	u64 right_start_ctransid;
+ 	u64 ctransid;
+@@ -5640,7 +5642,14 @@ int btrfs_compare_trees(struct btrfs_root *left_root,
+ 				right_blockptr = btrfs_node_blockptr(
+ 						right_path->nodes[right_level],
+ 						right_path->slots[right_level]);
+-				if (left_blockptr == right_blockptr) {
++				left_gen = btrfs_node_ptr_generation(
++						left_path->nodes[left_level],
++						left_path->slots[left_level]);
++				right_gen = btrfs_node_ptr_generation(
++						right_path->nodes[right_level],
++						right_path->slots[right_level]);
++				if (left_blockptr == right_blockptr &&
++				    left_gen == right_gen) {
+ 					/*
+ 					 * As we're on a shared block, don't
+ 					 * allow to go deeper.
+-- 
+cgit v0.10.1
