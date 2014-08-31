@@ -1,0 +1,94 @@
+
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix fsync race leading to invalid data after log replay
+Date: Sat, 30 Aug 2014 18:01:29 +0100
+Message-ID: <1409418089-31790-1-git-send-email-fdmanana@suse.com>
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38149>
+
+When the fsync callback (btrfs_sync_file) starts, it first waits for
+the writeback of any dirty pages to start and finish without holding
+the inode's mutex (to reduce contention). After this it acquires the
+inode's mutex and repeats that process via btrfs_wait_ordered_range
+only if we're doing a full sync (BTRFS_INODE_NEEDS_FULL_SYNC flag
+is set on the inode).
+
+This is not safe for a non full sync - we need to start and wait for
+writeback to finish of any pages that might have been made dirty
+before acquiring the inode's mutex and after that first step mentioned
+before. Why this is needed is explained by the following comment added
+to btrfs_sync_file:
+
+    "Right before acquiring the inode's mutex, we might have new writes
+     dirtying pages, which won't immediately start the respective ordered
+     operations - that is done through the fill_delalloc callbacks invoked
+     from the writepage and writepages address space operations. So make
+     sure we start all ordered operations before starting to log our
+     inode. Not doing this means that while logging the inode, writeback
+     could start and invoke writepage/writepages, which would call the
+     fill_delalloc callbacks (cow_file_range, submit_compressed_extents).
+     These callbacks add first an extent map to the modified list of
+     extents and then create the respective ordered operation, which means
+     in tree-log.c:btrfs_log_inode() we might capture all existing ordered
+     operations (with btrfs_get_logged_extents()) before the fill_delalloc
+     callback adds its ordered operation, and by the time we visit the
+     modified list of extent maps (with btrfs_log_changed_extents()), we
+     see and process the extent map they created. We then use their extent
+     map to construct a file extent item for logging without waiting for
+     the respective ordered operation to finish - these file extent items
+     point to a disk location that might not have yet been written to,
+     containing random data - so after a crash a log replay will make our
+     inode have file extent items that point to disk locations containing
+     invalid data."
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/file.c | 33 +++++++++++++++++++++++++++------
+ 1 file changed, 27 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index e5534c1..5e9d108 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1912,12 +1912,33 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
+ 	atomic_inc(&root->log_batch);
+ 	full_sync = test_bit(BTRFS_INODE_NEEDS_FULL_SYNC,
+ 			     &BTRFS_I(inode)->runtime_flags);
+-	if (full_sync) {
+-		ret = btrfs_wait_ordered_range(inode, start, end - start + 1);
+-		if (ret) {
+-			mutex_unlock(&inode->i_mutex);
+-			goto out;
+-		}
++	/*
++	 * Right before acquiring the inode's mutex, we might have new writes
++	 * dirtying pages, which won't immediately start the respective ordered
++	 * operations - that is done through the fill_delalloc callbacks invoked
++	 * from the writepage and writepages address space operations. So make
++	 * sure we start all ordered operations before starting to log our
++	 * inode. Not doing this means that while logging the inode, writeback
++	 * could start and invoke writepage/writepages, which would call the
++	 * fill_delalloc callbacks (cow_file_range, submit_compressed_extents).
++	 * These callbacks add first an extent map to the modified list of
++	 * extents and then create the respective ordered operation, which means
++	 * in tree-log.c:btrfs_log_inode() we might capture all existing ordered
++	 * operations (with btrfs_get_logged_extents()) before the fill_delalloc
++	 * callback adds its ordered operation, and by the time we visit the
++	 * modified list of extent maps (with btrfs_log_changed_extents()), we
++	 * see and process the extent map they created. We then use their extent
++	 * map to construct a file extent item for logging without waiting for
++	 * the respective ordered operation to finish - these file extent items
++	 * point to a disk location that might not have yet been written to,
++	 * containing random data - so after a crash a log replay will make our
++	 * inode have file extent items that point to disk locations containing
++	 * invalid data.
++	 */
++	ret = btrfs_wait_ordered_range(inode, start, end - start + 1);
++	if (ret) {
++		mutex_unlock(&inode->i_mutex);
++		goto out;
+ 	}
+ 	atomic_inc(&root->log_batch);
+ 
+-- 
+1.9.1
