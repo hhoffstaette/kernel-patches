@@ -1,0 +1,27 @@
+From 902c68a4da74442f0ab1c0b458f7723a68dfd3b1 Mon Sep 17 00:00:00 2001
+From: Gui Hecheng <guihc.fnst@cn.fujitsu.com>
+Date: Thu, 29 May 2014 09:19:58 +0800
+Subject: btrfs: replace EINVAL with ERANGE for resize when ULLONG_MAX
+
+To be accurate about the error case,
+if the new size is beyond ULLONG_MAX, return ERANGE instead of EINVAL.
+
+Signed-off-by: Gui Hecheng <guihc.fnst@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 219e26f..55f4d71 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -1593,7 +1593,7 @@ static noinline int btrfs_ioctl_resize(struct file *file,
+ 		new_size = old_size - new_size;
+ 	} else if (mod > 0) {
+ 		if (new_size > ULLONG_MAX - old_size) {
+-			ret = -EINVAL;
++			ret = -ERANGE;
+ 			goto out_free;
+ 		}
+ 		new_size = old_size + new_size;
+-- 
+cgit v0.10.1
+

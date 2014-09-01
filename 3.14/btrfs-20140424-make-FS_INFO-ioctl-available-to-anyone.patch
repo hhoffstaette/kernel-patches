@@ -1,0 +1,29 @@
+From e4ef90ff6198ac58d4c7dbbeae8cc7b24867d1ca Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Thu, 24 Apr 2014 15:09:18 +0200
+Subject: btrfs: make FS_INFO ioctl available to anyone
+
+This ioctl provides basic info about the filesystem that can be obtained
+in other ways (eg. sysfs), there's no reason to restrict it to
+CAP_SYSADMIN.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 92a5184a..2db12fc 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -2557,9 +2557,6 @@ static long btrfs_ioctl_fs_info(struct btrfs_root *root, void __user *arg)
+ 	struct btrfs_fs_devices *fs_devices = root->fs_info->fs_devices;
+ 	int ret = 0;
+ 
+-	if (!capable(CAP_SYS_ADMIN))
+-		return -EPERM;
+-
+ 	fi_args = kzalloc(sizeof(*fi_args), GFP_KERNEL);
+ 	if (!fi_args)
+ 		return -ENOMEM;
+-- 
+cgit v0.10.1
+
