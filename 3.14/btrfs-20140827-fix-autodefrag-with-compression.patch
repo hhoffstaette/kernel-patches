@@ -1,5 +1,6 @@
-Subject: Btrfs: fix autodefrag with compression
+
 From: Chris Mason <clm@fb.com>
+Subject: Btrfs: fix autodefrag with compression
 X-Patchwork-Id: 4790491
 Message-Id: <53FE28C0.4010603@fb.com>
 To: linux-btrfs <linux-btrfs@vger.kernel.org>
@@ -42,3 +43,4 @@ index fce6fd0e..a018ea4 100644
  		ret = false;
  
  	free_extent_map(next);
+
