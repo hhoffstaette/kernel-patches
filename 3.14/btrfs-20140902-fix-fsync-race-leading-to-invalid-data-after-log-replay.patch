@@ -3,7 +3,6 @@ From: Filipe Manana <fdmanana@suse.com>
 X-Patchwork-Id: 4823831
 Message-Id: <1409652598-27398-1-git-send-email-fdmanana@suse.com>
 To: linux-btrfs@vger.kernel.org
-Cc: Filipe Manana <fdmanana@suse.com>
 Date: Tue,  2 Sep 2014 11:09:58 +0100
 
 When the fsync callback (btrfs_sync_file) starts, it first waits for

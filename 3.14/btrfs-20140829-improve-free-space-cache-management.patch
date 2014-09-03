@@ -1,4 +1,3 @@
-
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
 Subject: [PATCH v3] Btrfs: improve free space cache management and space allocation
