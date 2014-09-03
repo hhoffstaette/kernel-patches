@@ -115,7 +115,7 @@ index 5a917a6..93d3c16 100644
 +				  struct dentry *parent,
 +				  const loff_t start,
 +				  const loff_t end,
-+				  int exists_only,
++				  int exists_only)
  {
  	int inode_only = exists_only ? LOG_INODE_EXISTS : LOG_INODE_ALL;
 @@ -4204,7 +4234,7 @@ static int btrfs_log_inode_parent(struct btrfs_trans_handle *trans,
@@ -143,7 +143,7 @@ index 5a917a6..93d3c16 100644
 -			  struct btrfs_root *root, struct dentry *dentry)
 + 			  struct btrfs_root *root, struct dentry *dentry,
 +			  const loff_t start,
-+			  const loff_t end,
++			  const loff_t end)
  {
  	struct dentry *parent = dget_parent(dentry);
  	int ret;
