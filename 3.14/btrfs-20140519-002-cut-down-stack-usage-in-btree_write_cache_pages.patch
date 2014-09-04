@@ -1,0 +1,41 @@
+From 0e378df15cd87f540f1ba9503e4aa039e1c72741 Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Mon, 19 May 2014 20:55:27 -0700
+Subject: Btrfs: cut down stack usage in btree_write_cache_pages
+
+This adds noinline_for_stack to two helpers used by
+btree_write_cache_pages.  It shaves us down from 424 bytes on the
+stack to 280.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 0f425de..51299c2 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -3393,9 +3393,10 @@ void wait_on_extent_buffer_writeback(struct extent_buffer *eb)
+ 		    TASK_UNINTERRUPTIBLE);
+ }
+ 
+-static int lock_extent_buffer_for_io(struct extent_buffer *eb,
+-				     struct btrfs_fs_info *fs_info,
+-				     struct extent_page_data *epd)
++static noinline_for_stack int
++lock_extent_buffer_for_io(struct extent_buffer *eb,
++			  struct btrfs_fs_info *fs_info,
++			  struct extent_page_data *epd)
+ {
+ 	unsigned long i, num_pages;
+ 	int flush = 0;
+@@ -3500,7 +3501,7 @@ static void end_bio_extent_buffer_writepage(struct bio *bio, int err)
+ 	bio_put(bio);
+ }
+ 
+-static int write_one_eb(struct extent_buffer *eb,
++static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
+ 			struct btrfs_fs_info *fs_info,
+ 			struct writeback_control *wbc,
+ 			struct extent_page_data *epd)
+-- 
+cgit v0.10.1
+

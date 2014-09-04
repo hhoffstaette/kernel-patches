@@ -1,0 +1,58 @@
+From f90e579c2b391979630b3343de0be65ab1b478ce Mon Sep 17 00:00:00 2001
+From: Mark Fasheh <mfasheh@suse.de>
+Date: Thu, 17 Jul 2014 12:39:04 -0700
+Subject: btrfs: correctly handle return from ulist_add
+
+ulist_add() can return '1' on sucess, which qgroup_subtree_accounting()
+doesn't take into account. As a result, that value can be bubbled up to
+callers, causing an error to be printed. Fix this by only returning the
+value of ulist_add() when it indicates an error.
+
+Signed-off-by: Mark Fasheh <mfasheh@suse.de>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 65b62c4..b497498 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -1959,6 +1959,7 @@ static int qgroup_subtree_accounting(struct btrfs_trans_handle *trans,
+ 	struct btrfs_qgroup_list *glist;
+ 	struct ulist *parents;
+ 	int ret = 0;
++	int err;
+ 	struct btrfs_qgroup *qg;
+ 	u64 root_obj = 0;
+ 	struct seq_list elem = {};
+@@ -2013,10 +2014,12 @@ static int qgroup_subtree_accounting(struct btrfs_trans_handle *trans,
+ 	 * while adding parents of the parents to our ulist.
+ 	 */
+ 	list_for_each_entry(glist, &qg->groups, next_group) {
+-		ret = ulist_add(parents, glist->group->qgroupid,
++		err = ulist_add(parents, glist->group->qgroupid,
+ 				ptr_to_u64(glist->group), GFP_ATOMIC);
+-		if (ret < 0)
++		if (err < 0) {
++			ret = err;
+ 			goto out_unlock;
++		}
+ 	}
+ 
+ 	ULIST_ITER_INIT(&uiter);
+@@ -2028,10 +2031,12 @@ static int qgroup_subtree_accounting(struct btrfs_trans_handle *trans,
+ 
+ 		/* Add any parents of the parents */
+ 		list_for_each_entry(glist, &qg->groups, next_group) {
+-			ret = ulist_add(parents, glist->group->qgroupid,
++			err = ulist_add(parents, glist->group->qgroupid,
+ 					ptr_to_u64(glist->group), GFP_ATOMIC);
+-			if (ret < 0)
++			if (err < 0) {
++				ret = err;
+ 				goto out_unlock;
++			}
+ 		}
+ 	}
+ 
+-- 
+cgit v0.10.1
+
