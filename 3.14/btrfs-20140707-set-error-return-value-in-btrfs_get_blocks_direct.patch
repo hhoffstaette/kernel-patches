@@ -1,0 +1,31 @@
+From 9f070eacf281e0af043f7a2e841b4a196fad0be5 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Mon, 7 Jul 2014 12:35:21 +0100
+Subject: Btrfs: set error return value in btrfs_get_blocks_direct
+
+We were returning with 0 (success) because we weren't extracting the
+error code from em (PTR_ERR(em)). Fix it.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Reviewed-by: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 5f3d60a..714e55a 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -7099,8 +7099,10 @@ static int btrfs_get_blocks_direct(struct inode *inode, sector_t iblock,
+ 						       block_start, len,
+ 						       orig_block_len,
+ 						       ram_bytes, type);
+-				if (IS_ERR(em))
++				if (IS_ERR(em)) {
++					ret = PTR_ERR(em);
+ 					goto unlock_err;
++				}
+ 			}
+ 
+ 			ret = btrfs_add_ordered_extent_dio(inode, start,
+-- 
+cgit v0.10.1
+

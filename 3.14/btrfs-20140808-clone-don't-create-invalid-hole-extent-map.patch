@@ -1,0 +1,33 @@
+From 62e2390e1ad78f956e96a6a831761adc6f2bf58a Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Fri, 8 Aug 2014 02:47:06 +0100
+Subject: Btrfs: clone, don't create invalid hole extent map
+
+When cloning a file that consists of an inline extent, we were creating
+an extent map that represents a non-existing trailing hole starting at a
+file offset that isn't a multiple of the sector size. This happened because
+when processing an inline extent we weren't aligning the extent's length to
+the sector size, and therefore incorrectly treating the range
+[inline_extent_length; sector_size[ as a hole.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Reviewed-by: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 845287c..fce6fd0e 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -3494,7 +3494,8 @@ process_slot:
+ 			btrfs_mark_buffer_dirty(leaf);
+ 			btrfs_release_path(path);
+ 
+-			last_dest_end = new_key.offset + datal;
++			last_dest_end = ALIGN(new_key.offset + datal,
++					      root->sectorsize);
+ 			ret = clone_finish_inode_update(trans, inode,
+ 							last_dest_end,
+ 							destoff, olen);
+-- 
+cgit v0.10.1
+

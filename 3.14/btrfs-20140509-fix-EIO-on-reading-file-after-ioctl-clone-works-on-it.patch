@@ -1,0 +1,43 @@
+From d3ecfcdf9108c833e4e501bfa02ecf673a0ace59 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Fri, 9 May 2014 10:01:02 +0800
+Subject: Btrfs: fix EIO on reading file after ioctl clone works on it
+
+For inline data extent, we need to make its length aligned, otherwise,
+we can get a phantom extent map which confuses readpages() to return -EIO.
+
+This can be detected by xfstests/btrfs/035.
+
+Reported-by: David Disseldorp <ddiss@suse.de>
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 7b001ab..e1b47ef 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -3142,6 +3142,8 @@ process_slot:
+ 			} else if (type == BTRFS_FILE_EXTENT_INLINE) {
+ 				u64 skip = 0;
+ 				u64 trim = 0;
++				u64 aligned_end = 0;
++
+ 				if (off > key.offset) {
+ 					skip = off - key.offset;
+ 					new_key.offset += skip;
+@@ -3158,9 +3160,11 @@ process_slot:
+ 				size -= skip + trim;
+ 				datal -= skip + trim;
+ 
++				aligned_end = ALIGN(new_key.offset + datal,
++						    root->sectorsize);
+ 				ret = btrfs_drop_extents(trans, root, inode,
+ 							 new_key.offset,
+-							 new_key.offset + datal,
++							 aligned_end,
+ 							 1);
+ 				if (ret) {
+ 					if (ret != -EOPNOTSUPP)
+-- 
+cgit v0.10.1
+

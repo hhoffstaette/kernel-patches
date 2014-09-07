@@ -1,0 +1,137 @@
+From fc4adbff823f76577ece26dcb88bf6f8392dbd43 Mon Sep 17 00:00:00 2001
+From: Alex Gartrell <agartrell@fb.com>
+Date: Tue, 20 May 2014 13:07:56 -0700
+Subject: btrfs: Drop EXTENT_UPTODATE check in hole punching and direct locking
+
+In these instances, we are trying to determine if a page has been accessed
+since we began the operation for the sake of retry.  This is easily
+accomplished by doing a gang lookup in the page mapping radix tree, and it
+saves us the dependency on the flag (so that we might eventually delete
+it).
+
+btrfs_page_exists_in_range borrows heavily from find_get_page, replacing
+the radix tree look up with a gang lookup of 1, so that we can find the
+next highest page >= index and see if it falls into our lock range.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+Signed-off-by: Alex Gartrell <agartrell@fb.com>
+
+diff --git a/fs/btrfs/btrfs_inode.h b/fs/btrfs/btrfs_inode.h
+index c9a2444..a0cf3e5 100644
+--- a/fs/btrfs/btrfs_inode.h
++++ b/fs/btrfs/btrfs_inode.h
+@@ -284,4 +284,6 @@ static inline void btrfs_inode_resume_unlocked_dio(struct inode *inode)
+ 		  &BTRFS_I(inode)->runtime_flags);
+ }
+ 
++bool btrfs_page_exists_in_range(struct inode *inode, loff_t start, loff_t end);
++
+ #endif
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 8accf94..e46bfaf 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2266,9 +2266,7 @@ static int btrfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 		if ((!ordered ||
+ 		    (ordered->file_offset + ordered->len <= lockstart ||
+ 		     ordered->file_offset > lockend)) &&
+-		     !test_range_bit(&BTRFS_I(inode)->io_tree, lockstart,
+-				     lockend, EXTENT_UPTODATE, 0,
+-				     cached_state)) {
++		     !btrfs_page_exists_in_range(inode, lockstart, lockend)) {
+ 			if (ordered)
+ 				btrfs_put_ordered_extent(ordered);
+ 			break;
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 0b8ce30..a462da1 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -6735,6 +6735,71 @@ out:
+ 	return ret;
+ }
+ 
++bool btrfs_page_exists_in_range(struct inode *inode, loff_t start, loff_t end)
++{
++	struct radix_tree_root *root = &inode->i_mapping->page_tree;
++	int found = false;
++	void **pagep = NULL;
++	struct page *page = NULL;
++	int start_idx;
++	int end_idx;
++
++	start_idx = start >> PAGE_CACHE_SHIFT;
++
++	/*
++	 * end is the last byte in the last page.  end == start is legal
++	 */
++	end_idx = end >> PAGE_CACHE_SHIFT;
++
++	rcu_read_lock();
++
++	/* Most of the code in this while loop is lifted from
++	 * find_get_page.  It's been modified to begin searching from a
++	 * page and return just the first page found in that range.  If the
++	 * found idx is less than or equal to the end idx then we know that
++	 * a page exists.  If no pages are found or if those pages are
++	 * outside of the range then we're fine (yay!) */
++	while (page == NULL &&
++	       radix_tree_gang_lookup_slot(root, &pagep, NULL, start_idx, 1)) {
++		page = radix_tree_deref_slot(pagep);
++		if (unlikely(!page))
++			break;
++
++		if (radix_tree_exception(page)) {
++			if (radix_tree_deref_retry(page))
++				continue;
++			/*
++			 * Otherwise, shmem/tmpfs must be storing a swap entry
++			 * here as an exceptional entry: so return it without
++			 * attempting to raise page count.
++			 */
++			break; /* TODO: Is this relevant for this use case? */
++		}
++
++		if (!page_cache_get_speculative(page))
++			continue;
++
++		/*
++		 * Has the page moved?
++		 * This is part of the lockless pagecache protocol. See
++		 * include/linux/pagemap.h for details.
++		 */
++		if (unlikely(page != *pagep)) {
++			page_cache_release(page);
++			page = NULL;
++		}
++	}
++
++	if (page) {
++		if (page->index <= end_idx)
++			found = true;
++		page_cache_release(page);
++	}
++
++	rcu_read_unlock();
++	return found;
++}
++
+ static int lock_extent_direct(struct inode *inode, u64 lockstart, u64 lockend,
+ 			      struct extent_state **cached_state, int writing)
+ {
+@@ -6759,10 +6824,9 @@ static int lock_extent_direct(struct inode *inode, u64 lockstart, u64 lockend,
+ 		 * invalidate needs to happen so that reads after a write do not
+ 		 * get stale data.
+ 		 */
+-		if (!ordered && (!writing ||
+-		    !test_range_bit(&BTRFS_I(inode)->io_tree,
+-				    lockstart, lockend, EXTENT_UPTODATE, 0,
+-				    *cached_state)))
++		if (!ordered &&
++		    (!writing ||
++		     !btrfs_page_exists_in_range(inode, lockstart, lockend)))
+ 			break;
+ 
+ 		unlock_extent_cached(&BTRFS_I(inode)->io_tree, lockstart, lockend,
+-- 
+cgit v0.10.1
+

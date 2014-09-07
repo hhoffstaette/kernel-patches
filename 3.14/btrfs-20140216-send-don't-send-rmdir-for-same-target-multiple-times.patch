@@ -1,0 +1,75 @@
+From 29d6d30f5c8aa58b04f40a58442df3bcaae5a1d5 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Sun, 16 Feb 2014 21:01:39 +0000
+Subject: Btrfs: send, don't send rmdir for same target multiple times
+
+When doing an incremental send, if we delete a directory that has N > 1
+hardlinks for the same file and that file has the highest inode number
+inside the directory contents, an incremental send would send N times an
+rmdir operation against the directory. This made the btrfs receive command
+fail on the second rmdir instruction, as the target directory didn't exist
+anymore.
+
+Steps to reproduce the issue:
+
+    $ mkfs.btrfs -f /dev/sdb3
+    $ mount /dev/sdb3 /mnt/btrfs
+    $ mkdir -p /mnt/btrfs/a/b/c
+    $ echo 'ola mundo' > /mnt/btrfs/a/b/c/foo.txt
+    $ ln /mnt/btrfs/a/b/c/foo.txt /mnt/btrfs/a/b/c/bar.txt
+    $ btrfs subvolume snapshot -r /mnt/btrfs /mnt/btrfs/snap1
+    $ btrfs send /mnt/btrfs/snap1 -f /tmp/base.send
+    $ rm -f /mnt/btrfs/a/b/c/foo.txt
+    $ rm -f /mnt/btrfs/a/b/c/bar.txt
+    $ rmdir /mnt/btrfs/a/b/c
+    $ btrfs subvolume snapshot -r /mnt/btrfs /mnt/btrfs/snap2
+    $ btrfs send -p /mnt/btrfs/snap1 /mnt/btrfs/snap2 -f /tmp/incremental.send
+
+    $ umount /mnt/btrfs
+    $ mkfs.btrfs -f /dev/sdb3
+    $ mount /dev/sdb3 /mnt/btrfs
+    $ btrfs receive /mnt/btrfs -f /tmp/base.send
+    $ btrfs receive /mnt/btrfs -f /tmp/incremental.send
+
+The second btrfs receive command failed with:
+
+    ERROR: rmdir o259-6-0 failed. No such file or directory
+
+A test case for xfstests follows.
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index cb9502a..cdfd435 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -3085,6 +3085,7 @@ static int process_recorded_refs(struct send_ctx *sctx, int *pending_move)
+ 	u64 ow_gen;
+ 	int did_overwrite = 0;
+ 	int is_orphan = 0;
++	u64 last_dir_ino_rm = 0;
+ 
+ verbose_printk("btrfs: process_recorded_refs %llu\n", sctx->cur_ino);
+ 
+@@ -3349,7 +3350,8 @@ verbose_printk("btrfs: process_recorded_refs %llu\n", sctx->cur_ino);
+ 			ret = send_utimes(sctx, cur->dir, cur->dir_gen);
+ 			if (ret < 0)
+ 				goto out;
+-		} else if (ret == inode_state_did_delete) {
++		} else if (ret == inode_state_did_delete &&
++			   cur->dir != last_dir_ino_rm) {
+ 			ret = can_rmdir(sctx, cur->dir, sctx->cur_ino);
+ 			if (ret < 0)
+ 				goto out;
+@@ -3361,6 +3363,7 @@ verbose_printk("btrfs: process_recorded_refs %llu\n", sctx->cur_ino);
+ 				ret = send_rmdir(sctx, valid_path);
+ 				if (ret < 0)
+ 					goto out;
++				last_dir_ino_rm = cur->dir;
+ 			}
+ 		}
+ 	}
+-- 
+cgit v0.10.1
+

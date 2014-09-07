@@ -1,0 +1,38 @@
+From 3e8d2fcae0db0c30534f115ee0af2fa0aa4c52d7 Mon Sep 17 00:00:00 2001
+From: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Date: Thu, 17 Jul 2014 11:44:10 +0800
+Subject: Btrfs: fall into nocompression codes quickly if possible
+
+If flag NOCOMPRESS is set which means bad compression ratio,
+we could avoid call cow_file_range_async() for this case earlier.
+
+Signed-off-by: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 05d4a20..4d32a82 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -1482,7 +1482,6 @@ static int run_delalloc_range(struct inode *inode, struct page *locked_page,
+ 			      unsigned long *nr_written)
+ {
+ 	int ret;
+-	struct btrfs_root *root = BTRFS_I(inode)->root;
+ 	int force_cow = need_force_cow(inode, start, end);
+ 
+ 	if (BTRFS_I(inode)->flags & BTRFS_INODE_NODATACOW && !force_cow) {
+@@ -1491,9 +1490,7 @@ static int run_delalloc_range(struct inode *inode, struct page *locked_page,
+ 	} else if (BTRFS_I(inode)->flags & BTRFS_INODE_PREALLOC && !force_cow) {
+ 		ret = run_delalloc_nocow(inode, locked_page, start, end,
+ 					 page_started, 0, nr_written);
+-	} else if (!btrfs_test_opt(root, COMPRESS) &&
+-		   !(BTRFS_I(inode)->force_compress) &&
+-		   !(BTRFS_I(inode)->flags & BTRFS_INODE_COMPRESS)) {
++	} else if (!inode_need_compress(inode)) {
+ 		ret = cow_file_range(inode, locked_page, start, end,
+ 				      page_started, nr_written, 1);
+ 	} else {
+-- 
+cgit v0.10.1
+

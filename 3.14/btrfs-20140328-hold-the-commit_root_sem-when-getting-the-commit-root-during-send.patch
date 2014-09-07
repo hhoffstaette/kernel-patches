@@ -1,0 +1,173 @@
+From 3f8a18cc53bd1be26eb5b5247e1386ad0e21b623 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Fri, 28 Mar 2014 17:16:01 -0400
+Subject: Btrfs: hold the commit_root_sem when getting the commit root during
+ send
+
+We currently rely too heavily on roots being read-only to save us from just
+accessing root->commit_root.  We can easily balance blocks out from underneath a
+read only root, so to save us from getting screwed make sure we only access
+root->commit_root under the commit root sem.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 9d89c16..1bcfcdb 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -2769,9 +2769,13 @@ again:
+ 		 * the commit roots are read only
+ 		 * so we always do read locks
+ 		 */
++		if (p->need_commit_sem)
++			down_read(&root->fs_info->commit_root_sem);
+ 		b = root->commit_root;
+ 		extent_buffer_get(b);
+ 		level = btrfs_header_level(b);
++		if (p->need_commit_sem)
++			up_read(&root->fs_info->commit_root_sem);
+ 		if (!p->skip_locking)
+ 			btrfs_tree_read_lock(b);
+ 	} else {
+@@ -5436,6 +5440,7 @@ int btrfs_compare_trees(struct btrfs_root *left_root,
+ 	 *   the right if possible or go up and right.
+ 	 */
+ 
++	down_read(&left_root->fs_info->commit_root_sem);
+ 	left_level = btrfs_header_level(left_root->commit_root);
+ 	left_root_level = left_level;
+ 	left_path->nodes[left_level] = left_root->commit_root;
+@@ -5445,6 +5450,7 @@ int btrfs_compare_trees(struct btrfs_root *left_root,
+ 	right_root_level = right_level;
+ 	right_path->nodes[right_level] = right_root->commit_root;
+ 	extent_buffer_get(right_path->nodes[right_level]);
++	up_read(&left_root->fs_info->commit_root_sem);
+ 
+ 	if (left_level == 0)
+ 		btrfs_item_key_to_cpu(left_path->nodes[left_level],
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 4253ab2..d8a669e 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -609,6 +609,7 @@ struct btrfs_path {
+ 	unsigned int skip_locking:1;
+ 	unsigned int leave_spinning:1;
+ 	unsigned int search_commit_root:1;
++	unsigned int need_commit_sem:1;
+ };
+ 
+ /*
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 6b5f136..ab34a23 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -493,6 +493,7 @@ static struct btrfs_path *alloc_path_for_send(void)
+ 		return NULL;
+ 	path->search_commit_root = 1;
+ 	path->skip_locking = 1;
++	path->need_commit_sem = 1;
+ 	return path;
+ }
+ 
+@@ -771,29 +772,22 @@ out:
+ /*
+  * Helper function to retrieve some fields from an inode item.
+  */
+-static int get_inode_info(struct btrfs_root *root,
+-			  u64 ino, u64 *size, u64 *gen,
+-			  u64 *mode, u64 *uid, u64 *gid,
+-			  u64 *rdev)
++static int __get_inode_info(struct btrfs_root *root, struct btrfs_path *path,
++			  u64 ino, u64 *size, u64 *gen, u64 *mode, u64 *uid,
++			  u64 *gid, u64 *rdev)
+ {
+ 	int ret;
+ 	struct btrfs_inode_item *ii;
+ 	struct btrfs_key key;
+-	struct btrfs_path *path;
+-
+-	path = alloc_path_for_send();
+-	if (!path)
+-		return -ENOMEM;
+ 
+ 	key.objectid = ino;
+ 	key.type = BTRFS_INODE_ITEM_KEY;
+ 	key.offset = 0;
+ 	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
+-	if (ret < 0)
+-		goto out;
+ 	if (ret) {
+-		ret = -ENOENT;
+-		goto out;
++		if (ret > 0)
++			ret = -ENOENT;
++		return ret;
+ 	}
+ 
+ 	ii = btrfs_item_ptr(path->nodes[0], path->slots[0],
+@@ -811,7 +805,22 @@ static int get_inode_info(struct btrfs_root *root,
+ 	if (rdev)
+ 		*rdev = btrfs_inode_rdev(path->nodes[0], ii);
+ 
+-out:
++	return ret;
++}
++
++static int get_inode_info(struct btrfs_root *root,
++			  u64 ino, u64 *size, u64 *gen,
++			  u64 *mode, u64 *uid, u64 *gid,
++			  u64 *rdev)
++{
++	struct btrfs_path *path;
++	int ret;
++
++	path = alloc_path_for_send();
++	if (!path)
++		return -ENOMEM;
++	ret = __get_inode_info(root, path, ino, size, gen, mode, uid, gid,
++			       rdev);
+ 	btrfs_free_path(path);
+ 	return ret;
+ }
+@@ -1085,6 +1094,7 @@ out:
+ struct backref_ctx {
+ 	struct send_ctx *sctx;
+ 
++	struct btrfs_path *path;
+ 	/* number of total found references */
+ 	u64 found;
+ 
+@@ -1155,8 +1165,9 @@ static int __iterate_backrefs(u64 ino, u64 offset, u64 root, void *ctx_)
+ 	 * There are inodes that have extents that lie behind its i_size. Don't
+ 	 * accept clones from these extents.
+ 	 */
+-	ret = get_inode_info(found->root, ino, &i_size, NULL, NULL, NULL, NULL,
+-			NULL);
++	ret = __get_inode_info(found->root, bctx->path, ino, &i_size, NULL, NULL,
++			       NULL, NULL, NULL);
++	btrfs_release_path(bctx->path);
+ 	if (ret < 0)
+ 		return ret;
+ 
+@@ -1235,12 +1246,17 @@ static int find_extent_clone(struct send_ctx *sctx,
+ 	if (!tmp_path)
+ 		return -ENOMEM;
+ 
++	/* We only use this path under the commit sem */
++	tmp_path->need_commit_sem = 0;
++
+ 	backref_ctx = kmalloc(sizeof(*backref_ctx), GFP_NOFS);
+ 	if (!backref_ctx) {
+ 		ret = -ENOMEM;
+ 		goto out;
+ 	}
+ 
++	backref_ctx->path = tmp_path;
++
+ 	if (data_offset >= ino_size) {
+ 		/*
+ 		 * There may be extents that lie behind the file's size.
+-- 
+cgit v0.10.1
+

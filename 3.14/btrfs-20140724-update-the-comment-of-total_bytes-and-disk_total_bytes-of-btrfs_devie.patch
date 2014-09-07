@@ -1,0 +1,29 @@
+From f50e705a5fa38e14335170579678762b6d61d3ba Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Thu, 24 Jul 2014 11:37:12 +0800
+Subject: Btrfs: update the comment of total_bytes and disk_total_bytes of
+ btrfs_devie
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 0defd23..90d4fa8 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -64,10 +64,10 @@ struct btrfs_device {
+ 	/* the internal btrfs device id */
+ 	u64 devid;
+ 
+-	/* size of the device */
++	/* size of the device in memory */
+ 	u64 total_bytes;
+ 
+-	/* size of the disk */
++	/* size of the device on disk */
+ 	u64 disk_total_bytes;
+ 
+ 	/* bytes used */
+-- 
+cgit v0.10.1
+
