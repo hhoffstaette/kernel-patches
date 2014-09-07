@@ -1,8 +1,7 @@
 From f50e705a5fa38e14335170579678762b6d61d3ba Mon Sep 17 00:00:00 2001
 From: Miao Xie <miaox@cn.fujitsu.com>
 Date: Thu, 24 Jul 2014 11:37:12 +0800
-Subject: Btrfs: update the comment of total_bytes and disk_total_bytes of
- btrfs_devie
+Subject: Btrfs: update the comment of total_bytes and disk_total_bytes of btrfs_devie
 
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
 Signed-off-by: Chris Mason <clm@fb.com>
