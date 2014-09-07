@@ -1,0 +1,31 @@
+From c5f7d0bb29df2e1848a236e58e201daf5b4e0f21 Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Date: Tue, 15 Apr 2014 10:41:00 +0800
+Subject: btrfs: Change the hole range to a more accurate value.
+
+Commit 3ac0d7b96a268a98bd474cab8bce3a9f125aaccf fixed the btrfs expanding
+write problem but the hole punched is sometimes too large for some
+iovec, which has unmapped data ranges.
+This patch will change to hole range to a more accurate value using the
+counts checked by the write check routines.
+
+Reported-by: Al Viro <viro@ZenIV.linux.org.uk>
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 23f6a9d..e7e78fa 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1783,7 +1783,7 @@ static ssize_t btrfs_file_aio_write(struct kiocb *iocb,
+ 	start_pos = round_down(pos, root->sectorsize);
+ 	if (start_pos > i_size_read(inode)) {
+ 		/* Expand hole size to cover write data, preventing empty gap */
+-		end_pos = round_up(pos + iov->iov_len, root->sectorsize);
++		end_pos = round_up(pos + count, root->sectorsize);
+ 		err = btrfs_cont_expand(inode, i_size_read(inode), end_pos);
+ 		if (err) {
+ 			mutex_unlock(&inode->i_mutex);
+-- 
+cgit v0.10.1
+

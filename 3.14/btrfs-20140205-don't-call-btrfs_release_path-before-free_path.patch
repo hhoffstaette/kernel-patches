@@ -1,0 +1,23 @@
+From 6334dd1d107117a0794f582ee253051a71e18e66 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Wed, 5 Feb 2014 02:11:25 +0100
+Subject: btrfs: clenaup: don't call btrfs_release_path before free_path
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 65245a0..b3329ad 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -4096,7 +4096,6 @@ static int __insert_orphan_inode(struct btrfs_trans_handle *trans,
+ 	btrfs_set_inode_flags(leaf, item, BTRFS_INODE_NOCOMPRESS |
+ 					  BTRFS_INODE_PREALLOC);
+ 	btrfs_mark_buffer_dirty(leaf);
+-	btrfs_release_path(path);
+ out:
+ 	btrfs_free_path(path);
+ 	return ret;
+-- 
+cgit v0.10.1
+
