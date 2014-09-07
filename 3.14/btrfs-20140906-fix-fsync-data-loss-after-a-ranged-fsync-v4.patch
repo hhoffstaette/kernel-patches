@@ -1,9 +1,9 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH v2] Btrfs: fix fsync data loss after a ranged fsync
-Date: Tue,  2 Sep 2014 13:50:12 +0100
-Message-ID: <1409662212-12126-1-git-send-email-fdmanana@suse.com>
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38201>
+Subject: [PATCH v4] Btrfs: fix fsync data loss after a ranged fsync
+Date: Sat,  6 Sep 2014 22:34:39 +0100
+Message-ID: <1410039279-9905-1-git-send-email-fdmanana@suse.com>
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38336>
 
 While we're doing a full fsync (when the inode has the flag
 BTRFS_INODE_NEEDS_FULL_SYNC set) that is ranged too (covers only a
@@ -20,16 +20,26 @@ let the next fast fsync (one that checks only the modified list) see this
 extent map and log a matching file extent item to the log btree and wait
 for its ordered operation to finish (if it's still ongoing).
 
+A test case for xfstests follows.
+
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
 
 V2: No code change, only updated the changelog and the comment, to make
     them more clear and accurate.
 
+V3: Added missing condition to exclude extent map from the modified list
+    and ensure btrfs_log_inode() is called for the next fsync if the
+    modified list didn't get empty after logging the inode. This time this
+    follows with a test case for xfstests that is better then my previous
+    local test and benefits everyone.
+
+V4: Simplifed em exclusion logic.
+
  fs/btrfs/file.c     |  2 +-
- fs/btrfs/tree-log.c | 54 +++++++++++++++++++++++++++++++++++++++++++----------
+ fs/btrfs/tree-log.c | 77 ++++++++++++++++++++++++++++++++++++++++++-----------
  fs/btrfs/tree-log.h |  2 ++
- 3 files changed, 47 insertions(+), 11 deletions(-)
+ 3 files changed, 64 insertions(+), 17 deletions(-)
 
 diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
 index 66c4076..e5534c1 100644
@@ -45,7 +55,7 @@ index 66c4076..e5534c1 100644
  		/* Fallthrough and commit/free transaction. */
  		ret = 1;
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index 5a917a6..93d3c16 100644
+index 5a917a6..82db14f 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
 @@ -94,8 +94,10 @@
@@ -74,11 +84,26 @@ index 5a917a6..93d3c16 100644
  {
  	struct btrfs_path *path;
  	struct btrfs_path *dst_path;
-@@ -4050,8 +4054,31 @@ log_extents:
+@@ -3874,6 +3878,7 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
+ 	int ins_nr;
+ 	bool fast_search = false;
+ 	u64 ino = btrfs_ino(inode);
++	struct extent_map_tree *em_tree = &BTRFS_I(inode)->extent_tree;
+ 
+ 	path = btrfs_alloc_path();
+ 	if (!path)
+@@ -4046,13 +4051,35 @@ log_extents:
+ 			goto out_unlock;
+ 		}
+ 	} else if (inode_only == LOG_INODE_ALL) {
+-		struct extent_map_tree *tree = &BTRFS_I(inode)->extent_tree;
  		struct extent_map *em, *n;
  
- 		write_lock(&tree->lock);
+-		write_lock(&tree->lock);
 -		list_for_each_entry_safe(em, n, &tree->modified_extents, list)
+-			list_del_init(&em->list);
+-		write_unlock(&tree->lock);
++		write_lock(&em_tree->lock);
 +		/*
 +		 * We can't just remove every em if we're called for a ranged
 +		 * fsync - that is, one that doesn't cover the whole possible
@@ -97,17 +122,40 @@ index 5a917a6..93d3c16 100644
 +		 * the next fast fsync not log their matching file extent items,
 +		 * therefore making us lose data after a log replay.
 +		 */
-+		list_for_each_entry_safe(em, n, &tree->modified_extents, list) {
-+			if (em->mod_start > end)
-+				continue;
-+			if (em->mod_start + em->mod_len <= start)
-+				continue;
- 			list_del_init(&em->list);
++		list_for_each_entry_safe(em, n, &em_tree->modified_extents,
++					 list) {
++			const u64 mod_end = em->mod_start + em->mod_len - 1;
++
++			if (em->mod_start >= start && mod_end <= end)
++				list_del_init(&em->list);
 +		}
- 		write_unlock(&tree->lock);
++		write_unlock(&em_tree->lock);
  	}
  
-@@ -4158,6 +4185,9 @@ out:
+ 	if (inode_only == LOG_INODE_ALL && S_ISDIR(inode->i_mode)) {
+@@ -4062,8 +4089,19 @@ log_extents:
+ 			goto out_unlock;
+ 		}
+ 	}
+-	BTRFS_I(inode)->logged_trans = trans->transid;
+-	BTRFS_I(inode)->last_log_commit = BTRFS_I(inode)->last_sub_trans;
++
++	write_lock(&em_tree->lock);
++	/*
++	 * If we're doing a ranged fsync and there are still modified extents
++	 * in the list, we must run on the next fsync call as it might cover
++	 * those extents (a full fsync or an fsync for other range).
++	 */
++	if (list_empty(&em_tree->modified_extents)) {
++		BTRFS_I(inode)->logged_trans = trans->transid;
++		BTRFS_I(inode)->last_log_commit =
++			BTRFS_I(inode)->last_sub_trans;
++	}
++	write_unlock(&em_tree->lock);
+ out_unlock:
+ 	if (unlikely(err))
+ 		btrfs_put_logged_extents(&logged_list);
+@@ -4158,6 +4196,9 @@ out:
   */
  static int btrfs_log_inode_parent(struct btrfs_trans_handle *trans,
  			    	  struct btrfs_root *root, struct inode *inode,
@@ -118,7 +166,7 @@ index 5a917a6..93d3c16 100644
 +				  int exists_only)
  {
  	int inode_only = exists_only ? LOG_INODE_EXISTS : LOG_INODE_ALL;
-@@ -4204,7 +4234,7 @@ static int btrfs_log_inode_parent(struct btrfs_trans_handle *trans,
+@@ -4204,7 +4245,7 @@ static int btrfs_log_inode_parent(struct btrfs_trans_handle *trans,
  	if (ret)
  		goto end_no_trans;
  
@@ -127,7 +175,7 @@ index 5a917a6..93d3c16 100644
  	if (ret)
  		goto end_trans;
  
-@@ -4232,7 +4262,8 @@ static int btrfs_log_inode_parent(struct btrfs_trans_handle *trans,
+@@ -4232,7 +4273,8 @@ static int btrfs_log_inode_parent(struct btrfs_trans_handle *trans,
  
  		if (BTRFS_I(inode)->generation >
  		    root->fs_info->last_trans_committed) {
@@ -137,7 +185,7 @@ index 5a917a6..93d3c16 100644
  			if (ret)
  				goto end_trans;
  		}
-@@ -4266,11 +4297,14 @@ end_no_trans:
+@@ -4266,11 +4308,14 @@ end_no_trans:
   */
  int btrfs_log_dentry_safe(struct btrfs_trans_handle *trans,
 -			  struct btrfs_root *root, struct dentry *dentry)
@@ -154,7 +202,7 @@ index 5a917a6..93d3c16 100644
  	dput(parent);
  
  	return ret;
-@@ -4509,6 +4542,7 @@ int btrfs_log_new_name(struct btrfs_trans_handle *trans,
+@@ -4509,6 +4553,7 @@ int btrfs_log_new_name(struct btrfs_trans_handle *trans,
  		    root->fs_info->last_trans_committed))
  		return 0;
  
@@ -171,7 +219,7 @@ index 7f5b41b..e2e798a 100644
  int btrfs_recover_log_trees(struct btrfs_root *tree_root);
  int btrfs_log_dentry_safe(struct btrfs_trans_handle *trans,
 -			  struct btrfs_root *root, struct dentry *dentry);
-+			  struct btrfs_root *root, struct dentry *dentry,
++ 			  struct btrfs_root *root, struct dentry *dentry,
 +			  const loff_t start,
 +			  const loff_t end);
  int btrfs_del_dir_entries_in_log(struct btrfs_trans_handle *trans,
