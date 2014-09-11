@@ -1,0 +1,65 @@
+From: Liu Bo <bo.li.liu@oracle.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix loop writing of async reclaim
+Date: Wed, 10 Sep 2014 12:58:50 +0800
+Message-ID: <1410325130-12665-1-git-send-email-bo.li.liu@oracle.com>
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38406>
+
+One of my tests shows that when we really don't have space to reclaim via
+flush_space and also run out of space, this async reclaim work loops on adding
+itself into the workqueue and keeps writing something to disk according to
+iostat's results, and these writes mainly comes from commit_transaction which
+writes super_block.  This's unacceptable as it can be bad to disks, especially
+memeory storages.
+
+This adds a check to avoid the above situation.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/extent-tree.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 3efe1c3..e33efbf 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -4343,11 +4343,21 @@ static inline int need_do_async_reclaim(struct btrfs_space_info *space_info,
+ }
+ 
+ static int btrfs_need_do_async_reclaim(struct btrfs_space_info *space_info,
+-				       struct btrfs_fs_info *fs_info)
++				       struct btrfs_fs_info *fs_info,
++				       int flush_state)
+ {
+ 	u64 used;
+ 
+ 	spin_lock(&space_info->lock);
++	/*
++	 * We run out of space and have not got any free space via flush_space,
++	 * so don't bother doing async reclaim.
++	 */
++	if (flush_state > COMMIT_TRANS && space_info->full) {
++		spin_unlock(&space_info->lock);
++		return 0;
++	}
++
+ 	used = space_info->bytes_used + space_info->bytes_reserved +
+ 	       space_info->bytes_pinned + space_info->bytes_readonly +
+ 	       space_info->bytes_may_use;
+@@ -4380,11 +4390,12 @@ static void btrfs_async_reclaim_metadata_space(struct work_struct *work)
+ 		flush_space(fs_info->fs_root, space_info, to_reclaim,
+ 			    to_reclaim, flush_state);
+ 		flush_state++;
+-		if (!btrfs_need_do_async_reclaim(space_info, fs_info))
++		if (!btrfs_need_do_async_reclaim(space_info, fs_info,
++						 flush_state))
+ 			return;
+ 	} while (flush_state <= COMMIT_TRANS);
+ 
+-	if (btrfs_need_do_async_reclaim(space_info, fs_info))
++	if (btrfs_need_do_async_reclaim(space_info, fs_info, flush_state))
+ 		queue_work(system_unbound_wq, work);
+ }
+ 
+-- 
+1.8.1.4
