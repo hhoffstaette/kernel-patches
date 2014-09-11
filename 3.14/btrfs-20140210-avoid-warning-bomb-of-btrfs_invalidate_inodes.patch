@@ -1,0 +1,31 @@
+From 7813b3db0a9ec77ff1f4b3ee3fb4925848395d59 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Mon, 10 Feb 2014 17:37:25 +0800
+Subject: Btrfs: avoid warning bomb of btrfs_invalidate_inodes
+
+So after transaction is aborted, we need to cleanup inode resources by
+calling btrfs_invalidate_inodes(), and btrfs_invalidate_inodes() hopes
+roots' refs to be zero in old times and sets a WARN_ON(), however, this
+is not always true within cleaning up transaction, so we get to detect
+transaction abortion and not warn at all.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index b88f622..8dba152 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -4926,7 +4926,8 @@ void btrfs_invalidate_inodes(struct btrfs_root *root)
+ 	struct inode *inode;
+ 	u64 objectid = 0;
+ 
+-	WARN_ON(btrfs_root_refs(&root->root_item) != 0);
++	if (!test_bit(BTRFS_FS_STATE_ERROR, &root->fs_info->fs_state))
++		WARN_ON(btrfs_root_refs(&root->root_item) != 0);
+ 
+ 	spin_lock(&root->inode_lock);
+ again:
+-- 
+cgit v0.10.1
+

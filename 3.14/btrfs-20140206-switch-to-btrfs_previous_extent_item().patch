@@ -1,0 +1,64 @@
+From 850a8cdffe41abec9e3319d7801c49eced0778a1 Mon Sep 17 00:00:00 2001
+From: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Date: Thu, 6 Feb 2014 20:02:29 +0800
+Subject: Btrfs: switch to btrfs_previous_extent_item()
+
+Since we have introduced btrfs_previous_extent_item() to search previous
+extent item, just switch into it.
+
+Signed-off-by: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Reviewed-by: Filipe Manana <fdmanana@gmail.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/backref.c b/fs/btrfs/backref.c
+index 903fe68..a88da72 100644
+--- a/fs/btrfs/backref.c
++++ b/fs/btrfs/backref.c
+@@ -1325,38 +1325,13 @@ int extent_from_logical(struct btrfs_fs_info *fs_info, u64 logical,
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	while (1) {
+-		u32 nritems;
+-		if (path->slots[0] == 0) {
+-			btrfs_set_path_blocking(path);
+-			ret = btrfs_prev_leaf(fs_info->extent_root, path);
+-			if (ret != 0) {
+-				if (ret > 0) {
+-					pr_debug("logical %llu is not within "
+-						 "any extent\n", logical);
+-					ret = -ENOENT;
+-				}
+-				return ret;
+-			}
+-		} else {
+-			path->slots[0]--;
+-		}
+-		nritems = btrfs_header_nritems(path->nodes[0]);
+-		if (nritems == 0) {
+-			pr_debug("logical %llu is not within any extent\n",
+-				 logical);
+-			return -ENOENT;
+-		}
+-		if (path->slots[0] == nritems)
+-			path->slots[0]--;
+-
+-		btrfs_item_key_to_cpu(path->nodes[0], found_key,
+-				      path->slots[0]);
+-		if (found_key->type == BTRFS_EXTENT_ITEM_KEY ||
+-		    found_key->type == BTRFS_METADATA_ITEM_KEY)
+-			break;
++	ret = btrfs_previous_extent_item(fs_info->extent_root, path, 0);
++	if (ret) {
++		if (ret > 0)
++			ret = -ENOENT;
++		return ret;
+ 	}
+-
++	btrfs_item_key_to_cpu(path->nodes[0], found_key, path->slots[0]);
+ 	if (found_key->type == BTRFS_METADATA_ITEM_KEY)
+ 		size = fs_info->extent_root->leafsize;
+ 	else if (found_key->type == BTRFS_EXTENT_ITEM_KEY)
+-- 
+cgit v0.10.1
+
