@@ -2,6 +2,7 @@ From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
 Subject: [PATCH v5] Btrfs: fix fsync data loss after a ranged fsync
 Date: Mon,  8 Sep 2014 22:56:57 +0100
+Message-ID: <1410213417-26003-1-git-send-email-fdmanana@suse.com>
 Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38377>
 
 While we're doing a full fsync (when the inode has the flag
@@ -79,8 +80,8 @@ index 66c4076..e5534c1 100644
  
  	btrfs_init_log_ctx(&ctx);
  
--	ret = btrfs_log_dentry_safe(trans, root, dentry);
-+	ret = btrfs_log_dentry_safe(trans, root, dentry, start, end);
+-	ret = btrfs_log_dentry_safe(trans, root, dentry, &ctx);
++	ret = btrfs_log_dentry_safe(trans, root, dentry, start, end, &ctx);
  	if (ret < 0) {
  		/* Fallthrough and commit/free transaction. */
  		ret = 1;
@@ -147,15 +148,16 @@ index 5a917a6..cf4ead8 100644
  		write_unlock(&tree->lock);
  	}
  
-@@ -4158,6 +4184,9 @@ out:
+@@ -4158,7 +4184,10 @@ out:
   */
  static int btrfs_log_inode_parent(struct btrfs_trans_handle *trans,
  			    	  struct btrfs_root *root, struct inode *inode,
--			    	  struct dentry *parent, int exists_only)
+-			    	  struct dentry *parent, int exists_only,
 +				  struct dentry *parent,
 +				  const loff_t start,
 +				  const loff_t end,
-+				  int exists_only)
++				  int exists_only,
+ 				  struct btrfs_log_ctx *ctx)
  {
  	int inode_only = exists_only ? LOG_INODE_EXISTS : LOG_INODE_ALL;
 @@ -4204,7 +4233,7 @@ static int btrfs_log_inode_parent(struct btrfs_trans_handle *trans,
@@ -177,21 +179,20 @@ index 5a917a6..cf4ead8 100644
  			if (ret)
  				goto end_trans;
  		}
-@@ -4177,12 +4207,15 @@
-  * data on disk.
+@@ -4266,13 +4296,15 @@ end_no_trans:
   */
  int btrfs_log_dentry_safe(struct btrfs_trans_handle *trans,
--			  struct btrfs_root *root, struct dentry *dentry)
-+ 			  struct btrfs_root *root, struct dentry *dentry,
+ 			  struct btrfs_root *root, struct dentry *dentry,
 +			  const loff_t start,
-+			  const loff_t end)
++			  const loff_t end,
+ 			  struct btrfs_log_ctx *ctx)
  {
  	struct dentry *parent = dget_parent(dentry);
  	int ret;
  
--	ret = btrfs_log_inode_parent(trans, root, dentry->d_inode, parent, 0);
-+	ret = btrfs_log_inode_parent(trans, root, dentry->d_inode, parent,
-+				     start, end, 0);
+ 	ret = btrfs_log_inode_parent(trans, root, dentry->d_inode, parent,
+-				     0, ctx);
++				     start, end, 0, ctx);
  	dput(parent);
  
  	return ret;
@@ -199,22 +200,22 @@ index 5a917a6..cf4ead8 100644
  		    root->fs_info->last_trans_committed))
  		return 0;
  
--	return btrfs_log_inode_parent(trans, root, inode, parent, 1);
+-	return btrfs_log_inode_parent(trans, root, inode, parent, 1, NULL);
 +	return btrfs_log_inode_parent(trans, root, inode, parent, 0,
-+				      LLONG_MAX, 1);
++				      LLONG_MAX, 1, NULL);
  }
  
 diff --git a/fs/btrfs/tree-log.h b/fs/btrfs/tree-log.h
 index 7f5b41b..e2e798a 100644
 --- a/fs/btrfs/tree-log.h
 +++ b/fs/btrfs/tree-log.h
-@@ -59,5 +59,7 @@ int btrfs_free_log_root_tree(struct btrfs_trans_handle *trans,
+@@ -59,6 +59,8 @@ int btrfs_free_log_root_tree(struct btrfs_trans_handle *trans,
  int btrfs_recover_log_trees(struct btrfs_root *tree_root);
  int btrfs_log_dentry_safe(struct btrfs_trans_handle *trans,
--			  struct btrfs_root *root, struct dentry *dentry);
-+			  struct btrfs_root *root, struct dentry *dentry,
+ 			  struct btrfs_root *root, struct dentry *dentry,
 +			  const loff_t start,
-+			  const loff_t end);
++			  const loff_t end,
+ 			  struct btrfs_log_ctx *ctx);
  int btrfs_del_dir_entries_in_log(struct btrfs_trans_handle *trans,
  				 struct btrfs_root *root,
 -- 
