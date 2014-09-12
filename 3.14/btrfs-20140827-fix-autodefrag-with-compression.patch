@@ -1,10 +1,7 @@
-
 From: Chris Mason <clm@fb.com>
 Subject: Btrfs: fix autodefrag with compression
-X-Patchwork-Id: 4790491
-Message-Id: <53FE28C0.4010603@fb.com>
-To: linux-btrfs <linux-btrfs@vger.kernel.org>
 Date: Wed, 27 Aug 2014 14:51:44 -0400
+X-Patchwork-Id: 4790491
 
 The autodefrag code skips defrag when two extents are adjacent.  But one
 big advantage for autodefrag is cutting down on the number of small

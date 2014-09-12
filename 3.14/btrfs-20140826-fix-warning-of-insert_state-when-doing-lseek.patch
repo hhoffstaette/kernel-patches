@@ -1,10 +1,7 @@
-Subject: [RFC] Btrfs: fix warning of insert_state() when doing lseek
 From: Liu Bo <bo.li.liu@oracle.com>
-X-Patchwork-Id: 4783031
-Message-Id: <1409066130-29948-1-git-send-email-bo.li.liu@oracle.com>
-To: linux-btrfs@vger.kernel.org
-Cc: toralf.foerster@gmx.de
+Subject: [RFC] Btrfs: fix warning of insert_state() when doing lseek
 Date: Tue, 26 Aug 2014 23:15:30 +0800
+X-Patchwork-Id: 4783031
 
 An user reported this, it is because that lseek's SEEK_SET/SEEK_CUR/SEEK_END
 allow a negative value for @offset, but btrfs's SEEK_DATA/SEEK_HOLE don't
