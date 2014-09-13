@@ -1,0 +1,41 @@
+From 4909e083997b3c5138320e02615b85a47e85d07b Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Wed, 3 Sep 2014 21:35:42 +0800
+Subject: Btrfs: fix unprotected device list access when cloning fs devices
+
+We can build a new filesystem based a seed filesystem, and we need clone
+the fs devices when we open the new filesystem. But someone might clear
+the seed flag of the seed filesystem, then mount that filesystem and
+remove some device. If we mount the new filesystem, we might access
+a device list which was being changed when we clone the fs devices.
+Fix it.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 105c5fe..d28e176 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -583,6 +583,7 @@ static struct btrfs_fs_devices *clone_fs_devices(struct btrfs_fs_devices *orig)
+ 	if (IS_ERR(fs_devices))
+ 		return fs_devices;
+ 
++	mutex_lock(&orig->device_list_mutex);
+ 	fs_devices->total_devices = orig->total_devices;
+ 
+ 	/* We have held the volume lock, it is safe to get the devices. */
+@@ -611,8 +612,10 @@ static struct btrfs_fs_devices *clone_fs_devices(struct btrfs_fs_devices *orig)
+ 		device->fs_devices = fs_devices;
+ 		fs_devices->num_devices++;
+ 	}
++	mutex_unlock(&orig->device_list_mutex);
+ 	return fs_devices;
+ error:
++	mutex_unlock(&orig->device_list_mutex);
+ 	free_fs_devices(fs_devices);
+ 	return ERR_PTR(-ENOMEM);
+ }
+-- 
+cgit v0.10.1
+

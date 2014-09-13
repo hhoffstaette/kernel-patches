@@ -1,0 +1,29 @@
+From 4907839f1678a9a5124600a27fc57d85bad310c9 Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Wed, 3 Sep 2014 21:35:45 +0800
+Subject: Btrfs: stop mounting the fs if the non-ENOENT errors happen when
+ opening seed fs
+
+When we open a seed filesystem, if the degraded mount option is set, we continue to
+mount the fs if we don't find some devices in the seed filesystem. But we should stop
+mounting if other errors happen. Fix it
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 2e078fa..fbe4ead 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6093,7 +6093,7 @@ static int read_one_dev(struct btrfs_root *root,
+ 
+ 	if (memcmp(fs_uuid, root->fs_info->fsid, BTRFS_UUID_SIZE)) {
+ 		ret = open_seed_devices(root, fs_uuid);
+-		if (ret && !btrfs_test_opt(root, DEGRADED))
++		if (ret && !(ret == -ENOENT && btrfs_test_opt(root, DEGRADED)))
+ 			return ret;
+ 	}
+ 
+-- 
+cgit v0.10.1
+

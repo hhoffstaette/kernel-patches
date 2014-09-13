@@ -1,0 +1,24 @@
+From bc9a5e6d419be3e2216957eba51d3067fb92bfdd Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Wed, 3 Sep 2014 21:35:31 +0800
+Subject: Btrfs: cleanup double assignment of device->bytes_used when device
+ replace finishes
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index a85b5f5..10dfb41 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -550,7 +550,6 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
+ 	tgt_device->is_tgtdev_for_dev_replace = 0;
+ 	tgt_device->devid = src_device->devid;
+ 	src_device->devid = BTRFS_DEV_REPLACE_DEVID;
+-	tgt_device->bytes_used = src_device->bytes_used;
+ 	memcpy(uuid_tmp, tgt_device->uuid, sizeof(uuid_tmp));
+ 	memcpy(tgt_device->uuid, src_device->uuid, sizeof(tgt_device->uuid));
+ 	memcpy(src_device->uuid, uuid_tmp, sizeof(src_device->uuid));
+-- 
+cgit v0.10.1
+

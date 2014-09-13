@@ -1,0 +1,39 @@
+From 6459c960a6caca55b3ad88479a40d9c4b6143f0e Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Wed, 3 Sep 2014 21:35:47 +0800
+Subject: Btrfs: modify rw_devices counter under chunk_mutex context
+
+rw_devices counter is often used to tune the profile when doing chunk allocation,
+so we should modify it under the chunk_mutex context to avoid getting wrong
+chunk profile.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 57a7f33..77d7fbc 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1649,8 +1649,8 @@ int btrfs_rm_device(struct btrfs_root *root, char *device_path)
+ 	if (device->writeable) {
+ 		lock_chunks(root);
+ 		list_del_init(&device->dev_alloc_list);
++		device->fs_devices->rw_devices--;
+ 		unlock_chunks(root);
+-		root->fs_info->fs_devices->rw_devices--;
+ 		clear_super = true;
+ 	}
+ 
+@@ -1795,8 +1795,8 @@ error_undo:
+ 		lock_chunks(root);
+ 		list_add(&device->dev_alloc_list,
+ 			 &root->fs_info->fs_devices->alloc_list);
++		device->fs_devices->rw_devices++;
+ 		unlock_chunks(root);
+-		root->fs_info->fs_devices->rw_devices++;
+ 	}
+ 	goto error_brelse;
+ }
+-- 
+cgit v0.10.1
+

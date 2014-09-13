@@ -1,0 +1,101 @@
+From 00996a7fb38d5ae2b3b1c30f7b21ed9a227bc65d Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Wed, 3 Sep 2014 21:35:43 +0800
+Subject: Btrfs: fix use-after-free problem of the device during device replace
+
+The problem is:
+	Task0(device scan task)		Task1(device replace task)
+	scan_one_device()
+	mutex_lock(&uuid_mutex)
+	device = find_device()
+					mutex_lock(&device_list_mutex)
+					lock_chunk()
+					rm_and_free_source_device
+					unlock_chunk()
+					mutex_unlock(&device_list_mutex)
+	check device
+
+Destroying the target device if device replace fails also has the same problem.
+
+We fix this problem by locking uuid_mutex during destroying source device or
+target device, just like the device remove operation.
+
+It is a temporary solution, we can fix this problem and make the code more
+clear by atomic counter in the future.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index aa4c828..e9cbbdb 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -509,6 +509,7 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
+ 	ret = btrfs_commit_transaction(trans, root);
+ 	WARN_ON(ret);
+ 
++	mutex_lock(&uuid_mutex);
+ 	/* keep away write_all_supers() during the finishing procedure */
+ 	mutex_lock(&root->fs_info->fs_devices->device_list_mutex);
+ 	mutex_lock(&root->fs_info->chunk_mutex);
+@@ -536,6 +537,7 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
+ 		btrfs_dev_replace_unlock(dev_replace);
+ 		mutex_unlock(&root->fs_info->chunk_mutex);
+ 		mutex_unlock(&root->fs_info->fs_devices->device_list_mutex);
++		mutex_unlock(&uuid_mutex);
+ 		if (tgt_device)
+ 			btrfs_destroy_dev_replace_tgtdev(fs_info, tgt_device);
+ 		mutex_unlock(&dev_replace->lock_finishing_cancel_unmount);
+@@ -591,6 +593,7 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
+ 	 */
+ 	mutex_unlock(&root->fs_info->chunk_mutex);
+ 	mutex_unlock(&root->fs_info->fs_devices->device_list_mutex);
++	mutex_unlock(&uuid_mutex);
+ 
+ 	/* write back the superblocks */
+ 	trans = btrfs_start_transaction(root, 0);
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index d28e176..a15c8ac 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -50,7 +50,7 @@ static void __btrfs_reset_dev_stats(struct btrfs_device *dev);
+ static void btrfs_dev_stat_print_on_error(struct btrfs_device *dev);
+ static void btrfs_dev_stat_print_on_load(struct btrfs_device *device);
+ 
+-static DEFINE_MUTEX(uuid_mutex);
++DEFINE_MUTEX(uuid_mutex);
+ static LIST_HEAD(fs_uuids);
+ 
+ static void lock_chunks(struct btrfs_root *root)
+@@ -1867,6 +1867,7 @@ void btrfs_destroy_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
+ {
+ 	struct btrfs_device *next_device;
+ 
++	mutex_lock(&uuid_mutex);
+ 	WARN_ON(!tgtdev);
+ 	mutex_lock(&fs_info->fs_devices->device_list_mutex);
+ 	if (tgtdev->bdev) {
+@@ -1886,6 +1887,7 @@ void btrfs_destroy_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
+ 	call_rcu(&tgtdev->rcu, free_device);
+ 
+ 	mutex_unlock(&fs_info->fs_devices->device_list_mutex);
++	mutex_unlock(&uuid_mutex);
+ }
+ 
+ static int btrfs_find_device_by_path(struct btrfs_root *root, char *device_path,
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 76600a3..2b37da3 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -24,6 +24,8 @@
+ #include <linux/btrfs.h>
+ #include "async-thread.h"
+ 
++extern struct mutex uuid_mutex;
++
+ #define BTRFS_STRIPE_LEN	(64 * 1024)
+ 
+ struct buffer_head;
+-- 
+cgit v0.10.1
+
