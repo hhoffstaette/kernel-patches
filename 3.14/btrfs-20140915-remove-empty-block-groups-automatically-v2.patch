@@ -1,8 +1,8 @@
 From: Josef Bacik <jbacik@fb.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: remove empty block groups automatically
-Date: Fri, 12 Sep 2014 15:18:30 -0400
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38489>
+Subject: [PATCH] Btrfs: remove empty block groups automatically V2
+Date: Mon, 15 Sep 2014 14:29:49 -0400
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38561>
 
 One problem that has plagued us is that a user will use up all of his space with
 data, remove a bunch of that data, and then try to create a bunch of small files
@@ -20,6 +20,8 @@ helpful for both this and relocate.  Thanks,
 
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 ---
+V1->V2: Don't bother deleting mixed block groups.
+
  fs/btrfs/ctree.h                  |   8 ++-
  fs/btrfs/disk-io.c                |   3 +
  fs/btrfs/extent-tree.c            | 128 +++++++++++++++++++++++++++++++++++---
@@ -90,7 +92,7 @@ index a224fb9..3409734 100644
  	btrfs_init_block_rsv(&fs_info->global_block_rsv,
  			     BTRFS_BLOCK_RSV_GLOBAL);
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index b30ddb4..c68cdb1 100644
+index b30ddb4..53714ef 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
 @@ -5433,6 +5433,20 @@ static int update_block_group(struct btrfs_root *root,
@@ -190,7 +192,7 @@ index b30ddb4..c68cdb1 100644
 +					       bg_list);
 +		space_info = block_group->space_info;
 +		list_del_init(&block_group->bg_list);
-+		if (ret) {
++		if (ret || btrfs_mixed_space_info(space_info)) {
 +			btrfs_put_block_group(block_group);
 +			continue;
 +		}
