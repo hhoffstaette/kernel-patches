@@ -1,0 +1,35 @@
+From acf59377267b5a74818e76873d0670b0ca6cf2fe Mon Sep 17 00:00:00 2001
+From: Andreas Gruenbacher <andreas.gruenbacher@gmail.com>
+Date: Tue, 15 Jul 2014 21:10:52 +0200
+Subject: locking/lockdep: Only ask for /proc/lock_stat output when available
+
+When lockdep turns itself off, the following message is logged:
+
+  Please attach the output of /proc/lock_stat to the bug report
+
+Omit this message when CONFIG_LOCK_STAT is off, and /proc/lock_stat
+doesn't exist.
+
+Signed-off-by: Andreas Gruenbacher <andreas.gruenbacher@gmail.com>
+Signed-off-by: Peter Zijlstra <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Link: http://lkml.kernel.org/r/1405451452-3824-1-git-send-email-andreas.gruenbacher@gmail.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/kernel/locking/lockdep.c b/kernel/locking/lockdep.c
+index d24e433..88d0d44 100644
+--- a/kernel/locking/lockdep.c
++++ b/kernel/locking/lockdep.c
+@@ -384,7 +384,9 @@ static void print_lockdep_off(const char *bug_msg)
+ {
+ 	printk(KERN_DEBUG "%s\n", bug_msg);
+ 	printk(KERN_DEBUG "turning off the locking correctness validator.\n");
++#ifdef CONFIG_LOCK_STAT
+ 	printk(KERN_DEBUG "Please attach the output of /proc/lock_stat to the bug report\n");
++#endif
+ }
+ 
+ static int save_trace(struct stack_trace *trace)
+-- 
+cgit v0.10.1
+

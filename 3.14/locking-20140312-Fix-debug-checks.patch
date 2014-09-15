@@ -1,0 +1,68 @@
+From 6f008e72cd111a119b5d8de8c5438d892aae99eb Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Wed, 12 Mar 2014 13:24:42 +0100
+Subject: locking/mutex: Fix debug checks
+
+OK, so commit:
+
+  1d8fe7dc8078 ("locking/mutexes: Unlock the mutex without the wait_lock")
+
+generates this boot warning when CONFIG_DEBUG_MUTEXES=y:
+
+  WARNING: CPU: 0 PID: 139 at /usr/src/linux-2.6/kernel/locking/mutex-debug.c:82 debug_mutex_unlock+0x155/0x180() DEBUG_LOCKS_WARN_ON(lock->owner != current)
+
+And that makes sense, because as soon as we release the lock a
+new owner can come in...
+
+One would think that !__mutex_slowpath_needs_to_unlock()
+implementations suffer the same, but for DEBUG we fall back to
+mutex-null.h which has an unconditional 1 for that.
+
+The mutex debug code requires the mutex to be unlocked after
+doing the debug checks, otherwise it can find inconsistent
+state.
+
+Reported-by: Ingo Molnar <mingo@kernel.org>
+Signed-off-by: Peter Zijlstra <peterz@infradead.org>
+Cc: jason.low2@hp.com
+Link: http://lkml.kernel.org/r/20140312122442.GB27965@twins.programming.kicks-ass.net
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/kernel/locking/mutex-debug.c b/kernel/locking/mutex-debug.c
+index faf6f5b..e1191c9 100644
+--- a/kernel/locking/mutex-debug.c
++++ b/kernel/locking/mutex-debug.c
+@@ -83,6 +83,12 @@ void debug_mutex_unlock(struct mutex *lock)
+ 
+ 	DEBUG_LOCKS_WARN_ON(!lock->wait_list.prev && !lock->wait_list.next);
+ 	mutex_clear_owner(lock);
++
++	/*
++	 * __mutex_slowpath_needs_to_unlock() is explicitly 0 for debug
++	 * mutexes so that we can do it here after we've verified state.
++	 */
++	atomic_set(&lock->count, 1);
+ }
+ 
+ void debug_mutex_init(struct mutex *lock, const char *name,
+diff --git a/kernel/locking/mutex.c b/kernel/locking/mutex.c
+index 02c61a9..14fe72c 100644
+--- a/kernel/locking/mutex.c
++++ b/kernel/locking/mutex.c
+@@ -34,6 +34,13 @@
+ #ifdef CONFIG_DEBUG_MUTEXES
+ # include "mutex-debug.h"
+ # include <asm-generic/mutex-null.h>
++/*
++ * Must be 0 for the debug case so we do not do the unlock outside of the
++ * wait_lock region. debug_mutex_unlock() will do the actual unlock in this
++ * case.
++ */
++# undef __mutex_slowpath_needs_to_unlock
++# define  __mutex_slowpath_needs_to_unlock()	0
+ #else
+ # include "mutex.h"
+ # include <asm/mutex.h>
+-- 
+cgit v0.10.1
+
