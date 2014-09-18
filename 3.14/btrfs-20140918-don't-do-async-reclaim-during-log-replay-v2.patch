@@ -1,8 +1,8 @@
 From: Josef Bacik <jbacik@fb.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: don't do async reclaim during log replay
-Date: Wed, 17 Sep 2014 10:06:21 -0400
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38626>
+Subject: [PATCH] Btrfs: don't do async reclaim during log replay V2
+Date: Thu, 18 Sep 2014 11:27:17 -0400
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38707>
 
 Trying to reproduce a log enospc bug I hit a panic in the async reclaim code
 during log replay.  This is because we use fs_info->fs_root as our root for
@@ -11,11 +11,14 @@ just not allow async reclaim while we're doing log replay.  Thanks,
 
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 ---
+V1->V2: use fs_info->log_root_recovering instead, didn't notice this existed
+before.
+
  fs/btrfs/extent-tree.c | 8 +++++++-
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 53714ef..e3fde87 100644
+index 28a27d5..44d0497 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
 @@ -4513,7 +4513,13 @@ again:
@@ -28,7 +31,7 @@ index 53714ef..e3fde87 100644
 +		 * which means we won't have fs_info->fs_root set, so don't do
 +		 * the async reclaim as we will panic.
 +		 */
-+		if (root->fs_info->fs_root &&
++		if (!root->fs_info->log_root_recovering &&
 +		    need_do_async_reclaim(space_info, root->fs_info, used) &&
  		    !work_busy(&root->fs_info->async_reclaim_work))
  			queue_work(system_unbound_wq,

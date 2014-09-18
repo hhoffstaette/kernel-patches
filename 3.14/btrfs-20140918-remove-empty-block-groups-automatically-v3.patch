@@ -1,8 +1,8 @@
 From: Josef Bacik <jbacik@fb.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: remove empty block groups automatically V2
-Date: Mon, 15 Sep 2014 14:29:49 -0400
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38561>
+Subject: [PATCH] Btrfs: remove empty block groups automatically V3
+Date: Thu, 18 Sep 2014 11:20:02 -0400
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38706>
 
 One problem that has plagued us is that a user will use up all of his space with
 data, remove a bunch of that data, and then try to create a bunch of small files
@@ -20,18 +20,20 @@ helpful for both this and relocate.  Thanks,
 
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 ---
-V1->V2: Don't bother deleting mixed block groups.
+V2->V3: Fixed a problem where orphan replay would get angry because bg deletion
+would add more orphans.  Fixed it so we don't delete bg's until after we've done
+all the open_ctree work.
 
- fs/btrfs/ctree.h                  |   8 ++-
- fs/btrfs/disk-io.c                |   3 +
- fs/btrfs/extent-tree.c            | 128 +++++++++++++++++++++++++++++++++++---
+ fs/btrfs/ctree.h                  |   9 ++-
+ fs/btrfs/disk-io.c                |   6 ++
+ fs/btrfs/extent-tree.c            | 141 ++++++++++++++++++++++++++++++++++++--
  fs/btrfs/tests/free-space-tests.c |   2 +-
- fs/btrfs/volumes.c                | 115 ++++++++++++++++++++++------------
+ fs/btrfs/volumes.c                | 115 ++++++++++++++++++++-----------
  fs/btrfs/volumes.h                |   2 +
- 6 files changed, 209 insertions(+), 49 deletions(-)
+ 6 files changed, 226 insertions(+), 49 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index 6db3d4b..d373c89 100644
+index 6db3d4b..d93d598 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
 @@ -1298,8 +1298,8 @@ struct btrfs_block_group_cache {
@@ -45,7 +47,15 @@ index 6db3d4b..d373c89 100644
  };
  
  /* delayed seq elem */
-@@ -1716,6 +1716,9 @@ struct btrfs_fs_info {
+@@ -1567,6 +1567,7 @@ struct btrfs_fs_info {
+ 	int do_barriers;
+ 	int closing;
+ 	int log_root_recovering;
++	int open;
+ 
+ 	u64 total_pinned;
+ 
+@@ -1716,6 +1717,9 @@ struct btrfs_fs_info {
  
  	/* Used to reclaim the metadata space in the background. */
  	struct work_struct async_reclaim_work;
@@ -55,7 +65,7 @@ index 6db3d4b..d373c89 100644
  };
  
  struct btrfs_subvolume_writers {
-@@ -3343,6 +3346,7 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
+@@ -3343,6 +3347,7 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
  			   u64 size);
  int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
  			     struct btrfs_root *root, u64 group_start);
@@ -64,7 +74,7 @@ index 6db3d4b..d373c89 100644
  				       struct btrfs_root *root);
  u64 btrfs_get_alloc_profile(struct btrfs_root *root, int data);
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index a224fb9..3409734 100644
+index a224fb9..38ee7f2 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
 @@ -1764,6 +1764,7 @@ static int cleaner_kthread(void *arg)
@@ -91,8 +101,25 @@ index a224fb9..3409734 100644
  	btrfs_mapping_init(&fs_info->mapping_tree);
  	btrfs_init_block_rsv(&fs_info->global_block_rsv,
  			     BTRFS_BLOCK_RSV_GLOBAL);
+@@ -2968,6 +2971,8 @@ retry_root_backup:
+ 		fs_info->update_uuid_tree_gen = 1;
+ 	}
+ 
++	fs_info->open = 1;
++
+ 	return 0;
+ 
+ fail_qgroup:
+@@ -3679,6 +3684,7 @@ void close_ctree(struct btrfs_root *root)
+ 	invalidate_inode_pages2(fs_info->btree_inode->i_mapping);
+ 	btrfs_stop_all_workers(fs_info);
+ 
++	fs_info->open = 0;
+ 	free_root_pointers(fs_info, 1);
+ 
+ 	iput(fs_info->btree_inode);
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index b30ddb4..53714ef 100644
+index b30ddb4..28a27d5 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
 @@ -5433,6 +5433,20 @@ static int update_block_group(struct btrfs_root *root,
@@ -116,7 +143,24 @@ index b30ddb4..53714ef 100644
  			btrfs_set_block_group_used(&cache->item, old_val);
  			cache->pinned += num_bytes;
  			cache->space_info->bytes_pinned += num_bytes;
-@@ -8989,7 +9003,7 @@ btrfs_create_block_group_cache(struct btrfs_root *root, u64 start, u64 size)
+@@ -8855,6 +8869,16 @@ int btrfs_free_block_groups(struct btrfs_fs_info *info)
+ 	}
+ 	up_write(&info->commit_root_sem);
+ 
++	spin_lock(&info->unused_bgs_lock);
++	while (!list_empty(&info->unused_bgs)) {
++		block_group = list_first_entry(&info->unused_bgs,
++					       struct btrfs_block_group_cache,
++					       bg_list);
++		list_del_init(&block_group->bg_list);
++		btrfs_put_block_group(block_group);
++	}
++	spin_unlock(&info->unused_bgs_lock);
++
+ 	spin_lock(&info->block_group_cache_lock);
+ 	while ((n = rb_last(&info->block_group_cache_tree)) != NULL) {
+ 		block_group = rb_entry(n, struct btrfs_block_group_cache,
+@@ -8989,7 +9013,7 @@ btrfs_create_block_group_cache(struct btrfs_root *root, u64 start, u64 size)
  	init_rwsem(&cache->data_rwsem);
  	INIT_LIST_HEAD(&cache->list);
  	INIT_LIST_HEAD(&cache->cluster_list);
@@ -125,7 +169,7 @@ index b30ddb4..53714ef 100644
  	btrfs_init_free_space_ctl(cache);
  
  	return cache;
-@@ -9130,8 +9144,18 @@ int btrfs_read_block_groups(struct btrfs_root *root)
+@@ -9130,8 +9154,18 @@ int btrfs_read_block_groups(struct btrfs_root *root)
  		__link_block_group(space_info, cache);
  
  		set_avail_alloc_bits(root->fs_info, cache->flags);
@@ -145,7 +189,7 @@ index b30ddb4..53714ef 100644
  	}
  
  	list_for_each_entry_rcu(space_info, &root->fs_info->space_info, list) {
-@@ -9172,10 +9196,8 @@ void btrfs_create_pending_block_groups(struct btrfs_trans_handle *trans,
+@@ -9172,10 +9206,8 @@ void btrfs_create_pending_block_groups(struct btrfs_trans_handle *trans,
  	struct btrfs_key key;
  	int ret = 0;
  
@@ -158,7 +202,7 @@ index b30ddb4..53714ef 100644
  		if (ret)
  			continue;
  
-@@ -9261,7 +9283,7 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
+@@ -9261,7 +9293,7 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
  
  	__link_block_group(cache->space_info, cache);
  
@@ -167,7 +211,7 @@ index b30ddb4..53714ef 100644
  
  	set_avail_alloc_bits(extent_root->fs_info, type);
  
-@@ -9430,6 +9452,98 @@ out:
+@@ -9430,6 +9462,101 @@ out:
  	return ret;
  }
  
@@ -182,6 +226,9 @@ index b30ddb4..53714ef 100644
 +	struct btrfs_root *root = fs_info->extent_root;
 +	struct btrfs_trans_handle *trans;
 +	int ret = 0;
++
++	if (!fs_info->open)
++		return;
 +
 +	spin_lock(&fs_info->unused_bgs_lock);
 +	while (!list_empty(&fs_info->unused_bgs)) {
