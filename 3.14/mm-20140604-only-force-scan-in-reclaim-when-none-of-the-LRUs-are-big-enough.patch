@@ -1,0 +1,141 @@
+From 6f04f48dc9c0433e2bb687f5f7f7af1aba97b04d Mon Sep 17 00:00:00 2001
+From: Suleiman Souhlal <suleiman@google.com>
+Date: Wed, 4 Jun 2014 16:06:44 -0700
+Subject: mm: only force scan in reclaim when none of the LRUs are big enough.
+
+Prior to this change, we would decide whether to force scan a LRU during
+reclaim if that LRU itself was too small for the current priority.
+However, this can lead to the file LRU getting force scanned even if
+there are a lot of anonymous pages we can reclaim, leading to hot file
+pages getting needlessly reclaimed.
+
+To address this, we instead only force scan when none of the reclaimable
+LRUs are big enough.
+
+Gives huge improvements with zswap.  For example, when doing -j20 kernel
+build in a 500MB container with zswap enabled, runtime (in seconds) is
+greatly reduced:
+
+x without this change
++ with this change
+    N           Min           Max        Median           Avg        Stddev
+x   5       700.997       790.076       763.928        754.05      39.59493
++   5       141.634       197.899       155.706         161.9     21.270224
+Difference at 95.0% confidence
+        -592.15 +/- 46.3521
+        -78.5293% +/- 6.14709%
+        (Student's t, pooled s = 31.7819)
+
+Should also give some improvements in regular (non-zswap) swap cases.
+
+Yes, hughd found significant speedup using regular swap, with several
+memcgs under pressure; and it should also be effective in the non-memcg
+case, whenever one or another zone LRU is forced too small.
+
+Signed-off-by: Suleiman Souhlal <suleiman@google.com>
+Signed-off-by: Hugh Dickins <hughd@google.com>
+Cc: Suleiman Souhlal <suleiman@google.com>
+Cc: Mel Gorman <mgorman@suse.de>
+Acked-by: Rik van Riel <riel@redhat.com>
+Acked-by: Rafael Aquini <aquini@redhat.com>
+Cc: Michal Hocko <mhocko@suse.cz>
+Cc: Yuanhan Liu <yuanhan.liu@linux.intel.com>
+Cc: Seth Jennings <sjennings@variantweb.net>
+Cc: Bob Liu <bob.liu@oracle.com>
+Cc: Minchan Kim <minchan@kernel.org>
+Cc: Luigi Semenzato <semenzato@google.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 32c661d..7901cb7 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -1866,6 +1866,8 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
+ 	bool force_scan = false;
+ 	unsigned long ap, fp;
+ 	enum lru_list lru;
++	bool some_scanned;
++	int pass;
+ 
+ 	/*
+ 	 * If the zone or memcg is small, nr[l] can be 0.  This
+@@ -1989,39 +1991,49 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
+ 	fraction[1] = fp;
+ 	denominator = ap + fp + 1;
+ out:
+-	for_each_evictable_lru(lru) {
+-		int file = is_file_lru(lru);
+-		unsigned long size;
+-		unsigned long scan;
++	some_scanned = false;
++	/* Only use force_scan on second pass. */
++	for (pass = 0; !some_scanned && pass < 2; pass++) {
++		for_each_evictable_lru(lru) {
++			int file = is_file_lru(lru);
++			unsigned long size;
++			unsigned long scan;
+ 
+-		size = get_lru_size(lruvec, lru);
+-		scan = size >> sc->priority;
++			size = get_lru_size(lruvec, lru);
++			scan = size >> sc->priority;
+ 
+-		if (!scan && force_scan)
+-			scan = min(size, SWAP_CLUSTER_MAX);
++			if (!scan && pass && force_scan)
++				scan = min(size, SWAP_CLUSTER_MAX);
+ 
+-		switch (scan_balance) {
+-		case SCAN_EQUAL:
+-			/* Scan lists relative to size */
+-			break;
+-		case SCAN_FRACT:
++			switch (scan_balance) {
++			case SCAN_EQUAL:
++				/* Scan lists relative to size */
++				break;
++			case SCAN_FRACT:
++				/*
++				 * Scan types proportional to swappiness and
++				 * their relative recent reclaim efficiency.
++				 */
++				scan = div64_u64(scan * fraction[file],
++							denominator);
++				break;
++			case SCAN_FILE:
++			case SCAN_ANON:
++				/* Scan one type exclusively */
++				if ((scan_balance == SCAN_FILE) != file)
++					scan = 0;
++				break;
++			default:
++				/* Look ma, no brain */
++				BUG();
++			}
++			nr[lru] = scan;
+ 			/*
+-			 * Scan types proportional to swappiness and
+-			 * their relative recent reclaim efficiency.
++			 * Skip the second pass and don't force_scan,
++			 * if we found something to scan.
+ 			 */
+-			scan = div64_u64(scan * fraction[file], denominator);
+-			break;
+-		case SCAN_FILE:
+-		case SCAN_ANON:
+-			/* Scan one type exclusively */
+-			if ((scan_balance == SCAN_FILE) != file)
+-				scan = 0;
+-			break;
+-		default:
+-			/* Look ma, no brain */
+-			BUG();
++			some_scanned |= !!scan;
+ 		}
+-		nr[lru] = scan;
+ 	}
+ }
+ 
+-- 
+cgit v0.10.1
