@@ -1,0 +1,51 @@
+From dbb5eafa23fdb7a00d64b04e23a3efc59d6474cb Mon Sep 17 00:00:00 2001
+From: Davidlohr Bueso <davidlohr@hp.com>
+Date: Mon, 19 May 2014 17:27:57 -0700
+Subject: locking/rwsem: Fix warnings for CONFIG_RWSEM_GENERIC_SPINLOCK
+
+Optimistic spinning is only used by the xadd variant
+of rw-semaphores. Make sure that we use the old version
+of the __RWSEM_INITIALIZER macro for systems that rely
+on the spinlock one, otherwise warnings can be triggered,
+such as the following reported on an arm box:
+
+  ipc/ipcns_notifier.c:22:8: warning: excess elements in struct initializer [enabled by default]
+  ipc/ipcns_notifier.c:22:8: warning: (near initialization for 'ipcns_chain.rwsem') [enabled by default]
+  ipc/ipcns_notifier.c:22:8: warning: excess elements in struct initializer [enabled by default]
+  ipc/ipcns_notifier.c:22:8: warning: (near initialization for 'ipcns_chain.rwsem') [enabled by default]
+
+Signed-off-by: Davidlohr Bueso <davidlohr@hp.com>
+Signed-off-by: Peter Zijlstra <peterz@infradead.org>
+Cc: Tim Chen <tim.c.chen@linux.intel.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Paul McKenney <paulmck@linux.vnet.ibm.com>
+Cc: Michel Lespinasse <walken@google.com>
+Cc: Peter Hurley <peter@hurleysoftware.com>
+Cc: Alex Shi <alex.shi@linaro.org>
+Cc: Rik van Riel <riel@redhat.com>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Andrea Arcangeli <aarcange@redhat.com>
+Cc: "H. Peter Anvin" <hpa@zytor.com>
+Cc: Jason Low <jason.low2@hp.com>
+Cc: Andi Kleen <andi@firstfloor.org>
+Cc: Chris Mason <clm@fb.com>
+Cc: Josef Bacik <jbacik@fusionio.com>
+Link: http://lkml.kernel.org/r/1400545677.6399.10.camel@buesod1.americas.hpqcorp.net
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/include/linux/rwsem.h b/include/linux/rwsem.h
+index 3e108f1..8d79708 100644
+--- a/include/linux/rwsem.h
++++ b/include/linux/rwsem.h
+@@ -64,7 +64,7 @@ static inline int rwsem_is_locked(struct rw_semaphore *sem)
+ # define __RWSEM_DEP_MAP_INIT(lockname)
+ #endif
+ 
+-#ifdef CONFIG_SMP
++#if defined(CONFIG_SMP) && !defined(CONFIG_RWSEM_GENERIC_SPINLOCK)
+ #define __RWSEM_INITIALIZER(name)			\
+ 	{ RWSEM_UNLOCKED_VALUE,				\
+ 	  __RAW_SPIN_LOCK_UNLOCKED(name.wait_lock),	\
+-- 
+cgit v0.10.1
+
