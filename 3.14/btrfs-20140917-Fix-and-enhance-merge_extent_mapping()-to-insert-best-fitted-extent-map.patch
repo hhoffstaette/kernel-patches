@@ -1,8 +1,8 @@
+From e6c4efd87ab04e5ead363f24e6ac35ed3506d401 Mon Sep 17 00:00:00 2001
 From: Qu Wenruo <quwenruo@cn.fujitsu.com>
-Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH v2] btrfs: Fix and enhance merge_extent_mapping() to insert best fitted extent map
-Date: Thu, 18 Sep 2014 16:55:42 +0800
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38690>
+Date: Wed, 17 Sep 2014 11:53:35 +0800
+Subject: btrfs: Fix and enhance merge_extent_mapping() to insert best fitted
+ extent map
 
 The following commit enhanced the merge_extent_mapping() to reduce
 fragment in extent map tree, but it can't handle case which existing
@@ -48,22 +48,13 @@ more than the 51f39 commit and reduce an unneeded extent map tree search.
 
 Reported-by: Tsutomu Itoh <t-itoh@jp.fujitsu.com>
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
-Reviewed-by: Liu Bo <bo.li.liu@oracle.com>
----
-changelog:
-v2:
-    Liu Bo points out that the if() use 'start + len <= existing->start'
-    is not equal to original if(), which may cause problem in no-holes
-    mode.
----
- fs/btrfs/inode.c | 79 ++++++++++++++++++++++++++++++++++++++++----------------
- 1 file changed, 57 insertions(+), 22 deletions(-)
+Signed-off-by: Chris Mason <clm@fb.com>
 
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index 016c403..b3864b7 100644
+index 3c16a14..b1106d0 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -6191,21 +6191,60 @@ out_fail_inode:
+@@ -6249,21 +6249,60 @@ out_fail_inode:
  	goto out_fail;
  }
  
@@ -128,7 +119,7 @@ index 016c403..b3864b7 100644
  	if (em->block_start < EXTENT_MAP_LAST_BYTE &&
  	    !test_bit(EXTENT_FLAG_COMPRESSED, &em->flags)) {
  		em->block_start += start_diff;
-@@ -6482,25 +6521,21 @@ insert:
+@@ -6540,25 +6579,21 @@ insert:
  
  		ret = 0;
  
@@ -141,7 +132,7 @@ index 016c403..b3864b7 100644
 +		 * extent causing the -EEXIST.
 +		 */
 +		if (start >= extent_map_end(existing) ||
-+		    start < existing->start) {
++		    start + len <= existing->start) {
 +			/*
 +			 * The existing extent map is the one nearest to
 +			 * the [start, start + len) range which overlaps
@@ -169,4 +160,5 @@ index 016c403..b3864b7 100644
  				em = NULL;
  			}
 -- 
-2.1.0
+cgit v0.10.1
+
