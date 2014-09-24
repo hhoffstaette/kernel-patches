@@ -1,0 +1,65 @@
+From f2071b21553bf8f1eae583e32b9068393f61cbe9 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Wed, 12 Feb 2014 15:05:53 +0000
+Subject: Btrfs: more efficient split extent state insertion
+
+When we split an extent state there's no need to start the rbtree search
+from the root node - we can start it from the original extent state node,
+since we would end up in its subtree if we do the search starting at the
+root node anyway.
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 2c9fbe3..fd78c84 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -229,12 +229,14 @@ void free_extent_state(struct extent_state *state)
+ 	}
+ }
+ 
+-static struct rb_node *tree_insert(struct rb_root *root, u64 offset,
++static struct rb_node *tree_insert(struct rb_root *root,
++				   struct rb_node *search_start,
++				   u64 offset,
+ 				   struct rb_node *node,
+ 				   struct rb_node ***p_in,
+ 				   struct rb_node **parent_in)
+ {
+-	struct rb_node **p = &root->rb_node;
++	struct rb_node **p;
+ 	struct rb_node *parent = NULL;
+ 	struct tree_entry *entry;
+ 
+@@ -244,6 +246,7 @@ static struct rb_node *tree_insert(struct rb_root *root, u64 offset,
+ 		goto do_insert;
+ 	}
+ 
++	p = search_start ? &search_start : &root->rb_node;
+ 	while (*p) {
+ 		parent = *p;
+ 		entry = rb_entry(parent, struct tree_entry, rb_node);
+@@ -430,7 +433,7 @@ static int insert_state(struct extent_io_tree *tree,
+ 
+ 	set_state_bits(tree, state, bits);
+ 
+-	node = tree_insert(&tree->state, end, &state->rb_node, p, parent);
++	node = tree_insert(&tree->state, NULL, end, &state->rb_node, p, parent);
+ 	if (node) {
+ 		struct extent_state *found;
+ 		found = rb_entry(node, struct extent_state, rb_node);
+@@ -477,8 +480,8 @@ static int split_state(struct extent_io_tree *tree, struct extent_state *orig,
+ 	prealloc->state = orig->state;
+ 	orig->start = split;
+ 
+-	node = tree_insert(&tree->state, prealloc->end, &prealloc->rb_node,
+-			   NULL, NULL);
++	node = tree_insert(&tree->state, &orig->rb_node, prealloc->end,
++			   &prealloc->rb_node, NULL, NULL);
+ 	if (node) {
+ 		free_extent_state(prealloc);
+ 		return -EEXIST;
+-- 
+cgit v0.10.1
+
