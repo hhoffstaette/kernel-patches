@@ -2507,6 +2507,19 @@ index 7c4c049..3aafbde 100644
  	/* see comments in should_cow_block() */
  	set_bit(BTRFS_ROOT_FORCE_COW, &root->state);
  	smp_wmb();
+@@ -1599,12 +1605,6 @@ static int btrfs_flush_all_pending_stuffs(struct btrfs_trans_handle *trans,
+ 	 * them now so that they hinder processing of more delayed refs
+ 	 * as little as possible.
+ 	 */
+-	if (ret) {
+-		btrfs_delayed_refs_qgroup_accounting(trans, root->fs_info);
+-		return ret;
+-	}
+-
+-	ret = btrfs_delayed_refs_qgroup_accounting(trans, root->fs_info);
+ 	if (ret)
+ 		return ret;
+ 
 -- 
 cgit v0.10.1
 

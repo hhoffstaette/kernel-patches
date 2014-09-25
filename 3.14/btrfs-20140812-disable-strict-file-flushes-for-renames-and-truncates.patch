@@ -308,8 +308,8 @@ index 7187b14..963895c 100644
 -			goto out;
 -		}
 -		list_add_tail(&work->list, &works);
--		btrfs_queue_worker(&root->fs_info->flush_workers,
--				   &work->work);
+-		btrfs_queue_work(root->fs_info->flush_workers,
+-				 &work->work);
 -
 -		cond_resched();
 -		spin_lock(&root->fs_info->ordered_root_lock);
@@ -399,7 +399,7 @@ index 5f379af..d89c6d3 100644
  	INIT_LIST_HEAD(&cur_trans->pending_chunks);
  	INIT_LIST_HEAD(&cur_trans->switch_commits);
  	list_add_tail(&cur_trans->list, &fs_info->trans_list);
-@@ -1612,38 +1611,6 @@ static void cleanup_transaction(struct btrfs_trans_handle *trans,
+@@ -1612,27 +1611,6 @@ static void cleanup_transaction(struct btrfs_trans_handle *trans,
  	kmem_cache_free(btrfs_trans_handle_cachep, trans);
  }
  
@@ -409,17 +409,6 @@ index 5f379af..d89c6d3 100644
 -	int ret;
 -
 -	ret = btrfs_run_delayed_items(trans, root);
--	/*
--	 * running the delayed items may have added new refs. account
--	 * them now so that they hinder processing of more delayed refs
--	 * as little as possible.
--	 */
--	if (ret) {
--		btrfs_delayed_refs_qgroup_accounting(trans, root->fs_info);
--		return ret;
--	}
--
--	ret = btrfs_delayed_refs_qgroup_accounting(trans, root->fs_info);
 -	if (ret)
 -		return ret;
 -
@@ -484,3 +473,4 @@ index 7dd558e..579be51 100644
  	struct btrfs_delayed_ref_root delayed_refs;
 -- 
 cgit v0.10.1
+

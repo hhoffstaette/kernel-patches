@@ -1,0 +1,116 @@
+From 5b3bc44e2e69d42edf40ca3785040d233ca949f4 Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Date: Fri, 28 Feb 2014 10:46:15 +0800
+Subject: btrfs: Replace fs_info->delayed_workers workqueue with
+ btrfs_workqueue.
+
+Replace the fs_info->delayed_workers with the newly created
+btrfs_workqueue.
+
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Tested-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index dd79fc5..c07b67f 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -1525,7 +1525,7 @@ struct btrfs_fs_info {
+ 	 * for the sys_munmap function call path
+ 	 */
+ 	struct btrfs_workqueue_struct *fixup_workers;
+-	struct btrfs_workers delayed_workers;
++	struct btrfs_workqueue_struct *delayed_workers;
+ 	struct task_struct *transaction_kthread;
+ 	struct task_struct *cleaner_kthread;
+ 	int thread_pool_size;
+diff --git a/fs/btrfs/delayed-inode.c b/fs/btrfs/delayed-inode.c
+index 451b00c..76e85d6 100644
+--- a/fs/btrfs/delayed-inode.c
++++ b/fs/btrfs/delayed-inode.c
+@@ -1318,10 +1318,10 @@ void btrfs_remove_delayed_node(struct inode *inode)
+ struct btrfs_async_delayed_work {
+ 	struct btrfs_delayed_root *delayed_root;
+ 	int nr;
+-	struct btrfs_work work;
++	struct btrfs_work_struct work;
+ };
+ 
+-static void btrfs_async_run_delayed_root(struct btrfs_work *work)
++static void btrfs_async_run_delayed_root(struct btrfs_work_struct *work)
+ {
+ 	struct btrfs_async_delayed_work *async_work;
+ 	struct btrfs_delayed_root *delayed_root;
+@@ -1392,11 +1392,11 @@ static int btrfs_wq_run_delayed_node(struct btrfs_delayed_root *delayed_root,
+ 		return -ENOMEM;
+ 
+ 	async_work->delayed_root = delayed_root;
+-	async_work->work.func = btrfs_async_run_delayed_root;
+-	async_work->work.flags = 0;
++	btrfs_init_work(&async_work->work, btrfs_async_run_delayed_root,
++			NULL, NULL);
+ 	async_work->nr = nr;
+ 
+-	btrfs_queue_worker(&root->fs_info->delayed_workers, &async_work->work);
++	btrfs_queue_work(root->fs_info->delayed_workers, &async_work->work);
+ 	return 0;
+ }
+ 
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 392cd3b..f5da1fd 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -2006,7 +2006,7 @@ static void btrfs_stop_all_workers(struct btrfs_fs_info *fs_info)
+ 	btrfs_destroy_workqueue(fs_info->endio_write_workers);
+ 	btrfs_destroy_workqueue(fs_info->endio_freespace_worker);
+ 	btrfs_destroy_workqueue(fs_info->submit_workers);
+-	btrfs_stop_workers(&fs_info->delayed_workers);
++	btrfs_destroy_workqueue(fs_info->delayed_workers);
+ 	btrfs_destroy_workqueue(fs_info->caching_workers);
+ 	btrfs_destroy_workqueue(fs_info->readahead_workers);
+ 	btrfs_destroy_workqueue(fs_info->flush_workers);
+@@ -2519,9 +2519,8 @@ int open_ctree(struct super_block *sb,
+ 		btrfs_alloc_workqueue("endio-write", flags, max_active, 2);
+ 	fs_info->endio_freespace_worker =
+ 		btrfs_alloc_workqueue("freespace-write", flags, max_active, 0);
+-	btrfs_init_workers(&fs_info->delayed_workers, "delayed-meta",
+-			   fs_info->thread_pool_size,
+-			   &fs_info->generic_worker);
++	fs_info->delayed_workers =
++		btrfs_alloc_workqueue("delayed-meta", flags, max_active, 0);
+ 	fs_info->readahead_workers =
+ 		btrfs_alloc_workqueue("readahead", flags, max_active, 2);
+ 	btrfs_init_workers(&fs_info->qgroup_rescan_workers, "qgroup-rescan", 1,
+@@ -2532,7 +2531,6 @@ int open_ctree(struct super_block *sb,
+ 	 * return -ENOMEM if any of these fail.
+ 	 */
+ 	ret = btrfs_start_workers(&fs_info->generic_worker);
+-	ret |= btrfs_start_workers(&fs_info->delayed_workers);
+ 	ret |= btrfs_start_workers(&fs_info->qgroup_rescan_workers);
+ 	if (ret) {
+ 		err = -ENOMEM;
+@@ -2545,7 +2543,7 @@ int open_ctree(struct super_block *sb,
+ 	      fs_info->endio_write_workers && fs_info->endio_raid56_workers &&
+ 	      fs_info->endio_freespace_worker && fs_info->rmw_workers &&
+ 	      fs_info->caching_workers && fs_info->readahead_workers &&
+-	      fs_info->fixup_workers)) {
++	      fs_info->fixup_workers && fs_info->delayed_workers)) {
+ 		err = -ENOMEM;
+ 		goto fail_sb_buffer;
+ 	}
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 2e1d6cf..fd07d03 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -1334,7 +1334,7 @@ static void btrfs_resize_thread_pool(struct btrfs_fs_info *fs_info,
+ 				new_pool_size);
+ 	btrfs_workqueue_set_max(fs_info->endio_write_workers, new_pool_size);
+ 	btrfs_workqueue_set_max(fs_info->endio_freespace_worker, new_pool_size);
+-	btrfs_set_max_workers(&fs_info->delayed_workers, new_pool_size);
++	btrfs_workqueue_set_max(fs_info->delayed_workers, new_pool_size);
+ 	btrfs_workqueue_set_max(fs_info->readahead_workers, new_pool_size);
+ 	btrfs_set_max_workers(&fs_info->scrub_wr_completion_workers,
+ 			      new_pool_size);
+-- 
+cgit v0.10.1
+

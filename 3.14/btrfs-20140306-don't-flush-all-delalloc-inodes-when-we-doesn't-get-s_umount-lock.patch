@@ -1,7 +1,8 @@
 From 6c255e67cec1c38a0569c7f823eba63f9449ccf8 Mon Sep 17 00:00:00 2001
 From: Miao Xie <miaox@cn.fujitsu.com>
 Date: Thu, 6 Mar 2014 13:55:01 +0800
-Subject: Btrfs: don't flush all delalloc inodes when we doesn't get s_umount lock
+Subject: Btrfs: don't flush all delalloc inodes when we doesn't get s_umount
+ lock
 
 We needn't flush all delalloc inodes when we doesn't get s_umount lock,
 or we would make the tasks wait for a long time.
@@ -92,8 +93,8 @@ index f5e6233..fbaf1ac 100644
 +			break;
  		}
  		list_add_tail(&work->list, &works);
- 		btrfs_queue_worker(&root->fs_info->flush_workers,
-				   &work->work);
+ 		btrfs_queue_work(root->fs_info->flush_workers,
+ 				 &work->work);
 -
 +		ret++;
 +		if (nr != -1 && ret >= nr)
@@ -216,3 +217,4 @@ index 79a4186..a999b85 100644
  
 -- 
 cgit v0.10.1
+

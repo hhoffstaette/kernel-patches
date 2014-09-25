@@ -1,0 +1,111 @@
+From dc6e320998fb907e4c19032d545d461bfe5040d1 Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Date: Fri, 28 Feb 2014 10:46:14 +0800
+Subject: btrfs: Replace fs_info->fixup_workers workqueue with btrfs_workqueue.
+
+Replace the fs_info->fixup_workers with the newly created
+btrfs_workqueue.
+
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Tested-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index b5f2a19..dd79fc5 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -1524,7 +1524,7 @@ struct btrfs_fs_info {
+ 	 * the cow mechanism and make them safe to write.  It happens
+ 	 * for the sys_munmap function call path
+ 	 */
+-	struct btrfs_workers fixup_workers;
++	struct btrfs_workqueue_struct *fixup_workers;
+ 	struct btrfs_workers delayed_workers;
+ 	struct task_struct *transaction_kthread;
+ 	struct task_struct *cleaner_kthread;
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index c0b003b..392cd3b 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1995,7 +1995,7 @@ static noinline int next_root_backup(struct btrfs_fs_info *info,
+ static void btrfs_stop_all_workers(struct btrfs_fs_info *fs_info)
+ {
+ 	btrfs_stop_workers(&fs_info->generic_worker);
+-	btrfs_stop_workers(&fs_info->fixup_workers);
++	btrfs_destroy_workqueue(fs_info->fixup_workers);
+ 	btrfs_destroy_workqueue(fs_info->delalloc_workers);
+ 	btrfs_destroy_workqueue(fs_info->workers);
+ 	btrfs_destroy_workqueue(fs_info->endio_workers);
+@@ -2498,8 +2498,8 @@ int open_ctree(struct super_block *sb,
+ 				      min_t(u64, fs_devices->num_devices,
+ 					    max_active), 64);
+ 
+-	btrfs_init_workers(&fs_info->fixup_workers, "fixup", 1,
+-			   &fs_info->generic_worker);
++	fs_info->fixup_workers =
++		btrfs_alloc_workqueue("fixup", flags, 1, 0);
+ 
+ 	/*
+ 	 * endios are largely parallel and should have a very
+@@ -2532,7 +2532,6 @@ int open_ctree(struct super_block *sb,
+ 	 * return -ENOMEM if any of these fail.
+ 	 */
+ 	ret = btrfs_start_workers(&fs_info->generic_worker);
+-	ret |= btrfs_start_workers(&fs_info->fixup_workers);
+ 	ret |= btrfs_start_workers(&fs_info->delayed_workers);
+ 	ret |= btrfs_start_workers(&fs_info->qgroup_rescan_workers);
+ 	if (ret) {
+@@ -2545,7 +2544,8 @@ int open_ctree(struct super_block *sb,
+ 	      fs_info->endio_meta_write_workers &&
+ 	      fs_info->endio_write_workers && fs_info->endio_raid56_workers &&
+ 	      fs_info->endio_freespace_worker && fs_info->rmw_workers &&
+-	      fs_info->caching_workers && fs_info->readahead_workers)) {
++	      fs_info->caching_workers && fs_info->readahead_workers &&
++	      fs_info->fixup_workers)) {
+ 		err = -ENOMEM;
+ 		goto fail_sb_buffer;
+ 	}
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index ce3f730..0885f33 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -1748,10 +1748,10 @@ int btrfs_set_extent_delalloc(struct inode *inode, u64 start, u64 end,
+ /* see btrfs_writepage_start_hook for details on why this is required */
+ struct btrfs_writepage_fixup {
+ 	struct page *page;
+-	struct btrfs_work work;
++	struct btrfs_work_struct work;
+ };
+ 
+-static void btrfs_writepage_fixup_worker(struct btrfs_work *work)
++static void btrfs_writepage_fixup_worker(struct btrfs_work_struct *work)
+ {
+ 	struct btrfs_writepage_fixup *fixup;
+ 	struct btrfs_ordered_extent *ordered;
+@@ -1842,9 +1842,9 @@ static int btrfs_writepage_start_hook(struct page *page, u64 start, u64 end)
+ 
+ 	SetPageChecked(page);
+ 	page_cache_get(page);
+-	fixup->work.func = btrfs_writepage_fixup_worker;
++	btrfs_init_work(&fixup->work, btrfs_writepage_fixup_worker, NULL, NULL);
+ 	fixup->page = page;
+-	btrfs_queue_worker(&root->fs_info->fixup_workers, &fixup->work);
++	btrfs_queue_work(root->fs_info->fixup_workers, &fixup->work);
+ 	return -EBUSY;
+ }
+ 
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index ce9d012..2e1d6cf 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -1328,7 +1328,6 @@ static void btrfs_resize_thread_pool(struct btrfs_fs_info *fs_info,
+ 	btrfs_workqueue_set_max(fs_info->delalloc_workers, new_pool_size);
+ 	btrfs_workqueue_set_max(fs_info->submit_workers, new_pool_size);
+ 	btrfs_workqueue_set_max(fs_info->caching_workers, new_pool_size);
+-	btrfs_set_max_workers(&fs_info->fixup_workers, new_pool_size);
+ 	btrfs_workqueue_set_max(fs_info->endio_workers, new_pool_size);
+ 	btrfs_workqueue_set_max(fs_info->endio_meta_workers, new_pool_size);
+ 	btrfs_workqueue_set_max(fs_info->endio_meta_write_workers,
+-- 
+cgit v0.10.1
+
