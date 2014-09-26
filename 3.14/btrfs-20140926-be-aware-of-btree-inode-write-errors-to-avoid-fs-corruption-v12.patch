@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 2/2 v11] Btrfs: be aware of btree inode write errors to avoid fs corruption
-Date: Thu, 25 Sep 2014 19:01:50 +0100
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38952>
+Subject: [PATCH 2/2 v12] Btrfs: be aware of btree inode write errors to avoid fs corruption
+Date: Fri, 26 Sep 2014 12:25:56 +0100
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38981>
 
 While we have a transaction ongoing, the VM might decide at any time
 to call btree_inode->i_mapping->a_ops->writepages(), which will start
@@ -93,16 +93,21 @@ V10: Clear the log eb write error flags in a more logical place (transaction
 V11: Updated commit message and a comment, replaced an ASSERT() with a BUG()
      and changed eb->lock_nested to a short to keep the structure size.
 
+V12: Removed leftovers from previous versions (no longer necessary #include and
+     prototype in extent_io.h of no longer existing function) and updated parts
+     from a comment that apply only to some past versions.
+     Rebased against latest integration branch (didn't apply cleanly) and re-tested.
+
  fs/btrfs/btrfs_inode.h | 11 ++++++++
  fs/btrfs/disk-io.c     |  4 +--
  fs/btrfs/extent-tree.c |  4 ++-
- fs/btrfs/extent_io.c   | 76 +++++++++++++++++++++++++++++++++++++++++++++-----
- fs/btrfs/extent_io.h   |  8 ++++--
- fs/btrfs/transaction.c | 26 +++++++++++++++++
- 6 files changed, 117 insertions(+), 12 deletions(-)
+ fs/btrfs/extent_io.c   | 74 +++++++++++++++++++++++++++++++++++++++++++++-----
+ fs/btrfs/extent_io.h   |  7 +++--
+ fs/btrfs/transaction.c | 26 ++++++++++++++++++
+ 6 files changed, 114 insertions(+), 12 deletions(-)
 
 diff --git a/fs/btrfs/btrfs_inode.h b/fs/btrfs/btrfs_inode.h
-index 3511031..aee4050 100644
+index 7a7521c..8a42adb 100644
 --- a/fs/btrfs/btrfs_inode.h
 +++ b/fs/btrfs/btrfs_inode.h
 @@ -44,6 +44,17 @@
@@ -124,10 +129,10 @@ index 3511031..aee4050 100644
  /* in memory btrfs inode */
  struct btrfs_inode {
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index 23393ec..8b54acf 100644
+index 4780e66..09b3c8a 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
-@@ -610,7 +610,7 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
+@@ -607,7 +607,7 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
  		goto err;
  
  	eb->read_mirror = mirror;
@@ -136,7 +141,7 @@ index 23393ec..8b54acf 100644
  		ret = -EIO;
  		goto err;
  	}
-@@ -683,7 +683,7 @@ static int btree_io_failed_hook(struct page *page, int failed_mirror)
+@@ -680,7 +680,7 @@ static int btree_io_failed_hook(struct page *page, int failed_mirror)
  	struct btrfs_root *root = BTRFS_I(page->mapping->host)->root;
  
  	eb = (struct extent_buffer *)page->private;
@@ -146,10 +151,10 @@ index 23393ec..8b54acf 100644
  	atomic_dec(&eb->io_pages);
  	if (test_and_clear_bit(EXTENT_BUFFER_READAHEAD, &eb->bflags))
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index ef0845d..c4df702 100644
+index 44d0497..8ebe6bf 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -7203,17 +7203,19 @@ btrfs_init_new_buffer(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+@@ -7235,17 +7235,19 @@ btrfs_init_new_buffer(struct btrfs_trans_handle *trans, struct btrfs_root *root,
  	btrfs_set_buffer_uptodate(buf);
  
  	if (root->root_key.objectid == BTRFS_TREE_LOG_OBJECTID) {
@@ -171,18 +176,10 @@ index ef0845d..c4df702 100644
  			 buf->start + buf->len - 1, GFP_NOFS);
  	}
 diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
-index 91f866c..9c5dbef 100644
+index 828aded..9cc757f 100644
 --- a/fs/btrfs/extent_io.c
 +++ b/fs/btrfs/extent_io.c
-@@ -20,6 +20,7 @@
- #include "locking.h"
- #include "rcu-string.h"
- #include "backref.h"
-+#include "transaction.h"
- 
- static struct kmem_cache *extent_state_cache;
- static struct kmem_cache *extent_buffer_cache;
-@@ -3606,6 +3607,69 @@ static void end_extent_buffer_writeback(struct extent_buffer *eb)
+@@ -3601,6 +3601,68 @@ static void end_extent_buffer_writeback(struct extent_buffer *eb)
  	wake_up_bit(&eb->bflags, EXTENT_BUFFER_WRITEBACK);
  }
  
@@ -220,10 +217,9 @@ index 91f866c..9c5dbef 100644
 +	 * will catch and clear such errors in the mapping - and that call might
 +	 * be from a log sync and not from a transaction commit. Also, checking
 +	 * for the eb flag EXTENT_BUFFER_WRITE_ERR at transaction commit time is
-+	 * not done and would not be completely reliable, as the eb might be
-+	 * removed from memory and read back when trying to get it, which clears
-+	 * that flag right before reading the eb's pages from disk, making us
-+	 * not know about the previous write error.
++	 * not done and would not be reliable - the eb might have been released
++	 * from memory and reading it back again means that flag would not be
++	 * set (since it's a runtime flag, not persisted on disk).
 +	 *
 +	 * Using the flags below in the btree inode also makes us achieve the
 +	 * goal of AS_EIO/AS_ENOSPC when writepages() returns success, started
@@ -252,7 +248,7 @@ index 91f866c..9c5dbef 100644
  static void end_bio_extent_buffer_writepage(struct bio *bio, int err)
  {
  	struct bio_vec *bvec;
-@@ -3619,10 +3683,9 @@ static void end_bio_extent_buffer_writepage(struct bio *bio, int err)
+@@ -3614,10 +3676,9 @@ static void end_bio_extent_buffer_writepage(struct bio *bio, int err)
  		BUG_ON(!eb);
  		done = atomic_dec_and_test(&eb->io_pages);
  
@@ -265,7 +261,7 @@ index 91f866c..9c5dbef 100644
  		}
  
  		end_page_writeback(page);
-@@ -3649,7 +3712,7 @@ static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
+@@ -3644,7 +3705,7 @@ static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
  	int rw = (epd->sync_io ? WRITE_SYNC : WRITE) | REQ_META;
  	int ret = 0;
  
@@ -274,7 +270,7 @@ index 91f866c..9c5dbef 100644
  	num_pages = num_extent_pages(eb->start, eb->len);
  	atomic_set(&eb->io_pages, num_pages);
  	if (btrfs_header_owner(eb) == BTRFS_TREE_LOG_OBJECTID)
-@@ -3666,8 +3729,7 @@ static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
+@@ -3661,8 +3722,7 @@ static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
  					 0, epd->bio_flags, bio_flags);
  		epd->bio_flags = bio_flags;
  		if (ret) {
@@ -284,7 +280,7 @@ index 91f866c..9c5dbef 100644
  			end_page_writeback(p);
  			if (atomic_sub_and_test(num_pages - i, &eb->io_pages))
  				end_extent_buffer_writeback(eb);
-@@ -5069,7 +5131,7 @@ int read_extent_buffer_pages(struct extent_io_tree *tree,
+@@ -5054,7 +5114,7 @@ int read_extent_buffer_pages(struct extent_io_tree *tree,
  		goto unlock_exit;
  	}
  
@@ -294,7 +290,7 @@ index 91f866c..9c5dbef 100644
  	atomic_set(&eb->io_pages, num_reads);
  	for (i = start_i; i < num_pages; i++) {
 diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
-index 5e91fb9..c8a6d92 100644
+index 5e91fb9..06f030c 100644
 --- a/fs/btrfs/extent_io.h
 +++ b/fs/btrfs/extent_io.h
 @@ -41,9 +41,10 @@
@@ -320,19 +316,11 @@ index 5e91fb9..c8a6d92 100644
  
  	/* protects write locks */
  	rwlock_t lock;
-@@ -314,6 +317,7 @@ void memmove_extent_buffer(struct extent_buffer *dst, unsigned long dst_offset,
- 			   unsigned long src_offset, unsigned long len);
- void memset_extent_buffer(struct extent_buffer *eb, char c,
- 			  unsigned long start, unsigned long len);
-+void clear_extent_buffer_write_err(struct extent_buffer *eb);
- void clear_extent_buffer_dirty(struct extent_buffer *eb);
- int set_extent_buffer_dirty(struct extent_buffer *eb);
- int set_extent_buffer_uptodate(struct extent_buffer *eb);
 diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
-index 1e272c0..51cb84f 100644
+index 16d0c1b..a47b100 100644
 --- a/fs/btrfs/transaction.c
 +++ b/fs/btrfs/transaction.c
-@@ -852,6 +852,8 @@ int btrfs_wait_marked_extents(struct btrfs_root *root,
+@@ -851,6 +851,8 @@ int btrfs_wait_marked_extents(struct btrfs_root *root,
  	struct extent_state *cached_state = NULL;
  	u64 start = 0;
  	u64 end;
@@ -341,7 +329,7 @@ index 1e272c0..51cb84f 100644
  
  	while (!find_first_extent_bit(dirty_pages, start, &start, &end,
  				      EXTENT_NEED_WAIT, &cached_state)) {
-@@ -865,6 +867,26 @@ int btrfs_wait_marked_extents(struct btrfs_root *root,
+@@ -864,6 +866,26 @@ int btrfs_wait_marked_extents(struct btrfs_root *root,
  	}
  	if (err)
  		werr = err;
@@ -368,17 +356,17 @@ index 1e272c0..51cb84f 100644
  	return werr;
  }
  
-@@ -1651,6 +1673,7 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
+@@ -1629,6 +1651,7 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
  {
  	struct btrfs_transaction *cur_trans = trans->transaction;
  	struct btrfs_transaction *prev_trans = NULL;
 +	struct btrfs_inode *btree_ino = BTRFS_I(root->fs_info->btree_inode);
  	int ret;
  
- 	ret = btrfs_run_ordered_operations(trans, root, 0);
-@@ -1897,6 +1920,9 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
- 	memcpy(root->fs_info->super_for_commit, root->fs_info->super_copy,
- 	       sizeof(*root->fs_info->super_copy));
+ 	/* Stop the commit early if ->aborted is set */
+@@ -1871,6 +1894,9 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
+ 	btrfs_update_commit_device_size(root->fs_info);
+ 	btrfs_update_commit_device_bytes_used(root, cur_trans);
  
 +	clear_bit(BTRFS_INODE_BTREE_LOG1_ERR, &btree_ino->runtime_flags);
 +	clear_bit(BTRFS_INODE_BTREE_LOG2_ERR, &btree_ino->runtime_flags);
