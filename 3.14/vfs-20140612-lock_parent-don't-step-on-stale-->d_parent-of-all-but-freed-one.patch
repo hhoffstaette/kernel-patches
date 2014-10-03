@@ -1,0 +1,39 @@
+From c2338f2dc7c1e9f6202f370c64ffd7f44f3d4b51 Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Thu, 12 Jun 2014 00:29:13 -0400
+Subject: lock_parent: don't step on stale ->d_parent of all-but-freed one
+
+Dentry that had been through (or into) __dentry_kill() might be seen
+by shrink_dentry_list(); that's normal, it'll be taken off the shrink
+list and freed if __dentry_kill() has already finished.  The problem
+is, its ->d_parent might be pointing to already freed dentry, so
+lock_parent() needs to be careful.
+
+We need to check that dentry hasn't already gone into __dentry_kill()
+*and* grab rcu_read_lock() before dropping ->d_lock - the latter makes
+sure that whatever we see in ->d_parent after dropping ->d_lock it
+won't be freed until we drop rcu_read_lock().
+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index be2bea8..e99c6f5 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -532,10 +532,12 @@ static inline struct dentry *lock_parent(struct dentry *dentry)
+ 	struct dentry *parent = dentry->d_parent;
+ 	if (IS_ROOT(dentry))
+ 		return NULL;
++	if (unlikely((int)dentry->d_lockref.count < 0))
++		return NULL;
+ 	if (likely(spin_trylock(&parent->d_lock)))
+ 		return parent;
+-	spin_unlock(&dentry->d_lock);
+ 	rcu_read_lock();
++	spin_unlock(&dentry->d_lock);
+ again:
+ 	parent = ACCESS_ONCE(dentry->d_parent);
+ 	spin_lock(&parent->d_lock);
+-- 
+cgit v0.10.1
+
