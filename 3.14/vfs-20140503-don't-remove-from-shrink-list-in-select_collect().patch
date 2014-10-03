@@ -1,0 +1,66 @@
+From fe91522a7ba82ca1a51b07e19954b3825e4aaa22 Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Sat, 3 May 2014 00:02:25 -0400
+Subject: don't remove from shrink list in select_collect()
+
+	If we find something already on a shrink list, just increment
+data->found and do nothing else.  Loops in shrink_dcache_parent() and
+check_submounts_and_drop() will do the right thing - everything we
+did put into our list will be evicted and if there had been nothing,
+but data->found got non-zero, well, we have somebody else shrinking
+those guys; just try again.
+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index 58e26be..f39a6f5a 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -1229,34 +1229,23 @@ static enum d_walk_ret select_collect(void *_data, struct dentry *dentry)
+ 	if (data->start == dentry)
+ 		goto out;
+ 
+-	/*
+-	 * move only zero ref count dentries to the dispose list.
+-	 *
+-	 * Those which are presently on the shrink list, being processed
+-	 * by shrink_dentry_list(), shouldn't be moved.  Otherwise the
+-	 * loop in shrink_dcache_parent() might not make any progress
+-	 * and loop forever.
+-	 */
+-	if (dentry->d_lockref.count) {
+-		dentry_lru_del(dentry);
+-	} else if (!(dentry->d_flags & DCACHE_SHRINK_LIST)) {
+-		/*
+-		 * We can't use d_lru_shrink_move() because we
+-		 * need to get the global LRU lock and do the
+-		 * LRU accounting.
+-		 */
+-		d_lru_del(dentry);
+-		d_shrink_add(dentry, &data->dispose);
++	if (dentry->d_flags & DCACHE_SHRINK_LIST) {
+ 		data->found++;
+-		ret = D_WALK_NORETRY;
++	} else {
++		if (dentry->d_flags & DCACHE_LRU_LIST)
++			d_lru_del(dentry);
++		if (!dentry->d_lockref.count) {
++			d_shrink_add(dentry, &data->dispose);
++			data->found++;
++		}
+ 	}
+ 	/*
+ 	 * We can return to the caller if we have found some (this
+ 	 * ensures forward progress). We'll be coming back to find
+ 	 * the rest.
+ 	 */
+-	if (data->found && need_resched())
+-		ret = D_WALK_QUIT;
++	if (!list_empty(&data->dispose))
++		ret = need_resched() ? D_WALK_QUIT : D_WALK_NORETRY;
+ out:
+ 	return ret;
+ }
+-- 
+cgit v0.10.1
+
