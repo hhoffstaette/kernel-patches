@@ -1,0 +1,58 @@
+From 7177a9c4b509eb357cc450256bc3cf39f1a1e639 Mon Sep 17 00:00:00 2001
+From: Miklos Szeredi <mszeredi@suse.cz>
+Date: Wed, 23 Jul 2014 15:15:30 +0200
+Subject: fs: call rename2 if exists
+
+Christoph Hellwig suggests:
+
+1) make vfs_rename call ->rename2 if it exists instead of ->rename
+2) switch all filesystems that you're adding NOREPLACE support for to
+   use ->rename2
+3) see how many ->rename instances we'll have left after a few
+   iterations of 2.
+
+Signed-off-by: Miklos Szeredi <mszeredi@suse.cz>
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/ext4/namei.c b/fs/ext4/namei.c
+index 3520ab8..b147a67 100644
+--- a/fs/ext4/namei.c
++++ b/fs/ext4/namei.c
+@@ -3455,7 +3455,6 @@ const struct inode_operations ext4_dir_inode_operations = {
+ 	.rmdir		= ext4_rmdir,
+ 	.mknod		= ext4_mknod,
+ 	.tmpfile	= ext4_tmpfile,
+-	.rename		= ext4_rename,
+ 	.rename2	= ext4_rename2,
+ 	.setattr	= ext4_setattr,
+ 	.setxattr	= generic_setxattr,
+diff --git a/fs/namei.c b/fs/namei.c
+index 9eb787e..0ff23ce 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -4075,7 +4075,7 @@ int vfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	if (error)
+ 		return error;
+ 
+-	if (!old_dir->i_op->rename)
++	if (!old_dir->i_op->rename && !old_dir->i_op->rename2)
+ 		return -EPERM;
+ 
+ 	if (flags && !old_dir->i_op->rename2)
+@@ -4134,10 +4134,11 @@ int vfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 		if (error)
+ 			goto out;
+ 	}
+-	if (!flags) {
++	if (!old_dir->i_op->rename2) {
+ 		error = old_dir->i_op->rename(old_dir, old_dentry,
+ 					      new_dir, new_dentry);
+ 	} else {
++		WARN_ON(old_dir->i_op->rename != NULL);
+ 		error = old_dir->i_op->rename2(old_dir, old_dentry,
+ 					       new_dir, new_dentry, flags);
+ 	}
+-- 
+cgit v0.10.1
+

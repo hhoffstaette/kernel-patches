@@ -1,0 +1,117 @@
+From 0b3974eb04c4874e85fa1d4fc70450d12f28611d Mon Sep 17 00:00:00 2001
+From: Miklos Szeredi <mszeredi@suse.cz>
+Date: Tue, 1 Apr 2014 17:08:43 +0200
+Subject: security: add flags to rename hooks
+
+Add flags to security_path_rename() and security_inode_rename() hooks.
+
+Signed-off-by: Miklos Szeredi <mszeredi@suse.cz>
+Reviewed-by: J. Bruce Fields <bfields@redhat.com>
+
+diff --git a/fs/cachefiles/namei.c b/fs/cachefiles/namei.c
+index 31088a9..6494d9f 100644
+--- a/fs/cachefiles/namei.c
++++ b/fs/cachefiles/namei.c
+@@ -391,7 +391,7 @@ try_again:
+ 	path.dentry = dir;
+ 	path_to_graveyard.mnt = cache->mnt;
+ 	path_to_graveyard.dentry = cache->graveyard;
+-	ret = security_path_rename(&path, rep, &path_to_graveyard, grave);
++	ret = security_path_rename(&path, rep, &path_to_graveyard, grave, 0);
+ 	if (ret < 0) {
+ 		cachefiles_io_error(cache, "Rename security error %d", ret);
+ 	} else {
+diff --git a/fs/namei.c b/fs/namei.c
+index 0e9d186..4096d58 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -4062,7 +4062,8 @@ int vfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 			return error;
+ 	}
+ 
+-	error = security_inode_rename(old_dir, old_dentry, new_dir, new_dentry);
++	error = security_inode_rename(old_dir, old_dentry, new_dir, new_dentry,
++				      flags);
+ 	if (error)
+ 		return error;
+ 
+@@ -4217,7 +4218,7 @@ retry_deleg:
+ 		goto exit5;
+ 
+ 	error = security_path_rename(&oldnd.path, old_dentry,
+-				     &newnd.path, new_dentry);
++				     &newnd.path, new_dentry, flags);
+ 	if (error)
+ 		goto exit5;
+ 	error = vfs_rename(old_dir->d_inode, old_dentry,
+diff --git a/include/linux/security.h b/include/linux/security.h
+index 2fc42d1..6478ce3 100644
+--- a/include/linux/security.h
++++ b/include/linux/security.h
+@@ -1793,7 +1793,8 @@ int security_inode_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+ int security_inode_rmdir(struct inode *dir, struct dentry *dentry);
+ int security_inode_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev);
+ int security_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
+-			  struct inode *new_dir, struct dentry *new_dentry);
++			  struct inode *new_dir, struct dentry *new_dentry,
++			  unsigned int flags);
+ int security_inode_readlink(struct dentry *dentry);
+ int security_inode_follow_link(struct dentry *dentry, struct nameidata *nd);
+ int security_inode_permission(struct inode *inode, int mask);
+@@ -2161,7 +2162,8 @@ static inline int security_inode_mknod(struct inode *dir,
+ static inline int security_inode_rename(struct inode *old_dir,
+ 					 struct dentry *old_dentry,
+ 					 struct inode *new_dir,
+-					 struct dentry *new_dentry)
++					 struct dentry *new_dentry,
++					 unsigned int flags)
+ {
+ 	return 0;
+ }
+@@ -2955,7 +2957,8 @@ int security_path_symlink(struct path *dir, struct dentry *dentry,
+ int security_path_link(struct dentry *old_dentry, struct path *new_dir,
+ 		       struct dentry *new_dentry);
+ int security_path_rename(struct path *old_dir, struct dentry *old_dentry,
+-			 struct path *new_dir, struct dentry *new_dentry);
++			 struct path *new_dir, struct dentry *new_dentry,
++			 unsigned int flags);
+ int security_path_chmod(struct path *path, umode_t mode);
+ int security_path_chown(struct path *path, kuid_t uid, kgid_t gid);
+ int security_path_chroot(struct path *path);
+@@ -3003,7 +3006,8 @@ static inline int security_path_link(struct dentry *old_dentry,
+ static inline int security_path_rename(struct path *old_dir,
+ 				       struct dentry *old_dentry,
+ 				       struct path *new_dir,
+-				       struct dentry *new_dentry)
++				       struct dentry *new_dentry,
++				       unsigned int flags)
+ {
+ 	return 0;
+ }
+diff --git a/security/security.c b/security/security.c
+index 919cad9..284fbc9 100644
+--- a/security/security.c
++++ b/security/security.c
+@@ -433,7 +433,8 @@ int security_path_link(struct dentry *old_dentry, struct path *new_dir,
+ }
+ 
+ int security_path_rename(struct path *old_dir, struct dentry *old_dentry,
+-			 struct path *new_dir, struct dentry *new_dentry)
++			 struct path *new_dir, struct dentry *new_dentry,
++			 unsigned int flags)
+ {
+ 	if (unlikely(IS_PRIVATE(old_dentry->d_inode) ||
+ 		     (new_dentry->d_inode && IS_PRIVATE(new_dentry->d_inode))))
+@@ -524,7 +525,8 @@ int security_inode_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
+ }
+ 
+ int security_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
+-			   struct inode *new_dir, struct dentry *new_dentry)
++			   struct inode *new_dir, struct dentry *new_dentry,
++			   unsigned int flags)
+ {
+         if (unlikely(IS_PRIVATE(old_dentry->d_inode) ||
+             (new_dentry->d_inode && IS_PRIVATE(new_dentry->d_inode))))
+-- 
+cgit v0.10.1
+
