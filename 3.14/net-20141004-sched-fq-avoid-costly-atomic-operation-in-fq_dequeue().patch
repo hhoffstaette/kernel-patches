@@ -1,0 +1,121 @@
+From: Eric Dumazet <eric.dumazet@gmail.com>
+Newsgroups: gmane.linux.network
+Subject: [PATCH net-next] net: sched: avoid costly atomic operation in fq_dequeue()
+Date: Sat, 04 Oct 2014 10:11:31 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.network/333542>
+
+From: Eric Dumazet <edumazet@google.com>
+
+Standard qdisc API to setup a timer implies an atomic operation on every
+packet dequeue : qdisc_unthrottled()
+
+It turns out this is not really needed for FQ, as FQ has no concept of
+global qdisc throttling, being a qdisc handling many different flows,
+some of them can be throttled, while others are not.
+
+Fix is straightforward : add a 'bool throttle' to
+qdisc_watchdog_schedule_ns(), and remove calls to qdisc_unthrottled()
+in sch_fq.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ include/net/pkt_sched.h |    4 ++--
+ net/sched/sch_api.c     |    5 +++--
+ net/sched/sch_fq.c      |    6 ++----
+ net/sched/sch_tbf.c     |    3 ++-
+ 4 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/include/net/pkt_sched.h b/include/net/pkt_sched.h
+index e4b3c828c1c2..27a33833ff4a 100644
+--- a/include/net/pkt_sched.h
++++ b/include/net/pkt_sched.h
+@@ -65,12 +65,12 @@ struct qdisc_watchdog {
+ };
+ 
+ void qdisc_watchdog_init(struct qdisc_watchdog *wd, struct Qdisc *qdisc);
+-void qdisc_watchdog_schedule_ns(struct qdisc_watchdog *wd, u64 expires);
++void qdisc_watchdog_schedule_ns(struct qdisc_watchdog *wd, u64 expires, bool throttle);
+ 
+ static inline void qdisc_watchdog_schedule(struct qdisc_watchdog *wd,
+ 					   psched_time_t expires)
+ {
+-	qdisc_watchdog_schedule_ns(wd, PSCHED_TICKS2NS(expires));
++	qdisc_watchdog_schedule_ns(wd, PSCHED_TICKS2NS(expires), true);
+ }
+ 
+ void qdisc_watchdog_cancel(struct qdisc_watchdog *wd);
+diff --git a/net/sched/sch_api.c b/net/sched/sch_api.c
+index aa8329508dba..ab70e7dddb04 100644
+--- a/net/sched/sch_api.c
++++ b/net/sched/sch_api.c
+@@ -592,13 +592,14 @@ void qdisc_watchdog_init(struct qdisc_watchdog *wd, struct Qdisc *qdisc)
+ }
+ EXPORT_SYMBOL(qdisc_watchdog_init);
+ 
+-void qdisc_watchdog_schedule_ns(struct qdisc_watchdog *wd, u64 expires)
++void qdisc_watchdog_schedule_ns(struct qdisc_watchdog *wd, u64 expires, bool throttle)
+ {
+ 	if (test_bit(__QDISC_STATE_DEACTIVATED,
+ 		     &qdisc_root_sleeping(wd->qdisc)->state))
+ 		return;
+ 
+-	qdisc_throttled(wd->qdisc);
++	if (throttle)
++		qdisc_throttled(wd->qdisc);
+ 
+ 	hrtimer_start(&wd->timer,
+ 		      ns_to_ktime(expires),
+diff --git a/net/sched/sch_fq.c b/net/sched/sch_fq.c
+index c9b9fcb53206..cbd7e1fd23b4 100644
+--- a/net/sched/sch_fq.c
++++ b/net/sched/sch_fq.c
+@@ -377,7 +377,6 @@ static int fq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
+ 		if (time_after(jiffies, f->age + q->flow_refill_delay))
+ 			f->credit = max_t(u32, f->credit, q->quantum);
+ 		q->inactive_flows--;
+-		qdisc_unthrottled(sch);
+ 	}
+ 
+ 	/* Note: this overwrites f->age */
+@@ -385,7 +384,6 @@ static int fq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
+ 
+ 	if (unlikely(f == &q->internal)) {
+ 		q->stat_internal_packets++;
+-		qdisc_unthrottled(sch);
+ 	}
+ 	sch->q.qlen++;
+ 
+@@ -433,7 +431,8 @@ begin:
+ 		if (!head->first) {
+ 			if (q->time_next_delayed_flow != ~0ULL)
+ 				qdisc_watchdog_schedule_ns(&q->watchdog,
+-							   q->time_next_delayed_flow);
++							   q->time_next_delayed_flow,
++							   false);
+ 			return NULL;
+ 		}
+ 	}
+@@ -495,7 +494,6 @@ begin:
+ 	}
+ out:
+ 	qdisc_bstats_update(sch, skb);
+-	qdisc_unthrottled(sch);
+ 	return skb;
+ }
+ 
+diff --git a/net/sched/sch_tbf.c b/net/sched/sch_tbf.c
+index 77edffe329c4..a4afde14e865 100644
+--- a/net/sched/sch_tbf.c
++++ b/net/sched/sch_tbf.c
+@@ -268,7 +268,8 @@ static struct sk_buff *tbf_dequeue(struct Qdisc *sch)
+ 		}
+ 
+ 		qdisc_watchdog_schedule_ns(&q->watchdog,
+-					   now + max_t(long, -toks, -ptoks));
++					   now + max_t(long, -toks, -ptoks),
++					   true);
+ 
+ 		/* Maybe we have a shorter packet in the queue,
+ 		   which can be sent now. It sounds cool,
+
+
