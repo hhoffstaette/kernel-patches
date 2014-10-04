@@ -40,35 +40,6 @@ Suggested-by: Andy Lutomirski <luto@amacapital.net>
 Signed-off-by: Miklos Szeredi <mszeredi@suse.cz>
 Reviewed-by: J. Bruce Fields <bfields@redhat.com>
 
-diff --git a/fs/ext4/namei.c b/fs/ext4/namei.c
-index d050e04..5f19171 100644
---- a/fs/ext4/namei.c
-+++ b/fs/ext4/namei.c
-@@ -3204,6 +3204,16 @@ end_rename:
- 	return retval;
- }
- 
-+static int ext4_rename2(struct inode *old_dir, struct dentry *old_dentry,
-+			struct inode *new_dir, struct dentry *new_dentry,
-+			unsigned int flags)
-+{
-+	if (flags & ~RENAME_NOREPLACE)
-+		return -EINVAL;
-+
-+	return ext4_rename(old_dir, old_dentry, new_dir, new_dentry);
-+}
-+
- /*
-  * directories can handle most operations...
-  */
-@@ -3218,6 +3228,7 @@ const struct inode_operations ext4_dir_inode_operations = {
- 	.mknod		= ext4_mknod,
- 	.tmpfile	= ext4_tmpfile,
- 	.rename		= ext4_rename,
-+	.rename2	= ext4_rename2,
- 	.setattr	= ext4_setattr,
- 	.setxattr	= generic_setxattr,
- 	.getxattr	= generic_getxattr,
 diff --git a/fs/namei.c b/fs/namei.c
 index ab4e48c..0e9d186 100644
 --- a/fs/namei.c
