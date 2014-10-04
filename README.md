@@ -11,8 +11,8 @@ performance/scalability improvements to the entire kernel.
 **List of patches for 3.14.x**
 
 - bfs: BFS v454 + SMT-nice patch ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
-- btrfs: >300 _carefully_ selected patches from 3.15/16/17/18 to address corruption, stability, performance and also a few new capabilities, e.g. `O_TMPFILE` support and automatic GC of empty blockgroups. The kernel workqueues from 3.15 are also merged as more and more patches rely on them, and the notorious "hung task" problem has been fixed.
-- ext4: corruption fixes
+- btrfs: >300 _carefully_ selected patches from 3.15/16/17/18 to address corruption, stability, performance and also a few new capabilities, e.g. `O_TMPFILE`, `renameat2` and automatic GC of empty blockgroups. The kernel workqueues from 3.15 are also merged as more and more patches rely on them, and the notorious "hung task" problem has been fixed.
+- ext4: corruption fixes, `renameat2`
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - locking: cancellable/optimistic spinning MCS / queued rwlocks ([patch](http://bit.ly/Xq41R6), [article]( http://lwn.net/Articles/590243/))
 - mm: proper `msync()`, per-thread VMA caching ([article](http://lwn.net/Articles/589475/)), reduced use of atomics in page handling & fixed prioritisation of swap.
