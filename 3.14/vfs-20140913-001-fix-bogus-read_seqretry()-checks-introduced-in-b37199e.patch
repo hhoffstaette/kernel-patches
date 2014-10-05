@@ -1,0 +1,35 @@
+From f5be3e29127aec8c87f883aadadff337f8c2cfd7 Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Sat, 13 Sep 2014 21:50:45 -0400
+Subject: fix bogus read_seqretry() checks introduced in b37199e
+
+read_seqretry() returns true on mismatch, not on match...
+
+Cc: stable@vger.kernel.org # 3.15+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/namei.c b/fs/namei.c
+index a996bb4..3d1dc74 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -1137,7 +1137,7 @@ static bool __follow_mount_rcu(struct nameidata *nd, struct path *path,
+ 		 */
+ 		*inode = path->dentry->d_inode;
+ 	}
+-	return read_seqretry(&mount_lock, nd->m_seq) &&
++	return !read_seqretry(&mount_lock, nd->m_seq) &&
+ 		!(path->dentry->d_flags & DCACHE_NEED_AUTOMOUNT);
+ }
+ 
+@@ -1174,7 +1174,7 @@ static int follow_dotdot_rcu(struct nameidata *nd)
+ 		nd->path.mnt = &mounted->mnt;
+ 		nd->path.dentry = mounted->mnt.mnt_root;
+ 		nd->seq = read_seqcount_begin(&nd->path.dentry->d_seq);
+-		if (!read_seqretry(&mount_lock, nd->m_seq))
++		if (read_seqretry(&mount_lock, nd->m_seq))
+ 			goto failed;
+ 	}
+ 	nd->inode = nd->path.dentry->d_inode;
+-- 
+cgit v0.10.1
+

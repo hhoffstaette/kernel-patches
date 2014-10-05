@@ -23,9 +23,10 @@ performance/scalability improvements to the entire kernel.
 To apply over a -stable release simply run `patch -s -p1 < <patch-dir/*>` when
 in the kernel directory, and build as usual.
 
-Most patches are generic for all architectures except for the MCS locking series,
-which unfortunately only applies to x86/x86_64 thanks to unrelated Kconfig changes.
-See the patch log for more information (trivial to fix, I just can't test it).
+Most patches are generic for all architectures except for the MCS locking
+series, which unfortunately only applies to x86/x86_64 thanks to unrelated
+Kconfig changes. See the patch log for more information (should be easy to
+fix, I just can't test it).
 
-The currently **required minimum** -stable release is **3.14.18**; unless otherwise
-noted any later 3.14-stable release should work as well.
+The currently **required minimum** -stable release is **3.14.20**; unless
+otherwise noted any later 3.14-stable release should work as well.
