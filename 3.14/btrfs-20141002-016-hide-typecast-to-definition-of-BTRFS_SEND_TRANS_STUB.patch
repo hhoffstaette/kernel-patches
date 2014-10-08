@@ -1,0 +1,63 @@
+From 2755a0de64693501741fb3603cd8ca928b0b7e81 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Thu, 31 Jul 2014 00:43:18 +0200
+Subject: btrfs: hide typecast to definition of BTRFS_SEND_TRANS_STUB
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 2f075ef..0abf4b0 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -347,8 +347,7 @@ static int verify_parent_transid(struct extent_io_tree *io_tree,
+ {
+ 	struct extent_state *cached_state = NULL;
+ 	int ret;
+-	bool need_lock = (current->journal_info ==
+-			  (void *)BTRFS_SEND_TRANS_STUB);
++	bool need_lock = (current->journal_info == BTRFS_SEND_TRANS_STUB);
+ 
+ 	if (!parent_transid || btrfs_header_generation(eb) == parent_transid)
+ 		return 0;
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 7edfc7c..8b44630 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -5728,7 +5728,7 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
+ 			NULL);
+ 	sort_clone_roots = 1;
+ 
+-	current->journal_info = (void *)BTRFS_SEND_TRANS_STUB;
++	current->journal_info = BTRFS_SEND_TRANS_STUB;
+ 	ret = send_subvol(sctx);
+ 	current->journal_info = NULL;
+ 	if (ret < 0)
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 16d0c1b..f4c194b 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -386,7 +386,7 @@ start_transaction(struct btrfs_root *root, u64 num_items, unsigned int type,
+ 	int ret;
+ 
+ 	/* Send isn't supposed to start transactions. */
+-	ASSERT(current->journal_info != (void *)BTRFS_SEND_TRANS_STUB);
++	ASSERT(current->journal_info != BTRFS_SEND_TRANS_STUB);
+ 
+ 	if (test_bit(BTRFS_FS_STATE_ERROR, &root->fs_info->fs_state))
+ 		return ERR_PTR(-EROFS);
+diff --git a/fs/btrfs/transaction.h b/fs/btrfs/transaction.h
+index 579be51..d8f40e1 100644
+--- a/fs/btrfs/transaction.h
++++ b/fs/btrfs/transaction.h
+@@ -79,7 +79,7 @@ struct btrfs_transaction {
+ #define TRANS_EXTWRITERS	(__TRANS_USERSPACE | __TRANS_START |	\
+ 				 __TRANS_ATTACH)
+ 
+-#define BTRFS_SEND_TRANS_STUB	1
++#define BTRFS_SEND_TRANS_STUB	((void *)1)
+ 
+ struct btrfs_trans_handle {
+ 	u64 transid;
+-- 
+cgit v0.10.1
+

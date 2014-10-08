@@ -1,0 +1,102 @@
+From 58dc4ce4325108b35425ffd30e6acfad9644d49d Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Sun, 15 Jun 2014 00:29:04 +0200
+Subject: btrfs: remove unused parameter from readahead_tree_block
+
+The parent_transid parameter has been unused since its introduction in
+ca7a79ad8dbe2466 ("Pass down the expected generation number when reading
+tree blocks").  In reada_tree_block, it was even wrongly set to leafsize.
+Transid check is done in the proper read and readahead ignores errors.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 39021bf..1b7e354 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -2298,7 +2298,7 @@ static void reada_for_search(struct btrfs_root *root,
+ 		if ((search <= target && target - search <= 65536) ||
+ 		    (search > target && search - target <= 65536)) {
+ 			gen = btrfs_node_ptr_generation(node, nr);
+-			readahead_tree_block(root, search, blocksize, gen);
++			readahead_tree_block(root, search, blocksize);
+ 			nread += blocksize;
+ 		}
+ 		nscan++;
+@@ -2350,9 +2350,9 @@ static noinline void reada_for_balance(struct btrfs_root *root,
+ 	}
+ 
+ 	if (block1)
+-		readahead_tree_block(root, block1, blocksize, 0);
++		readahead_tree_block(root, block1, blocksize);
+ 	if (block2)
+-		readahead_tree_block(root, block2, blocksize, 0);
++		readahead_tree_block(root, block2, blocksize);
+ }
+ 
+ 
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 4780e66..ff83748 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1062,8 +1062,7 @@ static const struct address_space_operations btree_aops = {
+ 	.set_page_dirty = btree_set_page_dirty,
+ };
+ 
+-int readahead_tree_block(struct btrfs_root *root, u64 bytenr, u32 blocksize,
+-			 u64 parent_transid)
++int readahead_tree_block(struct btrfs_root *root, u64 bytenr, u32 blocksize)
+ {
+ 	struct extent_buffer *buf = NULL;
+ 	struct inode *btree_inode = root->fs_info->btree_inode;
+diff --git a/fs/btrfs/disk-io.h b/fs/btrfs/disk-io.h
+index 14d06ee..8cd6a53 100644
+--- a/fs/btrfs/disk-io.h
++++ b/fs/btrfs/disk-io.h
+@@ -46,8 +46,7 @@ struct btrfs_fs_devices;
+ 
+ struct extent_buffer *read_tree_block(struct btrfs_root *root, u64 bytenr,
+ 				      u32 blocksize, u64 parent_transid);
+-int readahead_tree_block(struct btrfs_root *root, u64 bytenr, u32 blocksize,
+-			 u64 parent_transid);
++int readahead_tree_block(struct btrfs_root *root, u64 bytenr, u32 blocksize);
+ int reada_tree_block_flagged(struct btrfs_root *root, u64 bytenr, u32 blocksize,
+ 			 int mirror_num, struct extent_buffer **eb);
+ struct extent_buffer *btrfs_find_create_tree_block(struct btrfs_root *root,
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 44d0497..058abd0 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -7486,8 +7486,7 @@ static noinline void reada_walk_down(struct btrfs_trans_handle *trans,
+ 				continue;
+ 		}
+ reada:
+-		ret = readahead_tree_block(root, bytenr, blocksize,
+-					   generation);
++		ret = readahead_tree_block(root, bytenr, blocksize);
+ 		if (ret)
+ 			break;
+ 		nread++;
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 2d221c4..16cb2b4 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -2861,13 +2861,8 @@ static int reada_tree_block(struct reloc_control *rc,
+ 			    struct tree_block *block)
+ {
+ 	BUG_ON(block->key_ready);
+-	if (block->key.type == BTRFS_METADATA_ITEM_KEY)
+-		readahead_tree_block(rc->extent_root, block->bytenr,
+-				     block->key.objectid,
+-				     rc->extent_root->nodesize);
+-	else
+-		readahead_tree_block(rc->extent_root, block->bytenr,
+-				     block->key.objectid, block->key.offset);
++	readahead_tree_block(rc->extent_root, block->bytenr,
++			block->key.objectid);
+ 	return 0;
+ }
+ 
+-- 
+cgit v0.10.1
+

@@ -1,0 +1,31 @@
+From 94404e82e5f5452a13ef580b6d3df1483671dff9 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Wed, 30 Jul 2014 01:53:30 +0200
+Subject: btrfs: let merge_reloc_roots return void
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 2d221c4..f39abe6 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -2316,7 +2316,7 @@ void free_reloc_roots(struct list_head *list)
+ }
+ 
+ static noinline_for_stack
+-int merge_reloc_roots(struct reloc_control *rc)
++void merge_reloc_roots(struct reloc_control *rc)
+ {
+ 	struct btrfs_root *root;
+ 	struct btrfs_root *reloc_root;
+@@ -2397,7 +2397,6 @@ out:
+ 	}
+ 
+ 	BUG_ON(!RB_EMPTY_ROOT(&rc->reloc_root_tree.rb_root));
+-	return ret;
+ }
+ 
+ static void free_block_list(struct rb_root *blocks)
+-- 
+cgit v0.10.1
+
