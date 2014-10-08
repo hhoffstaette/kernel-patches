@@ -15,7 +15,7 @@ performance/scalability improvements to the entire kernel.
 - ext4: corruption fixes, `renameat2`
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - locking: cancellable/optimistic spinning MCS / queued rwlocks ([patch](http://bit.ly/Xq41R6), [article]( http://lwn.net/Articles/590243/))
-- mm: proper `msync()`, per-thread VMA caching ([article](http://lwn.net/Articles/589475/)), reduced use of atomics in page handling & fixed prioritisation of swap.
+- mm: proper `msync()`, per-thread VMA caching (in .21, [article](http://lwn.net/Articles/589475/)), reduced use of atomics in page handling & fixed prioritisation of swap (in .21).
 - net: minor updates/fixes for Realtek NICs, r8169 support for Byte Queue Limits, reduced use of atomics in fq qdisc
 - timekeeping: improved accuracy with `CONFIG_NO_HZ`
 - vfs: `renameat2` ([article](http://lwn.net/Articles/592952/)), dentry list corruption fixes & other updates from 3.16/17
@@ -28,5 +28,5 @@ series, which unfortunately only applies to x86/x86_64 thanks to unrelated
 Kconfig changes. See the patch log for more information (should be easy to
 fix, I just can't test it).
 
-The currently **required minimum** -stable release is **3.14.20**; unless
+The currently **required minimum** -stable release is **3.14.21**; unless
 otherwise noted any later 3.14-stable release should work as well.
