@@ -1,0 +1,52 @@
+From b46ab97bcd4ae7954b3a150f642a82cdd1434f40 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Fri, 21 Mar 2014 12:46:54 +0000
+Subject: Btrfs: send, avoid unnecessary inode item lookup in the btree
+
+Regardless of whether the caller is interested or not in knowing the inode's
+generation (dir_gen != NULL), get_first_ref always does a btree lookup to get
+the inode item. Avoid this useless lookup if dir_gen parameter is NULL (which
+is in some cases).
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index c76400d..98e9e0c 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -1693,10 +1693,12 @@ static int get_first_ref(struct btrfs_root *root, u64 ino,
+ 		goto out;
+ 	btrfs_release_path(path);
+ 
+-	ret = get_inode_info(root, parent_dir, NULL, dir_gen, NULL, NULL,
+-			NULL, NULL);
+-	if (ret < 0)
+-		goto out;
++	if (dir_gen) {
++		ret = get_inode_info(root, parent_dir, NULL, dir_gen, NULL,
++				     NULL, NULL, NULL);
++		if (ret < 0)
++			goto out;
++	}
+ 
+ 	*dir = parent_dir;
+ 
+@@ -1712,13 +1714,12 @@ static int is_first_ref(struct btrfs_root *root,
+ 	int ret;
+ 	struct fs_path *tmp_name;
+ 	u64 tmp_dir;
+-	u64 tmp_dir_gen;
+ 
+ 	tmp_name = fs_path_alloc();
+ 	if (!tmp_name)
+ 		return -ENOMEM;
+ 
+-	ret = get_first_ref(root, ino, &tmp_dir, &tmp_dir_gen, tmp_name);
++	ret = get_first_ref(root, ino, &tmp_dir, NULL, tmp_name);
+ 	if (ret < 0)
+ 		goto out;
+ 
+-- 
+cgit v0.10.1
+

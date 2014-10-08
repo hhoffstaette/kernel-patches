@@ -1,0 +1,41 @@
+From 1b2782c8ed24db03ad49942fa37c9f196b7c4af3 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Tue, 25 Feb 2014 19:32:59 +0100
+Subject: btrfs: send: fix old buffer length in fs_path_ensure_buf
+
+In "btrfs: send: lower memory requirements in common case" the code to
+save the old_buf_len was incorrectly moved to a wrong place and broke
+the original logic.
+
+Reported-by: Filipe David Manana <fdmanana@gmail.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+Reviewed-by: Filipe David Manana <fdmanana@gmail.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 298e25d..246df85 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -346,6 +346,9 @@ static int fs_path_ensure_buf(struct fs_path *p, int len)
+ 	if (p->buf_len >= len)
+ 		return 0;
+ 
++	path_len = p->end - p->start;
++	old_buf_len = p->buf_len;
++
+ 	/*
+ 	 * First time the inline_buf does not suffice
+ 	 */
+@@ -368,9 +371,6 @@ static int fs_path_ensure_buf(struct fs_path *p, int len)
+ 		p->buf_len = ksize(p->buf);
+ 	}
+ 
+-	path_len = p->end - p->start;
+-	old_buf_len = p->buf_len;
+-
+ 	if (p->reversed) {
+ 		tmp_buf = p->buf + old_buf_len - path_len - 1;
+ 		p->end = p->buf + p->buf_len - 1;
+-- 
+cgit v0.10.1
+
