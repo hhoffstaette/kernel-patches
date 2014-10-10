@@ -1,0 +1,75 @@
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 1/5] Btrfs: set page and mapping error on compressed write failure
+Date: Mon,  6 Oct 2014 22:14:22 +0100
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/39205>
+
+If we fail in submit_compressed_extents() before calling btrfs_submit_compressed_write(),
+we start and end the writeback for the pages (clear their dirty flag, unlock them, etc)
+but we don't tag the pages, nor the inode's mapping, with an error. This makes it
+impossible for a caller of filemap_fdatawait_range() (fsync, or transaction commit
+for e.g.) know that there was an error.
+
+Note that the return value of submit_compressed_extents() is useless, as that function
+is executed by a workqueue task and not directly by the fill_delalloc callback. This
+means the writepage/s callbacks of the inode's address space operations don't get that
+return value.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/extent_io.c | 5 +++++
+ fs/btrfs/extent_io.h | 1 +
+ fs/btrfs/inode.c     | 3 ++-
+ 3 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 9cc757f..865594c 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -1746,6 +1746,9 @@ int extent_clear_unlock_delalloc(struct inode *inode, u64 start, u64 end,
+ 	if (page_ops == 0)
+ 		return 0;
+ 
++	if ((page_ops & PAGE_SET_ERROR) && nr_pages > 0)
++		mapping_set_error(inode->i_mapping, -EIO);
++
+ 	while (nr_pages > 0) {
+ 		ret = find_get_pages_contig(inode->i_mapping, index,
+ 				     min_t(unsigned long,
+@@ -1763,6 +1766,8 @@ int extent_clear_unlock_delalloc(struct inode *inode, u64 start, u64 end,
+ 				clear_page_dirty_for_io(pages[i]);
+ 			if (page_ops & PAGE_SET_WRITEBACK)
+ 				set_page_writeback(pages[i]);
++			if (page_ops & PAGE_SET_ERROR)
++				SetPageError(pages[i]);
+ 			if (page_ops & PAGE_END_WRITEBACK)
+ 				end_page_writeback(pages[i]);
+ 			if (page_ops & PAGE_UNLOCK)
+diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
+index 06f030c..5654e14 100644
+--- a/fs/btrfs/extent_io.h
++++ b/fs/btrfs/extent_io.h
+@@ -52,6 +52,7 @@
+ #define PAGE_SET_WRITEBACK	(1 << 2)
+ #define PAGE_END_WRITEBACK	(1 << 3)
+ #define PAGE_SET_PRIVATE2	(1 << 4)
++#define PAGE_SET_ERROR		(1 << 5)
+ 
+ /*
+  * page->private values.  Every page that is controlled by the extent
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 344a322..cefa618 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -832,7 +832,8 @@ out_free:
+ 				     NULL, EXTENT_LOCKED | EXTENT_DELALLOC |
+ 				     EXTENT_DEFRAG | EXTENT_DO_ACCOUNTING,
+ 				     PAGE_UNLOCK | PAGE_CLEAR_DIRTY |
+-				     PAGE_SET_WRITEBACK | PAGE_END_WRITEBACK);
++				     PAGE_SET_WRITEBACK | PAGE_END_WRITEBACK |
++				     PAGE_SET_ERROR);
+ 	kfree(async_extent);
+ 	goto again;
+ }
+-- 
+1.9.1
