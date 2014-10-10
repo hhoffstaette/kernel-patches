@@ -1,0 +1,42 @@
+From cfc47a2803db42140167b92d991ef04018e162c7 Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@suse.de>
+Date: Wed, 4 Jun 2014 16:10:19 -0700
+Subject: mm: page_alloc: lookup pageblock migratetype with IRQs enabled during
+ free
+
+get_pageblock_migratetype() is called during free with IRQs disabled.
+This is unnecessary and disables IRQs for longer than necessary.
+
+Signed-off-by: Mel Gorman <mgorman@suse.de>
+Acked-by: Rik van Riel <riel@redhat.com>
+Cc: Johannes Weiner <hannes@cmpxchg.org>
+Acked-by: Vlastimil Babka <vbabka@suse.cz>
+Cc: Jan Kara <jack@suse.cz>
+Cc: Michal Hocko <mhocko@suse.cz>
+Cc: Hugh Dickins <hughd@google.com>
+Cc: Dave Hansen <dave.hansen@intel.com>
+Cc: Theodore Ts'o <tytso@mit.edu>
+Cc: "Paul E. McKenney" <paulmck@linux.vnet.ibm.com>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 6cadc86..ce4d371 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -774,9 +774,9 @@ static void __free_pages_ok(struct page *page, unsigned int order)
+ 	if (!free_pages_prepare(page, order))
+ 		return;
+ 
++	migratetype = get_pfnblock_migratetype(page, pfn);
+ 	local_irq_save(flags);
+ 	__count_vm_events(PGFREE, 1 << order);
+-	migratetype = get_pfnblock_migratetype(page, pfn);
+ 	set_freepage_migratetype(page, migratetype);
+ 	free_one_page(page_zone(page), page, pfn, order, migratetype);
+ 	local_irq_restore(flags);
+-- 
+cgit v0.10.1
+

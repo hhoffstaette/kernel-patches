@@ -1,0 +1,59 @@
+From 5dab29113ca56335c78be3f98bf5ddf2ef8eb6a6 Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@suse.de>
+Date: Wed, 4 Jun 2014 16:10:14 -0700
+Subject: mm: page_alloc: take the ALLOC_NO_WATERMARK check out of the fast
+ path
+
+ALLOC_NO_WATERMARK is set in a few cases.  Always by kswapd, always for
+__GFP_MEMALLOC, sometimes for swap-over-nfs, tasks etc.  Each of these
+cases are relatively rare events but the ALLOC_NO_WATERMARK check is an
+unlikely branch in the fast path.  This patch moves the check out of the
+fast path and after it has been determined that the watermarks have not
+been met.  This helps the common fast path at the cost of making the slow
+path slower and hitting kswapd with a performance cost.  It's a reasonable
+tradeoff.
+
+Signed-off-by: Mel Gorman <mgorman@suse.de>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Reviewed-by: Rik van Riel <riel@redhat.com>
+Cc: Vlastimil Babka <vbabka@suse.cz>
+Cc: Jan Kara <jack@suse.cz>
+Cc: Michal Hocko <mhocko@suse.cz>
+Cc: Hugh Dickins <hughd@google.com>
+Cc: Dave Hansen <dave.hansen@intel.com>
+Cc: Theodore Ts'o <tytso@mit.edu>
+Cc: "Paul E. McKenney" <paulmck@linux.vnet.ibm.com>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 30f327a..485932c57 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -1937,9 +1937,6 @@ zonelist_scan:
+ 			(alloc_flags & ALLOC_CPUSET) &&
+ 			!cpuset_zone_allowed_softwall(zone, gfp_mask))
+ 				continue;
+-		BUILD_BUG_ON(ALLOC_NO_WATERMARKS < NR_WMARK);
+-		if (unlikely(alloc_flags & ALLOC_NO_WATERMARKS))
+-			goto try_this_zone;
+ 		/*
+ 		 * Distribute pages in proportion to the individual
+ 		 * zone size to ensure fair page aging.  The zone a
+@@ -1986,6 +1983,11 @@ zonelist_scan:
+ 				       classzone_idx, alloc_flags)) {
+ 			int ret;
+ 
++			/* Checked here to keep the fast path fast */
++			BUILD_BUG_ON(ALLOC_NO_WATERMARKS < NR_WMARK);
++			if (alloc_flags & ALLOC_NO_WATERMARKS)
++				goto try_this_zone;
++
+ 			if (IS_ENABLED(CONFIG_NUMA) &&
+ 					!did_zlc_setup && nr_online_nodes > 1) {
+ 				/*
+-- 
+cgit v0.10.1
+

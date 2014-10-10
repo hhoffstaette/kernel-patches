@@ -1,0 +1,52 @@
+From 07a427884348d38a6fd56fa4d78249c407196650 Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@suse.de>
+Date: Wed, 4 Jun 2014 16:10:24 -0700
+Subject: mm: shmem: avoid atomic operation during shmem_getpage_gfp
+
+shmem_getpage_gfp uses an atomic operation to set the SwapBacked field
+before it's even added to the LRU or visible.  This is unnecessary as what
+could it possible race against?  Use an unlocked variant.
+
+Signed-off-by: Mel Gorman <mgorman@suse.de>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Acked-by: Rik van Riel <riel@redhat.com>
+Cc: Vlastimil Babka <vbabka@suse.cz>
+Cc: Jan Kara <jack@suse.cz>
+Cc: Michal Hocko <mhocko@suse.cz>
+Cc: Hugh Dickins <hughd@google.com>
+Cc: Dave Hansen <dave.hansen@intel.com>
+Cc: Theodore Ts'o <tytso@mit.edu>
+Cc: "Paul E. McKenney" <paulmck@linux.vnet.ibm.com>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/include/linux/page-flags.h b/include/linux/page-flags.h
+index d1fe1a7..4d4b39a 100644
+--- a/include/linux/page-flags.h
++++ b/include/linux/page-flags.h
+@@ -208,6 +208,7 @@ PAGEFLAG(Pinned, pinned) TESTSCFLAG(Pinned, pinned)	/* Xen */
+ PAGEFLAG(SavePinned, savepinned);			/* Xen */
+ PAGEFLAG(Reserved, reserved) __CLEARPAGEFLAG(Reserved, reserved)
+ PAGEFLAG(SwapBacked, swapbacked) __CLEARPAGEFLAG(SwapBacked, swapbacked)
++	__SETPAGEFLAG(SwapBacked, swapbacked)
+ 
+ __PAGEFLAG(SlobFree, slob_free)
+ 
+diff --git a/mm/shmem.c b/mm/shmem.c
+index 9f70e02..f47fb38 100644
+--- a/mm/shmem.c
++++ b/mm/shmem.c
+@@ -1132,7 +1132,7 @@ repeat:
+ 			goto decused;
+ 		}
+ 
+-		SetPageSwapBacked(page);
++		__SetPageSwapBacked(page);
+ 		__set_page_locked(page);
+ 		error = mem_cgroup_charge_file(page, current->mm,
+ 						gfp & GFP_RECLAIM_MASK);
+-- 
+cgit v0.10.1
+
