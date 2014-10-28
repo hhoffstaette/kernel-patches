@@ -1,0 +1,73 @@
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix race that makes btrfs_lookup_extent_info miss skinny extent items
+Date: Mon, 27 Oct 2014 09:19:52 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/39740>
+
+We have a race that can lead us to miss skinny extent items in the function
+btrfs_lookup_extent_info() when the skinny metadata feature is enabled.
+So basically the sequence of steps is:
+
+1) We search in the extent tree for the skinny extent, which returns > 0
+   (not found);
+
+2) We check the previous item in the returned leaf for a non-skinny extent,
+   and we don't find it;
+
+3) Because we didn't find the non-skinny extent in step 2), we release our
+   path to search the extent tree again, but this time for a non-skinny
+   extent key;
+
+4) Right after we released our path in step 3), a skinny extent was inserted
+   in the extent tree (delayed refs were run) - our second extent tree search
+   will miss it, because it's not looking for a skinny extent;
+
+5) After the second search returned (with ret > 0), we look for any delayed
+   ref for our extent's bytenr (and we do it while holding a read lock on the
+   leaf), but we won't find any, as such delayed ref had just run and completed
+   after we released out path in step 3) before doing the second search.
+
+Fix this by removing completely the path release and re-search logic. This is
+safe, because if we seach for a metadata item and we don't find it, we have the
+guarantee that the returned leaf is the one where the item would be inserted,
+and so path->slots[0] > 0 and path->slots[0] - 1 must be the slot where the
+non-skinny extent item is if it exists. The only case where path->slots[0] is
+zero is when there are no smaller keys in the tree (i.e. no left siblings for
+our leaf), in which case the re-search logic isn't needed as well.
+
+This race has been present since the introduction of skinny metadata (change
+3173a18f70554fe7880bb2d85c7da566e364eb3c).
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/extent-tree.c | 8 --------
+ 1 file changed, 8 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 9141b2b..2cedd06 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -780,7 +780,6 @@ search_again:
+ 	else
+ 		key.type = BTRFS_EXTENT_ITEM_KEY;
+ 
+-again:
+ 	ret = btrfs_search_slot(trans, root->fs_info->extent_root,
+ 				&key, path, 0, 0);
+ 	if (ret < 0)
+@@ -796,13 +795,6 @@ again:
+ 			    key.offset == root->nodesize)
+ 				ret = 0;
+ 		}
+-		if (ret) {
+-			key.objectid = bytenr;
+-			key.type = BTRFS_EXTENT_ITEM_KEY;
+-			key.offset = root->nodesize;
+-			btrfs_release_path(path);
+-			goto again;
+-		}
+ 	}
+ 
+ 	if (ret == 0) {
+-- 
+1.9.1
