@@ -1,8 +1,8 @@
 From: Josef Bacik <jbacik@fb.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: don't take the chunk_mutex/dev_list mutex in statfs
-Date: Fri, 31 Oct 2014 11:58:00 -0400
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/39895>
+Subject: [PATCH] Btrfs: don't take the chunk_mutex/dev_list mutex in statfs V2
+Date: Mon, 3 Nov 2014 08:56:50 -0500
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/39947>
 
 Our gluster boxes get several thousand statfs() calls per second, which begins
 to suck hardcore with all of the lock contention on the chunk mutex and dev list
@@ -16,11 +16,13 @@ another day.  Thanks,
 
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 ---
- fs/btrfs/super.c | 69 ++++++++++++++++++++++++++++++++++++--------------------
- 1 file changed, 45 insertions(+), 24 deletions(-)
+V1->V2: make sure ->alloc_start is set before doing the dev extent lookup logic.
+
+ fs/btrfs/super.c | 72 ++++++++++++++++++++++++++++++++++++--------------------
+ 1 file changed, 47 insertions(+), 25 deletions(-)
 
 diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
-index 54bd91e..2c9ba11 100644
+index 54bd91e..dc337d1 100644
 --- a/fs/btrfs/super.c
 +++ b/fs/btrfs/super.c
 @@ -1644,8 +1644,20 @@ static int btrfs_calc_avail_data_space(struct btrfs_root *root, u64 *free_bytes)
@@ -64,11 +66,14 @@ index 54bd91e..2c9ba11 100644
  		avail_space = device->total_bytes - device->bytes_used;
  
  		/* align with stripe_len */
-@@ -1690,23 +1708,30 @@ static int btrfs_calc_avail_data_space(struct btrfs_root *root, u64 *free_bytes)
+@@ -1689,24 +1707,32 @@ static int btrfs_calc_avail_data_space(struct btrfs_root *root, u64 *free_bytes)
+ 		skip_space = 1024 * 1024;
  
  		/* user can set the offset in fs_info->alloc_start. */
- 		if (fs_info->alloc_start + BTRFS_STRIPE_LEN <=
+-		if (fs_info->alloc_start + BTRFS_STRIPE_LEN <=
 -		    device->total_bytes)
++		if (fs_info->alloc_start &&
++		    fs_info->alloc_start + BTRFS_STRIPE_LEN <=
 +		    device->total_bytes) {
 +			rcu_read_unlock();
  			skip_space = max(fs_info->alloc_start, skip_space);
@@ -109,7 +114,7 @@ index 54bd91e..2c9ba11 100644
  
  		/*
  		 * we can use the free space in [0, skip_space - 1], subtract
-@@ -1725,6 +1750,9 @@ static int btrfs_calc_avail_data_space(struct btrfs_root *root, u64 *free_bytes)
+@@ -1725,6 +1751,9 @@ static int btrfs_calc_avail_data_space(struct btrfs_root *root, u64 *free_bytes)
  
  		i++;
  	}
@@ -119,7 +124,7 @@ index 54bd91e..2c9ba11 100644
  
  	nr_devices = i;
  
-@@ -1787,8 +1815,6 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+@@ -1787,8 +1816,6 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
  	 * holding chunk_muext to avoid allocating new chunks, holding
  	 * device_list_mutex to avoid the device being removed
  	 */
@@ -128,7 +133,7 @@ index 54bd91e..2c9ba11 100644
  	rcu_read_lock();
  	list_for_each_entry_rcu(found, head, list) {
  		if (found->flags & BTRFS_BLOCK_GROUP_DATA) {
-@@ -1826,15 +1852,10 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+@@ -1826,15 +1853,10 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
  
  	buf->f_bavail = total_free_data;
  	ret = btrfs_calc_avail_data_space(fs_info->tree_root, &total_free_data);
