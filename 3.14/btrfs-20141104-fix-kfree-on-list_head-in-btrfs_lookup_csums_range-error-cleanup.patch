@@ -1,0 +1,33 @@
+From 6e5aafb27419f32575b27ef9d6a31e5d54661aca Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Tue, 4 Nov 2014 06:59:04 -0800
+Subject: [PATCH] Btrfs: fix kfree on list_head in btrfs_lookup_csums_range error cleanup
+
+If we hit any errors in btrfs_lookup_csums_range, we'll loop through all
+the csums we allocate and free them.  But the code was using list_entry
+incorrectly, and ended up trying to free the on-stack list_head instead.
+
+This bug came from commit 0678b6185
+
+btrfs: Don't BUG_ON kzalloc error in btrfs_lookup_csums_range()
+
+Signed-off-by: Chris Mason <clm@fb.com>
+Reported-by: Erik Berg <btrfs@slipsprogrammoer.no>
+cc: stable@vger.kernel.org # 3.3 or newer
+---
+ fs/btrfs/file-item.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/file-item.c b/fs/btrfs/file-item.c
+index 783a943..84a2d18 100644
+--- a/fs/btrfs/file-item.c
++++ b/fs/btrfs/file-item.c
+@@ -413,7 +413,7 @@ int btrfs_lookup_csums_range(struct btrfs_root *root, u64 start, u64 end,
+ 	ret = 0;
+ fail:
+ 	while (ret < 0 && !list_empty(&tmplist)) {
+-		sums = list_entry(&tmplist, struct btrfs_ordered_sum, list);
++		sums = list_entry(tmplist.next, struct btrfs_ordered_sum, list);
+ 		list_del(&sums->list);
+ 		kfree(sums);
+ 	}
