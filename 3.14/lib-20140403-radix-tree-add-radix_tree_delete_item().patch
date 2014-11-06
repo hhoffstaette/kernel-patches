@@ -1,0 +1,113 @@
+From 53c59f262d747ea82e7414774c59a489501186a0 Mon Sep 17 00:00:00 2001
+From: Johannes Weiner <hannes@cmpxchg.org>
+Date: Thu, 3 Apr 2014 14:47:39 -0700
+Subject: lib: radix-tree: add radix_tree_delete_item()
+
+Provide a function that does not just delete an entry at a given index,
+but also allows passing in an expected item.  Delete only if that item
+is still located at the specified index.
+
+This is handy when lockless tree traversals want to delete entries as
+well because they don't have to do an second, locked lookup to verify
+the slot has not changed under them before deleting the entry.
+
+Signed-off-by: Johannes Weiner <hannes@cmpxchg.org>
+Reviewed-by: Minchan Kim <minchan@kernel.org>
+Reviewed-by: Rik van Riel <riel@redhat.com>
+Acked-by: Mel Gorman <mgorman@suse.de>
+Cc: Andrea Arcangeli <aarcange@redhat.com>
+Cc: Bob Liu <bob.liu@oracle.com>
+Cc: Christoph Hellwig <hch@infradead.org>
+Cc: Dave Chinner <david@fromorbit.com>
+Cc: Greg Thelen <gthelen@google.com>
+Cc: Hugh Dickins <hughd@google.com>
+Cc: Jan Kara <jack@suse.cz>
+Cc: KOSAKI Motohiro <kosaki.motohiro@jp.fujitsu.com>
+Cc: Luigi Semenzato <semenzato@google.com>
+Cc: Metin Doslu <metin@citusdata.com>
+Cc: Michel Lespinasse <walken@google.com>
+Cc: Ozgun Erdogan <ozgun@citusdata.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Roman Gushchin <klamm@yandex-team.ru>
+Cc: Ryan Mallon <rmallon@gmail.com>
+Cc: Tejun Heo <tj@kernel.org>
+Cc: Vlastimil Babka <vbabka@suse.cz>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/include/linux/radix-tree.h b/include/linux/radix-tree.h
+index 4039407..1bf0a9c 100644
+--- a/include/linux/radix-tree.h
++++ b/include/linux/radix-tree.h
+@@ -219,6 +219,7 @@ static inline void radix_tree_replace_slot(void **pslot, void *item)
+ int radix_tree_insert(struct radix_tree_root *, unsigned long, void *);
+ void *radix_tree_lookup(struct radix_tree_root *, unsigned long);
+ void **radix_tree_lookup_slot(struct radix_tree_root *, unsigned long);
++void *radix_tree_delete_item(struct radix_tree_root *, unsigned long, void *);
+ void *radix_tree_delete(struct radix_tree_root *, unsigned long);
+ unsigned int
+ radix_tree_gang_lookup(struct radix_tree_root *root, void **results,
+diff --git a/lib/radix-tree.c b/lib/radix-tree.c
+index bd4a8df..d832117 100644
+--- a/lib/radix-tree.c
++++ b/lib/radix-tree.c
+@@ -1337,15 +1337,18 @@ static inline void radix_tree_shrink(struct radix_tree_root *root)
+ }
+ 
+ /**
+- *	radix_tree_delete    -    delete an item from a radix tree
++ *	radix_tree_delete_item    -    delete an item from a radix tree
+  *	@root:		radix tree root
+  *	@index:		index key
++ *	@item:		expected item
+  *
+- *	Remove the item at @index from the radix tree rooted at @root.
++ *	Remove @item at @index from the radix tree rooted at @root.
+  *
+- *	Returns the address of the deleted item, or NULL if it was not present.
++ *	Returns the address of the deleted item, or NULL if it was not present
++ *	or the entry at the given @index was not @item.
+  */
+-void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
++void *radix_tree_delete_item(struct radix_tree_root *root,
++			     unsigned long index, void *item)
+ {
+ 	struct radix_tree_node *node = NULL;
+ 	struct radix_tree_node *slot = NULL;
+@@ -1380,6 +1383,11 @@ void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
+ 	if (slot == NULL)
+ 		goto out;
+ 
++	if (item && slot != item) {
++		slot = NULL;
++		goto out;
++	}
++
+ 	/*
+ 	 * Clear all tags associated with the item to be deleted.
+ 	 * This way of doing it would be inefficient, but seldom is any set.
+@@ -1424,6 +1432,21 @@ void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
+ out:
+ 	return slot;
+ }
++EXPORT_SYMBOL(radix_tree_delete_item);
++
++/**
++ *	radix_tree_delete    -    delete an item from a radix tree
++ *	@root:		radix tree root
++ *	@index:		index key
++ *
++ *	Remove the item at @index from the radix tree rooted at @root.
++ *
++ *	Returns the address of the deleted item, or NULL if it was not present.
++ */
++void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
++{
++	return radix_tree_delete_item(root, index, NULL);
++}
+ EXPORT_SYMBOL(radix_tree_delete);
+ 
+ /**
+-- 
+cgit v0.10.1
+
