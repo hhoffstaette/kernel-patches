@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH v2] Btrfs: make xattr replace operations atomic
-Date: Sat,  8 Nov 2014 01:01:54 +0000
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40048>
+Subject: [PATCH v3] Btrfs: make xattr replace operations atomic
+Date: Sat,  8 Nov 2014 13:01:06 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40056>
 
 Replacing a xattr consists of doing a lookup for its existing value, delete
 the current value from the respective leaf, release the search path and then
@@ -38,14 +38,17 @@ V2: Added missing btrfs_mark_buffer_dirty() call for the case where a replace
     btrfs_search_slot if the xattr exists in the item (and the new extend size
     is new_size - old_size, excluding xattr's name and sizeof struct btrfs_dir_item).
 
+V3: Made btrfs_search_slot not release the path on error logic more explicit
+    and generic.
+
  fs/btrfs/ctree.c    |   2 +-
- fs/btrfs/ctree.h    |   4 ++
+ fs/btrfs/ctree.h    |   5 ++
  fs/btrfs/dir-item.c |  10 ++--
- fs/btrfs/xattr.c    | 145 ++++++++++++++++++++++++++++++----------------------
- 4 files changed, 92 insertions(+), 69 deletions(-)
+ fs/btrfs/xattr.c    | 146 ++++++++++++++++++++++++++++++----------------------
+ 4 files changed, 94 insertions(+), 69 deletions(-)
 
 diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
-index 19bc616..461fcb7 100644
+index 19bc616..8172341 100644
 --- a/fs/btrfs/ctree.c
 +++ b/fs/btrfs/ctree.c
 @@ -2939,7 +2939,7 @@ done:
@@ -53,15 +56,23 @@ index 19bc616..461fcb7 100644
  	if (!p->leave_spinning)
  		btrfs_set_path_blocking(p);
 -	if (ret < 0)
-+	if (ret < 0 && ret != -EOVERFLOW)
++	if (ret < 0 && !p->skip_release_on_error)
  		btrfs_release_path(p);
  	return ret;
  }
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index a5e471a..9a47dfe 100644
+index a5e471a..e3ab75e 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
-@@ -3687,6 +3687,10 @@ struct btrfs_dir_item *btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
+@@ -607,6 +607,7 @@ struct btrfs_path {
+ 	unsigned int leave_spinning:1;
+ 	unsigned int search_commit_root:1;
+ 	unsigned int need_commit_sem:1;
++	unsigned int skip_release_on_error:1;
+ };
+ 
+ /*
+@@ -3687,6 +3688,10 @@ struct btrfs_dir_item *btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
  int verify_dir_item(struct btrfs_root *root,
  		    struct extent_buffer *leaf,
  		    struct btrfs_dir_item *dir_item);
@@ -101,7 +112,7 @@ index fc8df86..1752625 100644
  	struct btrfs_dir_item *dir_item;
  	unsigned long name_ptr;
 diff --git a/fs/btrfs/xattr.c b/fs/btrfs/xattr.c
-index dcf2013..821e49c 100644
+index dcf2013..b3b5632 100644
 --- a/fs/btrfs/xattr.c
 +++ b/fs/btrfs/xattr.c
 @@ -29,6 +29,7 @@
@@ -121,9 +132,11 @@ index dcf2013..821e49c 100644
  	struct btrfs_root *root = BTRFS_I(inode)->root;
  	struct btrfs_path *path;
  	size_t name_len = strlen(name);
-@@ -104,83 +105,105 @@ static int do_setxattr(struct btrfs_trans_handle *trans,
+@@ -103,84 +104,107 @@ static int do_setxattr(struct btrfs_trans_handle *trans,
+ 	path = btrfs_alloc_path();
  	if (!path)
  		return -ENOMEM;
++	path->skip_release_on_error = 1;
  
 -	if (flags & XATTR_REPLACE) {
 -		di = btrfs_lookup_xattr(trans, root, path, btrfs_ino(inode), name,
