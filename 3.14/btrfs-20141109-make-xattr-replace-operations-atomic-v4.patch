@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH v3] Btrfs: make xattr replace operations atomic
-Date: Sat,  8 Nov 2014 13:01:06 +0000
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40056>
+Subject: [PATCH v4] Btrfs: make xattr replace operations atomic
+Date: Sun,  9 Nov 2014 08:38:39 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40062>
 
 Replacing a xattr consists of doing a lookup for its existing value, delete
 the current value from the respective leaf, release the search path and then
@@ -41,11 +41,15 @@ V2: Added missing btrfs_mark_buffer_dirty() call for the case where a replace
 V3: Made btrfs_search_slot not release the path on error logic more explicit
     and generic.
 
+V4: Added missing ENOSPC condition - if overflow detected, there's no matching
+    dir_item for our xattr in the leaf item and there are no flags. Ensure
+    a replace can't insert a new value.
+
  fs/btrfs/ctree.c    |   2 +-
  fs/btrfs/ctree.h    |   5 ++
  fs/btrfs/dir-item.c |  10 ++--
- fs/btrfs/xattr.c    | 146 ++++++++++++++++++++++++++++++----------------------
- 4 files changed, 94 insertions(+), 69 deletions(-)
+ fs/btrfs/xattr.c    | 150 ++++++++++++++++++++++++++++++++--------------------
+ 4 files changed, 102 insertions(+), 65 deletions(-)
 
 diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
 index 19bc616..8172341 100644
@@ -112,7 +116,7 @@ index fc8df86..1752625 100644
  	struct btrfs_dir_item *dir_item;
  	unsigned long name_ptr;
 diff --git a/fs/btrfs/xattr.c b/fs/btrfs/xattr.c
-index dcf2013..b3b5632 100644
+index dcf2013..47b1946 100644
 --- a/fs/btrfs/xattr.c
 +++ b/fs/btrfs/xattr.c
 @@ -29,6 +29,7 @@
@@ -132,38 +136,48 @@ index dcf2013..b3b5632 100644
  	struct btrfs_root *root = BTRFS_I(inode)->root;
  	struct btrfs_path *path;
  	size_t name_len = strlen(name);
-@@ -103,84 +104,107 @@ static int do_setxattr(struct btrfs_trans_handle *trans,
+@@ -103,84 +104,119 @@ static int do_setxattr(struct btrfs_trans_handle *trans,
  	path = btrfs_alloc_path();
  	if (!path)
  		return -ENOMEM;
 +	path->skip_release_on_error = 1;
++
++	if (!value) {
++		di = btrfs_lookup_xattr(trans, root, path, btrfs_ino(inode),
++					name, name_len, -1);
++		if (!di && (flags & XATTR_REPLACE))
++			ret = -ENODATA;
++		else if (di)
++			ret = btrfs_delete_one_dir_name(trans, root, path, di);
++		goto out;
++	}
  
--	if (flags & XATTR_REPLACE) {
++	/*
++	 * For a replace we can't just do the insert blindly.
++	 * Do a lookup first (read-only btrfs_search_slot), and return if xattr
++	 * doesn't exist. If it exists, fall down below to the insert/replace
++	 * path - we can't race with a concurrent xattr delete, because the VFS
++	 * locks the inode's i_mutex before calling setxattr or removexattr.
++	 */
+ 	if (flags & XATTR_REPLACE) {
 -		di = btrfs_lookup_xattr(trans, root, path, btrfs_ino(inode), name,
 -					name_len, -1);
 -		if (IS_ERR(di)) {
 -			ret = PTR_ERR(di);
 -			goto out;
 -		} else if (!di) {
-+	if (!value && ((flags & XATTR_REPLACE) || !flags)) {
-+		/*
-+		 * We're deleting only a xattr (no replace).
-+		 * Don't follow the path below because it could leave a leaf
-+		 * empty.
-+		 */
-+		di = btrfs_lookup_xattr(trans, root, path, btrfs_ino(inode),
-+					name, name_len, -1);
-+		if (!di && (flags & XATTR_REPLACE))
++		ASSERT(mutex_is_locked(&inode->i_mutex));
++		di = btrfs_lookup_xattr(NULL, root, path, btrfs_ino(inode),
++					name, name_len, 0);
++		if (!di) {
  			ret = -ENODATA;
--			goto out;
--		}
+ 			goto out;
+ 		}
 -		ret = btrfs_delete_one_dir_name(trans, root, path, di);
 -		if (ret)
 -			goto out;
--		btrfs_release_path(path);
-+		else if (di)
-+			ret = btrfs_delete_one_dir_name(trans, root, path, di);
-+		goto out;
+ 		btrfs_release_path(path);
++		di = NULL;
 +	}
  
 +	ret = btrfs_insert_xattr_item(trans, root, path, btrfs_ino(inode),
@@ -185,7 +199,7 @@ index dcf2013..b3b5632 100644
 +		ret = 0;
 +		btrfs_assert_tree_locked(path->nodes[0]);
 +		di = btrfs_match_dir_item_name(root, path, name, name_len);
-+		if (!di && (flags & XATTR_CREATE)) {
++		if (!di && !(flags & XATTR_REPLACE)) {
 +			ret = -ENOSPC;
  			goto out;
  		}
@@ -212,12 +226,10 @@ index dcf2013..b3b5632 100644
 -	 * the rest of the function figure it out.
 -	 */
 -	if (ret == -EOVERFLOW)
-+	if (di && (flags & XATTR_CREATE))
++	if (di && (flags & XATTR_CREATE)) {
  		ret = -EEXIST;
-+	if (!di && (flags & XATTR_REPLACE))
-+		ret = -ENODATA;
-+	if (ret)
 +		goto out;
++	}
  
 -	if (ret == -EEXIST) {
 -		if (flags & XATTR_CREATE)
