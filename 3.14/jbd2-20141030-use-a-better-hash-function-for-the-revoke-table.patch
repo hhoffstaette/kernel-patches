@@ -1,0 +1,45 @@
+From d48458d4a768cece43f80a081a26cf912877da9c Mon Sep 17 00:00:00 2001
+From: Theodore Ts'o <tytso@mit.edu>
+Date: Thu, 30 Oct 2014 10:53:17 -0400
+Subject: jbd2: use a better hash function for the revoke table
+
+The old hash function didn't work well for 64-bit block numbers, and
+used undefined (negative) shift right behavior.  Use the generic
+64-bit hash function instead.
+
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+Reported-by: Andrey Ryabinin <a.ryabinin@samsung.com>
+
+diff --git a/fs/jbd2/revoke.c b/fs/jbd2/revoke.c
+index d5e95a1..c6cbaef 100644
+--- a/fs/jbd2/revoke.c
++++ b/fs/jbd2/revoke.c
+@@ -92,6 +92,7 @@
+ #include <linux/init.h>
+ #include <linux/bio.h>
+ #include <linux/log2.h>
++#include <linux/hash.h>
+ #endif
+ 
+ static struct kmem_cache *jbd2_revoke_record_cache;
+@@ -130,16 +131,9 @@ static void flush_descriptor(journal_t *, struct buffer_head *, int, int);
+ 
+ /* Utility functions to maintain the revoke table */
+ 
+-/* Borrowed from buffer.c: this is a tried and tested block hash function */
+ static inline int hash(journal_t *journal, unsigned long long block)
+ {
+-	struct jbd2_revoke_table_s *table = journal->j_revoke;
+-	int hash_shift = table->hash_shift;
+-	int hash = (int)block ^ (int)((block >> 31) >> 1);
+-
+-	return ((hash << (hash_shift - 6)) ^
+-		(hash >> 13) ^
+-		(hash << (hash_shift - 12))) & (table->hash_size - 1);
++	return hash_64(block, journal->j_revoke->hash_shift);
+ }
+ 
+ static int insert_revoke_hash(journal_t *journal, unsigned long long blocknr,
+-- 
+cgit v0.10.1
+
