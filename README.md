@@ -12,7 +12,7 @@ performance/scalability improvements to the entire kernel.
 
 - bfq: BFQ v7r6 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v454 + SMT-nice patch ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
-- btrfs: >350 _carefully_ selected patches from 3.15/16/17/18 to address corruption, stability, performance and also a few new capabilities, e.g. `O_TMPFILE`, `renameat2` and automatic GC of empty blockgroups. The kernel workqueues from 3.15 are also merged as more and more patches rely on them, and the notorious "hung task" problem has been fixed.
+- btrfs: >350 _carefully_ selected patches from 3.15/16/17/18+ to address corruption, stability, performance and also a few new capabilities, e.g. `O_TMPFILE`, `renameat2` and automatic GC of empty blockgroups. The kernel workqueues from 3.15 are also merged as more and more patches rely on them, and the notorious "hung task" problem has been fixed.
 - ext4: corruption fixes, `renameat2`
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - locking: cancellable/optimistic spinning MCS / queued rwlocks ([patch](http://bit.ly/Xq41R6), [article]( http://lwn.net/Articles/590243/))
@@ -29,5 +29,5 @@ series, which unfortunately only applies to x86/x86_64 thanks to unrelated
 Kconfig changes. See the patch log for more information (should be easy to
 fix, I just can't test it).
 
-The currently **required minimum** -stable release is **3.14.23**; unless
+The currently **required minimum** -stable release is **3.14.24**; unless
 otherwise noted any later 3.14-stable release should work as well.
