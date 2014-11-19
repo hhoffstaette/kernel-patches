@@ -1,8 +1,8 @@
 From: Josef Bacik <jbacik@fb.com>
-Newsgroups: gmane.linux.kernel.stable,gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: make sure logged extents complete in the current transaction
-Date: Tue, 18 Nov 2014 17:19:41 -0500
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/115276>
+Newsgroups: gmane.comp.file-systems.btrfs,gmane.linux.kernel.stable
+Subject: [PATCH] Btrfs: make sure logged extents complete in the current transaction V2
+Date: Wed, 19 Nov 2014 12:28:25 -0500
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40306>
 
 Liu Bo pointed out that my previous fix would lose the generation update in the
 scenario I described.  It is actually much worse than that, we could lose the
@@ -28,15 +28,19 @@ problem of the improperly updated extent generation.  Thanks,
 cc: stable@vger.kernel.org
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 ---
- fs/btrfs/ordered-data.c |  6 ++++--
- fs/btrfs/ordered-data.h |  6 +++++-
+V1->V2: Don't add previously logged ordered extents into the logged list, this
+keeps us from moving ordered extents off of the global transaction list once
+it's already been added there.
+
+ fs/btrfs/ordered-data.c |  9 +++++++--
+ fs/btrfs/ordered-data.h |  8 +++++++-
  fs/btrfs/transaction.c  | 33 +++++++++++++++++++++++++++++++++
  fs/btrfs/transaction.h  |  2 ++
  fs/btrfs/tree-log.c     |  6 +++---
- 5 files changed, 47 insertions(+), 6 deletions(-)
+ 5 files changed, 52 insertions(+), 6 deletions(-)
 
 diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
-index ac734ec..7c2dd7a 100644
+index ac734ec..269e21d 100644
 --- a/fs/btrfs/ordered-data.c
 +++ b/fs/btrfs/ordered-data.c
 @@ -220,6 +220,7 @@ static int __btrfs_add_ordered_extent(struct inode *inode, u64 file_offset,
@@ -47,7 +51,16 @@ index ac734ec..7c2dd7a 100644
  
  	trace_btrfs_ordered_extent_add(inode, entry);
  
-@@ -472,7 +473,8 @@ void btrfs_submit_logged_extents(struct list_head *logged_list,
+@@ -443,6 +444,8 @@ void btrfs_get_logged_extents(struct inode *inode,
+			break;
+		if (!list_empty(&ordered->log_list))
+			continue;
++		if (test_bit(BTRFS_ORDERED_LOGGED, &ordered->flags))
++			continue;
+ 		list_add(&ordered->log_list, logged_list);
+ 		atomic_inc(&ordered->refs);
+ 	}
+@@ -472,7 +475,8 @@ void btrfs_submit_logged_extents(struct list_head *logged_list,
  	spin_unlock_irq(&log->log_extents_lock[index]);
  }
  
@@ -57,20 +70,30 @@ index ac734ec..7c2dd7a 100644
  {
  	struct btrfs_ordered_extent *ordered;
  	int index = transid % 2;
-@@ -497,7 +499,7 @@ void btrfs_wait_logged_extents(struct btrfs_root *log, u64 transid)
+@@ -497,7 +501,8 @@ void btrfs_wait_logged_extents(struct btrfs_root *log, u64 transid)
  		wait_event(ordered->wait, test_bit(BTRFS_ORDERED_IO_DONE,
  						   &ordered->flags));
  
 -		btrfs_put_ordered_extent(ordered);
-+		list_add_tail(&ordered->trans_list, &trans->ordered);
++		if (!test_and_set_bit(BTRFS_ORDERED_LOGGED, &ordered->flags))
++			list_add_tail(&ordered->trans_list, &trans->ordered);
  		spin_lock_irq(&log->log_extents_lock[index]);
  	}
  	spin_unlock_irq(&log->log_extents_lock[index]);
 diff --git a/fs/btrfs/ordered-data.h b/fs/btrfs/ordered-data.h
-index d81a274..171a841 100644
+index d81a274..0124bff 100644
 --- a/fs/btrfs/ordered-data.h
 +++ b/fs/btrfs/ordered-data.h
-@@ -121,6 +121,9 @@ struct btrfs_ordered_extent {
+@@ -71,6 +71,8 @@ struct btrfs_ordered_sum {
+ 				       ordered extent */
+ #define BTRFS_ORDERED_TRUNCATED 9 /* Set when we have to truncate an extent */
+ 
++#define BTRFS_ORDERED_LOGGED 10 /* Set when we've waited on this ordered extent
++				 * in the logging code. */
+ struct btrfs_ordered_extent {
+ 	/* logical offset in the file */
+ 	u64 file_offset;
+@@ -121,6 +123,9 @@ struct btrfs_ordered_extent {
  	/* If we need to wait on this to be done */
  	struct list_head log_list;
  
@@ -80,7 +103,7 @@ index d81a274..171a841 100644
  	/* used to wait for the BTRFS_ORDERED_COMPLETE bit */
  	wait_queue_head_t wait;
  
-@@ -197,7 +200,8 @@ void btrfs_get_logged_extents(struct inode *inode,
+@@ -197,7 +202,8 @@ void btrfs_get_logged_extents(struct inode *inode,
  void btrfs_put_logged_extents(struct list_head *logged_list);
  void btrfs_submit_logged_extents(struct list_head *logged_list,
  				 struct btrfs_root *log);
@@ -220,3 +243,5 @@ index 70f99b1..337e4bc 100644
  					       &token);
  	if (test_bit(EXTENT_FLAG_PREALLOC, &em->flags))
  		btrfs_set_token_file_extent_type(leaf, fi,
+-- 
+1.8.3.1
