@@ -1,8 +1,8 @@
 From: Josef Bacik <jbacik@fb.com>
-Newsgroups: gmane.comp.file-systems.btrfs,gmane.linux.kernel.stable
-Subject: [PATCH] Btrfs: make sure logged extents complete in the current transaction V2
-Date: Wed, 19 Nov 2014 12:28:25 -0500
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40306>
+Newsgroups: gmane.linux.kernel.stable,gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: make sure logged extents complete in the current transaction V3
+Date: Fri, 21 Nov 2014 14:52:38 -0500
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/115923>
 
 Liu Bo pointed out that my previous fix would lose the generation update in the
 scenario I described.  It is actually much worse than that, we could lose the
@@ -28,17 +28,54 @@ problem of the improperly updated extent generation.  Thanks,
 cc: stable@vger.kernel.org
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 ---
-V1->V2: Don't add previously logged ordered extents into the logged list, this
-keeps us from moving ordered extents off of the global transaction list once
-it's already been added there.
+V2->V3: Cleanup pending ordered properly on transaction abort.
 
+ fs/btrfs/disk-io.c      | 20 ++++++++++++++++++++
  fs/btrfs/ordered-data.c |  9 +++++++--
  fs/btrfs/ordered-data.h |  8 +++++++-
  fs/btrfs/transaction.c  | 33 +++++++++++++++++++++++++++++++++
  fs/btrfs/transaction.h  |  2 ++
  fs/btrfs/tree-log.c     |  6 +++---
- 5 files changed, 52 insertions(+), 6 deletions(-)
+ 6 files changed, 72 insertions(+), 6 deletions(-)
 
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 2409718..fe4db97 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -4128,6 +4128,25 @@ again:
+ 	return 0;
+ }
+ 
++static void btrfs_free_pending_ordered(struct btrfs_transaction *cur_trans,
++				       struct btrfs_fs_info *fs_info)
++{
++	struct btrfs_ordered_extent *ordered;
++
++	spin_lock(&fs_info->trans_lock);
++	while (!list_empty(&cur_trans->pending_ordered)) {
++		ordered = list_first_entry(&cur_trans->pending_ordered,
++					   struct btrfs_ordered_extent,
++					   trans_list);
++		list_del_init(&ordered->trans_list);
++		spin_unlock(&fs_info->trans_lock);
++
++		btrfs_put_ordered_extent(ordered);
++		spin_lock(&fs_info->trans_lock);
++	}
++	spin_unlock(&fs_info->trans_lock);
++}
++
+ void btrfs_cleanup_one_transaction(struct btrfs_transaction *cur_trans,
+ 				   struct btrfs_root *root)
+ {
+@@ -4139,6 +4158,7 @@ void btrfs_cleanup_one_transaction(struct btrfs_transaction *cur_trans,
+ 	cur_trans->state = TRANS_STATE_UNBLOCKED;
+ 	wake_up(&root->fs_info->transaction_wait);
+ 
++	btrfs_free_pending_ordered(cur_trans, root->fs_info);
+ 	btrfs_destroy_delayed_inodes(root);
+ 	btrfs_assert_delayed_root_empty(root);
+ 
 diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
 index ac734ec..269e21d 100644
 --- a/fs/btrfs/ordered-data.c
@@ -217,7 +254,7 @@ index 70f99b1..337e4bc 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
 @@ -2600,7 +2600,7 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
- 		blk_finish_plug(&plug);
+		blk_finish_plug(&plug);
 		ret = btrfs_wait_marked_extents(log, &log->dirty_log_pages,
 						mark);
 -		btrfs_wait_logged_extents(log, log_transid);
