@@ -1,0 +1,37 @@
+From 89cceb2729c752e6ff9b3bc8650a70f29884f116 Mon Sep 17 00:00:00 2001
+From: Chun-Hao Lin <hau@realtek.com>
+Date: Wed, 1 Oct 2014 23:17:15 +0800
+Subject: r8169:add support more chips to get mac address from backup mac
+ address register
+
+RTL8168FB RTL8168G RTL8168GU RTL8411 RTL8411B RTL8106EUS RTL8402 can
+support get mac address from backup mac address register.
+
+Signed-off-by: Chun-Hao Lin <hau@realtek.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 86c55a0..c1e9661 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -7704,7 +7704,16 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 	u64_stats_init(&tp->tx_stats.syncp);
+ 
+ 	/* Get MAC address */
+-	if (tp->mac_version == RTL_GIGA_MAC_VER_45 ||
++	if (tp->mac_version == RTL_GIGA_MAC_VER_35 ||
++	    tp->mac_version == RTL_GIGA_MAC_VER_36 ||
++	    tp->mac_version == RTL_GIGA_MAC_VER_37 ||
++	    tp->mac_version == RTL_GIGA_MAC_VER_38 ||
++	    tp->mac_version == RTL_GIGA_MAC_VER_40 ||
++	    tp->mac_version == RTL_GIGA_MAC_VER_41 ||
++	    tp->mac_version == RTL_GIGA_MAC_VER_42 ||
++	    tp->mac_version == RTL_GIGA_MAC_VER_43 ||
++	    tp->mac_version == RTL_GIGA_MAC_VER_44 ||
++	    tp->mac_version == RTL_GIGA_MAC_VER_45 ||
+ 	    tp->mac_version == RTL_GIGA_MAC_VER_46 ||
+ 	    tp->mac_version == RTL_GIGA_MAC_VER_47 ||
+ 	    tp->mac_version == RTL_GIGA_MAC_VER_48) {
+-- 
+cgit v0.10.1
+

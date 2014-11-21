@@ -17,7 +17,7 @@ performance/scalability improvements to the entire kernel.
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - locking: cancellable/optimistic spinning MCS / queued rwlocks ([patch](http://bit.ly/Xq41R6), [article]( http://lwn.net/Articles/590243/))
 - mm: proper `msync()`, per-thread VMA caching (in .21, [article](http://lwn.net/Articles/589475/)), reduced use of atomics in page handling & fixed prioritisation of swap (in .21).
-- net: minor updates/fixes for Realtek NICs, r8169 support for Byte Queue Limits, reduced use of atomics in fq qdisc
+- net: updates for Realtek NICs (e.g. r8169 support for Byte Queue Limits, RTL8168EP support), reduced use of atomics in fq qdisc
 - timekeeping: improved accuracy with `CONFIG_NO_HZ`
 - vfs: `renameat2` ([article](http://lwn.net/Articles/592952/)) & other updates from 3.16/17/18
 

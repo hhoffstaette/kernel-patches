@@ -1,8 +1,7 @@
+From 1e918876853aa85435e0f17fd8b4a92dcfff53d6 Mon Sep 17 00:00:00 2001
 From: Florian Westphal <fw@strlen.de>
-Newsgroups: gmane.linux.network
-Subject: [PATCH V3 next] r8169: add support for Byte Queue Limits
-Date: Wed,  1 Oct 2014 13:38:03 +0200
-Archived-At: <http://permalink.gmane.org/gmane.linux.network/332976>
+Date: Wed, 1 Oct 2014 13:38:03 +0200
+Subject: r8169: add support for Byte Queue Limits
 
 tested on RTL8168d/8111d model using 'super_netperf 40' with TCP/UDP_STREAM.
 
@@ -63,17 +62,13 @@ Cc: Hayes Wang <hayeswang@realtek.com>
 Signed-off-by: Florian Westphal <fw@strlen.de>
 Acked-by: Eric Dumazet <edumazet@google.com>
 Acked-by: Tom Herbert <therbert@google.com>
----
- Change since v2: updated commit message.
-
- drivers/net/ethernet/realtek/r8169.c | 18 ++++++++++++++----
- 1 file changed, 14 insertions(+), 4 deletions(-)
+Signed-off-by: David S. Miller <davem@davemloft.net>
 
 diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
-index 1d81238..51b6dc2 100644
+index c03891b..54476ba 100644
 --- a/drivers/net/ethernet/realtek/r8169.c
 +++ b/drivers/net/ethernet/realtek/r8169.c
-@@ -4712,6 +4712,8 @@ static void rtl_hw_reset(struct rtl8169_private *tp)
+@@ -4733,6 +4733,8 @@ static void rtl_hw_reset(struct rtl8169_private *tp)
  	RTL_W8(ChipCmd, CmdReset);
  
  	rtl_udelay_loop_wait_low(tp, &rtl_chipcmd_cond, 100, 100);
@@ -82,7 +77,7 @@ index 1d81238..51b6dc2 100644
  }
  
  static void rtl_request_uncached_firmware(struct rtl8169_private *tp)
-@@ -6592,6 +6594,8 @@ static netdev_tx_t rtl8169_start_xmit(struct sk_buff *skb,
+@@ -6613,6 +6615,8 @@ static netdev_tx_t rtl8169_start_xmit(struct sk_buff *skb,
  
  	txd->opts2 = cpu_to_le32(opts[1]);
  
@@ -91,7 +86,7 @@ index 1d81238..51b6dc2 100644
  	skb_tx_timestamp(skb);
  
  	wmb();
-@@ -6691,6 +6695,7 @@ static void rtl8169_pcierr_interrupt(struct net_device *dev)
+@@ -6712,6 +6716,7 @@ static void rtl8169_pcierr_interrupt(struct net_device *dev)
  static void rtl_tx(struct net_device *dev, struct rtl8169_private *tp)
  {
  	unsigned int dirty_tx, tx_left;
@@ -99,7 +94,7 @@ index 1d81238..51b6dc2 100644
  
  	dirty_tx = tp->dirty_tx;
  	smp_rmb();
-@@ -6709,10 +6714,8 @@ static void rtl_tx(struct net_device *dev, struct rtl8169_private *tp)
+@@ -6730,10 +6735,8 @@ static void rtl_tx(struct net_device *dev, struct rtl8169_private *tp)
  		rtl8169_unmap_tx_skb(&tp->pci_dev->dev, tx_skb,
  				     tp->TxDescArray + entry);
  		if (status & LastFrag) {
@@ -112,7 +107,7 @@ index 1d81238..51b6dc2 100644
  			dev_kfree_skb_any(tx_skb->skb);
  			tx_skb->skb = NULL;
  		}
-@@ -6721,6 +6724,13 @@ static void rtl_tx(struct net_device *dev, struct rtl8169_private *tp)
+@@ -6742,6 +6745,13 @@ static void rtl_tx(struct net_device *dev, struct rtl8169_private *tp)
  	}
  
  	if (tp->dirty_tx != dirty_tx) {
@@ -126,3 +121,6 @@ index 1d81238..51b6dc2 100644
  		tp->dirty_tx = dirty_tx;
  		/* Sync with rtl8169_start_xmit:
  		 * - publish dirty_tx ring index (write barrier)
+-- 
+cgit v0.10.1
+

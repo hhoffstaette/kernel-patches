@@ -1,0 +1,37 @@
+From 2f8c040ce6791ef0477e6d59768ee3d5fd0df0fd Mon Sep 17 00:00:00 2001
+From: Chun-Hao Lin <hau@realtek.com>
+Date: Wed, 1 Oct 2014 23:17:19 +0800
+Subject: r8169:change the name of function "r8168dp_check_dash" to
+ "r8168_check_dash"
+
+DASH function not only RTL8168DP can support, but also RTL8168EP.
+So change the name of function "r8168dp_check_dash" to "r8168_check_dash".
+
+Signed-off-by: Chun-Hao Lin <hau@realtek.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 5884b6d..d84605a 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -1015,7 +1015,7 @@ static void rtl8168_driver_stop(struct rtl8169_private *tp)
+ 	rtl_msleep_loop_wait_low(tp, &rtl_ocp_read_cond, 10, 10);
+ }
+ 
+-static int r8168dp_check_dash(struct rtl8169_private *tp)
++static int r8168_check_dash(struct rtl8169_private *tp)
+ {
+ 	u16 reg = rtl8168_get_ocp_reg(tp);
+ 
+@@ -4364,7 +4364,7 @@ static void r8168_pll_power_down(struct rtl8169_private *tp)
+ 	if ((tp->mac_version == RTL_GIGA_MAC_VER_27 ||
+ 	     tp->mac_version == RTL_GIGA_MAC_VER_28 ||
+ 	     tp->mac_version == RTL_GIGA_MAC_VER_31) &&
+-	    r8168dp_check_dash(tp)) {
++	    r8168_check_dash(tp)) {
+ 		return;
+ 	}
+ 
+-- 
+cgit v0.10.1
+
