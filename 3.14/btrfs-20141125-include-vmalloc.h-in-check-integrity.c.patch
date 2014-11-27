@@ -1,0 +1,26 @@
+From 8f608de699ec3dd0618795c42734e5db3b20353d Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Tue, 25 Nov 2014 05:58:23 -0800
+Subject: Btrfs: include vmalloc.h in check-integrity.c
+
+Fengguang's build monster reported warnings on some arches because we
+don't have vmalloc.h included
+
+Signed-off-by: Chris Mason <clm@fb.com>
+Reported-by: fengguang.wu@intel.com
+
+diff --git a/fs/btrfs/check-integrity.c b/fs/btrfs/check-integrity.c
+index 47cb267..d897ef8 100644
+--- a/fs/btrfs/check-integrity.c
++++ b/fs/btrfs/check-integrity.c
+@@ -94,6 +94,7 @@
+ #include <linux/mutex.h>
+ #include <linux/genhd.h>
+ #include <linux/blkdev.h>
++#include <linux/vmalloc.h>
+ #include "ctree.h"
+ #include "disk-io.h"
+ #include "hash.h"
+-- 
+cgit v0.10.1
+
