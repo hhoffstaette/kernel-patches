@@ -1,0 +1,141 @@
+From 3eb38ac0c416a25708db9e7a7895603b57f529e5 Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Thu, 6 Nov 2014 16:14:21 +0800
+Subject: Btrfs, raid56: use a variant to record the operation type
+
+We will introduce new operation type later, if we still use integer
+variant as bool variant to record the operation type, we would add new
+variant and increase the size of raid bio structure. It is not good,
+by this patch, we define different number for different operation,
+and we can just use a variant to record the operation type.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+
+diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
+index 6013d88..bfc406d 100644
+--- a/fs/btrfs/raid56.c
++++ b/fs/btrfs/raid56.c
+@@ -62,6 +62,11 @@
+ 
+ #define RBIO_CACHE_SIZE 1024
+ 
++enum btrfs_rbio_ops {
++	BTRFS_RBIO_WRITE	= 0,
++	BTRFS_RBIO_READ_REBUILD	= 1,
++};
++
+ struct btrfs_raid_bio {
+ 	struct btrfs_fs_info *fs_info;
+ 	struct btrfs_bio *bbio;
+@@ -124,7 +129,7 @@ struct btrfs_raid_bio {
+ 	 * differently from a parity rebuild as part of
+ 	 * rmw
+ 	 */
+-	int read_rebuild;
++	enum btrfs_rbio_ops operation;
+ 
+ 	/* first bad stripe */
+ 	int faila;
+@@ -147,7 +152,6 @@ struct btrfs_raid_bio {
+ 
+ 	atomic_t refs;
+ 
+-
+ 	atomic_t stripes_pending;
+ 
+ 	atomic_t error;
+@@ -583,8 +587,7 @@ static int rbio_can_merge(struct btrfs_raid_bio *last,
+ 		return 0;
+ 
+ 	/* reads can't merge with writes */
+-	if (last->read_rebuild !=
+-	    cur->read_rebuild) {
++	if (last->operation != cur->operation) {
+ 		return 0;
+ 	}
+ 
+@@ -777,9 +780,9 @@ static noinline void unlock_stripe(struct btrfs_raid_bio *rbio)
+ 			spin_unlock(&rbio->bio_list_lock);
+ 			spin_unlock_irqrestore(&h->lock, flags);
+ 
+-			if (next->read_rebuild)
++			if (next->operation == BTRFS_RBIO_READ_REBUILD)
+ 				async_read_rebuild(next);
+-			else {
++			else if (next->operation == BTRFS_RBIO_WRITE){
+ 				steal_rbio(rbio, next);
+ 				async_rmw_stripe(next);
+ 			}
+@@ -1713,6 +1716,7 @@ int raid56_parity_write(struct btrfs_root *root, struct bio *bio,
+ 	}
+ 	bio_list_add(&rbio->bio_list, bio);
+ 	rbio->bio_list_bytes = bio->bi_iter.bi_size;
++	rbio->operation = BTRFS_RBIO_WRITE;
+ 
+ 	/*
+ 	 * don't plug on full rbios, just get them out the door
+@@ -1761,7 +1765,7 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
+ 	faila = rbio->faila;
+ 	failb = rbio->failb;
+ 
+-	if (rbio->read_rebuild) {
++	if (rbio->operation == BTRFS_RBIO_READ_REBUILD) {
+ 		spin_lock_irq(&rbio->bio_list_lock);
+ 		set_bit(RBIO_RMW_LOCKED_BIT, &rbio->flags);
+ 		spin_unlock_irq(&rbio->bio_list_lock);
+@@ -1778,7 +1782,7 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
+ 			 * if we're rebuilding a read, we have to use
+ 			 * pages from the bio list
+ 			 */
+-			if (rbio->read_rebuild &&
++			if (rbio->operation == BTRFS_RBIO_READ_REBUILD &&
+ 			    (stripe == faila || stripe == failb)) {
+ 				page = page_in_rbio(rbio, stripe, pagenr, 0);
+ 			} else {
+@@ -1871,7 +1875,7 @@ pstripe:
+ 		 * know they can be trusted.  If this was a read reconstruction,
+ 		 * other endio functions will fiddle the uptodate bits
+ 		 */
+-		if (!rbio->read_rebuild) {
++		if (rbio->operation == BTRFS_RBIO_WRITE) {
+ 			for (i = 0;  i < nr_pages; i++) {
+ 				if (faila != -1) {
+ 					page = rbio_stripe_page(rbio, faila, i);
+@@ -1888,7 +1892,7 @@ pstripe:
+ 			 * if we're rebuilding a read, we have to use
+ 			 * pages from the bio list
+ 			 */
+-			if (rbio->read_rebuild &&
++			if (rbio->operation == BTRFS_RBIO_READ_REBUILD &&
+ 			    (stripe == faila || stripe == failb)) {
+ 				page = page_in_rbio(rbio, stripe, pagenr, 0);
+ 			} else {
+@@ -1904,7 +1908,7 @@ cleanup:
+ 
+ cleanup_io:
+ 
+-	if (rbio->read_rebuild) {
++	if (rbio->operation == BTRFS_RBIO_READ_REBUILD) {
+ 		if (err == 0)
+ 			cache_rbio_pages(rbio);
+ 		else
+@@ -2042,7 +2046,7 @@ out:
+ 	return 0;
+ 
+ cleanup:
+-	if (rbio->read_rebuild)
++	if (rbio->operation == BTRFS_RBIO_READ_REBUILD)
+ 		rbio_orig_end_io(rbio, -EIO, 0);
+ 	return -EIO;
+ }
+@@ -2068,7 +2072,7 @@ int raid56_parity_recover(struct btrfs_root *root, struct bio *bio,
+ 
+ 	if (hold_bbio)
+ 		set_bit(RBIO_HOLD_BBIO_MAP_BIT, &rbio->flags);
+-	rbio->read_rebuild = 1;
++	rbio->operation = BTRFS_RBIO_READ_REBUILD;
+ 	bio_list_add(&rbio->bio_list, bio);
+ 	rbio->bio_list_bytes = bio->bi_iter.bi_size;
+ 
+-- 
+cgit v0.10.1

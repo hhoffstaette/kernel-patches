@@ -1,0 +1,27 @@
+From 7e07f3b6f961549bcf93c6b0a697ba19ec169b45 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 13 Nov 2014 11:45:38 +0800
+Subject: Btrfs, replace: enable dev-replace for raid56
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index 894796a..9f6a464 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -316,11 +316,6 @@ int btrfs_dev_replace_start(struct btrfs_root *root,
+ 	struct btrfs_device *tgt_device = NULL;
+ 	struct btrfs_device *src_device = NULL;
+ 
+-	if (btrfs_fs_incompat(fs_info, RAID56)) {
+-		btrfs_warn(fs_info, "dev_replace cannot yet handle RAID5/RAID6");
+-		return -EINVAL;
+-	}
+-
+ 	switch (args->start.cont_reading_from_srcdev_mode) {
+ 	case BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_ALWAYS:
+ 	case BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_AVOID:
+-- 
+cgit v0.10.1
+
