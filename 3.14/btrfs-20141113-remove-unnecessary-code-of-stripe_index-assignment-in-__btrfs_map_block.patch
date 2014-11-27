@@ -1,0 +1,30 @@
+From 15fa233d65f40f1c9100990274f93da76870d0ba Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 13 Nov 2014 11:45:40 +0800
+Subject: Btrfs: remove unnecessary code of stripe_index assignment in __btrfs_map_block
+
+stripe_index's value was set again in latter line:
+stripe_index = 0;
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 41b0dff..66d5035 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -5167,9 +5167,7 @@ static int __btrfs_map_block(struct btrfs_fs_info *fs_info, int rw,
+ 
+ 			/* push stripe_nr back to the start of the full stripe */
+ 			stripe_nr = raid56_full_stripe_start;
+-			do_div(stripe_nr, stripe_len);
+-
+-			stripe_index = do_div(stripe_nr, nr_data_stripes(map));
++			do_div(stripe_nr, stripe_len * nr_data_stripes(map));
+ 
+ 			/* RAID[56] write or recovery. Return all stripes */
+ 			num_stripes = map->num_stripes;
+-- 
+cgit v0.10.1
+

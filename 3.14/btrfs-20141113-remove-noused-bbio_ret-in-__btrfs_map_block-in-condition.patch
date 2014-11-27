@@ -1,0 +1,31 @@
+From aedd772f7394eeb9afae1977dfd87c348daafba8 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 13 Nov 2014 11:45:39 +0800
+Subject: Btrfs: remove noused bbio_ret in __btrfs_map_block in condition
+
+bbio_ret in this condition is always !NULL because previous code
+already have a check-and-skip:
+4908 if (!bbio_ret)
+4909     goto out;
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index f61278f..41b0dff 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -5162,8 +5162,7 @@ static int __btrfs_map_block(struct btrfs_fs_info *fs_info, int rw,
+ 				BTRFS_BLOCK_GROUP_RAID6)) {
+ 		u64 tmp;
+ 
+-		if (bbio_ret && ((rw & REQ_WRITE) || mirror_num > 1)
+-		    && raid_map_ret) {
++		if (raid_map_ret && ((rw & REQ_WRITE) || mirror_num > 1)) {
+ 			int i, rot;
+ 
+ 			/* push stripe_nr back to the start of the full stripe */
+-- 
+cgit v0.10.1
+
