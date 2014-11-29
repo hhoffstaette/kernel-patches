@@ -1,0 +1,157 @@
+From 688eb988d15af55c1d1b70b1ca9f6ce58f277c20 Mon Sep 17 00:00:00 2001
+From: Michal Hocko <mhocko@suse.cz>
+Date: Fri, 6 Jun 2014 14:38:15 -0700
+Subject: vmscan: memcg: always use swappiness of the reclaimed memcg
+
+Memory reclaim always uses swappiness of the reclaim target memcg
+(origin of the memory pressure) or vm_swappiness for global memory
+reclaim.  This behavior was consistent (except for difference between
+global and hard limit reclaim) because swappiness was enforced to be
+consistent within each memcg hierarchy.
+
+After "mm: memcontrol: remove hierarchy restrictions for swappiness and
+oom_control" each memcg can have its own swappiness independent of
+hierarchical parents, though, so the consistency guarantee is gone.
+This can lead to an unexpected behavior.  Say that a group is explicitly
+configured to not swapout by memory.swappiness=0 but its memory gets
+swapped out anyway when the memory pressure comes from its parent with a
+It is also unexpected that the knob is meaningless without setting the
+hard limit which would trigger the reclaim and enforce the swappiness.
+There are setups where the hard limit is configured higher in the
+hierarchy by an administrator and children groups are under control of
+somebody else who is interested in the swapout behavior but not
+necessarily about the memory limit.
+
+From a semantic point of view swappiness is an attribute defining anon
+vs.
+ file proportional scanning of LRU which is memcg specific (unlike
+charges which are propagated up the hierarchy) so it should be applied
+to the particular memcg's LRU regardless where the memory pressure comes
+from.
+
+This patch removes vmscan_swappiness() and stores the swappiness into
+the scan_control structure.  mem_cgroup_swappiness is then used to
+provide the correct value before shrink_lruvec is called.  The global
+vm_swappiness is used for the root memcg.
+
+[hughd@google.com: oopses immediately when booted with cgroup_disable=memory]
+Signed-off-by: Michal Hocko <mhocko@suse.cz>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Cc: Tejun Heo <tj@kernel.org>
+Signed-off-by: Hugh Dickins <hughd@google.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/Documentation/cgroups/memory.txt b/Documentation/cgroups/memory.txt
+index 4937e6f..b3429ae 100644
+--- a/Documentation/cgroups/memory.txt
++++ b/Documentation/cgroups/memory.txt
+@@ -540,14 +540,13 @@ Note:
+ 
+ 5.3 swappiness
+ 
+-Similar to /proc/sys/vm/swappiness, but only affecting reclaim that is
+-triggered by this cgroup's hard limit.  The tunable in the root cgroup
+-corresponds to the global swappiness setting.
+-
+-Please note that unlike the global swappiness, memcg knob set to 0
+-really prevents from any swapping even if there is a swap storage
+-available. This might lead to memcg OOM killer if there are no file
+-pages to reclaim.
++Overrides /proc/sys/vm/swappiness for the particular group. The tunable
++in the root cgroup corresponds to the global swappiness setting.
++
++Please note that unlike during the global reclaim, limit reclaim
++enforces that 0 swappiness really prevents from any swapping even if
++there is a swap storage available. This might lead to memcg OOM killer
++if there are no file pages to reclaim.
+ 
+ 5.4 failcnt
+ 
+diff --git a/mm/memcontrol.c b/mm/memcontrol.c
+index a500cb0..9bf8a84 100644
+--- a/mm/memcontrol.c
++++ b/mm/memcontrol.c
+@@ -1550,7 +1550,7 @@ static unsigned long mem_cgroup_margin(struct mem_cgroup *memcg)
+ int mem_cgroup_swappiness(struct mem_cgroup *memcg)
+ {
+ 	/* root ? */
+-	if (!css_parent(&memcg->css))
++	if (mem_cgroup_disabled() || !css_parent(&memcg->css))
+ 		return vm_swappiness;
+ 
+ 	return memcg->swappiness;
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 05d41c0..f44476a 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -83,6 +83,9 @@ struct scan_control {
+ 	/* Scan (total_size >> priority) pages at once */
+ 	int priority;
+ 
++	/* anon vs. file LRUs scanning "ratio" */
++	int swappiness;
++
+ 	/*
+ 	 * The memory cgroup that hit its limit and as a result is the
+ 	 * primary target of this reclaim invocation.
+@@ -1845,13 +1848,6 @@ static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
+ 	return shrink_inactive_list(nr_to_scan, lruvec, sc, lru);
+ }
+ 
+-static int vmscan_swappiness(struct scan_control *sc)
+-{
+-	if (global_reclaim(sc))
+-		return vm_swappiness;
+-	return mem_cgroup_swappiness(sc->target_mem_cgroup);
+-}
+-
+ enum scan_balance {
+ 	SCAN_EQUAL,
+ 	SCAN_FRACT,
+@@ -1912,7 +1908,7 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
+ 	 * using the memory controller's swap limit feature would be
+ 	 * too expensive.
+ 	 */
+-	if (!global_reclaim(sc) && !vmscan_swappiness(sc)) {
++	if (!global_reclaim(sc) && !sc->swappiness) {
+ 		scan_balance = SCAN_FILE;
+ 		goto out;
+ 	}
+@@ -1922,7 +1918,7 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
+ 	 * system is close to OOM, scan both anon and file equally
+ 	 * (unless the swappiness setting disagrees with swapping).
+ 	 */
+-	if (!sc->priority && vmscan_swappiness(sc)) {
++	if (!sc->priority && sc->swappiness) {
+ 		scan_balance = SCAN_EQUAL;
+ 		goto out;
+ 	}
+@@ -1965,7 +1961,7 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
+ 	 * With swappiness at 100, anonymous and file have the same priority.
+ 	 * This scanning priority is essentially the inverse of IO cost.
+ 	 */
+-	anon_prio = vmscan_swappiness(sc);
++	anon_prio = sc->swappiness;
+ 	file_prio = 200 - anon_prio;
+ 
+ 	/*
+@@ -2265,6 +2261,7 @@ static void shrink_zone(struct zone *zone, struct scan_control *sc)
+ 
+ 			lruvec = mem_cgroup_zone_lruvec(zone, memcg);
+ 
++			sc->swappiness = mem_cgroup_swappiness(memcg);
+ 			shrink_lruvec(lruvec, sc);
+ 
+ 			/*
+@@ -2731,6 +2728,7 @@ unsigned long mem_cgroup_shrink_node_zone(struct mem_cgroup *memcg,
+ 		.may_swap = !noswap,
+ 		.order = 0,
+ 		.priority = 0,
++		.swappiness = mem_cgroup_swappiness(memcg),
+ 		.target_mem_cgroup = memcg,
+ 	};
+ 	struct lruvec *lruvec = mem_cgroup_zone_lruvec(zone, memcg);
+-- 
+cgit v0.10.1
+
