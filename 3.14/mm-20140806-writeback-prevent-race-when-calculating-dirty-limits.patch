@@ -1,0 +1,44 @@
+From 9ef0a0ffa28edbf5c7cfa6be73b4ecb9896a3875 Mon Sep 17 00:00:00 2001
+From: David Rientjes <rientjes@google.com>
+Date: Wed, 6 Aug 2014 16:07:31 -0700
+Subject: mm, writeback: prevent race when calculating dirty limits
+
+Setting vm_dirty_bytes and dirty_background_bytes is not protected by
+any serialization.
+
+Therefore, it's possible for either variable to change value after the
+test in global_dirty_limits() to determine whether available_memory
+needs to be initialized or not.
+
+Always ensure that available_memory is properly initialized.
+
+Signed-off-by: David Rientjes <rientjes@google.com>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Acked-by: Michal Hocko <mhocko@suse.cz>
+Cc: Rik van Riel <riel@redhat.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index e0c9430..91d73ef 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -261,14 +261,11 @@ static unsigned long global_dirtyable_memory(void)
+  */
+ void global_dirty_limits(unsigned long *pbackground, unsigned long *pdirty)
+ {
++	const unsigned long available_memory = global_dirtyable_memory();
+ 	unsigned long background;
+ 	unsigned long dirty;
+-	unsigned long uninitialized_var(available_memory);
+ 	struct task_struct *tsk;
+ 
+-	if (!vm_dirty_bytes || !dirty_background_bytes)
+-		available_memory = global_dirtyable_memory();
+-
+ 	if (vm_dirty_bytes)
+ 		dirty = DIV_ROUND_UP(vm_dirty_bytes, PAGE_SIZE);
+ 	else
+-- 
+cgit v0.10.1
+
