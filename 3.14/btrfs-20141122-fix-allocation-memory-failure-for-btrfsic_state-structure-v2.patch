@@ -1,8 +1,10 @@
-From: Wang Shilong <wangshilong1991@gmail.com>
-Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: fix allocationg memory failure for btrfsic_state structure
-Date: Fri, 10 Oct 2014 17:35:59 -0400
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/39304>
+From patchwork Sat Nov 22 13:13:09 2014
+From: Shilong Wang <wangshilong1991@gmail.com>
+Subject: [v2] Btrfs: fix allocationg memory failure for btrfsic_state structure
+X-Patchwork-Id: 5359251
+Message-Id: <1416661990-20717-1-git-send-email-wangshilong1991@gmail.com>
+To: linux-btrfs@vger.kernel.org
+Date: Sat, 22 Nov 2014 21:13:09 +0800
 
 size of @btrfsic_state needs more than 2M, it is very likely to
 fail allocating memory using kzalloc(). see following mesage:
@@ -37,15 +39,27 @@ Fix this problem by firstly trying kzalloc(), if we fail,
 use vzalloc() instead.
 
 Signed-off-by: Wang Shilong <wangshilong1991@gmail.com>
+
 ---
- fs/btrfs/check-integrity.c | 16 +++++++++++-----
- 1 file changed, 11 insertions(+), 5 deletions(-)
+v1->v2:
+	include vmalloc.h and swith kvfree() helper.
+---
+ fs/btrfs/check-integrity.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
 
 diff --git a/fs/btrfs/check-integrity.c b/fs/btrfs/check-integrity.c
-index cb7f3fe..66e820f 100644
+index cb7f3fe..f88b3a6 100644
 --- a/fs/btrfs/check-integrity.c
 +++ b/fs/btrfs/check-integrity.c
-@@ -3130,10 +3130,13 @@ int btrfsic_mount(struct btrfs_root *root,
+@@ -94,6 +94,7 @@
+ #include <linux/mutex.h>
+ #include <linux/genhd.h>
+ #include <linux/blkdev.h>
++#include <linux/vmalloc.h>
+ #include "ctree.h"
+ #include "disk-io.h"
+ #include "hash.h"
+@@ -3130,10 +3131,13 @@ int btrfsic_mount(struct btrfs_root *root,
  		       root->sectorsize, PAGE_CACHE_SIZE);
  		return -1;
  	}
@@ -63,15 +77,10 @@ index cb7f3fe..66e820f 100644
  	}
  
  	if (!btrfsic_is_initialized) {
-@@ -3277,5 +3280,8 @@ void btrfsic_unmount(struct btrfs_root *root,
+@@ -3277,5 +3281,5 @@ void btrfsic_unmount(struct btrfs_root *root,
  
  	mutex_unlock(&btrfsic_mutex);
  
 -	kfree(state);
-+	if (is_vmalloc_addr(state))
-+		vfree(state);
-+	else
-+		kfree(state);
++	kvfree(state);
  }
--- 
-1.8.3.1
