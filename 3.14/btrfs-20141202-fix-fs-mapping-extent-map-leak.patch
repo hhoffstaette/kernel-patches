@@ -1,12 +1,16 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: fix extent map leak on chunk allocation failure
-Date: Mon,  1 Dec 2014 17:05:45 +0000
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40825>
+Subject: [PATCH 1/2] Btrfs: fix fs mapping extent map leak
+Date: Tue,  2 Dec 2014 18:07:30 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40937>
 
-On error, after adding the extent map to the tree and to the pending
-chunks list, we would leave decrementing the extent map's refcount
-by 2 instead of 3 (our allocation + tree reference + list reference).
+On chunk allocation error (label "error_del_extent"), after adding the
+extent map to the tree and to the pending chunks list, we would leave
+decrementing the extent map's refcount by 2 instead of 3 (our allocation
++ tree reference + list reference).
+
+Also, on chunk/block group removal, if the block group was on the list
+pending_chunks we weren't decrementing the respective list reference.
 
 Detected by 'rmmod btrfs':
 
@@ -25,11 +29,38 @@ Detected by 'rmmod btrfs':
 [20770.106182]  [<ffffffff8121261b>] ? trace_hardirqs_on_thunk+0x3a/0x3c
 [20770.106184]  [<ffffffff813ebf52>] system_call_fastpath+0x16/0x1b
 
+This applies on top (depends on) of my previous patch titled:
+"Btrfs: fix race between fs trimming and block group remove/allocation"
+
+But the issue in fact was already present before that change, it only
+became easier to hit after Josef's 3.18 patch that added automatic
+removal of empty block groups.
+
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/volumes.c | 2 ++
- 1 file changed, 2 insertions(+)
 
+This replaces my previous patch titled:
+"Btrfs: fix extent map leak on chunk allocation failure"
+
+ fs/btrfs/extent-tree.c | 4 ++++
+ fs/btrfs/volumes.c     | 2 ++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index a811ed2..17d429d 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -9479,6 +9479,10 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
+ 	memcpy(&key, &block_group->key, sizeof(key));
+ 
+ 	lock_chunks(root);
++	if (!list_empty(&em->list)) {
++		/* We're in the transaction->pending_chunks list. */
++		free_extent_map(em);
++	}
+ 	spin_lock(&block_group->lock);
+ 	block_group->removed = 1;
+ 	/*
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
 index 66a5a1e..e936fe3 100644
 --- a/fs/btrfs/volumes.c
