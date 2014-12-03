@@ -12,7 +12,7 @@ performance/scalability improvements to the entire kernel.
 
 - bfq: BFQ v7r6 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v454 + SMT-nice patch ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
-- btrfs: >430 patches from 3.15..3.18+ to address corruption, stability, performance and also most new capabilities, e.g. `O_TMPFILE`, `renameat2` and automatic GC of empty blockgroups. \o/
+- btrfs: >430 patches from 3.15..3.18+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace and automatic GC of empty blockgroups. \o/
 - ext4: corruption fixes, `renameat2`
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - locking: cancellable/optimistic spinning MCS / queued rwlocks ([patch](http://bit.ly/Xq41R6), [article]( http://lwn.net/Articles/590243/))

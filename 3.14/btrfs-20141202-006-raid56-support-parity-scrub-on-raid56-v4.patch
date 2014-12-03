@@ -1,7 +1,8 @@
-From 4098a5502f585941fd150772fa05b42e0b01e192 Mon Sep 17 00:00:00 2001
 From: Miao Xie <miaox@cn.fujitsu.com>
-Date: Thu, 6 Nov 2014 17:20:58 +0800
-Subject: Btrfs, raid56: support parity scrub on raid56
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH v4 06/10] Btrfs, raid56: support parity scrub on raid56
+Date: Tue, 2 Dec 2014 20:39:27 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40918>
 
 The implementation is:
 - Read and check all the data with checksum in the same stripe.
@@ -34,12 +35,30 @@ parity, we will skip those horizontal sub-stripes that the relative
 bits is 0.
 
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+---
+Changelog v3 -> v4:
+- None.
+
+Changelog v2 -> v3:
+- Fix wrong stripe start logical address calculation which was reported
+  by Chris.
+- Fix unhandled raid bios for parity scrub, which are added into the plug
+  list of the head raid bio.
+- Modify the code that is used to avoid the rbio merge.
+
+Changelog v1 -> v2:
+- None.
+---
+ fs/btrfs/raid56.c | 514 ++++++++++++++++++++++++++++++++++++++++++++-
+ fs/btrfs/raid56.h |  12 ++
+ fs/btrfs/scrub.c  | 609 ++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 3 files changed, 1115 insertions(+), 20 deletions(-)
 
 diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
-index bfc406d..3b99cbc 100644
+index 4924388..58a8408 100644
 --- a/fs/btrfs/raid56.c
 +++ b/fs/btrfs/raid56.c
-@@ -65,6 +65,7 @@
+@@ -72,6 +72,7 @@
  enum btrfs_rbio_ops {
  	BTRFS_RBIO_WRITE	= 0,
  	BTRFS_RBIO_READ_REBUILD	= 1,
@@ -47,7 +66,7 @@ index bfc406d..3b99cbc 100644
  };
  
  struct btrfs_raid_bio {
-@@ -123,6 +124,7 @@ struct btrfs_raid_bio {
+@@ -130,6 +131,7 @@ struct btrfs_raid_bio {
  	/* number of data stripes (no p/q) */
  	int nr_data;
  
@@ -55,7 +74,7 @@ index bfc406d..3b99cbc 100644
  	/*
  	 * set if we're doing a parity rebuild
  	 * for a read from higher up, which is handled
-@@ -137,6 +139,7 @@ struct btrfs_raid_bio {
+@@ -144,6 +146,7 @@ struct btrfs_raid_bio {
  	/* second bad stripe (for raid6 use) */
  	int failb;
  
@@ -63,7 +82,7 @@ index bfc406d..3b99cbc 100644
  	/*
  	 * number of pages needed to represent the full
  	 * stripe
-@@ -171,6 +174,11 @@ struct btrfs_raid_bio {
+@@ -178,6 +181,11 @@ struct btrfs_raid_bio {
  	 * here for faster lookup
  	 */
  	struct page **bio_pages;
@@ -75,7 +94,7 @@ index bfc406d..3b99cbc 100644
  };
  
  static int __raid56_parity_recover(struct btrfs_raid_bio *rbio);
-@@ -185,6 +193,10 @@ static void __free_raid_bio(struct btrfs_raid_bio *rbio);
+@@ -192,6 +200,10 @@ static void __free_raid_bio(struct btrfs_raid_bio *rbio);
  static void index_rbio_pages(struct btrfs_raid_bio *rbio);
  static int alloc_rbio_pages(struct btrfs_raid_bio *rbio);
  
@@ -86,7 +105,7 @@ index bfc406d..3b99cbc 100644
  /*
   * the stripe hash table is used for locking, and to collect
   * bios in hopes of making a full stripe
-@@ -586,10 +598,20 @@ static int rbio_can_merge(struct btrfs_raid_bio *last,
+@@ -593,10 +605,20 @@ static int rbio_can_merge(struct btrfs_raid_bio *last,
  	    cur->raid_map[0])
  		return 0;
  
@@ -110,7 +129,7 @@ index bfc406d..3b99cbc 100644
  
  	return 1;
  }
-@@ -782,9 +804,12 @@ static noinline void unlock_stripe(struct btrfs_raid_bio *rbio)
+@@ -789,9 +811,12 @@ static noinline void unlock_stripe(struct btrfs_raid_bio *rbio)
  
  			if (next->operation == BTRFS_RBIO_READ_REBUILD)
  				async_read_rebuild(next);
@@ -124,7 +143,7 @@ index bfc406d..3b99cbc 100644
  			}
  
  			goto done_nolock;
-@@ -950,9 +975,11 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
+@@ -957,9 +982,11 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
  	struct btrfs_raid_bio *rbio;
  	int nr_data = 0;
  	int num_pages = rbio_nr_pages(stripe_len, bbio->num_stripes);
@@ -137,7 +156,7 @@ index bfc406d..3b99cbc 100644
  			GFP_NOFS);
  	if (!rbio)
  		return ERR_PTR(-ENOMEM);
-@@ -967,6 +994,7 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
+@@ -974,6 +1001,7 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
  	rbio->fs_info = root->fs_info;
  	rbio->stripe_len = stripe_len;
  	rbio->nr_pages = num_pages;
@@ -145,7 +164,7 @@ index bfc406d..3b99cbc 100644
  	rbio->faila = -1;
  	rbio->failb = -1;
  	atomic_set(&rbio->refs, 1);
-@@ -980,6 +1008,7 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
+@@ -987,6 +1015,7 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
  	p = rbio + 1;
  	rbio->stripe_pages = p;
  	rbio->bio_pages = p + sizeof(struct page *) * num_pages;
@@ -153,7 +172,7 @@ index bfc406d..3b99cbc 100644
  
  	if (raid_map[bbio->num_stripes - 1] == RAID6_Q_STRIPE)
  		nr_data = bbio->num_stripes - 2;
-@@ -1774,6 +1803,14 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
+@@ -1781,6 +1810,14 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
  	index_rbio_pages(rbio);
  
  	for (pagenr = 0; pagenr < nr_pages; pagenr++) {
@@ -168,7 +187,7 @@ index bfc406d..3b99cbc 100644
  		/* setup our array of pointers with pages
  		 * from each stripe
  		 */
-@@ -1918,7 +1955,13 @@ cleanup_io:
+@@ -1925,7 +1962,13 @@ cleanup_io:
  	} else if (err == 0) {
  		rbio->faila = -1;
  		rbio->failb = -1;
@@ -183,7 +202,7 @@ index bfc406d..3b99cbc 100644
  	} else {
  		rbio_orig_end_io(rbio, err, 0);
  	}
-@@ -2126,3 +2169,462 @@ static void read_rebuild_work(struct btrfs_work *work)
+@@ -2133,3 +2176,462 @@ static void read_rebuild_work(struct btrfs_work *work)
  	rbio = container_of(work, struct btrfs_raid_bio, work);
  	__raid56_parity_recover(rbio);
  }
@@ -677,7 +696,7 @@ index b310e8c..3d4ddb3 100644
  void btrfs_free_stripe_hash_table(struct btrfs_fs_info *info);
  #endif
 diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
-index ca4b9eb..7f95afc 100644
+index 738ccff..e3f0b0f 100644
 --- a/fs/btrfs/scrub.c
 +++ b/fs/btrfs/scrub.c
 @@ -74,6 +74,7 @@ struct scrub_page {
@@ -750,7 +769,7 @@ index ca4b9eb..7f95afc 100644
  static int scrub_add_page_to_rd_bio(struct scrub_ctx *sctx,
  				    struct scrub_page *spage);
  static int scrub_pages(struct scrub_ctx *sctx, u64 logical, u64 len,
-@@ -943,6 +984,7 @@ static int scrub_handle_errored_block(struct scrub_block *sblock_to_check)
+@@ -944,6 +985,7 @@ static int scrub_handle_errored_block(struct scrub_block *sblock_to_check)
  		 */
  		spin_lock(&sctx->stat_lock);
  		sctx->stat.unverified_errors++;
@@ -758,7 +777,7 @@ index ca4b9eb..7f95afc 100644
  		spin_unlock(&sctx->stat_lock);
  
  		if (sctx->is_dev_replace)
-@@ -1203,6 +1245,7 @@ nodatasum_case:
+@@ -1204,6 +1246,7 @@ nodatasum_case:
  corrected_error:
  			spin_lock(&sctx->stat_lock);
  			sctx->stat.corrected_errors++;
@@ -766,7 +785,7 @@ index ca4b9eb..7f95afc 100644
  			spin_unlock(&sctx->stat_lock);
  			printk_ratelimited_in_rcu(KERN_ERR
  				"BTRFS: fixed up error at logical %llu on dev %s\n",
-@@ -1644,6 +1687,13 @@ static void scrub_write_block_to_dev_replace(struct scrub_block *sblock)
+@@ -1645,6 +1688,13 @@ static void scrub_write_block_to_dev_replace(struct scrub_block *sblock)
  {
  	int page_num;
  
@@ -780,7 +799,7 @@ index ca4b9eb..7f95afc 100644
  	for (page_num = 0; page_num < sblock->page_count; page_num++) {
  		int ret;
  
-@@ -2025,6 +2075,9 @@ static void scrub_block_put(struct scrub_block *sblock)
+@@ -2026,6 +2076,9 @@ static void scrub_block_put(struct scrub_block *sblock)
  	if (atomic_dec_and_test(&sblock->ref_count)) {
  		int i;
  
@@ -790,7 +809,7 @@ index ca4b9eb..7f95afc 100644
  		for (i = 0; i < sblock->page_count; i++)
  			scrub_page_put(sblock->pagev[i]);
  		kfree(sblock);
-@@ -2282,9 +2335,51 @@ static void scrub_bio_end_io_worker(struct btrfs_work *work)
+@@ -2283,9 +2336,51 @@ static void scrub_bio_end_io_worker(struct btrfs_work *work)
  	scrub_pending_bio_dec(sctx);
  }
  
@@ -842,7 +861,7 @@ index ca4b9eb..7f95afc 100644
  		scrub_handle_errored_block(sblock);
  	} else {
  		/*
-@@ -2292,9 +2387,19 @@ static void scrub_block_complete(struct scrub_block *sblock)
+@@ -2293,9 +2388,19 @@ static void scrub_block_complete(struct scrub_block *sblock)
  		 * dev replace case, otherwise write here in dev replace
  		 * case.
  		 */
@@ -863,7 +882,7 @@ index ca4b9eb..7f95afc 100644
  }
  
  static int scrub_find_csum(struct scrub_ctx *sctx, u64 logical, u64 len,
-@@ -2386,6 +2491,132 @@ behind_scrub_pages:
+@@ -2387,6 +2492,132 @@ behind_scrub_pages:
  	return 0;
  }
  
@@ -996,7 +1015,7 @@ index ca4b9eb..7f95afc 100644
  /*
   * Given a physical address, this will calculate it's
   * logical offset. if this is a parity stripe, it will return
-@@ -2394,7 +2625,8 @@ behind_scrub_pages:
+@@ -2395,7 +2626,8 @@ behind_scrub_pages:
   * return 0 if it is a data stripe, 1 means parity stripe.
   */
  static int get_raid56_logic_offset(u64 physical, int num,
@@ -1006,7 +1025,7 @@ index ca4b9eb..7f95afc 100644
  {
  	int i;
  	int j = 0;
-@@ -2405,6 +2637,9 @@ static int get_raid56_logic_offset(u64 physical, int num,
+@@ -2406,6 +2638,9 @@ static int get_raid56_logic_offset(u64 physical, int num,
  
  	last_offset = (physical - map->stripes[num].physical) *
  		      nr_data_stripes(map);
@@ -1016,7 +1035,7 @@ index ca4b9eb..7f95afc 100644
  	*offset = last_offset;
  	for (i = 0; i < nr_data_stripes(map); i++) {
  		*offset = last_offset + i * map->stripe_len;
-@@ -2427,13 +2662,330 @@ static int get_raid56_logic_offset(u64 physical, int num,
+@@ -2428,13 +2663,330 @@ static int get_raid56_logic_offset(u64 physical, int num,
  	return 1;
  }
  
@@ -1348,7 +1367,7 @@ index ca4b9eb..7f95afc 100644
  	struct btrfs_fs_info *fs_info = sctx->dev_root->fs_info;
  	struct btrfs_root *root = fs_info->extent_root;
  	struct btrfs_root *csum_root = fs_info->csum_root;
-@@ -2460,6 +3012,8 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+@@ -2461,6 +3013,8 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
  	u64 extent_logical;
  	u64 extent_physical;
  	u64 extent_len;
@@ -1357,7 +1376,7 @@ index ca4b9eb..7f95afc 100644
  	struct btrfs_device *extent_dev;
  	int extent_mirror_num;
  	int stop_loop = 0;
-@@ -2485,7 +3039,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+@@ -2486,7 +3040,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
  		mirror_num = num % map->num_stripes + 1;
  	} else if (map->type & (BTRFS_BLOCK_GROUP_RAID5 |
  				BTRFS_BLOCK_GROUP_RAID6)) {
@@ -1366,7 +1385,7 @@ index ca4b9eb..7f95afc 100644
  		increment = map->stripe_len * nr_data_stripes(map);
  		mirror_num = 1;
  	} else {
-@@ -2497,6 +3051,12 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+@@ -2498,6 +3052,12 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
  	if (!path)
  		return -ENOMEM;
  
@@ -1379,7 +1398,7 @@ index ca4b9eb..7f95afc 100644
  	/*
  	 * work on commit root. The related disk blocks are static as
  	 * long as COW is applied. This means, it is save to rewrite
-@@ -2515,7 +3075,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+@@ -2516,7 +3076,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
  	if (map->type & (BTRFS_BLOCK_GROUP_RAID5 |
  			 BTRFS_BLOCK_GROUP_RAID6)) {
  		get_raid56_logic_offset(physical_end, num,
@@ -1388,7 +1407,7 @@ index ca4b9eb..7f95afc 100644
  		logic_end += base;
  	} else {
  		logic_end = logical + increment * nstripes;
-@@ -2562,10 +3122,18 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+@@ -2563,10 +3123,18 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
  		if (map->type & (BTRFS_BLOCK_GROUP_RAID5 |
  				BTRFS_BLOCK_GROUP_RAID6)) {
  			ret = get_raid56_logic_offset(physical, num,
@@ -1409,7 +1428,7 @@ index ca4b9eb..7f95afc 100644
  		}
  		/*
  		 * canceled?
-@@ -2716,13 +3284,25 @@ again:
+@@ -2717,13 +3285,25 @@ again:
  					 * loop until we find next data stripe
  					 * or we have finished all stripes.
  					 */
@@ -1442,7 +1461,7 @@ index ca4b9eb..7f95afc 100644
  				} else {
  					physical += map->stripe_len;
  					logical += increment;
-@@ -2763,6 +3343,7 @@ out:
+@@ -2764,6 +3344,7 @@ out:
  
  	blk_finish_plug(&plug);
  	btrfs_free_path(path);
@@ -1451,4 +1470,4 @@ index ca4b9eb..7f95afc 100644
  }
  
 -- 
-cgit v0.10.1
+1.9.3
