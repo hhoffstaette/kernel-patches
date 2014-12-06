@@ -29,5 +29,5 @@ series, which unfortunately only applies to x86/x86_64 thanks to unrelated
 Kconfig changes. See the patch log for more information (should be easy to
 fix, I just can't test it).
 
-The currently **required minimum** -stable release is **3.14.25**; unless
+The currently **required minimum** -stable release is **3.14.26**; unless
 otherwise noted any later 3.14-stable release should work as well.
