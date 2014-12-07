@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs,gmane.linux.kernel.stable
-Subject: [PATCH] Btrfs: fix fs corruption on transaction abort if device supports discard
-Date: Sat,  6 Dec 2014 14:41:24 +0000
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/41081>
+Subject: [PATCH v2] Btrfs: fix fs corruption on transaction abort if device supports discard
+Date: Sun,  7 Dec 2014 21:31:47 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/41102>
 
 When we abort a transaction we iterate over all the ranges marked as dirty
 in fs_info->freed_extents[0] and fs_info->freed_extents[1], clear them
@@ -106,29 +106,20 @@ acce952b0263825da32cf10489413dec78053347).
 Cc: stable@vger.kernel.org  # any kernel released after 2011-01-06
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/ctree.h       | 2 --
- fs/btrfs/disk-io.c     | 7 -------
- fs/btrfs/extent-tree.c | 5 -----
- 3 files changed, 14 deletions(-)
 
-diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index c7e5f2a..75845ec 100644
---- a/fs/btrfs/ctree.h
-+++ b/fs/btrfs/ctree.h
-@@ -3427,8 +3427,6 @@ void btrfs_set_block_group_rw(struct btrfs_root *root,
- 			      struct btrfs_block_group_cache *cache);
- void btrfs_put_block_group_cache(struct btrfs_fs_info *info);
- u64 btrfs_account_ro_block_groups_free_space(struct btrfs_space_info *sinfo);
--int btrfs_error_unpin_extent_range(struct btrfs_root *root,
--				   u64 start, u64 end);
- int btrfs_error_discard_extent(struct btrfs_root *root, u64 bytenr,
- 			       u64 num_bytes, u64 *actual_bytes);
- int btrfs_force_chunk_alloc(struct btrfs_trans_handle *trans,
+V2: Avoid a warning when freeing the block group objects, since they got
+    their pinned field with a value > 0 when their ref count dropped to
+    zero. Harmless warning however, but unnecessary.
+
+ fs/btrfs/disk-io.c     |  6 ------
+ fs/btrfs/extent-tree.c | 10 ++++++----
+ 2 files changed, 6 insertions(+), 10 deletions(-)
+
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index 7e2405a..ceb37eb 100644
+index 7e2405a..ce65b0c 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
-@@ -4134,14 +4134,7 @@ again:
+@@ -4134,12 +4134,6 @@ again:
  		if (ret)
  			break;
  
@@ -139,25 +130,49 @@ index 7e2405a..ceb37eb 100644
 -							 NULL);
 -
  		clear_extent_dirty(unpin, start, end, GFP_NOFS);
--		btrfs_error_unpin_extent_range(root, start, end);
+ 		btrfs_error_unpin_extent_range(root, start, end);
+ 		cond_resched();
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index c2fc261..fc74a9b 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -5728,7 +5728,8 @@ void btrfs_prepare_extent_commit(struct btrfs_trans_handle *trans,
+ 	update_global_block_rsv(fs_info);
+ }
+ 
+-static int unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
++static int unpin_extent_range(struct btrfs_root *root, u64 start, u64 end,
++			      const bool return_free_space)
+ {
+ 	struct btrfs_fs_info *fs_info = root->fs_info;
+ 	struct btrfs_block_group_cache *cache = NULL;
+@@ -5752,7 +5753,8 @@ static int unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
+ 
+ 		if (start < cache->last_byte_to_unpin) {
+ 			len = min(len, cache->last_byte_to_unpin - start);
+-			btrfs_add_free_space(cache, start, len);
++			if (return_free_space)
++				btrfs_add_free_space(cache, start, len);
+ 		}
+ 
+ 		start += len;
+@@ -5816,7 +5818,7 @@ int btrfs_finish_extent_commit(struct btrfs_trans_handle *trans,
+ 						   end + 1 - start, NULL);
+ 
+ 		clear_extent_dirty(unpin, start, end, GFP_NOFS);
+-		unpin_extent_range(root, start, end);
++		unpin_extent_range(root, start, end, true);
  		cond_resched();
  	}
  
-diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index c2fc261..c2ac45a 100644
---- a/fs/btrfs/extent-tree.c
-+++ b/fs/btrfs/extent-tree.c
-@@ -9703,11 +9703,6 @@ out:
- 	return ret;
+@@ -9705,7 +9707,7 @@ out:
+ 
+ int btrfs_error_unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
+ {
+-	return unpin_extent_range(root, start, end);
++	return unpin_extent_range(root, start, end, false);
  }
  
--int btrfs_error_unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
--{
--	return unpin_extent_range(root, start, end);
--}
--
  int btrfs_error_discard_extent(struct btrfs_root *root, u64 bytenr,
- 			       u64 num_bytes, u64 *actual_bytes)
- {
 -- 
 2.1.3
