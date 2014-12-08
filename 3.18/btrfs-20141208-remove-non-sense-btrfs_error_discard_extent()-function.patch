@@ -1,0 +1,76 @@
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: remove non-sense btrfs_error_discard_extent() function
+Date: Mon,  8 Dec 2014 14:01:12 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/41125>
+
+It doesn't do anything special, it just calls btrfs_discard_extent(),
+so just remove it.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/ctree.h            |  4 ++--
+ fs/btrfs/extent-tree.c      | 10 ++--------
+ fs/btrfs/free-space-cache.c |  4 ++--
+ 3 files changed, 6 insertions(+), 12 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index c7e5f2a..399a4e0 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -3429,8 +3429,8 @@ void btrfs_put_block_group_cache(struct btrfs_fs_info *info);
+ u64 btrfs_account_ro_block_groups_free_space(struct btrfs_space_info *sinfo);
+ int btrfs_error_unpin_extent_range(struct btrfs_root *root,
+ 				   u64 start, u64 end);
+-int btrfs_error_discard_extent(struct btrfs_root *root, u64 bytenr,
+-			       u64 num_bytes, u64 *actual_bytes);
++int btrfs_discard_extent(struct btrfs_root *root, u64 bytenr,
++			 u64 num_bytes, u64 *actual_bytes);
+ int btrfs_force_chunk_alloc(struct btrfs_trans_handle *trans,
+ 			    struct btrfs_root *root, u64 type);
+ int btrfs_trim_fs(struct btrfs_root *root, struct fstrim_range *range);
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index fc74a9b..18b63acc 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -1891,8 +1891,8 @@ static int btrfs_issue_discard(struct block_device *bdev,
+ 	return blkdev_issue_discard(bdev, start >> 9, len >> 9, GFP_NOFS, 0);
+ }
+ 
+-static int btrfs_discard_extent(struct btrfs_root *root, u64 bytenr,
+-				u64 num_bytes, u64 *actual_bytes)
++int btrfs_discard_extent(struct btrfs_root *root, u64 bytenr,
++			 u64 num_bytes, u64 *actual_bytes)
+ {
+ 	int ret;
+ 	u64 discarded_bytes = 0;
+@@ -9710,12 +9710,6 @@ int btrfs_error_unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
+ 	return unpin_extent_range(root, start, end, false);
+ }
+ 
+-int btrfs_error_discard_extent(struct btrfs_root *root, u64 bytenr,
+-			       u64 num_bytes, u64 *actual_bytes)
+-{
+-	return btrfs_discard_extent(root, bytenr, num_bytes, actual_bytes);
+-}
+-
+ int btrfs_trim_fs(struct btrfs_root *root, struct fstrim_range *range)
+ {
+ 	struct btrfs_fs_info *fs_info = root->fs_info;
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index edf32c5..d6c03f7 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -2966,8 +2966,8 @@ static int do_trimming(struct btrfs_block_group_cache *block_group,
+ 	spin_unlock(&block_group->lock);
+ 	spin_unlock(&space_info->lock);
+ 
+-	ret = btrfs_error_discard_extent(fs_info->extent_root,
+-					 start, bytes, &trimmed);
++	ret = btrfs_discard_extent(fs_info->extent_root,
++				   start, bytes, &trimmed);
+ 	if (!ret)
+ 		*total_trimmed += trimmed;
+ 
+-- 
+2.1.3
