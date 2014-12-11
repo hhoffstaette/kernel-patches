@@ -10,6 +10,7 @@ performance/scalability improvements to the entire kernel.
 
 **List of patches for 3.18.x**
 
+- bfs: BFS v460 ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
 - btrfs: fixes for filesystem corruption, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: TSO improvements
