@@ -1,0 +1,78 @@
+From: Miao Xie <miaox@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH v2 03/10] Btrfs: fix wrong fsid check of scrub
+Date: Wed, 3 Sep 2014 14:58:47 +0800
+Message-ID: <1409727527-21147-1-git-send-email-miaox@cn.fujitsu.com>
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/38251>
+
+All the metadata in the seed devices has the same fsid as the fsid
+of the seed filesystem which is on the seed device, so we should check
+them by the current filesystem. Fix it.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+---
+Changelog v1 -> v2:
+- Use const keyword to restrict the fsid.
+- Remove unnecessary the variant.
+---
+ fs/btrfs/scrub.c | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index dfb92a2..12a6801 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -1361,6 +1361,14 @@ static void scrub_recheck_block(struct btrfs_fs_info *fs_info,
+ 	return;
+ }
+ 
++static inline int scrub_check_fsid(const u8 *fsid,
++				   struct scrub_page *spage)
++{
++	struct btrfs_fs_devices *fs_devices = spage->dev->fs_devices;
++
++	return !memcmp(fsid, fs_devices->fsid, BTRFS_UUID_SIZE);
++}
++
+ static void scrub_recheck_block_checksum(struct btrfs_fs_info *fs_info,
+ 					 struct scrub_block *sblock,
+ 					 int is_metadata, int have_csum,
+@@ -1380,7 +1388,7 @@ static void scrub_recheck_block_checksum(struct btrfs_fs_info *fs_info,
+ 		h = (struct btrfs_header *)mapped_buffer;
+ 
+ 		if (sblock->pagev[0]->logical != btrfs_stack_header_bytenr(h) ||
+-		    memcmp(h->fsid, fs_info->fsid, BTRFS_UUID_SIZE) ||
++		    !scrub_check_fsid(h->fsid, sblock->pagev[0]) ||
+ 		    memcmp(h->chunk_tree_uuid, fs_info->chunk_tree_uuid,
+ 			   BTRFS_UUID_SIZE)) {
+ 			sblock->header_error = 1;
+@@ -1750,7 +1758,7 @@ static int scrub_checksum_tree_block(struct scrub_block *sblock)
+ 	if (sblock->pagev[0]->generation != btrfs_stack_header_generation(h))
+ 		++fail;
+ 
+-	if (memcmp(h->fsid, fs_info->fsid, BTRFS_UUID_SIZE))
++	if (!scrub_check_fsid(h->fsid, sblock->pagev[0]))
+ 		++fail;
+ 
+ 	if (memcmp(h->chunk_tree_uuid, fs_info->chunk_tree_uuid,
+@@ -1790,8 +1798,6 @@ static int scrub_checksum_super(struct scrub_block *sblock)
+ {
+ 	struct btrfs_super_block *s;
+ 	struct scrub_ctx *sctx = sblock->sctx;
+-	struct btrfs_root *root = sctx->dev_root;
+-	struct btrfs_fs_info *fs_info = root->fs_info;
+ 	u8 calculated_csum[BTRFS_CSUM_SIZE];
+ 	u8 on_disk_csum[BTRFS_CSUM_SIZE];
+ 	struct page *page;
+@@ -1816,7 +1822,7 @@ static int scrub_checksum_super(struct scrub_block *sblock)
+ 	if (sblock->pagev[0]->generation != btrfs_super_generation(s))
+ 		++fail_gen;
+ 
+-	if (memcmp(s->fsid, fs_info->fsid, BTRFS_UUID_SIZE))
++	if (!scrub_check_fsid(s->fsid, sblock->pagev[0]))
+ 		++fail_cor;
+ 
+ 	len = BTRFS_SUPER_INFO_SIZE - BTRFS_CSUM_SIZE;
+-- 
+1.9.3

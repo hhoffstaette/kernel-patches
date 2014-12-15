@@ -1,0 +1,30 @@
+From 472b909ff6f4884d235ef7b9d3847fad5efafbff Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Wed, 25 Jun 2014 13:45:41 -0700
+Subject: btrfs: only unlock block in verify_parent_transid if we locked it
+
+This is a regression from my patch a26e8c9f75b0bfd8cccc9e8f110737b136eb5994, we
+need to only unlock the block if we were the one who locked it.  Otherwise this
+will trip BUG_ON()'s in locking.c  Thanks,
+
+cc: stable@vger.kernel.org
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 8bb4aa1..f00165d 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -369,7 +369,8 @@ static int verify_parent_transid(struct extent_io_tree *io_tree,
+ out:
+ 	unlock_extent_cached(io_tree, eb->start, eb->start + eb->len - 1,
+ 			     &cached_state, GFP_NOFS);
+-	btrfs_tree_read_unlock_blocking(eb);
++	if (need_lock)
++		btrfs_tree_read_unlock_blocking(eb);
+ 	return ret;
+ }
+ 
+-- 
+cgit v0.10.1
+

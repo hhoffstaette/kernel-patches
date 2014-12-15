@@ -1,0 +1,51 @@
+From b2b80195d8829921506880f6dccd21cabd163d0d Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Thu, 29 May 2014 09:11:45 -0400
+Subject: dealing with the rest of shrink_dentry_list() livelock
+
+We have the same problem with ->d_lock order in the inner loop, where
+we are dropping references to ancestors.  Same solution, basically -
+instead of using dentry_kill() we use lock_parent() (introduced in the
+previous commit) to get that lock in a safe way, recheck ->d_count
+(in case if lock_parent() has ended up dropping and retaking ->d_lock
+and somebody managed to grab a reference during that window), trylock
+the inode->i_lock and use __dentry_kill() to do the rest.
+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index d54a99b..eb7c725 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -885,8 +885,26 @@ static void shrink_dentry_list(struct list_head *list)
+ 		 * fragmentation.
+ 		 */
+ 		dentry = parent;
+-		while (dentry && !lockref_put_or_lock(&dentry->d_lockref))
+-			dentry = dentry_kill(dentry, 1);
++		while (dentry && !lockref_put_or_lock(&dentry->d_lockref)) {
++			parent = lock_parent(dentry);
++			if (dentry->d_lockref.count != 1) {
++				dentry->d_lockref.count--;
++				spin_unlock(&dentry->d_lock);
++				if (parent)
++					spin_unlock(&parent->d_lock);
++				break;
++			}
++			inode = dentry->d_inode;	/* can't be NULL */
++			if (unlikely(!spin_trylock(&inode->i_lock))) {
++				spin_unlock(&dentry->d_lock);
++				if (parent)
++					spin_unlock(&parent->d_lock);
++				cpu_relax();
++				continue;
++			}
++			__dentry_kill(dentry);
++			dentry = parent;
++		}
+ 	}
+ }
+ 
+-- 
+cgit v0.10.1
+

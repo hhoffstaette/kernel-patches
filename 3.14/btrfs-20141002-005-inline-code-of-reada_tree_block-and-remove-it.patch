@@ -1,0 +1,42 @@
+From 453848a05ff984cb3665bad5c7e0024e8cfe87a5 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Sun, 15 Jun 2014 00:51:19 +0200
+Subject: btrfs: inline code of reada_tree_block and remove it
+
+It's trivial with a single user. And remove one pointless BUG_ON.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 16cb2b4..d750632 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -2857,15 +2857,6 @@ static int get_tree_block_key(struct reloc_control *rc,
+ 	return 0;
+ }
+ 
+-static int reada_tree_block(struct reloc_control *rc,
+-			    struct tree_block *block)
+-{
+-	BUG_ON(block->key_ready);
+-	readahead_tree_block(rc->extent_root, block->bytenr,
+-			block->key.objectid);
+-	return 0;
+-}
+-
+ /*
+  * helper function to relocate a tree block
+  */
+@@ -2945,7 +2936,8 @@ int relocate_tree_blocks(struct btrfs_trans_handle *trans,
+ 	while (rb_node) {
+ 		block = rb_entry(rb_node, struct tree_block, rb_node);
+ 		if (!block->key_ready)
+-			reada_tree_block(rc, block);
++			readahead_tree_block(rc->extent_root, block->bytenr,
++					block->key.objectid);
+ 		rb_node = rb_next(rb_node);
+ 	}
+ 
+-- 
+cgit v0.10.1
+

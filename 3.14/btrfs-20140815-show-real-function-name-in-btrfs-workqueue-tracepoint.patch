@@ -1,0 +1,27 @@
+From b7831b20f32019b741eb8fe3435c2516e13e0c4a Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Fri, 15 Aug 2014 23:38:06 +0800
+Subject: Btrfs: show real function name in btrfs workqueue tracepoint
+
+Use %pf instead of %p, just same as kernel workqueue tracepoints.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/include/trace/events/btrfs.h b/include/trace/events/btrfs.h
+index 64a90d7..e022a60 100644
+--- a/include/trace/events/btrfs.h
++++ b/include/trace/events/btrfs.h
+@@ -1009,7 +1009,7 @@ DECLARE_EVENT_CLASS(btrfs__work,
+ 		__entry->normal_work	= &work->normal_work;
+ 	),
+ 
+-	TP_printk("work=%p (normal_work=%p), wq=%p, func=%p, ordered_func=%p,"
++	TP_printk("work=%p (normal_work=%p), wq=%p, func=%pf, ordered_func=%p,"
+ 		  " ordered_free=%p",
+ 		  __entry->work, __entry->normal_work, __entry->wq,
+ 		   __entry->func, __entry->ordered_func, __entry->ordered_free)
+-- 
+cgit v0.10.1
+

@@ -1,0 +1,104 @@
+From 41edf278fc2f042f4e22a12ed87d19c5201210e1 Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Thu, 1 May 2014 10:30:00 -0400
+Subject: dentry_kill(): don't try to remove from shrink list
+
+If the victim in on the shrink list, don't remove it from there.
+If shrink_dentry_list() manages to remove it from the list before
+we are done - fine, we'll just free it as usual.  If not - mark
+it with new flag (DCACHE_MAY_FREE) and leave it there.
+
+Eventually, shrink_dentry_list() will get to it, remove the sucker
+from shrink list and call dentry_kill(dentry, 0).  Which is where
+we'll deal with freeing.
+
+Since now dentry_kill(dentry, 0) may happen after or during
+dentry_kill(dentry, 1), we need to recognize that (by seeing
+DCACHE_DENTRY_KILLED already set), unlock everything
+and either free the sucker (in case DCACHE_MAY_FREE has been
+set) or leave it for ongoing dentry_kill(dentry, 1) to deal with.
+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index e482775..58e26be 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -468,7 +468,14 @@ dentry_kill(struct dentry *dentry, int unlock_on_failure)
+ 	__releases(dentry->d_lock)
+ {
+ 	struct inode *inode;
+-	struct dentry *parent;
++	struct dentry *parent = NULL;
++	bool can_free = true;
++
++	if (unlikely(dentry->d_flags & DCACHE_DENTRY_KILLED)) {
++		can_free = dentry->d_flags & DCACHE_MAY_FREE;
++		spin_unlock(&dentry->d_lock);
++		goto out;
++	}
+ 
+ 	inode = dentry->d_inode;
+ 	if (inode && !spin_trylock(&inode->i_lock)) {
+@@ -479,9 +486,7 @@ relock:
+ 		}
+ 		return dentry; /* try again with same dentry */
+ 	}
+-	if (IS_ROOT(dentry))
+-		parent = NULL;
+-	else
++	if (!IS_ROOT(dentry))
+ 		parent = dentry->d_parent;
+ 	if (parent && !spin_trylock(&parent->d_lock)) {
+ 		if (inode)
+@@ -504,8 +509,6 @@ relock:
+ 	if (dentry->d_flags & DCACHE_LRU_LIST) {
+ 		if (!(dentry->d_flags & DCACHE_SHRINK_LIST))
+ 			d_lru_del(dentry);
+-		else
+-			d_shrink_del(dentry);
+ 	}
+ 	/* if it was on the hash then remove it */
+ 	__d_drop(dentry);
+@@ -527,7 +530,15 @@ relock:
+ 	if (dentry->d_op && dentry->d_op->d_release)
+ 		dentry->d_op->d_release(dentry);
+ 
+-	dentry_free(dentry);
++	spin_lock(&dentry->d_lock);
++	if (dentry->d_flags & DCACHE_SHRINK_LIST) {
++		dentry->d_flags |= DCACHE_MAY_FREE;
++		can_free = false;
++	}
++	spin_unlock(&dentry->d_lock);
++out:
++	if (likely(can_free))
++		dentry_free(dentry);
+ 	return parent;
+ }
+ 
+@@ -829,7 +840,7 @@ static void shrink_dentry_list(struct list_head *list)
+ 		 * We found an inuse dentry which was not removed from
+ 		 * the LRU because of laziness during lookup. Do not free it.
+ 		 */
+-		if (dentry->d_lockref.count) {
++		if ((int)dentry->d_lockref.count > 0) {
+ 			spin_unlock(&dentry->d_lock);
+ 			continue;
+ 		}
+diff --git a/include/linux/dcache.h b/include/linux/dcache.h
+index 3b9bfdb..3c7ec32 100644
+--- a/include/linux/dcache.h
++++ b/include/linux/dcache.h
+@@ -221,6 +221,8 @@ struct dentry_operations {
+ #define DCACHE_SYMLINK_TYPE		0x00300000 /* Symlink */
+ #define DCACHE_FILE_TYPE		0x00400000 /* Other file type */
+ 
++#define DCACHE_MAY_FREE			0x00800000
++
+ extern seqlock_t rename_lock;
+ 
+ static inline int dname_external(const struct dentry *dentry)
+-- 
+cgit v0.10.1
+

@@ -1,0 +1,61 @@
+From 9d89ce658718d9d21465666127a15ca2c82c4ea7 Mon Sep 17 00:00:00 2001
+From: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Date: Wed, 23 Apr 2014 19:33:33 +0800
+Subject: Btrfs: move btrfs_{set,clear}_and_info() to ctree.h
+
+Signed-off-by: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index ad1a594..e7c9e1c 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -2058,6 +2058,20 @@ struct btrfs_ioctl_defrag_range_args {
+ #define btrfs_raw_test_opt(o, opt)	((o) & BTRFS_MOUNT_##opt)
+ #define btrfs_test_opt(root, opt)	((root)->fs_info->mount_opt & \
+ 					 BTRFS_MOUNT_##opt)
++#define btrfs_set_and_info(root, opt, fmt, args...)			\
++{									\
++	if (!btrfs_test_opt(root, opt))					\
++		btrfs_info(root->fs_info, fmt, ##args);			\
++	btrfs_set_opt(root->fs_info->mount_opt, opt);			\
++}
++
++#define btrfs_clear_and_info(root, opt, fmt, args...)			\
++{									\
++	if (btrfs_test_opt(root, opt))					\
++		btrfs_info(root->fs_info, fmt, ##args);			\
++	btrfs_clear_opt(root->fs_info->mount_opt, opt);			\
++}
++
+ /*
+  * Inode flags
+  */
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 53bc373..363404b 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -385,20 +385,6 @@ static match_table_t tokens = {
+ 	{Opt_err, NULL},
+ };
+ 
+-#define btrfs_set_and_info(root, opt, fmt, args...)			\
+-{									\
+-	if (!btrfs_test_opt(root, opt))					\
+-		btrfs_info(root->fs_info, fmt, ##args);			\
+-	btrfs_set_opt(root->fs_info->mount_opt, opt);			\
+-}
+-
+-#define btrfs_clear_and_info(root, opt, fmt, args...)			\
+-{									\
+-	if (btrfs_test_opt(root, opt))					\
+-		btrfs_info(root->fs_info, fmt, ##args);			\
+-	btrfs_clear_opt(root->fs_info->mount_opt, opt);			\
+-}
+-
+ /*
+  * Regular mount options parser.  Everything that is needed only when
+  * reading in a new superblock is parsed here.
+-- 
+cgit v0.10.1
+

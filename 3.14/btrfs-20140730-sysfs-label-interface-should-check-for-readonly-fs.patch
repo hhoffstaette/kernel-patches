@@ -1,0 +1,27 @@
+From 03e016c826fc6976147f023bbb654c6171f73f81 Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Wed, 30 Jul 2014 20:04:10 +0800
+Subject: btrfs: sysfs label interface should check for read only FS
+
+Not sure how this escaped many eyes so far
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 82a968f..f729d57 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -377,6 +377,9 @@ static ssize_t btrfs_label_store(struct kobject *kobj,
+ 	int ret;
+ 	size_t p_len;
+ 
++	if (fs_info->sb->s_flags & MS_RDONLY)
++		return -EROFS;
++
+ 	/*
+ 	 * p_len is the len until the first occurrence of either
+ 	 * '\n' or '\0'
+-- 
+cgit v0.10.1
+

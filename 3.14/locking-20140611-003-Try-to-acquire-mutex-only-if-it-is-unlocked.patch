@@ -1,0 +1,61 @@
+From 0d968dd8c6aced585b86fa7ba8ce4573bf19e848 Mon Sep 17 00:00:00 2001
+From: Jason Low <jason.low2@hp.com>
+Date: Wed, 11 Jun 2014 11:37:22 -0700
+Subject: locking/mutexes: Try to acquire mutex only if it is unlocked
+
+Upon entering the slowpath in __mutex_lock_common(), we try once more to
+acquire the mutex. We only try to acquire if (lock->count >= 0). However,
+what we actually want here is to try to acquire if the mutex is unlocked
+(lock->count == 1).
+
+This patch changes it so that we only try-acquire the mutex upon entering
+the slowpath if it is unlocked, rather than if the lock count is non-negative.
+This helps further reduce unnecessary atomic xchg() operations.
+
+Furthermore, this patch uses !mutex_is_locked(lock) to do the initial
+checks for if the lock is free rather than directly calling atomic_read()
+on the lock->count, in order to improve readability.
+
+Signed-off-by: Jason Low <jason.low2@hp.com>
+Acked-by: Waiman Long <Waiman.Long@hp.com>
+Signed-off-by: Peter Zijlstra <peterz@infradead.org>
+Cc: akpm@linux-foundation.org
+Cc: tim.c.chen@linux.intel.com
+Cc: paulmck@linux.vnet.ibm.com
+Cc: rostedt@goodmis.org
+Cc: davidlohr@hp.com
+Cc: scott.norton@hp.com
+Cc: aswin@hp.com
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Link: http://lkml.kernel.org/r/1402511843-4721-4-git-send-email-jason.low2@hp.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/kernel/locking/mutex.c b/kernel/locking/mutex.c
+index 4bd9546..e4d997b 100644
+--- a/kernel/locking/mutex.c
++++ b/kernel/locking/mutex.c
+@@ -432,7 +432,8 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
+ 		if (owner && !mutex_spin_on_owner(lock, owner))
+ 			break;
+ 
+-		if ((atomic_read(&lock->count) == 1) &&
++		/* Try to acquire the mutex if it is unlocked. */
++		if (!mutex_is_locked(lock) &&
+ 		    (atomic_cmpxchg(&lock->count, 1, 0) == 1)) {
+ 			lock_acquired(&lock->dep_map, ip);
+ 			if (use_ww_ctx) {
+@@ -479,9 +480,9 @@ slowpath:
+ 
+ 	/*
+ 	 * Once more, try to acquire the lock. Only try-lock the mutex if
+-	 * lock->count >= 0 to reduce unnecessary xchg operations.
++	 * it is unlocked to reduce unnecessary xchg() operations.
+ 	 */
+-	if (atomic_read(&lock->count) >= 0 && (atomic_xchg(&lock->count, 0) == 1))
++	if (!mutex_is_locked(lock) && (atomic_xchg(&lock->count, 0) == 1))
+ 		goto skip_wait;
+ 
+ 	debug_mutex_lock_common(lock, &waiter);
+-- 
+cgit v0.10.1
+

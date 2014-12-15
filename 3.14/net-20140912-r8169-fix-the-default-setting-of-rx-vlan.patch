@@ -1,0 +1,33 @@
+From 48c20407f49039d8da155ca00877ec5f057799e6 Mon Sep 17 00:00:00 2001
+From: hayeswang <hayeswang@realtek.com>
+Date: Fri, 12 Sep 2014 11:35:11 +0800
+Subject: r8169: fix the default setting of rx vlan
+
+If the parameter "features" of __rtl8169_set_features() is equal to
+dev->features, the variable "changed" is alwayes 0, and nothing would
+be changed.
+
+Signed-off-by: Hayes Wang <hayeswang@realtek.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 91652e7..f3ce284 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -6707,7 +6707,12 @@ static int rtl_open(struct net_device *dev)
+ 
+ 	rtl8169_init_phy(dev, tp);
+ 
+-	__rtl8169_set_features(dev, dev->features);
++	if (dev->features & NETIF_F_HW_VLAN_CTAG_RX)
++		tp->cp_cmd |= RxVlan;
++	else
++		tp->cp_cmd &= ~RxVlan;
++
++	RTL_W16(CPlusCmd, tp->cp_cmd);
+ 
+ 	rtl_pll_power_up(tp);
+ 
+-- 
+cgit v0.10.1
+

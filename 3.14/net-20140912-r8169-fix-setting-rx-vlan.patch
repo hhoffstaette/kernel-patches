@@ -1,0 +1,26 @@
+From 36d8e82541c4be8f529dce9efbcefd504e085ccf Mon Sep 17 00:00:00 2001
+From: hayeswang <hayeswang@realtek.com>
+Date: Fri, 12 Sep 2014 11:35:12 +0800
+Subject: r8169: fix setting rx vlan
+
+The setting should depend on the new features not the current one.
+
+Signed-off-by: Hayes Wang <hayeswang@realtek.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index f3ce284..7a7860a 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -1796,7 +1796,7 @@ static void __rtl8169_set_features(struct net_device *dev,
+ 		else
+ 			tp->cp_cmd &= ~RxChkSum;
+ 
+-		if (dev->features & NETIF_F_HW_VLAN_CTAG_RX)
++		if (features & NETIF_F_HW_VLAN_CTAG_RX)
+ 			tp->cp_cmd |= RxVlan;
+ 		else
+ 			tp->cp_cmd &= ~RxVlan;
+-- 
+cgit v0.10.1
+

@@ -1,0 +1,50 @@
+From 72d5305dcb3637913c2c37e847a4de9028e49244 Mon Sep 17 00:00:00 2001
+From: Jason Low <jason.low2@hp.com>
+Date: Wed, 11 Jun 2014 11:37:23 -0700
+Subject: locking/mutexes: Optimize mutex trylock slowpath
+
+The mutex_trylock() function calls into __mutex_trylock_fastpath() when
+trying to obtain the mutex. On 32 bit x86, in the !__HAVE_ARCH_CMPXCHG
+case, __mutex_trylock_fastpath() calls directly into __mutex_trylock_slowpath()
+regardless of whether or not the mutex is locked.
+
+In __mutex_trylock_slowpath(), we then acquire the wait_lock spinlock, xchg()
+lock->count with -1, then set lock->count back to 0 if there are no waiters,
+and return true if the prev lock count was 1.
+
+However, if the mutex is already locked, then there isn't much point
+in attempting all of the above expensive operations. In this patch, we only
+attempt the above trylock operations if the mutex is unlocked.
+
+Signed-off-by: Jason Low <jason.low2@hp.com>
+Reviewed-by: Davidlohr Bueso <davidlohr@hp.com>
+Signed-off-by: Peter Zijlstra <peterz@infradead.org>
+Cc: akpm@linux-foundation.org
+Cc: tim.c.chen@linux.intel.com
+Cc: paulmck@linux.vnet.ibm.com
+Cc: rostedt@goodmis.org
+Cc: Waiman.Long@hp.com
+Cc: scott.norton@hp.com
+Cc: aswin@hp.com
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Link: http://lkml.kernel.org/r/1402511843-4721-5-git-send-email-jason.low2@hp.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/kernel/locking/mutex.c b/kernel/locking/mutex.c
+index e4d997b..11b103d 100644
+--- a/kernel/locking/mutex.c
++++ b/kernel/locking/mutex.c
+@@ -820,6 +820,10 @@ static inline int __mutex_trylock_slowpath(atomic_t *lock_count)
+ 	unsigned long flags;
+ 	int prev;
+ 
++	/* No need to trylock if the mutex is locked. */
++	if (mutex_is_locked(lock))
++		return 0;
++
+ 	spin_lock_mutex(&lock->wait_lock, flags);
+ 
+ 	prev = atomic_xchg(&lock->count, -1);
+-- 
+cgit v0.10.1
+

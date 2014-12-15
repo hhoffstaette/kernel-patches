@@ -1,0 +1,29 @@
+From 64c948abc53f5873687b116d755510c60f592339 Mon Sep 17 00:00:00 2001
+From: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Date: Thu, 17 Jul 2014 11:44:12 +0800
+Subject: Btrfs: fix wrong max inline data size limit
+
+inline data is stored from offset of @disk_bytenr in
+struct btrfs_file_extent_item. So substracting total
+size of struct btrfs_file_extent_item is wrong, fix it.
+
+Signed-off-by: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 6fc16d2..840ecb7 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -394,7 +394,7 @@ struct btrfs_header {
+ #define BTRFS_LEAF_DATA_SIZE(r) (__BTRFS_LEAF_DATA_SIZE(r->nodesize))
+ #define BTRFS_MAX_INLINE_DATA_SIZE(r) (BTRFS_LEAF_DATA_SIZE(r) - \
+ 					sizeof(struct btrfs_item) - \
+-					sizeof(struct btrfs_file_extent_item))
++					offsetof(struct btrfs_file_extent_item, disk_bytenr))
+ #define BTRFS_MAX_XATTR_SIZE(r)	(BTRFS_LEAF_DATA_SIZE(r) - \
+ 				 sizeof(struct btrfs_item) -\
+ 				 sizeof(struct btrfs_dir_item))
+-- 
+cgit v0.10.1
+

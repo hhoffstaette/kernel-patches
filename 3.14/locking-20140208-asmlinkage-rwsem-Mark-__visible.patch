@@ -1,0 +1,50 @@
+From 3ebae4f3a2e746ae17f25c741e249294e7d6d7c2 Mon Sep 17 00:00:00 2001
+From: Andi Kleen <ak@linux.intel.com>
+Date: Sat, 8 Feb 2014 08:52:05 +0100
+Subject: asmlinkage: Mark rwsem functions that can be called from assembler asmlinkage
+
+Mark the rwsem functions that can be called from assembler asmlinkage.
+
+Signed-off-by: Andi Kleen <ak@linux.intel.com>
+Link: http://lkml.kernel.org/r/1391845930-28580-9-git-send-email-ak@linux.intel.com
+Signed-off-by: H. Peter Anvin <hpa@linux.intel.com>
+
+diff --git a/kernel/locking/rwsem-xadd.c b/kernel/locking/rwsem-xadd.c
+index 19c5fa9..1d66e08 100644
+--- a/kernel/locking/rwsem-xadd.c
++++ b/kernel/locking/rwsem-xadd.c
+@@ -143,6 +143,7 @@ __rwsem_do_wake(struct rw_semaphore *sem, enum rwsem_wake_type wake_type)
+ /*
+  * wait for the read lock to be granted
+  */
++__visible
+ struct rw_semaphore __sched *rwsem_down_read_failed(struct rw_semaphore *sem)
+ {
+ 	long count, adjustment = -RWSEM_ACTIVE_READ_BIAS;
+@@ -190,6 +191,7 @@ struct rw_semaphore __sched *rwsem_down_read_failed(struct rw_semaphore *sem)
+ /*
+  * wait until we successfully acquire the write lock
+  */
++__visible
+ struct rw_semaphore __sched *rwsem_down_write_failed(struct rw_semaphore *sem)
+ {
+ 	long count, adjustment = -RWSEM_ACTIVE_WRITE_BIAS;
+@@ -252,6 +254,7 @@ struct rw_semaphore __sched *rwsem_down_write_failed(struct rw_semaphore *sem)
+  * handle waking up a waiter on the semaphore
+  * - up_read/up_write has decremented the active part of count if we come here
+  */
++__visible
+ struct rw_semaphore *rwsem_wake(struct rw_semaphore *sem)
+ {
+ 	unsigned long flags;
+@@ -272,6 +275,7 @@ struct rw_semaphore *rwsem_wake(struct rw_semaphore *sem)
+  * - caller incremented waiting part of count and discovered it still negative
+  * - just wake up any readers at the front of the queue
+  */
++__visible
+ struct rw_semaphore *rwsem_downgrade_wake(struct rw_semaphore *sem)
+ {
+ 	unsigned long flags;
+-- 
+cgit v0.10.1
+

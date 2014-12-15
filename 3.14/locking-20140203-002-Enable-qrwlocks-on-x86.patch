@@ -1,0 +1,99 @@
+From bd01ec1a13f9a327950c8e3080096446c7804753 Mon Sep 17 00:00:00 2001
+From: Waiman Long <Waiman.Long@hp.com>
+Date: Mon, 3 Feb 2014 13:18:57 +0100
+Subject: x86, locking/rwlocks: Enable qrwlocks on x86
+
+Make x86 use the fair rwlock_t.
+
+Implement the custom queue_write_unlock() for best performance.
+
+Signed-off-by: Waiman Long <Waiman.Long@hp.com>
+[peterz: near complete rewrite]
+Signed-off-by: Peter Zijlstra <peterz@infradead.org>
+Cc: Dave Jones <davej@redhat.com>
+Cc: Jeremy Fitzhardinge <jeremy@goop.org>
+Cc: Konrad Rzeszutek Wilk <konrad.wilk@oracle.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Raghavendra K T <raghavendra.kt@linux.vnet.ibm.com>
+Cc: "Paul E.McKenney" <paulmck@linux.vnet.ibm.com>
+Cc: linux-kernel@vger.kernel.org
+Cc: x86@kernel.org
+Link: http://lkml.kernel.org/n/tip-r1xuzmdysvuhl3h86n5fbxi7@git.kernel.org
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+index 25d2c6f..bf7626f 100644
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -121,6 +121,7 @@ config X86
+ 	select MODULES_USE_ELF_RELA if X86_64
+ 	select CLONE_BACKWARDS if X86_32
+ 	select ARCH_USE_BUILTIN_BSWAP
++	select ARCH_USE_QUEUE_RWLOCK
+ 	select OLD_SIGSUSPEND3 if X86_32 || IA32_EMULATION
+ 	select OLD_SIGACTION if X86_32
+ 	select COMPAT_OLD_SIGACTION if IA32_EMULATION
+diff --git a/arch/x86/include/asm/qrwlock.h b/arch/x86/include/asm/qrwlock.h
+new file mode 100644
+index 0000000..70f46f0
+--- /dev/null
++++ b/arch/x86/include/asm/qrwlock.h
+@@ -0,0 +1,17 @@
++#ifndef _ASM_X86_QRWLOCK_H
++#define _ASM_X86_QRWLOCK_H
++
++#include <asm-generic/qrwlock_types.h>
++
++#if !defined(CONFIG_X86_OOSTORE) && !defined(CONFIG_X86_PPRO_FENCE)
++#define queue_write_unlock queue_write_unlock
++static inline void queue_write_unlock(struct qrwlock *lock)
++{
++        barrier();
++        ACCESS_ONCE(*(u8 *)&lock->cnts) = 0;
++}
++#endif
++
++#include <asm-generic/qrwlock.h>
++
++#endif /* _ASM_X86_QRWLOCK_H */
+diff --git a/arch/x86/include/asm/spinlock.h b/arch/x86/include/asm/spinlock.h
+index 0f62f54..54f1c80 100644
+--- a/arch/x86/include/asm/spinlock.h
++++ b/arch/x86/include/asm/spinlock.h
+@@ -187,6 +187,7 @@ static inline void arch_spin_unlock_wait(arch_spinlock_t *lock)
+ 		cpu_relax();
+ }
+ 
++#ifndef CONFIG_QUEUE_RWLOCK
+ /*
+  * Read-write spinlocks, allowing multiple readers
+  * but only one writer.
+@@ -269,6 +270,9 @@ static inline void arch_write_unlock(arch_rwlock_t *rw)
+ 	asm volatile(LOCK_PREFIX WRITE_LOCK_ADD(%1) "%0"
+ 		     : "+m" (rw->write) : "i" (RW_LOCK_BIAS) : "memory");
+ }
++#else
++#include <asm/qrwlock.h>
++#endif /* CONFIG_QUEUE_RWLOCK */
+ 
+ #define arch_read_lock_flags(lock, flags) arch_read_lock(lock)
+ #define arch_write_lock_flags(lock, flags) arch_write_lock(lock)
+diff --git a/arch/x86/include/asm/spinlock_types.h b/arch/x86/include/asm/spinlock_types.h
+index 4f1bea1..73c4c00 100644
+--- a/arch/x86/include/asm/spinlock_types.h
++++ b/arch/x86/include/asm/spinlock_types.h
+@@ -34,6 +34,10 @@ typedef struct arch_spinlock {
+ 
+ #define __ARCH_SPIN_LOCK_UNLOCKED	{ { 0 } }
+ 
++#ifdef CONFIG_QUEUE_RWLOCK
++#include <asm-generic/qrwlock_types.h>
++#else
+ #include <asm/rwlock.h>
++#endif
+ 
+ #endif /* _ASM_X86_SPINLOCK_TYPES_H */
+-- 
+cgit v0.10.1
+

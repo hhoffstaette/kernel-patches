@@ -1,0 +1,47 @@
+From 487b74a5aee33b366dddb8da71274f43ce90d77b Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Wed, 3 Sep 2014 21:35:40 +0800
+Subject: Btrfs: fix unprotected device list access when getting the fs
+ information
+
+When we get the fs information, we forgot to acquire the mutex of device list,
+it might cause the problem we might access a device that was removed. Fix
+it by acquiring the device list mutex.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 624ee74..d0f44d9 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -1703,7 +1703,11 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 	struct btrfs_block_rsv *block_rsv = &fs_info->global_block_rsv;
+ 	int ret;
+ 
+-	/* holding chunk_muext to avoid allocating new chunks */
++	/*
++	 * holding chunk_muext to avoid allocating new chunks, holding
++	 * device_list_mutex to avoid the device being removed
++	 */
++	mutex_lock(&fs_info->fs_devices->device_list_mutex);
+ 	mutex_lock(&fs_info->chunk_mutex);
+ 	rcu_read_lock();
+ 	list_for_each_entry_rcu(found, head, list) {
+@@ -1744,11 +1748,13 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 	ret = btrfs_calc_avail_data_space(fs_info->tree_root, &total_free_data);
+ 	if (ret) {
+ 		mutex_unlock(&fs_info->chunk_mutex);
++		mutex_unlock(&fs_info->fs_devices->device_list_mutex);
+ 		return ret;
+ 	}
+ 	buf->f_bavail += div_u64(total_free_data, factor);
+ 	buf->f_bavail = buf->f_bavail >> bits;
+ 	mutex_unlock(&fs_info->chunk_mutex);
++	mutex_unlock(&fs_info->fs_devices->device_list_mutex);
+ 
+ 	buf->f_type = BTRFS_SUPER_MAGIC;
+ 	buf->f_bsize = dentry->d_sb->s_blocksize;
+-- 
+cgit v0.10.1
+

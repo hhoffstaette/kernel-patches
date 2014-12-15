@@ -1,0 +1,39 @@
+From 7a9810e7bd99c922d9cedf64dbaa5ef6be412295 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michel=20D=C3=A4nzer?= <michel@daenzer.net>
+Date: Thu, 17 Jul 2014 12:55:40 +0900
+Subject: r8169: Enable RX_MULTI_EN for RTL_GIGA_MAC_VER_40
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The ethernet port on my ASUS A88X Pro mainboard stopped working
+several times a day, with messages like these in dmesg:
+
+AMD-Vi: Event logged [IO_PAGE_FAULT device=05:00.0 domain=0x001e address=0x0000000000003000 flags=0x0050]
+
+Searching the web for these messages led me to similar reports about
+different hardware supported by r8169, and eventually to commits
+3ced8c955e74d319f3e3997f7169c79d524dfd06 ('r8169: enforce RX_MULTI_EN
+for the 8168f.') and eb2dc35d99028b698cdedba4f5522bc43e576bd2 ('r8169:
+RxConfig hack for the 8168evl'). So I tried this change, and it fixes
+the problem for me.
+
+Signed-off-by: Michel Dänzer <michel@daenzer.net>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 06bdc31..61623e9 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -4240,6 +4240,8 @@ static void rtl_init_rxcfg(struct rtl8169_private *tp)
+ 		RTL_W32(RxConfig, RX128_INT_EN | RX_MULTI_EN | RX_DMA_BURST);
+ 		break;
+ 	case RTL_GIGA_MAC_VER_40:
++		RTL_W32(RxConfig, RX128_INT_EN | RX_MULTI_EN | RX_DMA_BURST | RX_EARLY_OFF);
++		break;
+ 	case RTL_GIGA_MAC_VER_41:
+ 	case RTL_GIGA_MAC_VER_42:
+ 	case RTL_GIGA_MAC_VER_43:
+-- 
+cgit v0.10.1
+

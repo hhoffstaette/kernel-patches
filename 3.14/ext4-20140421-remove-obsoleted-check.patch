@@ -1,0 +1,28 @@
+From 236f5ecb4a5876977837376729a7599cc1ab2cc3 Mon Sep 17 00:00:00 2001
+From: Dmitry Monakhov <dmonakhov@openvz.org>
+Date: Mon, 21 Apr 2014 14:38:14 -0400
+Subject: ext4: remove obsoleted check
+
+BH can not be NULL at this point, ext4_read_dirblock() always return
+non null value, and we already have done all necessery checks.
+
+Signed-off-by: Dmitry Monakhov <dmonakhov@openvz.org>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+
+diff --git a/fs/ext4/namei.c b/fs/ext4/namei.c
+index 1cb84f7..a683f95 100644
+--- a/fs/ext4/namei.c
++++ b/fs/ext4/namei.c
+@@ -2510,8 +2510,7 @@ static int empty_dir(struct inode *inode)
+ 		 ext4_rec_len_from_disk(de1->rec_len, sb->s_blocksize);
+ 	de = ext4_next_entry(de1, sb->s_blocksize);
+ 	while (offset < inode->i_size) {
+-		if (!bh ||
+-		    (void *) de >= (void *) (bh->b_data+sb->s_blocksize)) {
++		if ((void *) de >= (void *) (bh->b_data+sb->s_blocksize)) {
+ 			unsigned int lblock;
+ 			err = 0;
+ 			brelse(bh);
+-- 
+cgit v0.10.1
+

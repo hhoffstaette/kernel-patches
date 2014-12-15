@@ -1,0 +1,31 @@
+From f6982116204b5fbf91a28bb02071918b96b4b3ca Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Tue, 1 Jul 2014 00:58:56 +0800
+Subject: btrfs: device add must be sysloged
+
+when we add a new disk to the mounted btrfs we don't record it
+as of now, disk add is a critical change of btrfs configuration,
+it must be recorded in the syslog to help offline investigations
+of customer problems when reported.
+
+Signed-off-by: Anand Jain <Anand.Jain@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 26e4bce..2acd2e2 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -2629,6 +2629,9 @@ static long btrfs_ioctl_add_dev(struct btrfs_root *root, void __user *arg)
+ 	vol_args->name[BTRFS_PATH_NAME_MAX] = '\0';
+ 	ret = btrfs_init_new_device(root, vol_args->name);
+ 
++	if (!ret)
++		btrfs_info(root->fs_info, "disk added %s",vol_args->name);
++
+ 	kfree(vol_args);
+ out:
+ 	mutex_unlock(&root->fs_info->volume_mutex);
+-- 
+cgit v0.10.1
+

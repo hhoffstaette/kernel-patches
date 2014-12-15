@@ -1,0 +1,43 @@
+From: Chris Mason <clm@fb.com>
+Subject: Btrfs: fix autodefrag with compression
+Date: Wed, 27 Aug 2014 14:51:44 -0400
+X-Patchwork-Id: 4790491
+
+The autodefrag code skips defrag when two extents are adjacent.  But one
+big advantage for autodefrag is cutting down on the number of small
+extents, even when they are adjacent.  This commit changes it to defrag
+all small extents.
+
+This is especially useful when trying to use compression on slowly
+growing log files.  We usually end up writing 4K or less at a time, so
+the compression code isn't able to compress across multiple pages.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+
+---
+fs/btrfs/ioctl.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+--
+To unsubscribe from this list: send the line "unsubscribe linux-btrfs" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index fce6fd0e..a018ea4 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -1019,8 +1019,10 @@ static bool defrag_check_next_extent(struct inode *inode, struct extent_map *em)
+ 		return false;
+ 
+ 	next = defrag_lookup_extent(inode, em->start + em->len);
+-	if (!next || next->block_start >= EXTENT_MAP_LAST_BYTE ||
+-	    (em->block_start + em->block_len == next->block_start))
++	if (!next || next->block_start >= EXTENT_MAP_LAST_BYTE)
++		ret = false;
++	else if ((em->block_start + em->block_len == next->block_start) &&
++		 (em->block_len > 128 * 1024 && next->block_len > 128 * 1024))
+ 		ret = false;
+ 
+ 	free_extent_map(next);
+

@@ -1,0 +1,44 @@
+From 46af29e479cc0c1c63633007993af5292c2c3e75 Mon Sep 17 00:00:00 2001
+From: Jason Low <jason.low2@hp.com>
+Date: Tue, 28 Jan 2014 11:13:12 -0800
+Subject: locking/mutexes: Return false if task need_resched() in
+ mutex_can_spin_on_owner()
+
+The mutex_can_spin_on_owner() function should also return false if the
+task needs to be rescheduled to avoid entering the MCS queue when it
+needs to reschedule.
+
+Signed-off-by: Jason Low <jason.low2@hp.com>
+Signed-off-by: Peter Zijlstra <peterz@infradead.org>
+Cc: Waiman.Long@hp.com
+Cc: torvalds@linux-foundation.org
+Cc: tglx@linutronix.de
+Cc: riel@redhat.com
+Cc: akpm@linux-foundation.org
+Cc: davidlohr@hp.com
+Cc: hpa@zytor.com
+Cc: andi@firstfloor.org
+Cc: aswin@hp.com
+Cc: scott.norton@hp.com
+Cc: chegu_vinod@hp.com
+Cc: paulmck@linux.vnet.ibm.com
+Link: http://lkml.kernel.org/r/1390936396-3962-2-git-send-email-jason.low2@hp.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/kernel/locking/mutex.c b/kernel/locking/mutex.c
+index 4f408be..e6d646b 100644
+--- a/kernel/locking/mutex.c
++++ b/kernel/locking/mutex.c
+@@ -166,6 +166,9 @@ static inline int mutex_can_spin_on_owner(struct mutex *lock)
+ 	struct task_struct *owner;
+ 	int retval = 1;
+ 
++	if (need_resched())
++		return 0;
++
+ 	rcu_read_lock();
+ 	owner = ACCESS_ONCE(lock->owner);
+ 	if (owner)
+-- 
+cgit v0.10.1
+

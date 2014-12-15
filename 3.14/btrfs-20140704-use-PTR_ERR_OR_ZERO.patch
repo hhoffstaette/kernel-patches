@@ -1,0 +1,32 @@
+From 860cab3e781c9a02fbf991dd6cb14ab5dd0f099a Mon Sep 17 00:00:00 2001
+From: Fabian Frederick <fabf@skynet.be>
+Date: Fri, 4 Jul 2014 21:10:27 +0200
+Subject: btrfs: use PTR_ERR_OR_ZERO
+
+replace IS_ERR/PTR_ERR
+
+Cc: Chris Mason <clm@fb.com>
+Cc: Josef Bacik <jbacik@fb.com>
+Cc: linux-btrfs@vger.kernel.org
+Signed-off-by: Fabian Frederick <fabf@skynet.be>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/hash.c b/fs/btrfs/hash.c
+index 85889aa..64f15bb 100644
+--- a/fs/btrfs/hash.c
++++ b/fs/btrfs/hash.c
+@@ -20,10 +20,8 @@ static struct crypto_shash *tfm;
+ int __init btrfs_hash_init(void)
+ {
+ 	tfm = crypto_alloc_shash("crc32c", 0, 0);
+-	if (IS_ERR(tfm))
+-		return PTR_ERR(tfm);
+ 
+-	return 0;
++	return PTR_ERR_OR_ZERO(tfm);
+ }
+ 
+ void btrfs_hash_exit(void)
+-- 
+cgit v0.10.1
+

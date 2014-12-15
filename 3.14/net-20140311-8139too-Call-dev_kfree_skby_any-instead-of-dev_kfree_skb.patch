@@ -1,0 +1,30 @@
+From a2ccd2e4bd70122523a7bf21cec4dd6e34427089 Mon Sep 17 00:00:00 2001
+From: "Eric W. Biederman" <ebiederm@xmission.com>
+Date: Tue, 11 Mar 2014 14:15:36 -0700
+Subject: 8139too: Call dev_kfree_skby_any instead of dev_kfree_skb.
+
+Replace dev_kfree_skb with dev_kfree_skb_any in functions that can
+be called in hard irq and other contexts.
+
+Signed-off-by: "Eric W. Biederman" <ebiederm@xmission.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/drivers/net/ethernet/realtek/8139too.c b/drivers/net/ethernet/realtek/8139too.c
+index da5972e..8cb2f35 100644
+--- a/drivers/net/ethernet/realtek/8139too.c
++++ b/drivers/net/ethernet/realtek/8139too.c
+@@ -1717,9 +1717,9 @@ static netdev_tx_t rtl8139_start_xmit (struct sk_buff *skb,
+ 		if (len < ETH_ZLEN)
+ 			memset(tp->tx_buf[entry], 0, ETH_ZLEN);
+ 		skb_copy_and_csum_dev(skb, tp->tx_buf[entry]);
+-		dev_kfree_skb(skb);
++		dev_kfree_skb_any(skb);
+ 	} else {
+-		dev_kfree_skb(skb);
++		dev_kfree_skb_any(skb);
+ 		dev->stats.tx_dropped++;
+ 		return NETDEV_TX_OK;
+ 	}
+-- 
+cgit v0.10.1
+

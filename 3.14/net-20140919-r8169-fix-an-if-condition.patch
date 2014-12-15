@@ -1,0 +1,29 @@
+From 85911d71109d3dda8bb35515b78bcc1de6837785 Mon Sep 17 00:00:00 2001
+From: Dan Carpenter <dan.carpenter@oracle.com>
+Date: Fri, 19 Sep 2014 13:40:25 +0300
+Subject: r8169: fix an if condition
+
+There is an extra semi-colon so __rtl8169_set_features() is called every
+time.
+
+Fixes: 929a031dfd62 ('r8169: adjust __rtl8169_set_features')
+Signed-off-by: Dan Carpenter <dan.carpenter@oracle.com>
+Acked-by: Hayes Wang <hayeswang@realtek.com>--
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index ef2cee5..0921302 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -1818,7 +1818,7 @@ static int rtl8169_set_features(struct net_device *dev,
+ 	features &= NETIF_F_RXALL | NETIF_F_RXCSUM | NETIF_F_HW_VLAN_CTAG_RX;
+ 
+ 	rtl_lock_work(tp);
+-	if (features ^ dev->features);
++	if (features ^ dev->features)
+ 		__rtl8169_set_features(dev, features);
+ 	rtl_unlock_work(tp);
+ 
+-- 
+cgit v0.10.1
+

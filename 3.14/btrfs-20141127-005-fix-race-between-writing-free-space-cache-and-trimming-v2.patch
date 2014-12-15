@@ -1,0 +1,349 @@
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH v2 5/6] Btrfs: fix race between writing free space cache and trimming
+Date: Mon,  1 Dec 2014 17:04:09 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40823>
+
+Trimming is completely transactionless, and the way it operates consists
+of hiding free space entries from a block group, perform the trim/discard
+and then make the free space entries visible again.
+Therefore while a free space entry is being trimmed, we can have free space
+cache writing running in parallel (as part of a transaction commit) which
+will miss the free space entry. This means that an unmount (or crash/reboot)
+after that transaction commit and mount again before another transaction
+starts/commits after the discard finishes, we will have some free space
+that won't be used again unless the free space cache is rebuilt. After the
+unmount, fsck (btrfsck, btrfs check) reports the issue like the following
+example:
+
+        *** fsck.btrfs output ***
+        checking extents
+        checking free space cache
+        There is no free space entry for 521764864-521781248
+        There is no free space entry for 521764864-1103101952
+        cache appears valid but isnt 29360128
+        Checking filesystem on /dev/sdc
+        UUID: b4789e27-4774-4626-98e9-ae8dfbfb0fb5
+        found 1235681286 bytes used err is -22
+        (...)
+
+Another issue caused by this race is a crash while writing bitmap entries
+to the cache, because while the cache writeout task accesses the bitmaps,
+the trim task can be concurrently modifying the bitmap or worse might
+be freeing the bitmap. The later case results in the following crash:
+
+[55650.804460] general protection fault: 0000 [#1] SMP DEBUG_PAGEALLOC
+[55650.804835] Modules linked in: btrfs dm_flakey dm_mod crc32c_generic xor raid6_pq nfsd auth_rpcgss oid_registry nfs_acl nfs lockd fscache sunrpc loop parport_pc parport i2c_piix4 psmouse evdev pcspkr microcode processor i2ccore serio_raw thermal_sys button ext4 crc16 jbd2 mbcache sg sd_mod crc_t10dif sr_mod cdrom crct10dif_generic crct10dif_common ata_generic virtio_scsi floppy ata_piix libata virtio_pci virtio_ring virtio scsi_mod e1000 [last unloaded: btrfs]
+[55650.806169] CPU: 1 PID: 31002 Comm: btrfs-transacti Tainted: G        W      3.17.0-rc5-btrfs-next-1+ #1
+[55650.806493] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.7.5-0-ge51488c-20140602_164612-nilsson.home.kraxel.org 04/01/2014
+[55650.806867] task: ffff8800b12f6410 ti: ffff880071538000 task.ti: ffff880071538000
+[55650.807166] RIP: 0010:[<ffffffffa037cf45>]  [<ffffffffa037cf45>] write_bitmap_entries+0x65/0xbb [btrfs]
+[55650.807514] RSP: 0018:ffff88007153bc30  EFLAGS: 00010246
+[55650.807687] RAX: 000000005d1ec000 RBX: ffff8800a665df08 RCX: 0000000000000400
+[55650.807885] RDX: ffff88005d1ec000 RSI: 6b6b6b6b6b6b6b6b RDI: ffff88005d1ec000
+[55650.808017] RBP: ffff88007153bc58 R08: 00000000ddd51536 R09: 00000000000001e0
+[55650.808017] R10: 0000000000000000 R11: 0000000000000037 R12: 6b6b6b6b6b6b6b6b
+[55650.808017] R13: ffff88007153bca8 R14: 6b6b6b6b6b6b6b6b R15: ffff88007153bc98
+[55650.808017] FS:  0000000000000000(0000) GS:ffff88023ec80000(0000) knlGS:0000000000000000
+[55650.808017] CS:  0010 DS: 0000 ES: 0000 CR0: 000000008005003b
+[55650.808017] CR2: 0000000002273b88 CR3: 00000000b18f6000 CR4: 00000000000006e0
+[55650.808017] Stack:
+[55650.808017]  ffff88020e834e00 ffff880172d68db0 0000000000000000 ffff88019257c800
+[55650.808017]  ffff8801d42ea720 ffff88007153bd10 ffffffffa037d2fa ffff880224e99180
+[55650.808017]  ffff8801469a6188 ffff880224e99140 ffff880172d68c50 00000003000000b7
+[55650.808017] Call Trace:
+[55650.808017]  [<ffffffffa037d2fa>] __btrfs_write_out_cache+0x1ea/0x37f [btrfs]
+[55650.808017]  [<ffffffffa037d959>] btrfs_write_out_cache+0xa1/0xd8 [btrfs]
+[55650.808017]  [<ffffffffa033936b>] btrfs_write_dirty_block_groups+0x4b5/0x505 [btrfs]
+[55650.808017]  [<ffffffffa03aa98e>] commit_cowonly_roots+0x15e/0x1f7 [btrfs]
+[55650.808017]  [<ffffffff813eb9c7>] ? _raw_spin_lock+0xe/0x10
+[55650.808017]  [<ffffffffa0346e46>] btrfs_commit_transaction+0x411/0x882 [btrfs]
+[55650.808017]  [<ffffffffa03432a4>] transaction_kthread+0xf2/0x1a4 [btrfs]
+[55650.808017]  [<ffffffffa03431b2>] ? btrfs_cleanup_transaction+0x3d8/0x3d8 [btrfs]
+[55650.808017]  [<ffffffff8105966b>] kthread+0xb7/0xbf
+[55650.808017]  [<ffffffff810595b4>] ? __kthread_parkme+0x67/0x67
+[55650.808017]  [<ffffffff813ebeac>] ret_from_fork+0x7c/0xb0
+[55650.808017]  [<ffffffff810595b4>] ? __kthread_parkme+0x67/0x67
+[55650.808017] Code: 4c 89 ef 8d 70 ff e8 d4 fc ff ff 41 8b 45 34 41 39 45 30 7d 5c 31 f6 4c 89 ef e8 80 f6 ff ff 49 8b 7d 00 4c 89 f6 b9 00 04 00 00 <f3> a5 4c 89 ef 41 8b 45 30 8d 70 ff e8 a3 fc ff ff 41 8b 45 34
+[55650.808017] RIP  [<ffffffffa037cf45>] write_bitmap_entries+0x65/0xbb [btrfs]
+[55650.808017]  RSP <ffff88007153bc30>
+[55650.815725] ---[ end trace 1c032e96b149ff86 ]---
+
+Fix this by serializing both tasks in such a way that cache writeout
+doesn't wait for the trim/discard of free space entries to finish and
+doesn't miss any free space entry.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+
+V2: Enlonged the critical section to include the cache writeout of bitmaps,
+    since I ran into this recently. The issue is that a concurrent trim can
+    modify or free the bitmaps while the cache writeout task is using them.
+    Updated commit message with crash trace example.
+
+ fs/btrfs/free-space-cache.c | 73 +++++++++++++++++++++++++++++++++++++++++----
+ fs/btrfs/free-space-cache.h |  2 ++
+ fs/btrfs/inode-map.c        |  2 ++
+ 3 files changed, 71 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index 0ddc114..2ee73c2 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -32,6 +32,12 @@
+ #define BITS_PER_BITMAP		(PAGE_CACHE_SIZE * 8)
+ #define MAX_CACHE_BYTES_PER_GIG	(32 * 1024)
+ 
++struct btrfs_trim_range {
++	u64 start;
++	u64 bytes;
++	struct list_head list;
++};
++
+ static int link_free_space(struct btrfs_free_space_ctl *ctl,
+ 			   struct btrfs_free_space *info);
+ static void unlink_free_space(struct btrfs_free_space_ctl *ctl,
+@@ -882,6 +888,7 @@ int write_cache_extent_entries(struct io_ctl *io_ctl,
+ 	int ret;
+ 	struct btrfs_free_cluster *cluster = NULL;
+ 	struct rb_node *node = rb_first(&ctl->free_space_offset);
++	struct btrfs_trim_range *trim_entry;
+ 
+ 	/* Get the cluster for this block_group if it exists */
+ 	if (block_group && !list_empty(&block_group->cluster_list)) {
+@@ -917,6 +924,21 @@ int write_cache_extent_entries(struct io_ctl *io_ctl,
+ 			cluster = NULL;
+ 		}
+ 	}
++
++	/*
++	 * Make sure we don't miss any range that was removed from our rbtree
++	 * because trimming is running. Otherwise after a umount+mount (or crash
++	 * after committing the transaction) we would leak free space and get
++	 * an inconsistent free space cache report from fsck.
++	 */
++	list_for_each_entry(trim_entry, &ctl->trimming_ranges, list) {
++		ret = io_ctl_add_entry(io_ctl, trim_entry->start,
++				       trim_entry->bytes, NULL);
++		if (ret)
++			goto fail;
++		*entries += 1;
++	}
++
+ 	return 0;
+ fail:
+ 	return -ENOSPC;
+@@ -1136,12 +1158,15 @@ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
+ 
+ 	io_ctl_set_generation(&io_ctl, trans->transid);
+ 
++	mutex_lock(&ctl->cache_writeout_mutex);
+ 	/* Write out the extent entries in the free space cache */
+ 	ret = write_cache_extent_entries(&io_ctl, ctl,
+ 					 block_group, &entries, &bitmaps,
+ 					 &bitmap_list);
+-	if (ret)
++	if (ret) {
++		mutex_unlock(&ctl->cache_writeout_mutex);
+ 		goto out_nospc;
++	}
+ 
+ 	/*
+ 	 * Some spaces that are freed in the current transaction are pinned,
+@@ -1149,11 +1174,18 @@ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
+ 	 * committed, we shouldn't lose them.
+ 	 */
+ 	ret = write_pinned_extent_entries(root, block_group, &io_ctl, &entries);
+-	if (ret)
++	if (ret) {
++		mutex_unlock(&ctl->cache_writeout_mutex);
+ 		goto out_nospc;
++	}
+ 
+-	/* At last, we write out all the bitmaps. */
++	/*
++	 * At last, we write out all the bitmaps and keep cache_writeout_mutex
++	 * locked while doing it because a concurrent trim can be manipulating
++	 * or freeing the bitmap.
++	 */
+ 	ret = write_bitmap_entries(&io_ctl, &bitmap_list);
++	mutex_unlock(&ctl->cache_writeout_mutex);
+ 	if (ret)
+ 		goto out_nospc;
+ 
+@@ -2296,6 +2328,8 @@ void btrfs_init_free_space_ctl(struct btrfs_block_group_cache *block_group)
+ 	ctl->start = block_group->key.objectid;
+ 	ctl->private = block_group;
+ 	ctl->op = &free_space_op;
++	INIT_LIST_HEAD(&ctl->trimming_ranges);
++	mutex_init(&ctl->cache_writeout_mutex);
+ 
+ 	/*
+ 	 * we only want to have 32k of ram per block group for keeping
+@@ -2912,10 +2946,12 @@ void btrfs_init_free_cluster(struct btrfs_free_cluster *cluster)
+ 
+ static int do_trimming(struct btrfs_block_group_cache *block_group,
+ 		       u64 *total_trimmed, u64 start, u64 bytes,
+-		       u64 reserved_start, u64 reserved_bytes)
++		       u64 reserved_start, u64 reserved_bytes,
++		       struct btrfs_trim_range *trim_entry)
+ {
+ 	struct btrfs_space_info *space_info = block_group->space_info;
+ 	struct btrfs_fs_info *fs_info = block_group->fs_info;
++	struct btrfs_free_space_ctl *ctl = block_group->free_space_ctl;
+ 	int ret;
+ 	int update = 0;
+ 	u64 trimmed = 0;
+@@ -2935,7 +2971,10 @@ static int do_trimming(struct btrfs_block_group_cache *block_group,
+ 	if (!ret)
+ 		*total_trimmed += trimmed;
+ 
++	mutex_lock(&ctl->cache_writeout_mutex);
+ 	btrfs_add_free_space(block_group, reserved_start, reserved_bytes);
++	list_del(&trim_entry->list);
++	mutex_unlock(&ctl->cache_writeout_mutex);
+ 
+ 	if (update) {
+ 		spin_lock(&space_info->lock);
+@@ -2963,16 +3002,21 @@ static int trim_no_bitmap(struct btrfs_block_group_cache *block_group,
+ 	u64 bytes;
+ 
+ 	while (start < end) {
++		struct btrfs_trim_range trim_entry;
++
++		mutex_lock(&ctl->cache_writeout_mutex);
+ 		spin_lock(&ctl->tree_lock);
+ 
+ 		if (ctl->free_space < minlen) {
+ 			spin_unlock(&ctl->tree_lock);
++			mutex_unlock(&ctl->cache_writeout_mutex);
+ 			break;
+ 		}
+ 
+ 		entry = tree_search_offset(ctl, start, 0, 1);
+ 		if (!entry) {
+ 			spin_unlock(&ctl->tree_lock);
++			mutex_unlock(&ctl->cache_writeout_mutex);
+ 			break;
+ 		}
+ 
+@@ -2981,6 +3025,7 @@ static int trim_no_bitmap(struct btrfs_block_group_cache *block_group,
+ 			node = rb_next(&entry->offset_index);
+ 			if (!node) {
+ 				spin_unlock(&ctl->tree_lock);
++				mutex_unlock(&ctl->cache_writeout_mutex);
+ 				goto out;
+ 			}
+ 			entry = rb_entry(node, struct btrfs_free_space,
+@@ -2989,6 +3034,7 @@ static int trim_no_bitmap(struct btrfs_block_group_cache *block_group,
+ 
+ 		if (entry->offset >= end) {
+ 			spin_unlock(&ctl->tree_lock);
++			mutex_unlock(&ctl->cache_writeout_mutex);
+ 			break;
+ 		}
+ 
+@@ -2998,6 +3044,7 @@ static int trim_no_bitmap(struct btrfs_block_group_cache *block_group,
+ 		bytes = min(extent_start + extent_bytes, end) - start;
+ 		if (bytes < minlen) {
+ 			spin_unlock(&ctl->tree_lock);
++			mutex_unlock(&ctl->cache_writeout_mutex);
+ 			goto next;
+ 		}
+ 
+@@ -3005,9 +3052,13 @@ static int trim_no_bitmap(struct btrfs_block_group_cache *block_group,
+ 		kmem_cache_free(btrfs_free_space_cachep, entry);
+ 
+ 		spin_unlock(&ctl->tree_lock);
++		trim_entry.start = extent_start;
++		trim_entry.bytes = extent_bytes;
++		list_add_tail(&trim_entry.list, &ctl->trimming_ranges);
++		mutex_unlock(&ctl->cache_writeout_mutex);
+ 
+ 		ret = do_trimming(block_group, total_trimmed, start, bytes,
+-				  extent_start, extent_bytes);
++				  extent_start, extent_bytes, &trim_entry);
+ 		if (ret)
+ 			break;
+ next:
+@@ -3036,17 +3087,21 @@ static int trim_bitmaps(struct btrfs_block_group_cache *block_group,
+ 
+ 	while (offset < end) {
+ 		bool next_bitmap = false;
++		struct btrfs_trim_range trim_entry;
+ 
++		mutex_lock(&ctl->cache_writeout_mutex);
+ 		spin_lock(&ctl->tree_lock);
+ 
+ 		if (ctl->free_space < minlen) {
+ 			spin_unlock(&ctl->tree_lock);
++			mutex_unlock(&ctl->cache_writeout_mutex);
+ 			break;
+ 		}
+ 
+ 		entry = tree_search_offset(ctl, offset, 1, 0);
+ 		if (!entry) {
+ 			spin_unlock(&ctl->tree_lock);
++			mutex_unlock(&ctl->cache_writeout_mutex);
+ 			next_bitmap = true;
+ 			goto next;
+ 		}
+@@ -3055,6 +3110,7 @@ static int trim_bitmaps(struct btrfs_block_group_cache *block_group,
+ 		ret2 = search_bitmap(ctl, entry, &start, &bytes);
+ 		if (ret2 || start >= end) {
+ 			spin_unlock(&ctl->tree_lock);
++			mutex_unlock(&ctl->cache_writeout_mutex);
+ 			next_bitmap = true;
+ 			goto next;
+ 		}
+@@ -3062,6 +3118,7 @@ static int trim_bitmaps(struct btrfs_block_group_cache *block_group,
+ 		bytes = min(bytes, end - start);
+ 		if (bytes < minlen) {
+ 			spin_unlock(&ctl->tree_lock);
++			mutex_unlock(&ctl->cache_writeout_mutex);
+ 			goto next;
+ 		}
+ 
+@@ -3070,9 +3127,13 @@ static int trim_bitmaps(struct btrfs_block_group_cache *block_group,
+ 			free_bitmap(ctl, entry);
+ 
+ 		spin_unlock(&ctl->tree_lock);
++		trim_entry.start = start;
++		trim_entry.bytes = bytes;
++		list_add_tail(&trim_entry.list, &ctl->trimming_ranges);
++		mutex_unlock(&ctl->cache_writeout_mutex);
+ 
+ 		ret = do_trimming(block_group, total_trimmed, start, bytes,
+-				  start, bytes);
++				  start, bytes, &trim_entry);
+ 		if (ret)
+ 			break;
+ next:
+diff --git a/fs/btrfs/free-space-cache.h b/fs/btrfs/free-space-cache.h
+index 0cf4977..88b2238 100644
+--- a/fs/btrfs/free-space-cache.h
++++ b/fs/btrfs/free-space-cache.h
+@@ -38,6 +38,8 @@ struct btrfs_free_space_ctl {
+ 	u64 start;
+ 	struct btrfs_free_space_op *op;
+ 	void *private;
++	struct mutex cache_writeout_mutex;
++	struct list_head trimming_ranges;
+ };
+ 
+ struct btrfs_free_space_op {
+diff --git a/fs/btrfs/inode-map.c b/fs/btrfs/inode-map.c
+index 83d646b..81efd83 100644
+--- a/fs/btrfs/inode-map.c
++++ b/fs/btrfs/inode-map.c
+@@ -364,6 +364,8 @@ void btrfs_init_free_ino_ctl(struct btrfs_root *root)
+ 	ctl->start = 0;
+ 	ctl->private = NULL;
+ 	ctl->op = &free_ino_op;
++	INIT_LIST_HEAD(&ctl->trimming_ranges);
++	mutex_init(&ctl->cache_writeout_mutex);
+ 
+ 	/*
+ 	 * Initially we allow to use 16K of ram to cache chunks of
+-- 
+2.1.3

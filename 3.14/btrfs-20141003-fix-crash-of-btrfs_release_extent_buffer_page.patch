@@ -1,0 +1,38 @@
+From 8146502820231da924ca22d147cdcf733ac9a057 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Tue, 23 Sep 2014 22:22:33 +0800
+Subject: Btrfs: fix crash of btrfs_release_extent_buffer_page
+
+This is actually inspired by Filipe's patch.  When write_one_eb() fails on
+submit_extent_page(), it'll give up writing this eb and mark it with
+EXTENT_BUFFER_IOERR.  So if it's not the last page that encounter the failure,
+there are some left pages which remain DIRTY, and if a later COW on this eb
+happens, ie. eb is COWed and freed, it'd run into BUG_ON in
+btrfs_release_extent_buffer_page() for the DIRTY page, ie. BUG_ON(PageDirty(page));
+
+This adds the missing clear_page_dirty_for_io() for the rest pages of eb.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Reviewed-by: Filipe Manana <fdmanana@suse.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 828aded..4267a05 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -3677,8 +3677,11 @@ static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
+ 	}
+ 
+ 	if (unlikely(ret)) {
+-		for (; i < num_pages; i++)
+-			unlock_page(eb->pages[i]);
++		for (; i < num_pages; i++) {
++			struct page *p = eb->pages[i];
++			clear_page_dirty_for_io(p);
++			unlock_page(p);
++		}
+ 	}
+ 
+ 	return ret;
+-- 
+cgit v0.10.1

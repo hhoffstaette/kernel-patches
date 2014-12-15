@@ -1,0 +1,61 @@
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: don't ignore log btree writeback errors
+Date: Thu, 13 Nov 2014 16:59:53 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/40158>
+
+If an error happens during writeback of log btree extents, make sure the
+error is returned to the caller (fsync), so that it takes proper action
+(commit current transaction) instead of writing a superblock that points
+to log btrees with all or some nodes that weren't durably persisted.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/tree-log.c | 21 +++++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index 6d58d72..c8274d3 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -2599,12 +2599,14 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 	index2 = root_log_ctx.log_transid % 2;
+ 	if (atomic_read(&log_root_tree->log_commit[index2])) {
+ 		blk_finish_plug(&plug);
+-		btrfs_wait_marked_extents(log, &log->dirty_log_pages, mark);
++		ret = btrfs_wait_marked_extents(log, &log->dirty_log_pages,
++						mark);
+		btrfs_wait_logged_extents(log, log_transid);
+ 		wait_log_commit(trans, log_root_tree,
+ 				root_log_ctx.log_transid);
+ 		mutex_unlock(&log_root_tree->log_mutex);
+-		ret = root_log_ctx.log_ret;
++		if (!ret)
++			ret = root_log_ctx.log_ret;
+ 		goto out;
+ 	}
+ 	ASSERT(root_log_ctx.log_transid == log_root_tree->log_transid);
+@@ -2641,10 +2643,17 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 		mutex_unlock(&log_root_tree->log_mutex);
+ 		goto out_wake_log_root;
+ 	}
+-	btrfs_wait_marked_extents(log, &log->dirty_log_pages, mark);
+-	btrfs_wait_marked_extents(log_root_tree,
+-				  &log_root_tree->dirty_log_pages,
+-				  EXTENT_NEW | EXTENT_DIRTY);
++	ret = btrfs_wait_marked_extents(log, &log->dirty_log_pages, mark);
++	if (!ret)
++		ret = btrfs_wait_marked_extents(log_root_tree,
++						&log_root_tree->dirty_log_pages,
++						EXTENT_NEW | EXTENT_DIRTY);
++	if (ret) {
++		btrfs_set_log_full_commit(root->fs_info, trans);
++		btrfs_free_logged_extents(log, log_transid);
++		mutex_unlock(&log_root_tree->log_mutex);
++		goto out_wake_log_root;
++	}
+ 	btrfs_wait_logged_extents(log, log_transid);
+ 
+ 	btrfs_set_super_log_root(root->fs_info->super_for_commit,
+-- 
+1.9.1

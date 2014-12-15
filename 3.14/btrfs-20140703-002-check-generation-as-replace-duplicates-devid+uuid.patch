@@ -1,0 +1,71 @@
+From 77bdae4d136e167bab028cbec58b988f91cf73c0 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Thu, 3 Jul 2014 18:22:06 +0800
+Subject: btrfs: check generation as replace duplicates devid+uuid
+
+When FS in unmounted we need to check generation number as well
+since devid+uuid combination could match with the missing replaced
+disk when it reappears, and without this patch it might pair with
+the replaced disk again.
+
+ device_list_add() function is called in the following threads,
+	mount device option
+	mount argument
+	ioctl BTRFS_IOC_SCAN_DEV (btrfs dev scan)
+	ioctl BTRFS_IOC_DEVICES_READY (btrfs dev ready <dev>)
+ they have been unit tested to work fine with this patch.
+
+ If the user knows what he is doing and really want to pair with
+ replaced disk (which is not a standard operation), then he should
+ first clear the kernel btrfs device list in the memory by doing
+ the module unload/load and followed with the mount -o device option.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 7c538f6..5700ab0 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -532,8 +532,19 @@ static noinline int device_list_add(const char *path,
+ 		 * As of now don't allow update to btrfs_fs_device through
+ 		 * the btrfs dev scan cli, after FS has been mounted.
+ 		 */
+-		if (fs_devices->opened)
++		if (fs_devices->opened) {
+ 			return -EBUSY;
++		} else {
++			/*
++			 * That is if the FS is _not_ mounted and if you
++			 * are here, that means there is more than one
++			 * disk with same uuid and devid.We keep the one
++			 * with larger generation number or the last-in if
++			 * generation are equal.
++			 */
++			if (found_transid < device->generation)
++				return -EEXIST;
++		}
+ 
+ 		name = rcu_string_strdup(path, GFP_NOFS);
+ 		if (!name)
+@@ -546,6 +557,15 @@ static noinline int device_list_add(const char *path,
+ 		}
+ 	}
+ 
++	/*
++	 * Unmount does not free the btrfs_device struct but would zero
++	 * generation along with most of the other members. So just update
++	 * it back. We need it to pick the disk with largest generation
++	 * (as above).
++	 */
++	if (!fs_devices->opened)
++		device->generation = found_transid;
++
+ 	if (found_transid > fs_devices->latest_trans) {
+ 		fs_devices->latest_devid = devid;
+ 		fs_devices->latest_trans = found_transid;
+-- 
+cgit v0.10.1
+

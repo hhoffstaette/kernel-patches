@@ -1,0 +1,30 @@
+From d1b00a4711d5b953b13ccc859bc30c447c96860e Mon Sep 17 00:00:00 2001
+From: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Date: Fri, 25 Jul 2014 17:07:48 +0900
+Subject: btrfs: use IS_ALIGNED() for assertion in btrfs_lookup_csums_range() for simplicity
+
+btrfs_lookup_csums_range() uses ALIGN() to check if "start"
+and "end + 1" are aligned to "root->sectorsize". It's better to
+replace these with IS_ALIGNED() for simplicity.
+
+Signed-off-by: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/file-item.c b/fs/btrfs/file-item.c
+index 991f056..6e6262e 100644
+--- a/fs/btrfs/file-item.c
++++ b/fs/btrfs/file-item.c
+@@ -329,8 +329,8 @@ int btrfs_lookup_csums_range(struct btrfs_root *root, u64 start, u64 end,
+ 	u64 csum_end;
+ 	u16 csum_size = btrfs_super_csum_size(root->fs_info->super_copy);
+ 
+-	ASSERT(start == ALIGN(start, root->sectorsize) &&
+-	       (end + 1) == ALIGN(end + 1, root->sectorsize));
++	ASSERT(IS_ALIGNED(start, root->sectorsize) &&
++	       IS_ALIGNED(end + 1, root->sectorsize));
+ 
+ 	path = btrfs_alloc_path();
+ 	if (!path)
+-- 
+cgit v0.10.1
+

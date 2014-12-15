@@ -1,0 +1,57 @@
+From 2131bcd38b18167f499f190acf3409dfe5b3c280 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Wed, 5 Mar 2014 10:07:35 +0800
+Subject: Btrfs: add readahead for send_write
+
+Btrfs send reads data from disk and then writes to a stream via pipe or
+a file via flush.
+
+Currently we're going to read each page a time, so every page results
+in a disk read, which is not friendly to disks, esp. HDD.  Given that,
+the performance can be gained by adding readahead for those pages.
+
+Here is a quick test:
+$ btrfs subvolume create send
+$ xfs_io -f -c "pwrite 0 1G" send/foobar
+$ btrfs subvolume snap -r send ro
+$ time "btrfs send ro -f /dev/null"
+
+           w/o             w
+real    1m37.527s       0m9.097s
+user    0m0.122s        0m0.086s
+sys     0m53.191s       0m12.857s
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 112eb64..6463691 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -124,6 +124,8 @@ struct send_ctx {
+ 	struct list_head name_cache_list;
+ 	int name_cache_size;
+ 
++	struct file_ra_state ra;
++
+ 	char *read_buf;
+ 
+ 	/*
+@@ -4170,6 +4172,13 @@ static ssize_t fill_read_buf(struct send_ctx *sctx, u64 offset, u32 len)
+ 		goto out;
+ 
+ 	last_index = (offset + len - 1) >> PAGE_CACHE_SHIFT;
++
++	/* initial readahead */
++	memset(&sctx->ra, 0, sizeof(struct file_ra_state));
++	file_ra_state_init(&sctx->ra, inode->i_mapping);
++	btrfs_force_ra(inode->i_mapping, &sctx->ra, NULL, index,
++		       last_index - index + 1);
++
+ 	while (index <= last_index) {
+ 		unsigned cur_len = min_t(unsigned, len,
+ 					 PAGE_CACHE_SIZE - pg_offset);
+-- 
+cgit v0.10.1
+

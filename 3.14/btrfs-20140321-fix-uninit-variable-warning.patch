@@ -1,0 +1,28 @@
+From 73b802f44747e824f6efe273903149ede9ddf741 Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Fri, 21 Mar 2014 15:30:44 -0700
+Subject: btrfs: fix uninit variable warning
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+fs/btrfs/send.c:2926: warning: ‘entry’ may be used uninitialized in this
+function
+
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 143fed3..9b6da9d 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -2923,7 +2923,7 @@ static int add_pending_dir_move(struct send_ctx *sctx,
+ {
+ 	struct rb_node **p = &sctx->pending_dir_moves.rb_node;
+ 	struct rb_node *parent = NULL;
+-	struct pending_dir_move *entry, *pm;
++	struct pending_dir_move *entry = NULL, *pm;
+ 	struct recorded_ref *cur;
+ 	int exists = 0;
+ 	int ret;
+-- 
+cgit v0.10.1

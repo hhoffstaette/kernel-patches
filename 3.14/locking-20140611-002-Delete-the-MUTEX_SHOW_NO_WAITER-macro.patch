@@ -1,0 +1,83 @@
+From 1e820c9608eace237e2c519d8fd9074aec479d81 Mon Sep 17 00:00:00 2001
+From: Jason Low <jason.low2@hp.com>
+Date: Wed, 11 Jun 2014 11:37:21 -0700
+Subject: locking/mutexes: Delete the MUTEX_SHOW_NO_WAITER macro
+
+MUTEX_SHOW_NO_WAITER() is a macro which checks for if there are
+"no waiters" on a mutex by checking if the lock count is non-negative.
+Based on feedback from the discussion in the earlier version of this
+patchset, the macro is not very readable.
+
+Furthermore, checking lock->count isn't always the correct way to
+determine if there are "no waiters" on a mutex. For example, a negative
+count on a mutex really only means that there "potentially" are
+waiters. Likewise, there can be waiters on the mutex even if the count is
+non-negative. Thus, "MUTEX_SHOW_NO_WAITER" doesn't always do what the name
+of the macro suggests.
+
+So this patch deletes the MUTEX_SHOW_NO_WAITERS() macro, directly
+use atomic_read() instead of the macro, and adds comments which
+elaborate on how the extra atomic_read() checks can help reduce
+unnecessary xchg() operations.
+
+Signed-off-by: Jason Low <jason.low2@hp.com>
+Acked-by: Waiman Long <Waiman.Long@hp.com>
+Signed-off-by: Peter Zijlstra <peterz@infradead.org>
+Cc: akpm@linux-foundation.org
+Cc: tim.c.chen@linux.intel.com
+Cc: paulmck@linux.vnet.ibm.com
+Cc: rostedt@goodmis.org
+Cc: davidlohr@hp.com
+Cc: scott.norton@hp.com
+Cc: aswin@hp.com
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Link: http://lkml.kernel.org/r/1402511843-4721-3-git-send-email-jason.low2@hp.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/kernel/locking/mutex.c b/kernel/locking/mutex.c
+index dd26bf6de..4bd9546 100644
+--- a/kernel/locking/mutex.c
++++ b/kernel/locking/mutex.c
+@@ -46,12 +46,6 @@
+ # include <asm/mutex.h>
+ #endif
+ 
+-/*
+- * A negative mutex count indicates that waiters are sleeping waiting for the
+- * mutex.
+- */
+-#define	MUTEX_SHOW_NO_WAITER(mutex)	(atomic_read(&(mutex)->count) >= 0)
+-
+ void
+ __mutex_init(struct mutex *lock, const char *name, struct lock_class_key *key)
+ {
+@@ -483,8 +477,11 @@ slowpath:
+ #endif
+ 	spin_lock_mutex(&lock->wait_lock, flags);
+ 
+-	/* once more, can we acquire the lock? */
+-	if (MUTEX_SHOW_NO_WAITER(lock) && (atomic_xchg(&lock->count, 0) == 1))
++	/*
++	 * Once more, try to acquire the lock. Only try-lock the mutex if
++	 * lock->count >= 0 to reduce unnecessary xchg operations.
++	 */
++	if (atomic_read(&lock->count) >= 0 && (atomic_xchg(&lock->count, 0) == 1))
+ 		goto skip_wait;
+ 
+ 	debug_mutex_lock_common(lock, &waiter);
+@@ -504,9 +501,10 @@ slowpath:
+ 		 * it's unlocked. Later on, if we sleep, this is the
+ 		 * operation that gives us the lock. We xchg it to -1, so
+ 		 * that when we release the lock, we properly wake up the
+-		 * other waiters:
++		 * other waiters. We only attempt the xchg if the count is
++		 * non-negative in order to avoid unnecessary xchg operations:
+ 		 */
+-		if (MUTEX_SHOW_NO_WAITER(lock) &&
++		if (atomic_read(&lock->count) >= 0 &&
+ 		    (atomic_xchg(&lock->count, -1) == 1))
+ 			break;
+ 
+-- 
+cgit v0.10.1
+

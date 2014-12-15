@@ -1,0 +1,87 @@
+From 1f7e0616cd4f5df594595153c3a01bbb16072380 Mon Sep 17 00:00:00 2001
+From: Joe Perches <joe@perches.com>
+Date: Fri, 6 Jun 2014 14:38:05 -0700
+Subject: fs: convert use of typedef ctl_table to struct ctl_table
+
+This typedef is unnecessary and should just be removed.
+
+Signed-off-by: Joe Perches <joe@perches.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index be2bea8..1792d60 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -150,7 +150,7 @@ static long get_nr_dentry_unused(void)
+ 	return sum < 0 ? 0 : sum;
+ }
+ 
+-int proc_nr_dentry(ctl_table *table, int write, void __user *buffer,
++int proc_nr_dentry(struct ctl_table *table, int write, void __user *buffer,
+ 		   size_t *lenp, loff_t *ppos)
+ {
+ 	dentry_stat.nr_dentry = get_nr_dentry();
+diff --git a/fs/drop_caches.c b/fs/drop_caches.c
+index 9280202..1de7294 100644
+--- a/fs/drop_caches.c
++++ b/fs/drop_caches.c
+@@ -50,7 +50,7 @@ static void drop_slab(void)
+ 	} while (nr_objects > 10);
+ }
+ 
+-int drop_caches_sysctl_handler(ctl_table *table, int write,
++int drop_caches_sysctl_handler(struct ctl_table *table, int write,
+ 	void __user *buffer, size_t *length, loff_t *ppos)
+ {
+ 	int ret;
+diff --git a/fs/eventpoll.c b/fs/eventpoll.c
+index af90312..b73e062 100644
+--- a/fs/eventpoll.c
++++ b/fs/eventpoll.c
+@@ -293,7 +293,7 @@ static LIST_HEAD(tfile_check_list);
+ static long zero;
+ static long long_max = LONG_MAX;
+ 
+-ctl_table epoll_table[] = {
++struct ctl_table epoll_table[] = {
+ 	{
+ 		.procname	= "max_user_watches",
+ 		.data		= &max_user_watches,
+diff --git a/fs/file_table.c b/fs/file_table.c
+index a374f50..40bf466 100644
+--- a/fs/file_table.c
++++ b/fs/file_table.c
+@@ -76,14 +76,14 @@ EXPORT_SYMBOL_GPL(get_max_files);
+  * Handle nr_files sysctl
+  */
+ #if defined(CONFIG_SYSCTL) && defined(CONFIG_PROC_FS)
+-int proc_nr_files(ctl_table *table, int write,
++int proc_nr_files(struct ctl_table *table, int write,
+                      void __user *buffer, size_t *lenp, loff_t *ppos)
+ {
+ 	files_stat.nr_files = get_nr_files();
+ 	return proc_doulongvec_minmax(table, write, buffer, lenp, ppos);
+ }
+ #else
+-int proc_nr_files(ctl_table *table, int write,
++int proc_nr_files(struct ctl_table *table, int write,
+                      void __user *buffer, size_t *lenp, loff_t *ppos)
+ {
+ 	return -ENOSYS;
+diff --git a/fs/inode.c b/fs/inode.c
+index f96d2a6..2feb9b6 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -105,7 +105,7 @@ long get_nr_dirty_inodes(void)
+  * Handle nr_inode sysctl
+  */
+ #ifdef CONFIG_SYSCTL
+-int proc_nr_inodes(ctl_table *table, int write,
++int proc_nr_inodes(struct ctl_table *table, int write,
+ 		   void __user *buffer, size_t *lenp, loff_t *ppos)
+ {
+ 	inodes_stat.nr_inodes = get_nr_inodes();
+-- 
+cgit v0.10.1
+

@@ -1,0 +1,39 @@
+From 2aa06a35d06a34b3109bdbf1d653de1695dc8f12 Mon Sep 17 00:00:00 2001
+From: Eric Sandeen <sandeen@redhat.com>
+Date: Fri, 27 Jun 2014 16:50:31 -0500
+Subject: btrfs: fix nossd and ssd_spread mount option regression
+
+The commit
+
+0780253 btrfs: Cleanup the btrfs_parse_options for remount.
+
+broke ssd options quite badly; it stopped making ssd_spread
+imply ssd, and it made "nossd" unsettable.
+
+Put things back at least as well as they were before
+(though ssd mount option handling is still pretty odd:
+# mount -o "nossd,ssd_spread" works?)
+
+Reported-by: Roman Mamedov <rm@romanrm.net>
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index b6ebde2..0927e46 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -522,9 +522,10 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
+ 		case Opt_ssd_spread:
+ 			btrfs_set_and_info(root, SSD_SPREAD,
+ 					   "use spread ssd allocation scheme");
++			btrfs_set_opt(info->mount_opt, SSD);
+ 			break;
+ 		case Opt_nossd:
+-			btrfs_clear_and_info(root, NOSSD,
++			btrfs_set_and_info(root, NOSSD,
+ 					     "not using ssd allocation scheme");
+ 			btrfs_clear_opt(info->mount_opt, SSD);
+ 			break;
+-- 
+cgit v0.10.1
+

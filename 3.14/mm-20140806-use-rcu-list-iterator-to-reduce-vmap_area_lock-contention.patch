@@ -1,0 +1,104 @@
+From 474750aba88817c53f39424e5567b8e4acc4b39b Mon Sep 17 00:00:00 2001
+From: Joonsoo Kim <iamjoonsoo.kim@lge.com>
+Date: Wed, 6 Aug 2014 16:05:06 -0700
+Subject: vmalloc: use rcu list iterator to reduce vmap_area_lock contention
+
+Richard Yao reported a month ago that his system have a trouble with
+vmap_area_lock contention during performance analysis by /proc/meminfo.
+Andrew asked why his analysis checks /proc/meminfo stressfully, but he
+didn't answer it.
+
+  https://lkml.org/lkml/2014/4/10/416
+
+Although I'm not sure that this is right usage or not, there is a
+solution reducing vmap_area_lock contention with no side-effect.  That
+is just to use rcu list iterator in get_vmalloc_info().
+
+rcu can be used in this function because all RCU protocol is already
+respected by writers, since Nick Piggin commit db64fe02258f1 ("mm:
+rewrite vmap layer") back in linux-2.6.28
+
+Specifically :
+   insertions use list_add_rcu(),
+   deletions use list_del_rcu() and kfree_rcu().
+
+Note the rb tree is not used from rcu reader (it would not be safe),
+only the vmap_area_list has full RCU protection.
+
+Note that __purge_vmap_area_lazy() already uses this rcu protection.
+
+        rcu_read_lock();
+        list_for_each_entry_rcu(va, &vmap_area_list, list) {
+                if (va->flags & VM_LAZY_FREE) {
+                        if (va->va_start < *start)
+                                *start = va->va_start;
+                        if (va->va_end > *end)
+                                *end = va->va_end;
+                        nr += (va->va_end - va->va_start) >> PAGE_SHIFT;
+                        list_add_tail(&va->purge_list, &valist);
+                        va->flags |= VM_LAZY_FREEING;
+                        va->flags &= ~VM_LAZY_FREE;
+                }
+        }
+        rcu_read_unlock();
+
+Peter:
+
+: While rcu list traversal over the vmap_area_list is safe, this may
+: arrive at different results than the spinlocked version. The rcu list
+: traversal version will not be a 'snapshot' of a single, valid instant
+: of the entire vmap_area_list, but rather a potential amalgam of
+: different list states.
+
+Joonsoo:
+
+: Yes, you are right, but I don't think that we should be strict here.
+: Meminfo is already not a 'snapshot' at specific time.  While we try to get
+: certain stats, the other stats can change.  And, although we may arrive at
+: different results than the spinlocked version, the difference would not be
+: large and would not make serious side-effect.
+
+[edumazet@google.com: add more commit description]
+Signed-off-by: Joonsoo Kim <iamjoonsoo.kim@lge.com>
+Reported-by: Richard Yao <ryao@gentoo.org>
+Acked-by: Eric Dumazet <edumazet@google.com>
+Cc: Peter Hurley <peter@hurleysoftware.com>
+Cc: Zhang Yanfei <zhangyanfei.yes@gmail.com>
+Cc: Johannes Weiner <hannes@cmpxchg.org>
+Cc: Andi Kleen <andi@firstfloor.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/mm/vmalloc.c b/mm/vmalloc.c
+index f64632b..fdbb116 100644
+--- a/mm/vmalloc.c
++++ b/mm/vmalloc.c
+@@ -2690,14 +2690,14 @@ void get_vmalloc_info(struct vmalloc_info *vmi)
+ 
+ 	prev_end = VMALLOC_START;
+ 
+-	spin_lock(&vmap_area_lock);
++	rcu_read_lock();
+ 
+ 	if (list_empty(&vmap_area_list)) {
+ 		vmi->largest_chunk = VMALLOC_TOTAL;
+ 		goto out;
+ 	}
+ 
+-	list_for_each_entry(va, &vmap_area_list, list) {
++	list_for_each_entry_rcu(va, &vmap_area_list, list) {
+ 		unsigned long addr = va->va_start;
+ 
+ 		/*
+@@ -2724,7 +2724,7 @@ void get_vmalloc_info(struct vmalloc_info *vmi)
+ 		vmi->largest_chunk = VMALLOC_END - prev_end;
+ 
+ out:
+-	spin_unlock(&vmap_area_lock);
++	rcu_read_unlock();
+ }
+ #endif
+ 
+-- 
+cgit v0.10.1
+

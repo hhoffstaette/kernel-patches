@@ -1,0 +1,79 @@
+From 03cb4fb9d86d591bc8a3f66eac6fb874b50b1b4d Mon Sep 17 00:00:00 2001
+From: Filipe David Borba Manana <fdmanana@gmail.com>
+Date: Sat, 1 Feb 2014 02:00:15 +0000
+Subject: Btrfs: fix send dealing with file renames and directory moves
+
+This fixes a case that the commit titled:
+
+   Btrfs: fix infinite path build loops in incremental send
+
+didn't cover. If the parent-child relationship between 2 directories
+is inverted, both get renamed, and the former parent has a file that
+got renamed too (but remains a child of that directory), the incremental
+send operation would use the file's old path after sending an unlink
+operation for that old path, causing receive to fail on future operations
+like changing owner, permissions or utimes of the corresponding inode.
+
+This is not a regression from the commit mentioned before, as without
+that commit we would fall into the issues that commit fixed, so it's
+just one case that wasn't covered before.
+
+Simple steps to reproduce this issue are:
+
+      $ mkfs.btrfs -f /dev/sdb3
+      $ mount /dev/sdb3 /mnt/btrfs
+      $ mkdir -p /mnt/btrfs/a/b/c/d
+      $ touch /mnt/btrfs/a/b/c/d/file
+      $ mkdir -p /mnt/btrfs/a/b/x
+      $ btrfs subvol snapshot -r /mnt/btrfs /mnt/btrfs/snap1
+      $ mv /mnt/btrfs/a/b/x /mnt/btrfs/a/b/c/x2
+      $ mv /mnt/btrfs/a/b/c/d /mnt/btrfs/a/b/c/x2/d2
+      $ mv /mnt/btrfs/a/b/c/x2/d2/file /mnt/btrfs/a/b/c/x2/d2/file2
+      $ btrfs subvol snapshot -r /mnt/btrfs /mnt/btrfs/snap2
+      $ btrfs send -p /mnt/btrfs/snap1 /mnt/btrfs/snap2 > /tmp/incremental.send
+
+A patch to update the test btrfs/030 from xfstests, so that it covers
+this case, will be submitted soon.
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 70272e1..8bd0505 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -2131,8 +2131,6 @@ static int get_cur_path(struct send_ctx *sctx, u64 ino, u64 gen,
+ 	u64 parent_inode = 0;
+ 	u64 parent_gen = 0;
+ 	int stop = 0;
+-	u64 start_ino = ino;
+-	u64 start_gen = gen;
+ 	int skip_name_cache = 0;
+ 
+ 	name = fs_path_alloc();
+@@ -2144,7 +2142,6 @@ static int get_cur_path(struct send_ctx *sctx, u64 ino, u64 gen,
+ 	if (is_waiting_for_move(sctx, ino))
+ 		skip_name_cache = 1;
+ 
+-again:
+ 	dest->reversed = 1;
+ 	fs_path_reset(dest);
+ 
+@@ -2159,13 +2156,8 @@ again:
+ 			stop = 1;
+ 
+ 		if (!skip_name_cache &&
+-		    is_waiting_for_move(sctx, parent_inode)) {
+-			ino = start_ino;
+-			gen = start_gen;
+-			stop = 0;
++		    is_waiting_for_move(sctx, parent_inode))
+ 			skip_name_cache = 1;
+-			goto again;
+-		}
+ 
+ 		ret = fs_path_add_path(dest, name);
+ 		if (ret < 0)
+-- 
+cgit v0.10.1
+

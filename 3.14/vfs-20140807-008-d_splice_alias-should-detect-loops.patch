@@ -1,0 +1,30 @@
+From 95ad5c291313b66a98a44dc92b57e0b37c1dd589 Mon Sep 17 00:00:00 2001
+From: "J. Bruce Fields" <bfields@redhat.com>
+Date: Wed, 12 Mar 2014 12:19:23 -0400
+Subject: dcache: d_splice_alias should detect loops
+
+I believe this can only happen in the case of a corrupted filesystem.
+So -EIO looks like the appropriate error.
+
+Signed-off-by: J. Bruce Fields <bfields@redhat.com>
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index 85a2aad..ad13700 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -2706,6 +2706,11 @@ struct dentry *d_splice_alias(struct inode *inode, struct dentry *dentry)
+ 				dput(new);
+ 				return ERR_PTR(-EIO);
+ 			}
++			if (d_ancestor(new, dentry)) {
++				spin_unlock(&inode->i_lock);
++				dput(new);
++				return ERR_PTR(-EIO);
++			}
+ 			write_seqlock(&rename_lock);
+ 			__d_materialise_dentry(dentry, new);
+ 			write_sequnlock(&rename_lock);
+-- 
+cgit v0.10.1
+

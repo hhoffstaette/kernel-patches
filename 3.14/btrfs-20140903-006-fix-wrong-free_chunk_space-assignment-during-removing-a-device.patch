@@ -1,0 +1,31 @@
+From ed3e54acb5e465e79085ae8b9521c37dabcfd781 Mon Sep 17 00:00:00 2001
+From: Miao Xie <miaox@cn.fujitsu.com>
+Date: Wed, 3 Sep 2014 21:35:35 +0800
+Subject: Btrfs: Fix wrong free_chunk_space assignment during removing a device
+
+During removing a device, we have modified free_chunk_space when we
+shrink the device, so we needn't assign a new value to it after
+the device shrink. Fix it.
+
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index f8273bb..1524b3f 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1671,11 +1671,6 @@ int btrfs_rm_device(struct btrfs_root *root, char *device_path)
+ 	if (ret)
+ 		goto error_undo;
+ 
+-	spin_lock(&root->fs_info->free_chunk_lock);
+-	root->fs_info->free_chunk_space = device->total_bytes -
+-		device->bytes_used;
+-	spin_unlock(&root->fs_info->free_chunk_lock);
+-
+ 	device->in_fs_metadata = 0;
+ 	btrfs_scrub_cancel_dev(root->fs_info, device);
+ 
+-- 
+cgit v0.10.1
+

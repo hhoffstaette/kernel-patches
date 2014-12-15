@@ -1,0 +1,60 @@
+From bf8e8ca6fd4ac6e8edc58b92cffb2ffd51933138 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Thu, 2 Oct 2014 19:17:32 +0100
+Subject: Btrfs: send, don't delay dir move if there's a new parent inode
+
+If between two snapshots we rename an existing directory named X to Y and
+make it a child (direct or not) of a new inode named X, we were delaying
+the move/rename of the former directory unnecessarily, which would result
+in attempting to rename the new directory from its orphan name to name X
+prematurely.
+
+Minimal reproducer:
+
+    $ mkfs.btrfs -f /dev/vdd
+    $ mount /dev/vdd /mnt
+    $ mkdir -p /mnt/merlin/RC/OSD/Source
+
+    $ btrfs subvolume snapshot -r /mnt /mnt/mysnap1
+
+    $ mkdir /mnt/OSD
+    $ mv /mnt/merlin/RC/OSD /mnt/OSD/OSD-Plane_788
+    $ mv /mnt/OSD /mnt/merlin/RC
+
+    $ btrfs subvolume snapshot -r /mnt /mnt/mysnap2
+
+    $ btrfs send /mnt/mysnap1 -f /tmp/1.snap
+    $ btrfs send -p /mnt/mysnap1 /mnt/mysnap2 -f /tmp/2.snap
+
+    $ mkfs.btrfs -f /dev/vdc
+    $ mount /dev/vdc /mnt2
+
+    $ btrfs receive /mnt2 -f /tmp/1.snap
+    $ btrfs receive /mnt2 -f /tmp/2.snap
+
+The second receive (from an incremental send) failed with the following
+error message: "rename o261-7-0 -> merlin/RC/OSD failed".
+This is a regression introduced in the 3.16 kernel.
+
+A test case for xfstests follows.
+
+Reported-by: Marc Merlin <marc@merlins.org>
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 7edfc7c..b9c27aa 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -3327,7 +3327,7 @@ static int wait_for_parent_move(struct send_ctx *sctx,
+ 		if (ret < 0 && ret != -ENOENT) {
+ 			goto out;
+ 		} else if (ret == -ENOENT) {
+-			ret = 1;
++			ret = 0;
+ 			break;
+ 		}
+ 
+-- 
+cgit v0.10.1
+

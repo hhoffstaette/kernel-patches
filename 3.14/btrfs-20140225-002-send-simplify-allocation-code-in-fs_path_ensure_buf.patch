@@ -1,0 +1,52 @@
+From 9c9ca00bd31989f1a3dcbf54e97c979024e44409 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Tue, 25 Feb 2014 19:33:08 +0100
+Subject: btrfs: send: simplify allocation code in fs_path_ensure_buf
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 246df85..ba23fef 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -352,24 +352,18 @@ static int fs_path_ensure_buf(struct fs_path *p, int len)
+ 	/*
+ 	 * First time the inline_buf does not suffice
+ 	 */
+-	if (p->buf == p->inline_buf) {
+-		p->buf = kmalloc(len, GFP_NOFS);
+-		if (!p->buf)
+-			return -ENOMEM;
+-		/*
+-		 * The real size of the buffer is bigger, this will let the
+-		 * fast path happen most of the time
+-		 */
+-		p->buf_len = ksize(p->buf);
+-	} else {
+-		char *tmp;
+-
+-		tmp = krealloc(p->buf, len, GFP_NOFS);
+-		if (!tmp)
+-			return -ENOMEM;
+-		p->buf = tmp;
+-		p->buf_len = ksize(p->buf);
+-	}
++	if (p->buf == p->inline_buf)
++		tmp_buf = kmalloc(len, GFP_NOFS);
++	else
++		tmp_buf = krealloc(p->buf, len, GFP_NOFS);
++	if (!tmp_buf)
++		return -ENOMEM;
++	p->buf = tmp_buf;
++	/*
++	 * The real size of the buffer is bigger, this will let the fast path
++	 * happen most of the time
++	 */
++	p->buf_len = ksize(p->buf);
+ 
+ 	if (p->reversed) {
+ 		tmp_buf = p->buf + old_buf_len - path_len - 1;
+-- 
+cgit v0.10.1
+

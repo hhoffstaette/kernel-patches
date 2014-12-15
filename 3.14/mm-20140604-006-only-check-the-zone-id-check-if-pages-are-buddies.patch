@@ -1,0 +1,62 @@
+From d34c5fa06fade08a689fc171bf756fba2858ae73 Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@suse.de>
+Date: Wed, 4 Jun 2014 16:10:10 -0700
+Subject: mm: page_alloc: only check the zone id check if pages are buddies
+
+A node/zone index is used to check if pages are compatible for merging
+but this happens unconditionally even if the buddy page is not free. Defer
+the calculation as long as possible. Ideally we would check the zone boundary
+but nodes can overlap.
+
+Signed-off-by: Mel Gorman <mgorman@suse.de>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Acked-by: Rik van Riel <riel@redhat.com>
+Cc: Vlastimil Babka <vbabka@suse.cz>
+Cc: Jan Kara <jack@suse.cz>
+Cc: Michal Hocko <mhocko@suse.cz>
+Cc: Hugh Dickins <hughd@google.com>
+Cc: Dave Hansen <dave.hansen@intel.com>
+Cc: Theodore Ts'o <tytso@mit.edu>
+Cc: "Paul E. McKenney" <paulmck@linux.vnet.ibm.com>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index a2955e1..da52690 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -509,16 +509,26 @@ static inline int page_is_buddy(struct page *page, struct page *buddy,
+ 	if (!pfn_valid_within(page_to_pfn(buddy)))
+ 		return 0;
+ 
+-	if (page_zone_id(page) != page_zone_id(buddy))
+-		return 0;
+-
+ 	if (page_is_guard(buddy) && page_order(buddy) == order) {
+ 		VM_BUG_ON_PAGE(page_count(buddy) != 0, buddy);
++
++		if (page_zone_id(page) != page_zone_id(buddy))
++			return 0;
++
+ 		return 1;
+ 	}
+ 
+ 	if (PageBuddy(buddy) && page_order(buddy) == order) {
+ 		VM_BUG_ON_PAGE(page_count(buddy) != 0, buddy);
++
++		/*
++		 * zone check is done late to avoid uselessly
++		 * calculating zone/node ids for pages that could
++		 * never merge.
++		 */
++		if (page_zone_id(page) != page_zone_id(buddy))
++			return 0;
++
+ 		return 1;
+ 	}
+ 	return 0;
+-- 
+cgit v0.10.1
+

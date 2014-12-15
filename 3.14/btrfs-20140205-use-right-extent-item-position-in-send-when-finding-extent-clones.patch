@@ -1,0 +1,30 @@
+From a0859c0998605d2dc1b021543398cd84a40589db Mon Sep 17 00:00:00 2001
+From: Filipe David Borba Manana <fdmanana@gmail.com>
+Date: Wed, 5 Feb 2014 16:48:55 +0000
+Subject: Btrfs: use right extent item position in send when finding extent
+ clones
+
+This was a leftover from the commit:
+
+   74dd17fbe3d65829e75d84f00a9525b2ace93998
+   (Btrfs: fix btrfs send for inline items and compression)
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index bef7ba6..89fefbd 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -1288,8 +1288,6 @@ static int find_extent_clone(struct send_ctx *sctx,
+ 		extent_item_pos = logical - found_key.objectid;
+ 	else
+ 		extent_item_pos = 0;
+-
+-	extent_item_pos = logical - found_key.objectid;
+ 	ret = iterate_extent_inodes(sctx->send_root->fs_info,
+ 					found_key.objectid, extent_item_pos, 1,
+ 					__iterate_backrefs, backref_ctx);
+-- 
+cgit v0.10.1
+

@@ -1,0 +1,40 @@
+From 37be2796bff734062fdc46c38d6c7db1bc7adbc8 Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Wed, 13 Aug 2014 14:24:21 +0800
+Subject: btrfs: fix rw_devices miss match after seed replace
+
+reproducer:
+    reproducer:
+    mount /dev/sdb /btrfs
+    btrfs dev add /dev/sdc /btrfs
+    btrfs rep start -B /dev/sdb /dev/sdd /btrfs
+    umount /btrfs
+
+WARNING: CPU: 0 PID: 3882 at fs/btrfs/volumes.c:892 __btrfs_close_devices+0x1c8/0x200 [btrfs]()
+
+which is
+
+        WARN_ON(fs_devices->rw_devices);
+
+   The problem here is that we did not add one to the rw_devices when
+   we replace the seed device with a writable device.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index eea26e1..fb0a7fa 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -562,6 +562,8 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
+ 	if (fs_info->fs_devices->latest_bdev == src_device->bdev)
+ 		fs_info->fs_devices->latest_bdev = tgt_device->bdev;
+ 	list_add(&tgt_device->dev_alloc_list, &fs_info->fs_devices->alloc_list);
++	if (src_device->fs_devices->seeding)
++		fs_info->fs_devices->rw_devices++;
+ 
+ 	/* replace the sysfs entry */
+ 	btrfs_kobj_rm_device(fs_info, src_device);
+-- 
+cgit v0.10.1
+

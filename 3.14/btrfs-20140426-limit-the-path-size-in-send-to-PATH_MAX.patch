@@ -1,0 +1,37 @@
+From cfd4a535b68faf651b238586011f5bae128391c4 Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Sat, 26 Apr 2014 05:02:03 -0700
+Subject: Btrfs: limit the path size in send to PATH_MAX
+
+fs_path_ensure_buf is used to make sure our path buffers for
+send are big enough for the path names as we construct them.
+The buffer size is limited to 32K by the length field in
+the struct.
+
+But bugs in the path construction can end up trying to build
+a huge buffer, and we'll do invalid memmmoves when the
+buffer length field wraps.
+
+This patch is step one, preventing the overflows.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 1ac3ca9..eb6537a 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -349,6 +349,11 @@ static int fs_path_ensure_buf(struct fs_path *p, int len)
+ 	if (p->buf_len >= len)
+ 		return 0;
+ 
++	if (len > PATH_MAX) {
++		WARN_ON(1);
++		return -ENOMEM;
++	}
++
+ 	path_len = p->end - p->start;
+ 	old_buf_len = p->buf_len;
+ 
+-- 
+cgit v0.10.1
+

@@ -1,0 +1,139 @@
+From bf0d1f441d1679136c25e6141dd7e66cc7a14218 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Fri, 21 Feb 2014 00:01:32 +0000
+Subject: Btrfs: fix send issuing outdated paths for utimes, chown and chmod
+
+When doing an incremental send, if we had a directory pending a move/rename
+operation and none of its parents, except for the immediate parent, were
+pending a move/rename, after processing the directory's references, we would
+be issuing utimes, chown and chmod intructions against am outdated path - a
+path which matched the one in the parent root.
+
+This change also simplifies a bit the code that deals with building a path
+for a directory which has a move/rename operation delayed.
+
+Steps to reproduce:
+
+    $ mkfs.btrfs -f /dev/sdb3
+    $ mount /dev/sdb3 /mnt/btrfs
+    $ mkdir -p /mnt/btrfs/a/b/c/d/e
+    $ mkdir /mnt/btrfs/a/b/c/f
+    $ chmod 0777 /mnt/btrfs/a/b/c/d/e
+    $ btrfs subvolume snapshot -r /mnt/btrfs /mnt/btrfs/snap1
+    $ btrfs send /mnt/btrfs/snap1 -f /tmp/base.send
+    $ mv /mnt/btrfs/a/b/c/f /mnt/btrfs/a/b/f2
+    $ mv /mnt/btrfs/a/b/c/d/e /mnt/btrfs/a/b/f2/e2
+    $ mv /mnt/btrfs/a/b/c /mnt/btrfs/a/b/c2
+    $ mv /mnt/btrfs/a/b/c2/d /mnt/btrfs/a/b/c2/d2
+    $ chmod 0700 /mnt/btrfs/a/b/f2/e2
+    $ btrfs subvolume snapshot -r /mnt/btrfs /mnt/btrfs/snap2
+    $ btrfs send -p /mnt/btrfs/snap1 /mnt/btrfs/snap2 -f /tmp/incremental.send
+
+    $ umount /mnt/btrfs
+    $ mkfs.btrfs -f /dev/sdb3
+    $ mount /dev/sdb3 /mnt/btrfs
+    $ btrfs receive /mnt/btrfs -f /tmp/base.send
+    $ btrfs receive /mnt/btrfs -f /tmp/incremental.send
+
+The second btrfs receive command failed with:
+
+    ERROR: chmod a/b/c/d/e failed. No such file or directory
+
+A test case for xfstests follows.
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 46c6b54..298e25d 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -2000,7 +2000,6 @@ static void name_cache_free(struct send_ctx *sctx)
+  */
+ static int __get_cur_name_and_parent(struct send_ctx *sctx,
+ 				     u64 ino, u64 gen,
+-				     int skip_name_cache,
+ 				     u64 *parent_ino,
+ 				     u64 *parent_gen,
+ 				     struct fs_path *dest)
+@@ -2010,8 +2009,6 @@ static int __get_cur_name_and_parent(struct send_ctx *sctx,
+ 	struct btrfs_path *path = NULL;
+ 	struct name_cache_entry *nce = NULL;
+ 
+-	if (skip_name_cache)
+-		goto get_ref;
+ 	/*
+ 	 * First check if we already did a call to this function with the same
+ 	 * ino/gen. If yes, check if the cache entry is still up-to-date. If yes
+@@ -2056,12 +2053,11 @@ static int __get_cur_name_and_parent(struct send_ctx *sctx,
+ 		goto out_cache;
+ 	}
+ 
+-get_ref:
+ 	/*
+ 	 * Depending on whether the inode was already processed or not, use
+ 	 * send_root or parent_root for ref lookup.
+ 	 */
+-	if (ino < sctx->send_progress && !skip_name_cache)
++	if (ino < sctx->send_progress)
+ 		ret = get_first_ref(sctx->send_root, ino,
+ 				    parent_ino, parent_gen, dest);
+ 	else
+@@ -2085,8 +2081,6 @@ get_ref:
+ 			goto out;
+ 		ret = 1;
+ 	}
+-	if (skip_name_cache)
+-		goto out;
+ 
+ out_cache:
+ 	/*
+@@ -2154,7 +2148,6 @@ static int get_cur_path(struct send_ctx *sctx, u64 ino, u64 gen,
+ 	u64 parent_inode = 0;
+ 	u64 parent_gen = 0;
+ 	int stop = 0;
+-	int skip_name_cache = 0;
+ 
+ 	name = fs_path_alloc();
+ 	if (!name) {
+@@ -2162,9 +2155,6 @@ static int get_cur_path(struct send_ctx *sctx, u64 ino, u64 gen,
+ 		goto out;
+ 	}
+ 
+-	if (is_waiting_for_move(sctx, ino))
+-		skip_name_cache = 1;
+-
+ 	dest->reversed = 1;
+ 	fs_path_reset(dest);
+ 
+@@ -2179,16 +2169,19 @@ static int get_cur_path(struct send_ctx *sctx, u64 ino, u64 gen,
+ 			break;
+ 		}
+ 
+-		ret = __get_cur_name_and_parent(sctx, ino, gen, skip_name_cache,
+-				&parent_inode, &parent_gen, name);
++		if (is_waiting_for_move(sctx, ino)) {
++			ret = get_first_ref(sctx->parent_root, ino,
++					    &parent_inode, &parent_gen, name);
++		} else {
++			ret = __get_cur_name_and_parent(sctx, ino, gen,
++							&parent_inode,
++							&parent_gen, name);
++			if (ret)
++				stop = 1;
++		}
++
+ 		if (ret < 0)
+ 			goto out;
+-		if (ret)
+-			stop = 1;
+-
+-		if (!skip_name_cache &&
+-		    is_waiting_for_move(sctx, parent_inode))
+-			skip_name_cache = 1;
+ 
+ 		ret = fs_path_add_path(dest, name);
+ 		if (ret < 0)
+-- 
+cgit v0.10.1
+

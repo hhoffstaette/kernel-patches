@@ -1,0 +1,25 @@
+From 5fb6b953bb7aa86a9c8ea760934982cedc45c52b Mon Sep 17 00:00:00 2001
+From: Heiko Carstens <heiko.carstens@de.ibm.com>
+Date: Tue, 8 Apr 2014 12:55:46 +0200
+Subject: include/linux/syscalls.h: add sys_renameat2() prototype
+
+Signed-off-by: Heiko Carstens <heiko.carstens@de.ibm.com>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
+index 2aa8b74..697ceb7 100644
+--- a/include/linux/syscalls.h
++++ b/include/linux/syscalls.h
+@@ -748,6 +748,9 @@ asmlinkage long sys_linkat(int olddfd, const char __user *oldname,
+ 			   int newdfd, const char __user *newname, int flags);
+ asmlinkage long sys_renameat(int olddfd, const char __user * oldname,
+ 			     int newdfd, const char __user * newname);
++asmlinkage long sys_renameat2(int olddfd, const char __user *oldname,
++			      int newdfd, const char __user *newname,
++			      unsigned int flags);
+ asmlinkage long sys_futimesat(int dfd, const char __user *filename,
+ 			      struct timeval __user *utimes);
+ asmlinkage long sys_faccessat(int dfd, const char __user *filename, int mode);
+-- 
+cgit v0.10.1
+

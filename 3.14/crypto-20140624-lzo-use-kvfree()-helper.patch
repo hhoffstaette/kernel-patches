@@ -1,0 +1,29 @@
+From de18cd4b71acecbd1278a7bb79340cbf885212aa Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Tue, 24 Jun 2014 01:23:45 -0700
+Subject: crypto: lzo - use kvfree() helper
+
+kvfree() helper is now available, use it instead of open code it.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
+
+diff --git a/crypto/lzo.c b/crypto/lzo.c
+index 252e791d..a8ff2f7 100644
+--- a/crypto/lzo.c
++++ b/crypto/lzo.c
+@@ -45,10 +45,7 @@ static void lzo_exit(struct crypto_tfm *tfm)
+ {
+ 	struct lzo_ctx *ctx = crypto_tfm_ctx(tfm);
+ 
+-	if (is_vmalloc_addr(ctx->lzo_comp_mem))
+-		vfree(ctx->lzo_comp_mem);
+-	else
+-		kfree(ctx->lzo_comp_mem);
++	kvfree(ctx->lzo_comp_mem);
+ }
+ 
+ static int lzo_compress(struct crypto_tfm *tfm, const u8 *src,
+-- 
+cgit v0.10.1
+

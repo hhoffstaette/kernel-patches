@@ -1,0 +1,104 @@
+From e9894fd3e3b3c5ecaa096d32c2d2b79db8e64433 Mon Sep 17 00:00:00 2001
+From: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Date: Thu, 27 Mar 2014 11:12:25 +0800
+Subject: Btrfs: fix snapshot vs nocow writting
+
+While running fsstress and snapshots concurrently, we will hit something
+like followings:
+
+Thread 1			Thread 2
+
+|->fallocate
+  |->write pages
+    |->join transaction
+       |->add ordered extent
+    |->end transaction
+				|->flushing data
+				  |->creating pending snapshots
+|->write data into src root's
+   fallocated space
+
+After above work flows finished, we will get a state that source and
+snapshot root share same space, but source root have written data into
+fallocated space, this will make fsck fail to verify checksums for
+snapshot root's preallocating file extent data.Nocow writting also
+has this same problem.
+
+Fix this problem by syncing snapshots with nocow writting:
+
+ 1.for nocow writting,if there are pending snapshots, we will
+ fall into COW way.
+
+ 2.if there are pending nocow writes, snapshots for this root
+ will be blocked until nocow writting finish.
+
+Reported-by: Gui Hecheng <guihc.fnst@cn.fujitsu.com>
+Signed-off-by: Wang Shilong <wangsl.fnst@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 0ec8766..251db68 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -1271,6 +1271,15 @@ next_slot:
+ 			disk_bytenr += cur_offset - found_key.offset;
+ 			num_bytes = min(end + 1, extent_end) - cur_offset;
+ 			/*
++			 * if there are pending snapshots for this root,
++			 * we fall into common COW way.
++			 */
++			if (!nolock) {
++				err = btrfs_start_nocow_write(root);
++				if (!err)
++					goto out_check;
++			}
++			/*
+ 			 * force cow if csum exists in the range.
+ 			 * this ensure that csum for a given extent are
+ 			 * either valid or do not exist.
+@@ -1289,6 +1298,8 @@ next_slot:
+ out_check:
+ 		if (extent_end <= start) {
+ 			path->slots[0]++;
++			if (!nolock && nocow)
++				btrfs_end_nocow_write(root);
+ 			goto next_slot;
+ 		}
+ 		if (!nocow) {
+@@ -1306,8 +1317,11 @@ out_check:
+ 			ret = cow_file_range(inode, locked_page,
+ 					     cow_start, found_key.offset - 1,
+ 					     page_started, nr_written, 1);
+-			if (ret)
++			if (ret) {
++				if (!nolock && nocow)
++					btrfs_end_nocow_write(root);
+ 				goto error;
++			}
+ 			cow_start = (u64)-1;
+ 		}
+ 
+@@ -1354,8 +1368,11 @@ out_check:
+ 		    BTRFS_DATA_RELOC_TREE_OBJECTID) {
+ 			ret = btrfs_reloc_clone_csums(inode, cur_offset,
+ 						      num_bytes);
+-			if (ret)
++			if (ret) {
++				if (!nolock && nocow)
++					btrfs_end_nocow_write(root);
+ 				goto error;
++			}
+ 		}
+ 
+ 		extent_clear_unlock_delalloc(inode, cur_offset,
+@@ -1363,6 +1380,8 @@ out_check:
+ 					     locked_page, EXTENT_LOCKED |
+ 					     EXTENT_DELALLOC, PAGE_UNLOCK |
+ 					     PAGE_SET_PRIVATE2);
++		if (!nolock && nocow)
++			btrfs_end_nocow_write(root);
+ 		cur_offset = extent_end;
+ 		if (cur_offset > end)
+ 			break;
+-- 
+cgit v0.10.1

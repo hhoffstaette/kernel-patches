@@ -1,0 +1,94 @@
+From ce069fc920e5734558b3d9cbef1ab06cf01ee793 Mon Sep 17 00:00:00 2001
+From: Jason Low <jason.low2@hp.com>
+Date: Mon, 14 Jul 2014 10:27:52 -0700
+Subject: locking/rwsem: Reduce the size of struct rw_semaphore
+
+Recent optimistic spinning additions to rwsem provide significant performance
+benefits on many workloads on large machines. The cost of it was increasing
+the size of the rwsem structure by up to 128 bits.
+
+However, now that the previous patches in this series bring the overhead of
+struct optimistic_spin_queue to 32 bits, this patch reorders some fields in
+struct rw_semaphore such that we can reduce the overhead of the rwsem structure
+by 64 bits (on 64 bit systems).
+
+The extra overhead required for rwsem optimistic spinning would now be up
+to 8 additional bytes instead of up to 16 bytes. Additionally, the size of
+rwsem would now be more in line with mutexes.
+
+Signed-off-by: Jason Low <jason.low2@hp.com>
+Signed-off-by: Peter Zijlstra <peterz@infradead.org>
+Cc: Scott Norton <scott.norton@hp.com>
+Cc: "Paul E. McKenney" <paulmck@linux.vnet.ibm.com>
+Cc: Dave Chinner <david@fromorbit.com>
+Cc: Waiman Long <waiman.long@hp.com>
+Cc: Davidlohr Bueso <davidlohr@hp.com>
+Cc: Rik van Riel <riel@redhat.com>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: "H. Peter Anvin" <hpa@zytor.com>
+Cc: Steven Rostedt <rostedt@goodmis.org>
+Cc: Tim Chen <tim.c.chen@linux.intel.com>
+Cc: Konrad Rzeszutek Wilk <konrad.wilk@oracle.com>
+Cc: Aswin Chandramouleeswaran <aswin@hp.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Chris Mason <clm@fb.com>
+Cc: Josef Bacik <jbacik@fusionio.com>
+Link: http://lkml.kernel.org/r/1405358872-3732-6-git-send-email-jason.low2@hp.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/include/linux/rwsem.h b/include/linux/rwsem.h
+index 25cd9aa..716807f 100644
+--- a/include/linux/rwsem.h
++++ b/include/linux/rwsem.h
+@@ -24,15 +24,15 @@ struct rw_semaphore;
+ /* All arch specific implementations share the same struct */
+ struct rw_semaphore {
+ 	long count;
+-	raw_spinlock_t wait_lock;
+ 	struct list_head wait_list;
++	raw_spinlock_t wait_lock;
+ #ifdef CONFIG_SMP
++	struct optimistic_spin_queue osq; /* spinner MCS lock */
+ 	/*
+ 	 * Write owner. Used as a speculative check to see
+ 	 * if the owner is running on the cpu.
+ 	 */
+ 	struct task_struct *owner;
+-	struct optimistic_spin_queue osq; /* spinner MCS lock */
+ #endif
+ #ifdef CONFIG_DEBUG_LOCK_ALLOC
+ 	struct lockdep_map	dep_map;
+@@ -64,21 +64,18 @@ static inline int rwsem_is_locked(struct rw_semaphore *sem)
+ #endif
+ 
+ #if defined(CONFIG_SMP) && !defined(CONFIG_RWSEM_GENERIC_SPINLOCK)
+-#define __RWSEM_INITIALIZER(name)			\
+-	{ RWSEM_UNLOCKED_VALUE,				\
+-	  __RAW_SPIN_LOCK_UNLOCKED(name.wait_lock),	\
+-	  LIST_HEAD_INIT((name).wait_list),		\
+-	  NULL, /* owner */				\
+-	  OSQ_LOCK_UNLOCKED /* osq */			\
+-	  __RWSEM_DEP_MAP_INIT(name) }
++#define __RWSEM_OPT_INIT(lockname) , .osq = OSQ_LOCK_UNLOCKED, .owner = NULL
+ #else
+-#define __RWSEM_INITIALIZER(name)			\
+-	{ RWSEM_UNLOCKED_VALUE,				\
+-	  __RAW_SPIN_LOCK_UNLOCKED(name.wait_lock),	\
+-	  LIST_HEAD_INIT((name).wait_list)		\
+-	  __RWSEM_DEP_MAP_INIT(name) }
++#define __RWSEM_OPT_INIT(lockname)
+ #endif
+ 
++#define __RWSEM_INITIALIZER(name)				\
++	{ .count = RWSEM_UNLOCKED_VALUE,			\
++	  .wait_list = LIST_HEAD_INIT((name).wait_list),	\
++	  .wait_lock = __RAW_SPIN_LOCK_UNLOCKED(name.wait_lock)	\
++	  __RWSEM_OPT_INIT(name)				\
++	  __RWSEM_DEP_MAP_INIT(name) }
++
+ #define DECLARE_RWSEM(name) \
+ 	struct rw_semaphore name = __RWSEM_INITIALIZER(name)
+ 
+-- 
+cgit v0.10.1
+

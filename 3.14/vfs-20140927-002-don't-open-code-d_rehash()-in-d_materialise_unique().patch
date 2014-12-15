@@ -1,0 +1,30 @@
+From 8527dd7187a05f2548010accdfad9dad892acf47 Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Fri, 26 Sep 2014 21:26:50 -0400
+Subject: don't open-code d_rehash() in d_materialise_unique()
+
+... and get rid of duplicate BUG_ON() there
+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index 36d84ec..2210763 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -2804,12 +2804,8 @@ struct dentry *d_materialise_unique(struct dentry *dentry, struct inode *inode)
+ 	actual = __d_instantiate_unique(dentry, inode);
+ 	if (!actual)
+ 		actual = dentry;
+-	else
+-		BUG_ON(!d_unhashed(actual));
+ 
+-	spin_lock(&actual->d_lock);
+-	_d_rehash(actual);
+-	spin_unlock(&actual->d_lock);
++	d_rehash(actual);
+ found:
+ 	spin_unlock(&inode->i_lock);
+ out_nolock:
+-- 
+cgit v0.10.1
+

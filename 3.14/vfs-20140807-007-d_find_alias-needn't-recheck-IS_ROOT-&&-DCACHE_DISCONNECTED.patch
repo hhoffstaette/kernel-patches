@@ -1,0 +1,34 @@
+From 8d80d7dabe9668965574669afbd31733f7b0fe9b Mon Sep 17 00:00:00 2001
+From: "J. Bruce Fields" <bfields@redhat.com>
+Date: Thu, 16 Jan 2014 17:17:31 -0500
+Subject: dcache: d_find_alias needn't recheck IS_ROOT && DCACHE_DISCONNECTED
+
+If we get to this point and discover the dentry is not a root dentry, or
+not DCACHE_DISCONNECTED--great, we always prefer that anyway.
+
+Signed-off-by: J. Bruce Fields <bfields@redhat.com>
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index 5c5f3bd..85a2aad 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -765,12 +765,9 @@ again:
+ 		alias = discon_alias;
+ 		spin_lock(&alias->d_lock);
+ 		if (S_ISDIR(inode->i_mode) || !d_unhashed(alias)) {
+-			if (IS_ROOT(alias) &&
+-			    (alias->d_flags & DCACHE_DISCONNECTED)) {
+-				__dget_dlock(alias);
+-				spin_unlock(&alias->d_lock);
+-				return alias;
+-			}
++			__dget_dlock(alias);
++			spin_unlock(&alias->d_lock);
++			return alias;
+ 		}
+ 		spin_unlock(&alias->d_lock);
+ 		goto again;
+-- 
+cgit v0.10.1
+

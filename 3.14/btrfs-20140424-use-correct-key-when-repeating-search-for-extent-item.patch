@@ -1,0 +1,40 @@
+From 9ce49a0b4ff7f13961d8d106ffae959823d2e758 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@gmail.com>
+Date: Thu, 24 Apr 2014 15:15:28 +0100
+Subject: Btrfs: use correct key when repeating search for extent item
+
+If skinny metadata is enabled and our first tree search fails to find a
+skinny extent item, we may repeat a tree search for a "fat" extent item
+(if the previous item in the leaf is not the "fat" extent we're looking
+for). However we were not setting the new key's objectid to the right
+value, as we previously used the same key variable to peek at the previous
+item in the leaf, which has a different objectid. So just set the right
+objectid to avoid modifying/deleting a wrong item if we repeat the tree
+search.
+
+Signed-off-by: Filipe David Borba Manana <fdmanana@gmail.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 1306487..678cb35 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -1542,6 +1542,7 @@ again:
+ 				ret = 0;
+ 		}
+ 		if (ret) {
++			key.objectid = bytenr;
+ 			key.type = BTRFS_EXTENT_ITEM_KEY;
+ 			key.offset = num_bytes;
+ 			btrfs_release_path(path);
+@@ -5719,6 +5720,7 @@ static int __btrfs_free_extent(struct btrfs_trans_handle *trans,
+ 
+ 			if (ret > 0 && skinny_metadata) {
+ 				skinny_metadata = false;
++				key.objectid = bytenr;
+ 				key.type = BTRFS_EXTENT_ITEM_KEY;
+ 				key.offset = num_bytes;
+ 				btrfs_release_path(path);
+-- 
+cgit v0.10.1
+
