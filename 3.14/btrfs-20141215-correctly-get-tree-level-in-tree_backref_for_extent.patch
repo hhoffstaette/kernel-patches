@@ -1,0 +1,59 @@
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: correctly get tree level in tree_backref_for_extent
+Date: Mon, 15 Dec 2014 16:04:42 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/41444>
+
+If we are using skinny metadata, the block's tree level is in the offset
+of the key and not in a btrfs_tree_block_info structure following the
+extent item (it doesn't exist). Therefore fix it.
+
+Besides returning the correct level in the tree, this also prevents reading
+past the leaf's end in the case where the extent item is the last item in
+the leaf (eb) and it has only 1 inline reference - this is because
+sizeof(struct btrfs_tree_block_info) is greater than
+sizeof(struct btrfs_extent_inline_ref).
+
+Got it while running a scrub which produced the following warning:
+
+    BTRFS: checksum error at logical 42123264 on dev /dev/sde, sector 15840: metadata node (level 24) in tree 5
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/backref.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/backref.c b/fs/btrfs/backref.c
+index 2d3e32e..8729cf6 100644
+--- a/fs/btrfs/backref.c
++++ b/fs/btrfs/backref.c
+@@ -1552,7 +1552,6 @@ int tree_backref_for_extent(unsigned long *ptr, struct extent_buffer *eb,
+ {
+ 	int ret;
+ 	int type;
+-	struct btrfs_tree_block_info *info;
+ 	struct btrfs_extent_inline_ref *eiref;
+ 
+ 	if (*ptr == (unsigned long)-1)
+@@ -1573,9 +1572,17 @@ int tree_backref_for_extent(unsigned long *ptr, struct extent_buffer *eb,
+ 	}
+ 
+ 	/* we can treat both ref types equally here */
+-	info = (struct btrfs_tree_block_info *)(ei + 1);
+ 	*out_root = btrfs_extent_inline_ref_offset(eb, eiref);
+-	*out_level = btrfs_tree_block_level(eb, info);
++
++	if (key->type == BTRFS_EXTENT_ITEM_KEY) {
++		struct btrfs_tree_block_info *info;
++
++		info = (struct btrfs_tree_block_info *)(ei + 1);
++		*out_level = btrfs_tree_block_level(eb, info);
++	} else {
++		ASSERT(key->type == BTRFS_METADATA_ITEM_KEY);
++		*out_level = (u8)key->offset;
++	}
+ 
+ 	if (ret == 1)
+ 		*ptr = (unsigned long)-1;
+-- 
+2.1.3
