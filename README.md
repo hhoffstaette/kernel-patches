@@ -14,6 +14,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 
 **Current release: 3.18.x**
 
+- bfq: BFQ v7r6 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v460 ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
 - btrfs: fixes from 3.19+ for filesystem corruption, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
