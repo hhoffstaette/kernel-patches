@@ -1,8 +1,8 @@
 From: Qu Wenruo <quwenruo@cn.fujitsu.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] btrfs: Enhance btrfs chunk allocation algorithm to reduce ENOSPC caused by unbalanced data/metadata allocation.
-Date: Thu, 23 Oct 2014 10:37:51 +0800
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/39646>
+Subject: [PATCH v2] btrfs: Enhance btrfs chunk allocation algorithm to reduce ENOSPC caused by unbalanced data/metadata allocation.
+Date: Thu, 18 Dec 2014 17:26:45 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/41551>
 
 When btrfs allocate a chunk, it will try to alloc up to 1G for data and
 256M for metadata, or 10% of all the writeable space if there is enough
@@ -39,14 +39,18 @@ About 230M is still available for later metadata allocation.
 
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
 ---
- fs/btrfs/volumes.c | 18 ++++++++++++++++++
- 1 file changed, 18 insertions(+)
+Changelog:
+v2:
+   Fix a dead judgement which will cause last 16~32M size unavailable.
+---
+ fs/btrfs/volumes.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
 
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index d47289c..fa8de79 100644
+index 0144790..1cd0256 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
-@@ -4240,6 +4240,7 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
+@@ -4236,6 +4236,7 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
  	int ret;
  	u64 max_stripe_size;
  	u64 max_chunk_size;
@@ -54,7 +58,7 @@ index d47289c..fa8de79 100644
  	u64 stripe_size;
  	u64 num_bytes;
  	u64 raid_stripe_len = BTRFS_STRIPE_LEN;
-@@ -4352,10 +4353,27 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
+@@ -4348,10 +4349,26 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
  		devices_info[ndevs].max_avail = max_avail;
  		devices_info[ndevs].total_avail = total_avail;
  		devices_info[ndevs].dev = device;
@@ -76,11 +80,10 @@ index d47289c..fa8de79 100644
 +		max_chunk_size = total_avail_space;
 +	else
 +		max_chunk_size = min(total_avail_space / 2, max_chunk_size);
-+	max_chunk_size = min(total_avail_space / 2, max_chunk_size);
 +
 +	/*
  	 * now sort the devices by hole size / available space
  	 */
  	sort(devices_info, ndevs, sizeof(struct btrfs_device_info),
 -- 
-2.1.2
+2.1.3
