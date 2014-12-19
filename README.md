@@ -14,7 +14,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 
 **Current release: 3.18.x**
 
-- bfq: BFQ v7r6 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
+- bfq: BFQ v7r7 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v460 ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
 - btrfs: fixes from 3.19+ for filesystem corruption, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
@@ -23,7 +23,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 
 **3.14.x**
 
-- bfq: BFQ v7r6 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
+- bfq: BFQ v7r7 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v454 + SMT-nice patch ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
 - btrfs: >430 patches from 3.15-3.19+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace and automatic GC of empty blockgroups. \o/
 - ext4: corruption fixes, `renameat2`
