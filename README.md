@@ -19,6 +19,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 - btrfs: fixes from 3.19+ for filesystem corruption, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: TSO improvements
+- nfs: fix xdr encoding at page boundary ([discussion](http://thread.gmane.org/gmane.linux.kernel/1852120/))
 
 
 **3.14.x**
