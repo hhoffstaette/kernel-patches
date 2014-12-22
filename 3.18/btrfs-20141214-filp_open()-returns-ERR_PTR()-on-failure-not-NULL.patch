@@ -1,0 +1,23 @@
+From 98af592f5bf863137ae2872ed03720f02fbc82c3 Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Sun, 14 Dec 2014 02:59:17 -0500
+Subject: btrfs: filp_open() returns ERR_PTR() on failure, not NULL...
+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 0144790..50c5a87 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1485,7 +1485,7 @@ static void update_dev_time(char *path_name)
+ 	struct file *filp;
+ 
+ 	filp = filp_open(path_name, O_RDWR, 0);
+-	if (!filp)
++	if (IS_ERR(filp))
+ 		return;
+ 	file_update_time(filp);
+ 	filp_close(filp, NULL);
+-- 
+cgit v0.10.1
+
