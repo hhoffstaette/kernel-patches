@@ -1,0 +1,38 @@
+From: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: Remove unnecessary placeholder in btrfs_err_code
+Date: Wed, 24 Dec 2014 14:52:04 +0900
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/41752>
+
+From: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+
+"notused" is not necessary. Set 1 to the first entry is enough.
+
+Signed-off-by: Takeuchi Satoru <takeuchi_satoru@jp.fujitsu.com
+Cc: Gui Hecheng <guihc.fnst@cn.fujitsu.com>
+---
+I once submit the similar patch to btrfs-progs.
+Then Gui Hecheng tell me fixing original code in kernel
+is better.
+
+http://permalink.gmane.org/gmane.comp.file-systems.btrfs/41679
+---
+ include/uapi/linux/btrfs.h | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/include/uapi/linux/btrfs.h b/include/uapi/linux/btrfs.h
+index 611e1c5..b6dec05 100644
+--- a/include/uapi/linux/btrfs.h
++++ b/include/uapi/linux/btrfs.h
+@@ -495,8 +495,7 @@ struct btrfs_ioctl_send_args {
+ 
+ /* Error codes as returned by the kernel */
+ enum btrfs_err_code {
+-	notused,
+-	BTRFS_ERROR_DEV_RAID1_MIN_NOT_MET,
++	BTRFS_ERROR_DEV_RAID1_MIN_NOT_MET = 1,
+ 	BTRFS_ERROR_DEV_RAID10_MIN_NOT_MET,
+ 	BTRFS_ERROR_DEV_RAID5_MIN_NOT_MET,
+ 	BTRFS_ERROR_DEV_RAID6_MIN_NOT_MET,
+-- 
+1.8.3.1
