@@ -25,7 +25,7 @@ index 6d58d72..c8274d3 100644
 -		btrfs_wait_marked_extents(log, &log->dirty_log_pages, mark);
 +		ret = btrfs_wait_marked_extents(log, &log->dirty_log_pages,
 +						mark);
-		btrfs_wait_logged_extents(log, log_transid);
+		btrfs_wait_logged_extents(trans, log, log_transid);
  		wait_log_commit(trans, log_root_tree,
  				root_log_ctx.log_transid);
  		mutex_unlock(&log_root_tree->log_mutex);
@@ -54,7 +54,7 @@ index 6d58d72..c8274d3 100644
 +		mutex_unlock(&log_root_tree->log_mutex);
 +		goto out_wake_log_root;
 +	}
- 	btrfs_wait_logged_extents(log, log_transid);
+ 	btrfs_wait_logged_extents(trans, log, log_transid);
  
  	btrfs_set_super_log_root(root->fs_info->super_for_commit,
 -- 

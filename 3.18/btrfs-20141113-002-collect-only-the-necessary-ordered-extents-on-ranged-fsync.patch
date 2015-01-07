@@ -19,7 +19,7 @@ diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
 index 1401b1a..a45bb01 100644
 --- a/fs/btrfs/ordered-data.c
 +++ b/fs/btrfs/ordered-data.c
-@@ -431,19 +431,29 @@ out:
+@@ -431,21 +431,31 @@ out:
  
  /* Needs to either be called under a log transaction or the log_mutex */
  void btrfs_get_logged_extents(struct inode *inode,
@@ -47,6 +47,8 @@ index 1401b1a..a45bb01 100644
 +			break;
  		if (!list_empty(&ordered->log_list))
  			continue;
+		if (test_bit(BTRFS_ORDERED_LOGGED, &ordered->flags))
+			continue;
 -		list_add_tail(&ordered->log_list, logged_list);
 +		list_add(&ordered->log_list, logged_list);
  		atomic_inc(&ordered->refs);
@@ -82,3 +84,8 @@ index c8274d3..38f1ee9 100644
  	 * a brute force approach to making sure we get the most uptodate
 -- 
 1.9.1
+
+
+
+
+
