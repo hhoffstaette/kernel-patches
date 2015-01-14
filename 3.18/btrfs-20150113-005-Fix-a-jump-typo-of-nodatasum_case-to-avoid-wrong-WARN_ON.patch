@@ -1,0 +1,49 @@
+From patchwork Tue Jan 13 12:34:38 2015
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [05/15] Btrfs: Fix a jump typo of nodatasum_case to avoid wrong
+	WARN_ON()
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+X-Patchwork-Id: 5620311
+Message-Id: <1421152488-30548-6-git-send-email-zhaolei@cn.fujitsu.com>
+To: <linux-btrfs@vger.kernel.org>
+Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
+Date: Tue, 13 Jan 2015 20:34:38 +0800
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+if (sctx->is_dev_replace && !is_metadata && !have_csum) {
+    ...
+    goto nodatasum_case;
+}
+...
+nodatasum_case:
+    WARN_ON(sctx->is_dev_replace);
+
+In above code, nodatasum_case marker should be moved after
+WARN_ON().
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+
+---
+fs/btrfs/scrub.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index c4b7876..f45399a 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -1028,9 +1028,10 @@ static int scrub_handle_errored_block(struct scrub_block *sblock_to_check)
+ 	if (!is_metadata && !have_csum) {
+ 		struct scrub_fixup_nodatasum *fixup_nodatasum;
+ 
+-nodatasum_case:
+ 		WARN_ON(sctx->is_dev_replace);
+ 
++nodatasum_case:
++
+ 		/*
+ 		 * !is_metadata and !have_csum, this means that the data
+ 		 * might not be COW'ed, that it might be modified

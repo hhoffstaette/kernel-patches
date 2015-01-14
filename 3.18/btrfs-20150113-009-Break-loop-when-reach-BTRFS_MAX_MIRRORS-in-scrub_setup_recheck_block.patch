@@ -1,0 +1,38 @@
+From patchwork Tue Jan 13 12:34:42 2015
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [09/15] Btrfs: Break loop when reach BTRFS_MAX_MIRRORS in
+	scrub_setup_recheck_block()
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+X-Patchwork-Id: 5620291
+Message-Id: <1421152488-30548-10-git-send-email-zhaolei@cn.fujitsu.com>
+To: <linux-btrfs@vger.kernel.org>
+Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
+Date: Tue, 13 Jan 2015 20:34:42 +0800
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+Use break instead of useless loop should be more suitable in this
+case.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+
+---
+fs/btrfs/scrub.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index 8ea5ce7..22779dd 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -1386,7 +1386,7 @@ static int scrub_setup_recheck_block(struct scrub_ctx *sctx,
+ 			struct scrub_page *page;
+ 
+ 			if (mirror_index >= BTRFS_MAX_MIRRORS)
+-				continue;
++				break;
+ 
+ 			sblock = sblocks_for_recheck + mirror_index;
+ 			sblock->sctx = sctx;
