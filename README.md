@@ -12,17 +12,16 @@ To apply over a -stable release simply run `patch -s -p1 < ../kernel-patches/ver
 
 A patch series should apply cleanly to the *latest* version of the respective -stable release on [kernel.org](https://www.kernel.org/); if it does not then **please** file a bug here on Github. Older release series will only see sporadic updates, if any. Backport requests for specific patches/features from Linus' mainline tree are also welcome!
 
-**Current release: >=3.18.2**
+**Current release: >=3.18.3**
 
 - bfq: BFQ v7r7 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v460 ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
 - btrfs: fixes from 3.19+ for filesystem corruption, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: TSO improvements
-- nfs: fix xdr encoding at page boundary ([bug report/discussion](http://thread.gmane.org/gmane.linux.kernel/1852120/))
 
 
-**Previous release: >=3.14.28**
+**Previous release: >=3.14.29**
 
 - bfq: BFQ v7r7 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v454 + SMT-nice patch ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
