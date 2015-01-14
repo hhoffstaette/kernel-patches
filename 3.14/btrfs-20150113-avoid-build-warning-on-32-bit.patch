@@ -1,0 +1,35 @@
+From: Arnd Bergmann <arnd@arndb.de>
+Newsgroups: gmane.linux.kernel,gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: avoid build warning on 32-bit
+Date: Tue, 13 Jan 2015 15:09:03 +0100
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/1864980>
+
+A recent change introduced a type cast from a private 64-bit
+value to a pointer, which works fine on 64-bit architectures,
+but not on 32-bit ones, where it produces a harmless compiler
+warning:
+
+fs/btrfs/extent_io.c: In function 'btrfs_free_io_failure_record':
+fs/btrfs/extent_io.c:2193:13: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+
+This adds an intermediate cast to 'unsigned long', which tells
+the compiler to ignore the type mismatch.
+
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+Fixes: f612496bca664 ("Btrfs: cleanup the read failure record after write
+			or when the inode is freeing")
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 4ebabd237153..790dbae3343c 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -2190,7 +2190,7 @@ void btrfs_free_io_failure_record(struct inode *inode, u64 start, u64 end)
+ 
+ 		next = next_state(state);
+ 
+-		failrec = (struct io_failure_record *)state->private;
++		failrec = (struct io_failure_record *)(unsigned long)state->private;
+ 		free_extent_state(state);
+ 		kfree(failrec);
+ 
+
