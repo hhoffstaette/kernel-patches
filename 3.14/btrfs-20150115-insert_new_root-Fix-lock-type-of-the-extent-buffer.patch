@@ -1,0 +1,29 @@
+From: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: insert_new_root: Fix lock type of the extent buffer.
+Date: Thu, 15 Jan 2015 12:22:03 +0530
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42258>
+
+btrfs_alloc_tree_block() returns an extent buffer on which a blocked lock has
+been taken. Hence assign the appropriate value to path->locks[level].
+
+Signed-off-by: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+---
+ fs/btrfs/ctree.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 14a72ed..1747aa6 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -3383,7 +3383,7 @@ static noinline int insert_new_root(struct btrfs_trans_handle *trans,
+ 	add_root_to_dirty_list(root);
+ 	extent_buffer_get(c);
+ 	path->nodes[level] = c;
+-	path->locks[level] = BTRFS_WRITE_LOCK;
++	path->locks[level] = BTRFS_WRITE_LOCK_BLOCKING;
+ 	path->slots[level] = 0;
+ 	return 0;
+ }
+-- 
+2.1.0
