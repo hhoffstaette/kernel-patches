@@ -1,14 +1,8 @@
-From patchwork Tue Jan 13 12:34:47 2015
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Subject: [14/15] Btrfs: Include map_type in raid_bio
 From: Zhaolei <zhaolei@cn.fujitsu.com>
-X-Patchwork-Id: 5620241
-Message-Id: <1421152488-30548-15-git-send-email-zhaolei@cn.fujitsu.com>
-To: <linux-btrfs@vger.kernel.org>
-Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
-Date: Tue, 13 Jan 2015 20:34:47 +0800
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 13/15] Btrfs: Include map_type in raid_bio
+Date: Tue, 20 Jan 2015 15:11:43 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42358>
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
@@ -24,16 +18,15 @@ way.
 
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
-
 ---
-fs/btrfs/raid56.c  | 10 +++++-----
+ fs/btrfs/raid56.c  | 10 +++++-----
  fs/btrfs/scrub.c   | 28 +++++++++++++++-------------
  fs/btrfs/volumes.c |  1 +
  fs/btrfs/volumes.h |  1 +
  4 files changed, 22 insertions(+), 18 deletions(-)
 
 diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
-index b1dadf7..5d13ac7 100644
+index cbc4162..5264858 100644
 --- a/fs/btrfs/raid56.c
 +++ b/fs/btrfs/raid56.c
 @@ -994,10 +994,12 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
@@ -63,10 +56,10 @@ index b1dadf7..5d13ac7 100644
  			 * single failure, rebuild from parity raid5
  			 * style
 diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
-index ce86807..68033d2 100644
+index b13bd89..3a0653a 100644
 --- a/fs/btrfs/scrub.c
 +++ b/fs/btrfs/scrub.c
-@@ -1276,19 +1276,16 @@ out:
+@@ -1248,19 +1248,16 @@ out:
  
  static inline int scrub_nr_raid_mirrors(struct btrfs_bio *bbio)
  {
@@ -93,7 +86,7 @@ index ce86807..68033d2 100644
  						 u64 mapped_length,
  						 int nstripes, int mirror,
  						 int *stripe_index,
-@@ -1296,7 +1293,7 @@ static inline void scrub_stripe_index_and_offset(u64 logical, u64 *raid_map,
+@@ -1268,7 +1265,7 @@ static inline void scrub_stripe_index_and_offset(u64 logical, u64 *raid_map,
  {
  	int i;
  
@@ -102,7 +95,7 @@ index ce86807..68033d2 100644
  		/* RAID5/6 */
  		for (i = 0; i < nstripes; i++) {
  			if (raid_map[i] == RAID6_Q_STRIPE ||
-@@ -1370,6 +1367,7 @@ static int scrub_setup_recheck_block(struct scrub_block *original_sblock,
+@@ -1342,6 +1339,7 @@ static int scrub_setup_recheck_block(struct scrub_block *original_sblock,
  		BUG_ON(page_index >= SCRUB_PAGES_PER_RD_BIO);
  
  		nmirrors = min(scrub_nr_raid_mirrors(bbio), BTRFS_MAX_MIRRORS);
@@ -110,7 +103,7 @@ index ce86807..68033d2 100644
  		for (mirror_index = 0; mirror_index < nmirrors;
  		     mirror_index++) {
  			struct scrub_block *sblock;
-@@ -1390,7 +1388,9 @@ leave_nomem:
+@@ -1362,7 +1360,9 @@ leave_nomem:
  			sblock->pagev[page_index] = page;
  			page->logical = logical;
  
@@ -121,7 +114,7 @@ index ce86807..68033d2 100644
  						      mapped_length,
  						      bbio->num_stripes -
  						      bbio->num_tgtdevs,
-@@ -1439,7 +1439,9 @@ static void scrub_bio_wait_endio(struct bio *bio, int error)
+@@ -1411,7 +1411,9 @@ static void scrub_bio_wait_endio(struct bio *bio, int error)
  
  static inline int scrub_is_page_on_raid56(struct scrub_page *page)
  {
@@ -133,7 +126,7 @@ index ce86807..68033d2 100644
  
  static int scrub_submit_raid56_bio_wait(struct btrfs_fs_info *fs_info,
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 8671400..1b0de3a 100644
+index de74206..565a0eb 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
 @@ -5453,6 +5453,7 @@ static int __btrfs_map_block(struct btrfs_fs_info *fs_info, int rw,
@@ -145,14 +138,16 @@ index 8671400..1b0de3a 100644
  	bbio->max_errors = max_errors;
  	bbio->mirror_num = mirror_num;
 diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
-index db195f0..b3921ad 100644
+index 4313e8f..83069de 100644
 --- a/fs/btrfs/volumes.h
 +++ b/fs/btrfs/volumes.h
 @@ -298,6 +298,7 @@ struct btrfs_bio {
- 	atomic_t ref_count;
+ 	atomic_t refs;
  	atomic_t stripes_pending;
  	struct btrfs_fs_info *fs_info;
 +	u64 map_type; /* get from map_lookup->type */
  	bio_end_io_t *end_io;
  	struct bio *orig_bio;
  	unsigned long flags;
+-- 
+1.8.5.1

@@ -1,14 +1,8 @@
-From patchwork Tue Jan 13 12:34:35 2015
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Subject: [02/15] Btrfs: sort raid_map before adding tgtdev stripes
 From: Zhaolei <zhaolei@cn.fujitsu.com>
-X-Patchwork-Id: 5620221
-Message-Id: <1421152488-30548-3-git-send-email-zhaolei@cn.fujitsu.com>
-To: <linux-btrfs@vger.kernel.org>
-Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
-Date: Tue, 13 Jan 2015 20:34:35 +0800
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 02/15] Btrfs: sort raid_map before adding tgtdev stripes
+Date: Tue, 20 Jan 2015 15:11:32 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42367>
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
@@ -18,9 +12,8 @@ will be in order initially.
 
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
-
 ---
-fs/btrfs/volumes.c | 22 ++++++++--------------
+ fs/btrfs/volumes.c | 22 ++++++++--------------
  1 file changed, 8 insertions(+), 14 deletions(-)
 
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
@@ -86,3 +79,5 @@ index 0144790..db779ca 100644
  out:
  	if (dev_replace_is_ongoing)
  		btrfs_dev_replace_unlock(dev_replace);
+-- 
+1.8.5.1

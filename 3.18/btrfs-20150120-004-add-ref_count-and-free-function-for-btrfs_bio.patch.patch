@@ -1,14 +1,8 @@
-From patchwork Tue Jan 13 12:34:37 2015
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Subject: [04/15] Btrfs: add ref_count and free function for btrfs_bio
 From: Zhaolei <zhaolei@cn.fujitsu.com>
-X-Patchwork-Id: 5620281
-Message-Id: <1421152488-30548-5-git-send-email-zhaolei@cn.fujitsu.com>
-To: <linux-btrfs@vger.kernel.org>
-Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
-Date: Tue, 13 Jan 2015 20:34:37 +0800
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 04/15] Btrfs: add ref_count and free function for btrfs_bio
+Date: Tue, 20 Jan 2015 15:11:34 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42369>
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
@@ -17,21 +11,26 @@ From: Zhao Lei <zhaolei@cn.fujitsu.com>
 2: free function for bbio will make code clean and flexible, plus
    forced data type checking in compile.
 
+Changelog v1->v2:
+ Rename following by David Sterba's suggestion:
+ put_btrfs_bio() -> btrfs_put_bio()
+ get_btrfs_bio() -> btrfs_get_bio()
+ bbio->ref_count -> bbio->refs
+
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
-
 ---
-fs/btrfs/extent-tree.c |  2 +-
+ fs/btrfs/extent-tree.c |  2 +-
  fs/btrfs/extent_io.c   |  2 +-
- fs/btrfs/raid56.c      | 39 +++++++++------------------------------
+ fs/btrfs/raid56.c      | 38 ++++++++------------------------------
  fs/btrfs/reada.c       |  4 ++--
  fs/btrfs/scrub.c       | 12 ++++++------
  fs/btrfs/volumes.c     | 43 ++++++++++++++++++++++++++++++++++++-------
  fs/btrfs/volumes.h     | 10 +++-------
- 7 files changed, 58 insertions(+), 54 deletions(-)
+ 7 files changed, 57 insertions(+), 54 deletions(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 1511658..da8fe79 100644
+index 1511658..44e7e43 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
 @@ -1925,7 +1925,7 @@ int btrfs_discard_extent(struct btrfs_root *root, u64 bytenr,
@@ -39,12 +38,12 @@ index 1511658..da8fe79 100644
  			ret = 0;
  		}
 -		kfree(bbio);
-+		put_btrfs_bio(bbio);
++		btrfs_put_bbio(bbio);
  	}
  
  	if (actual_bytes)
 diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
-index 4ebabd2..4f959e5 100644
+index 4ebabd2..7488154 100644
 --- a/fs/btrfs/extent_io.c
 +++ b/fs/btrfs/extent_io.c
 @@ -2057,7 +2057,7 @@ int repair_io_failure(struct inode *inode, u64 start, u64 length, u64 logical,
@@ -52,12 +51,12 @@ index 4ebabd2..4f959e5 100644
  	bio->bi_iter.bi_sector = sector;
  	dev = bbio->stripes[mirror_num-1].dev;
 -	kfree(bbio);
-+	put_btrfs_bio(bbio);
++	btrfs_put_bbio(bbio);
  	if (!dev || !dev->bdev || !dev->writeable) {
  		bio_put(bio);
  		return -EIO;
 diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
-index e301d33..b1dadf7 100644
+index e301d33..cbc4162 100644
 --- a/fs/btrfs/raid56.c
 +++ b/fs/btrfs/raid56.c
 @@ -58,15 +58,6 @@
@@ -102,7 +101,7 @@ index e301d33..b1dadf7 100644
  
 -	free_bbio(rbio);
 -
-+	put_btrfs_bio(rbio->bbio);
++	btrfs_put_bbio(rbio->bbio);
  	kfree(rbio);
  }
  
@@ -111,7 +110,7 @@ index e301d33..b1dadf7 100644
  	rbio = alloc_rbio(root, bbio, stripe_len);
  	if (IS_ERR(rbio)) {
 -		__free_bbio(bbio, 1);
-+		put_btrfs_bio(bbio);
++		btrfs_put_bbio(bbio);
  		return PTR_ERR(rbio);
  	}
  	bio_list_add(&rbio->bio_list, bio);
@@ -131,7 +130,7 @@ index e301d33..b1dadf7 100644
  	if (IS_ERR(rbio)) {
 -		__free_bbio(bbio, generic_io);
 +		if (generic_io)
-+			put_btrfs_bio(bbio);
++			btrfs_put_bbio(bbio);
  		return PTR_ERR(rbio);
  	}
  
@@ -141,24 +140,21 @@ index e301d33..b1dadf7 100644
  		BUG();
 -		__free_bbio(bbio, generic_io);
 +		if (generic_io)
-+			put_btrfs_bio(bbio);
++			btrfs_put_bbio(bbio);
  		kfree(rbio);
  		return -EIO;
  	}
-@@ -2173,9 +2151,10 @@ int raid56_parity_recover(struct btrfs_root *root, struct bio *bio,
+@@ -2173,7 +2151,7 @@ int raid56_parity_recover(struct btrfs_root *root, struct bio *bio,
  		btrfs_bio_counter_inc_noblocked(root->fs_info);
  		rbio->generic_bio_cnt = 1;
  	} else {
 -		set_bit(RBIO_HOLD_BBIO_MAP_BIT, &rbio->flags);
-+		get_btrfs_bio(bbio);
++		btrfs_get_bbio(bbio);
  	}
  
-+
  	/*
- 	 * reconstruct from the q stripe if they are
- 	 * asking for mirror 3
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index b63ae20..b346227 100644
+index b63ae20..cfdffc5 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
 @@ -463,7 +463,7 @@ static struct reada_extent *reada_find_extent(struct btrfs_root *root,
@@ -166,7 +162,7 @@ index b63ae20..b346227 100644
  	btrfs_dev_replace_unlock(&fs_info->dev_replace);
  
 -	kfree(bbio);
-+	put_btrfs_bio(bbio);
++	btrfs_put_bbio(bbio);
  	return re;
  
  error:
@@ -175,12 +171,12 @@ index b63ae20..b346227 100644
  		spin_unlock(&fs_info->reada_lock);
  	}
 -	kfree(bbio);
-+	put_btrfs_bio(bbio);
++	btrfs_put_bbio(bbio);
  	kfree(re);
  	return re_exist;
  }
 diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
-index 8f32520..c4b7876 100644
+index 8f32520..1c50982 100644
 --- a/fs/btrfs/scrub.c
 +++ b/fs/btrfs/scrub.c
 @@ -847,7 +847,7 @@ static inline void scrub_get_recover(struct scrub_recover *recover)
@@ -188,7 +184,7 @@ index 8f32520..c4b7876 100644
  {
  	if (atomic_dec_and_test(&recover->refs)) {
 -		kfree(recover->bbio);
-+		put_btrfs_bio(recover->bbio);
++		btrfs_put_bbio(recover->bbio);
  		kfree(recover);
  	}
  }
@@ -197,14 +193,14 @@ index 8f32520..c4b7876 100644
  				       &mapped_length, &bbio, 0, 1);
  		if (ret || !bbio || mapped_length < sublen) {
 -			kfree(bbio);
-+			put_btrfs_bio(bbio);
++			btrfs_put_bbio(bbio);
  			return -EIO;
  		}
  
  		recover = kzalloc(sizeof(struct scrub_recover), GFP_NOFS);
  		if (!recover) {
 -			kfree(bbio);
-+			put_btrfs_bio(bbio);
++			btrfs_put_bbio(bbio);
  			return -ENOMEM;
  		}
  
@@ -213,7 +209,7 @@ index 8f32520..c4b7876 100644
  	bio_put(bio);
  bbio_out:
 -	kfree(bbio);
-+	put_btrfs_bio(bbio);
++	btrfs_put_bbio(bbio);
  	bitmap_or(sparity->ebitmap, sparity->ebitmap, sparity->dbitmap,
  		  sparity->nsectors);
  	spin_lock(&sctx->stat_lock);
@@ -222,7 +218,7 @@ index 8f32520..c4b7876 100644
  	if (ret || !bbio || mapped_length < extent_len ||
  	    !bbio->stripes[0].dev->bdev) {
 -		kfree(bbio);
-+		put_btrfs_bio(bbio);
++		btrfs_put_bbio(bbio);
  		return;
  	}
  
@@ -230,12 +226,12 @@ index 8f32520..c4b7876 100644
  	*extent_mirror_num = bbio->mirror_num;
  	*extent_dev = bbio->stripes[0].dev;
 -	kfree(bbio);
-+	put_btrfs_bio(bbio);
++	btrfs_put_bbio(bbio);
  }
  
  static int scrub_setup_wr_ctx(struct scrub_ctx *sctx,
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index b364e14..8671400 100644
+index b364e14..de74206 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
 @@ -4901,6 +4901,37 @@ static void sort_parity_stripes(struct btrfs_bio *bbio, int num_stripes)
@@ -254,22 +250,22 @@ index b364e14..8671400 100644
 +		return NULL;
 +
 +	atomic_set(&bbio->error, 0);
-+	atomic_set(&bbio->ref_count, 1);
++	atomic_set(&bbio->refs, 1);
 +
 +	return bbio;
 +}
 +
-+void get_btrfs_bio(struct btrfs_bio *bbio)
++void btrfs_get_bbio(struct btrfs_bio *bbio)
 +{
-+	WARN_ON(!atomic_read(&bbio->ref_count));
-+	atomic_inc(&bbio->ref_count);
++	WARN_ON(!atomic_read(&bbio->refs));
++	atomic_inc(&bbio->refs);
 +}
 +
-+void put_btrfs_bio(struct btrfs_bio *bbio)
++void btrfs_put_bbio(struct btrfs_bio *bbio)
 +{
 +	if (!bbio)
 +		return;
-+	if (atomic_dec_and_test(&bbio->ref_count))
++	if (atomic_dec_and_test(&bbio->refs))
 +		kfree(bbio);
 +}
 +
@@ -281,7 +277,7 @@ index b364e14..8671400 100644
  			 */
  			ret = -EIO;
 -			kfree(tmp_bbio);
-+			put_btrfs_bio(tmp_bbio);
++			btrfs_put_bbio(tmp_bbio);
  			goto out;
  		}
  
@@ -290,12 +286,12 @@ index b364e14..8671400 100644
  			WARN_ON(1);
  			ret = -EIO;
 -			kfree(tmp_bbio);
-+			put_btrfs_bio(tmp_bbio);
++			btrfs_put_bbio(tmp_bbio);
  			goto out;
  		}
  
 -		kfree(tmp_bbio);
-+		put_btrfs_bio(tmp_bbio);
++		btrfs_put_bbio(tmp_bbio);
  	} else if (mirror_num > map->num_stripes) {
  		mirror_num = 0;
  	}
@@ -319,19 +315,19 @@ index b364e14..8671400 100644
  	else
  		bio_endio(bio, err);
 -	kfree(bbio);
-+	put_btrfs_bio(bbio);
++	btrfs_put_bbio(bbio);
  }
  
  static void btrfs_end_bio(struct bio *bio, int err)
 diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
-index fb0e8c3..db195f0 100644
+index fb0e8c3..4313e8f 100644
 --- a/fs/btrfs/volumes.h
 +++ b/fs/btrfs/volumes.h
 @@ -295,6 +295,7 @@ typedef void (btrfs_bio_end_io_t) (struct btrfs_bio *bio, int err);
  #define BTRFS_BIO_ORIG_BIO_SUBMITTED	(1 << 0)
  
  struct btrfs_bio {
-+	atomic_t ref_count;
++	atomic_t refs;
  	atomic_t stripes_pending;
  	struct btrfs_fs_info *fs_info;
  	bio_end_io_t *end_io;
@@ -346,8 +342,10 @@ index fb0e8c3..db195f0 100644
 -	 (sizeof(int) * (real_stripes)) +			\
 -	 (sizeof(u64) * (real_stripes)))
 -
-+void get_btrfs_bio(struct btrfs_bio *bbio);
-+void put_btrfs_bio(struct btrfs_bio *bbio);
++void btrfs_get_bbio(struct btrfs_bio *bbio);
++void btrfs_put_bbio(struct btrfs_bio *bbio);
  int btrfs_map_block(struct btrfs_fs_info *fs_info, int rw,
  		    u64 logical, u64 *length,
  		    struct btrfs_bio **bbio_ret, int mirror_num);
+-- 
+1.8.5.1

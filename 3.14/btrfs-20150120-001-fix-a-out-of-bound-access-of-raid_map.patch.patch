@@ -1,14 +1,8 @@
-From patchwork Tue Jan 13 12:34:34 2015
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Subject: [01/15] Btrfs: fix a out-of-bound access of raid_map
 From: Zhaolei <zhaolei@cn.fujitsu.com>
-X-Patchwork-Id: 5620201
-Message-Id: <1421152488-30548-2-git-send-email-zhaolei@cn.fujitsu.com>
-To: <linux-btrfs@vger.kernel.org>
-Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
-Date: Tue, 13 Jan 2015 20:34:34 +0800
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 01/15] Btrfs: fix a out-of-bound access of raid_map
+Date: Tue, 20 Jan 2015 15:11:31 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42368>
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
@@ -19,9 +13,8 @@ real raid_map, we need skip the stripes on the target devices.
 
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
-
 ---
-fs/btrfs/scrub.c | 7 +++++--
+ fs/btrfs/scrub.c | 7 +++++--
  1 file changed, 5 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
@@ -49,3 +42,5 @@ index 9e1569f..9d19065 100644
  						      mirror_index,
  						      &stripe_index,
  						      &stripe_offset);
+-- 
+1.8.5.1

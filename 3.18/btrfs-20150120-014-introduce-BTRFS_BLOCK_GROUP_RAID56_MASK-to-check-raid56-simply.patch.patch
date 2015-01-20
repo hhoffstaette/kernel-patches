@@ -1,15 +1,8 @@
-From patchwork Tue Jan 13 12:34:48 2015
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Subject: [15/15] Btrfs: Introduce BTRFS_BLOCK_GROUP_RAID56_MASK to check
-	raid56 simply
 From: Zhaolei <zhaolei@cn.fujitsu.com>
-X-Patchwork-Id: 5620251
-Message-Id: <1421152488-30548-16-git-send-email-zhaolei@cn.fujitsu.com>
-To: <linux-btrfs@vger.kernel.org>
-Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
-Date: Tue, 13 Jan 2015 20:34:48 +0800
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 14/15] Btrfs: Introduce BTRFS_BLOCK_GROUP_RAID56_MASK to check raid56 simply
+Date: Tue, 20 Jan 2015 15:11:44 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42359>
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
@@ -20,9 +13,8 @@ instead of long:
 
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
-
 ---
-fs/btrfs/ctree.h   |  3 +++
+ fs/btrfs/ctree.h   |  3 +++
  fs/btrfs/inode.c   |  3 +--
  fs/btrfs/scrub.c   | 17 ++++++-----------
  fs/btrfs/volumes.c | 24 +++++++++---------------
@@ -57,10 +49,10 @@ index 8a036ed..54295a6 100644
  	else
  		async_submit = 1;
 diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
-index 68033d2..d34b971 100644
+index 3a0653a..94f2b2b 100644
 --- a/fs/btrfs/scrub.c
 +++ b/fs/btrfs/scrub.c
-@@ -1293,7 +1293,7 @@ static inline void scrub_stripe_index_and_offset(u64 logical, u64 map_type,
+@@ -1265,7 +1265,7 @@ static inline void scrub_stripe_index_and_offset(u64 logical, u64 map_type,
  {
  	int i;
  
@@ -69,7 +61,7 @@ index 68033d2..d34b971 100644
  		/* RAID5/6 */
  		for (i = 0; i < nstripes; i++) {
  			if (raid_map[i] == RAID6_Q_STRIPE ||
-@@ -1440,8 +1440,7 @@ static void scrub_bio_wait_endio(struct bio *bio, int error)
+@@ -1412,8 +1412,7 @@ static void scrub_bio_wait_endio(struct bio *bio, int error)
  static inline int scrub_is_page_on_raid56(struct scrub_page *page)
  {
  	return page->recover &&
@@ -79,7 +71,7 @@ index 68033d2..d34b971 100644
  }
  
  static int scrub_submit_raid56_bio_wait(struct btrfs_fs_info *fs_info,
-@@ -3014,8 +3013,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+@@ -2986,8 +2985,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
  	} else if (map->type & BTRFS_BLOCK_GROUP_DUP) {
  		increment = map->stripe_len;
  		mirror_num = num % map->num_stripes + 1;
@@ -89,7 +81,7 @@ index 68033d2..d34b971 100644
  		get_raid56_logic_offset(physical, num, map, &offset, NULL);
  		increment = map->stripe_len * nr_data_stripes(map);
  		mirror_num = 1;
-@@ -3049,8 +3047,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+@@ -3021,8 +3019,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
  	 */
  	logical = base + offset;
  	physical_end = physical + nstripes * map->stripe_len;
@@ -99,7 +91,7 @@ index 68033d2..d34b971 100644
  		get_raid56_logic_offset(physical_end, num,
  					map, &logic_end, NULL);
  		logic_end += base;
-@@ -3096,8 +3093,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+@@ -3068,8 +3065,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
  	ret = 0;
  	while (physical < physical_end) {
  		/* for raid56, we skip parity stripe */
@@ -109,7 +101,7 @@ index 68033d2..d34b971 100644
  			ret = get_raid56_logic_offset(physical, num,
  					map, &logical, &stripe_logical);
  			logical += base;
-@@ -3255,8 +3251,7 @@ again:
+@@ -3227,8 +3223,7 @@ again:
  			scrub_free_csums(sctx);
  			if (extent_logical + extent_len <
  			    key.objectid + bytes) {
@@ -120,7 +112,7 @@ index 68033d2..d34b971 100644
  					 * loop until we find next data stripe
  					 * or we have finished all stripes.
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 1b0de3a..02a7b66 100644
+index 565a0eb..c0a792f 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
 @@ -4196,7 +4196,7 @@ static u32 find_raid56_stripe_len(u32 data_devices, u32 dev_stripe_target)
@@ -211,3 +203,5 @@ index 1b0de3a..02a7b66 100644
  		do_div(length, nr_data_stripes(map));
  		rmap_len = map->stripe_len * nr_data_stripes(map);
  	}
+-- 
+1.8.5.1

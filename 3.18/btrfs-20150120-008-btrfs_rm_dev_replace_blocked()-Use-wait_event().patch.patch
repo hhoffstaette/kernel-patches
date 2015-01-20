@@ -1,22 +1,14 @@
-From patchwork Tue Jan 13 12:34:41 2015
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Subject: [08/15] Btrfs: btrfs_rm_dev_replace_blocked(): Use wait_event()
-From: Zhaolei <zhaolei@cn.fujitsu.com>
-X-Patchwork-Id: 5620331
-Message-Id: <1421152488-30548-9-git-send-email-zhaolei@cn.fujitsu.com>
-To: <linux-btrfs@vger.kernel.org>
-Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
-Date: Tue, 13 Jan 2015 20:34:41 +0800
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 08/15] Btrfs: btrfs_rm_dev_replace_blocked(): Use wait_event()
+Date: Tue, 20 Jan 2015 15:11:38 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42362>
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
-
 ---
-fs/btrfs/dev-replace.c | 13 ++-----------
+ fs/btrfs/dev-replace.c | 13 ++-----------
  1 file changed, 2 insertions(+), 11 deletions(-)
 
 diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
@@ -44,3 +36,5 @@ index 92109b7..5ec03d9 100644
  }
  
  /*
+-- 
+1.8.5.1

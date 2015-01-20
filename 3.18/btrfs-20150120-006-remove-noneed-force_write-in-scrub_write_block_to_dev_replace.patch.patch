@@ -1,15 +1,8 @@
-From patchwork Tue Jan 13 12:34:39 2015
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Subject: [06/15] Btrfs: Remove noneed force_write in
-	scrub_write_block_to_dev_replace
 From: Zhaolei <zhaolei@cn.fujitsu.com>
-X-Patchwork-Id: 5620341
-Message-Id: <1421152488-30548-7-git-send-email-zhaolei@cn.fujitsu.com>
-To: <linux-btrfs@vger.kernel.org>
-Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
-Date: Tue, 13 Jan 2015 20:34:39 +0800
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 06/15] Btrfs: Remove noneed force_write in scrub_write_block_to_dev_replace
+Date: Tue, 20 Jan 2015 15:11:36 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42366>
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
@@ -18,13 +11,12 @@ out in previous code.
 
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
-
 ---
-fs/btrfs/scrub.c | 19 +++++++------------
+ fs/btrfs/scrub.c | 19 +++++++------------
  1 file changed, 7 insertions(+), 12 deletions(-)
 
 diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
-index f45399a..8ea5ce7 100644
+index ec0a2f8..c93c43f 100644
 --- a/fs/btrfs/scrub.c
 +++ b/fs/btrfs/scrub.c
 @@ -250,8 +250,7 @@ static void scrub_recheck_block_checksum(struct btrfs_fs_info *fs_info,
@@ -77,3 +69,5 @@ index f45399a..8ea5ce7 100644
  		if (ret_sub)
  			ret = ret_sub;
  	}
+-- 
+1.8.5.1

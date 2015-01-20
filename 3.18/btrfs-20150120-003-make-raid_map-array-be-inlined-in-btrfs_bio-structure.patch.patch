@@ -1,25 +1,18 @@
-From patchwork Tue Jan 13 12:34:36 2015
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Subject: [03/15] Btrfs: Make raid_map array be inlined in btrfs_bio structure
 From: Zhaolei <zhaolei@cn.fujitsu.com>
-X-Patchwork-Id: 5620211
-Message-Id: <1421152488-30548-4-git-send-email-zhaolei@cn.fujitsu.com>
-To: <linux-btrfs@vger.kernel.org>
-Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
-Date: Tue, 13 Jan 2015 20:34:36 +0800
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 03/15] Btrfs: Make raid_map array be inlined in btrfs_bio structure
+Date: Tue, 20 Jan 2015 15:11:33 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42356>
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
 It can make code more simple and clear, we need not care about
 free bbio and raid_map together.
 
-Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
-
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 ---
-fs/btrfs/raid56.c  |  77 ++++++++++++++++++-----------------------
+ fs/btrfs/raid56.c  |  77 ++++++++++++++++++-----------------------
  fs/btrfs/raid56.h  |  11 +++---
  fs/btrfs/scrub.c   |  31 ++++++-----------
  fs/btrfs/volumes.c | 100 +++++++++++++++++++++++++----------------------------
@@ -700,3 +693,5 @@ index d6fe73c..fb0e8c3 100644
  int btrfs_rmap_block(struct btrfs_mapping_tree *map_tree,
  		     u64 chunk_start, u64 physical, u64 devid,
  		     u64 **logical, int *naddrs, int *stripe_len);
+-- 
+1.8.5.1

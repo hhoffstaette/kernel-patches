@@ -1,15 +1,8 @@
-From patchwork Tue Jan 13 12:34:42 2015
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Subject: [09/15] Btrfs: Break loop when reach BTRFS_MAX_MIRRORS in
-	scrub_setup_recheck_block()
 From: Zhaolei <zhaolei@cn.fujitsu.com>
-X-Patchwork-Id: 5620291
-Message-Id: <1421152488-30548-10-git-send-email-zhaolei@cn.fujitsu.com>
-To: <linux-btrfs@vger.kernel.org>
-Cc: Zhao Lei <zhaolei@cn.fujitsu.com>, Miao Xie <miaox@cn.fujitsu.com>
-Date: Tue, 13 Jan 2015 20:34:42 +0800
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 09/15] Btrfs: Break loop when reach BTRFS_MAX_MIRRORS in scrub_setup_recheck_block()
+Date: Tue, 20 Jan 2015 15:11:39 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42361>
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
@@ -18,13 +11,12 @@ case.
 
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
-
 ---
-fs/btrfs/scrub.c | 2 +-
+ fs/btrfs/scrub.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
-index 8ea5ce7..22779dd 100644
+index c93c43f..9afc6dd 100644
 --- a/fs/btrfs/scrub.c
 +++ b/fs/btrfs/scrub.c
 @@ -1386,7 +1386,7 @@ static int scrub_setup_recheck_block(struct scrub_ctx *sctx,
@@ -36,3 +28,5 @@ index 8ea5ce7..22779dd 100644
  
  			sblock = sblocks_for_recheck + mirror_index;
  			sblock->sctx = sctx;
+-- 
+1.8.5.1
