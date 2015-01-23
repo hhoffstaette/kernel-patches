@@ -1,0 +1,95 @@
+From e7070be198b34c26f39bd9010a29ce6462dc4f3e Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Tue, 16 Dec 2014 08:54:43 -0800
+Subject: Btrfs: change how we track dirty roots
+
+I've been overloading root->dirty_list to keep track of dirty roots and which
+roots need to have their commit roots switched at transaction commit time.  This
+could cause us to lose an update to the root which could corrupt the file
+system.  To fix this use a state bit to know if the root is dirty, and if it
+isn't set we go ahead and move the root to the dirty list.  This way if we
+re-dirty the root after adding it to the switch_commit list we make sure to
+update it.  This also makes it so that the extent root is always the last root
+on the dirty list to try and keep the amount of churn down at this point in the
+commit.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 14a72ed..97a98fc 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -213,11 +213,19 @@ static struct extent_buffer *btrfs_read_lock_root_node(struct btrfs_root *root)
+  */
+ static void add_root_to_dirty_list(struct btrfs_root *root)
+ {
++	if (test_bit(BTRFS_ROOT_DIRTY, &root->state) ||
++	    !test_bit(BTRFS_ROOT_TRACK_DIRTY, &root->state))
++		return;
++
+ 	spin_lock(&root->fs_info->trans_lock);
+-	if (test_bit(BTRFS_ROOT_TRACK_DIRTY, &root->state) &&
+-	    list_empty(&root->dirty_list)) {
+-		list_add(&root->dirty_list,
+-			 &root->fs_info->dirty_cowonly_roots);
++	if (!test_and_set_bit(BTRFS_ROOT_DIRTY, &root->state)) {
++		/* Want the extent tree to be the last on the list */
++		if (root->objectid == BTRFS_EXTENT_TREE_OBJECTID)
++			list_move_tail(&root->dirty_list,
++				       &root->fs_info->dirty_cowonly_roots);
++		else
++			list_move(&root->dirty_list,
++				  &root->fs_info->dirty_cowonly_roots);
+ 	}
+ 	spin_unlock(&root->fs_info->trans_lock);
+ }
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 7e60741..45ed4dc 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -1775,6 +1775,7 @@ struct btrfs_subvolume_writers {
+ #define BTRFS_ROOT_DEFRAG_RUNNING	6
+ #define BTRFS_ROOT_FORCE_COW		7
+ #define BTRFS_ROOT_MULTI_LOG_TASKS	8
++#define BTRFS_ROOT_DIRTY		9
+ 
+ /*
+  * in ram representation of the tree.  extent_root is used for all allocations
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index a605d4e..aa2219e 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -1020,6 +1020,7 @@ static int update_cowonly_root(struct btrfs_trans_handle *trans,
+ 	u64 old_root_bytenr;
+ 	u64 old_root_used;
+ 	struct btrfs_root *tree_root = root->fs_info->tree_root;
++	bool extent_root = (root->objectid == BTRFS_EXTENT_TREE_OBJECTID);
+ 
+ 	old_root_used = btrfs_root_used(&root->root_item);
+ 	btrfs_write_dirty_block_groups(trans, root);
+@@ -1038,7 +1039,12 @@ static int update_cowonly_root(struct btrfs_trans_handle *trans,
+ 			return ret;
+ 
+ 		old_root_used = btrfs_root_used(&root->root_item);
+-		ret = btrfs_write_dirty_block_groups(trans, root);
++		if (extent_root) {
++			ret = btrfs_write_dirty_block_groups(trans, root);
++			if (ret)
++				return ret;
++		}
++		ret = btrfs_run_delayed_refs(trans, root, (unsigned long)-1);
+ 		if (ret)
+ 			return ret;
+ 	}
+@@ -1097,6 +1103,7 @@ static noinline int commit_cowonly_roots(struct btrfs_trans_handle *trans,
+ 		next = fs_info->dirty_cowonly_roots.next;
+ 		list_del_init(next);
+ 		root = list_entry(next, struct btrfs_root, dirty_list);
++		clear_bit(BTRFS_ROOT_DIRTY, &root->state);
+ 
+ 		if (root != fs_info->extent_root)
+ 			list_add_tail(&root->dirty_list,
+-- 
+cgit v0.10.2
+
