@@ -277,7 +277,7 @@ index f5bd4bd3f7e669b3fd48a843d55e7313a30a3409..f37ecf53ee8a96827fc08bd203b0ca88
  		}
  
 -		limit = mss_now;
--		if (tso_segs > 1 && !tcp_urg_mode(tp))
+-		if (tso_segs > 1 && sk->sk_gso_max_segs && !tcp_urg_mode(tp))
 -			limit = tcp_mss_split_point(sk, skb, mss_now,
 -						    min_t(unsigned int,
 -							  cwnd_quota,

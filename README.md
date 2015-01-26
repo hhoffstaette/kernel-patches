@@ -12,7 +12,7 @@ To apply over a -stable release simply run `patch -s -p1 < ../kernel-patches/ver
 
 A patch series should apply cleanly to the *latest* version of the respective -stable release on [kernel.org](https://www.kernel.org/); if it does not then **please** file a bug here on Github. Older release series will only see sporadic updates, if any. Backport requests for specific patches/features from Linus' mainline tree are also welcome!
 
-**Current release: >=3.18.3**
+**Current release: >=3.18.4**
 
 - bfq: BFQ v7r7 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v460+ ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
