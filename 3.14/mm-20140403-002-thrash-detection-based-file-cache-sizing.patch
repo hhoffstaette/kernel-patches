@@ -73,9 +73,9 @@ index 9b61b9b..f25db1d7 100644
 +	/* Evictions & activations on the inactive file list */
 +	atomic_long_t		inactive_age;
 +
- 	unsigned long		pages_scanned;	   /* since last reclaim */
- 	unsigned long		flags;		   /* zone flags, see below */
- 
+	/*
+	 * When free pages are below this point, additional steps are taken
+	 * when reading the number of free pages to avoid per-cpu counter
 diff --git a/include/linux/swap.h b/include/linux/swap.h
 index 46ba0c6..b83cf61 100644
 --- a/include/linux/swap.h

@@ -66,9 +66,9 @@ index 638e1a5..3359969b1 100644
  	for (i = 0; i < num_pages; i++) {
 -		struct page *p = extent_buffer_page(eb, i);
 +		struct page *p = eb->pages[i];
-		mark_page_accessed(p);
- 	}
-
+		if (p != accessed)
+			mark_page_accessed(p);
+	}
 @@ -4815,7 +4814,7 @@ again:
  	 */
  	SetPageChecked(eb->pages[0]);
