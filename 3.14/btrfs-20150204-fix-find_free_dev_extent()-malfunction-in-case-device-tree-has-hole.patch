@@ -1,8 +1,8 @@
 From: Forrest Liu <forrestl@synology.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: fix find_free_dev_extent() malfunction in case device tree has hole
-Date: Mon,  2 Feb 2015 15:31:39 +0800
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42668>
+Subject: [PATCH v2] Btrfs: fix find_free_dev_extent() malfunction in case device tree has hole
+Date: Wed,  4 Feb 2015 20:10:53 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42709>
 
 If device tree has hole, find_free_dev_extent() cannot find available
 address properly.
@@ -21,12 +21,17 @@ allocate just one chunk in a transaction.
             chunk objectid 256 chunk offset 1071623700480 length
 
 Signed-off-by: Forrest Liu <forrestl@synology.com>
+Reviewed-by: Liu Bo <bo.li.liu@oracle.com>
 ---
+changelog:
+v2: fix typo key_offset
+    replace WARN_ON with WARN_ON_ONCE
+
  fs/btrfs/volumes.c | 15 +++++++++++----
  1 file changed, 11 insertions(+), 4 deletions(-)
 
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index da7e0e1..61be789 100644
+index 50c5a87..da07eca 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
 @@ -1060,6 +1060,7 @@ static int contains_pending_extent(struct btrfs_trans_handle *trans,
@@ -59,7 +64,7 @@ index da7e0e1..61be789 100644
 +				if (key.offset >= search_start)
 +					hole_size = key.offset - search_start;
 +				else {
-+					WARN_ON(1);
++					WARN_ON_ONCE(1);
 +					hole_size = 0;
 +				}
 +			}
