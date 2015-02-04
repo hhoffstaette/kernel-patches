@@ -1,0 +1,34 @@
+From: Forrest Liu <forrestl@synology.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix BUG_ON in btrfs_orphan_add() when delete unused block group
+Date: Mon,  2 Feb 2015 16:08:48 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42669>
+
+btrfs_orphan_reserve_metadata() will grab metadata reservation from
+transaction handle, and the transaction handle was passed from
+btrfs_delete_unused_bgs() when delete unused block group.
+
+Repace btrfs_join_transaction() with btrfs_start_transaction() in
+btrfs_delete_unused_bgs() to prevent BUG_ON() in btrfs_orphan_add()
+
+Signed-off-by: Forrest Liu <forrestl@synology.com>
+---
+ fs/btrfs/extent-tree.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 53294da..61a3255 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -9548,7 +9548,8 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
+ 		 * Want to do this before we do anything else so we can recover
+ 		 * properly if we fail to join the transaction.
+ 		 */
+-		trans = btrfs_join_transaction(root);
++		/* 1 for btrfs_orphan_reserve_metadata() */
++		trans = btrfs_start_transaction(root, 1);
+ 		if (IS_ERR(trans)) {
+ 			btrfs_set_block_group_rw(root, block_group);
+ 			ret = PTR_ERR(trans);
+-- 
+1.9.1
