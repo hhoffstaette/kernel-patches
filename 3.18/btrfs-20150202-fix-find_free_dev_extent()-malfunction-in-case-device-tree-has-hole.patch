@@ -1,0 +1,70 @@
+From: Forrest Liu <forrestl@synology.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix find_free_dev_extent() malfunction in case device tree has hole
+Date: Mon,  2 Feb 2015 15:31:39 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42668>
+
+If device tree has hole, find_free_dev_extent() cannot find available
+address properly.
+
+The example below, has one BIG hole in device tree, and can only
+allocate just one chunk in a transaction.
+
+    item 9 key (1 DEV_EXTENT 273841913856) itemoff 15811 itemsize 48
+        dev extent chunk_tree 3
+        chunk objectid 256 chunk offset 272759783424 length 1073741824
+    item 10 key (1 DEV_EXTENT 1071632089088) itemoff 15763 itemsize 48
+        dev extent chunk_tree 3
+        chunk objectid 256 chunk offset 1070549958656 length 1073741824
+    item 11 key (1 DEV_EXTENT 1072705830912) itemoff 15715 itemsize 48
+            dev extent chunk_tree 3
+            chunk objectid 256 chunk offset 1071623700480 length
+
+Signed-off-by: Forrest Liu <forrestl@synology.com>
+---
+ fs/btrfs/volumes.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index da7e0e1..61be789 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1060,6 +1060,7 @@ static int contains_pending_extent(struct btrfs_trans_handle *trans,
+ 	struct extent_map *em;
+ 	struct list_head *search_list = &trans->transaction->pending_chunks;
+ 	int ret = 0;
++	u64 physical_start = *start;
+ 
+ again:
+ 	list_for_each_entry(em, search_list, list) {
+@@ -1070,9 +1071,9 @@ again:
+ 		for (i = 0; i < map->num_stripes; i++) {
+ 			if (map->stripes[i].dev != device)
+ 				continue;
+-			if (map->stripes[i].physical >= *start + len ||
++			if (map->stripes[i].physical >= physical_start + len ||
+ 			    map->stripes[i].physical + em->orig_block_len <=
+-			    *start)
++			    physical_start)
+ 				continue;
+ 			*start = map->stripes[i].physical +
+ 				em->orig_block_len;
+@@ -1195,8 +1196,14 @@ again:
+ 			 */
+ 			if (contains_pending_extent(trans, device,
+ 						    &search_start,
+-						    hole_size))
+-				hole_size = 0;
++						    hole_size)) {
++				if (key.offset >= search_start)
++					hole_size = key.offset - search_start;
++				else {
++					WARN_ON(1);
++					hole_size = 0;
++				}
++			}
+ 
+ 			if (hole_size > max_hole_size) {
+ 				max_hole_start = search_start;
+-- 
+1.9.1
