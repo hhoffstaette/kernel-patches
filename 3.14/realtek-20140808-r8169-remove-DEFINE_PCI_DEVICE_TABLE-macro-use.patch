@@ -27,19 +27,6 @@ initializer z;
 Signed-off-by: Benoit Taine <benoit.taine@lip6.fr>
 Signed-off-by: Bjorn Helgaas <bhelgaas@google.com>
 
-diff --git a/drivers/net/ethernet/realtek/8139too.c b/drivers/net/ethernet/realtek/8139too.c
-index 2e5df14..007b38c 100644
---- a/drivers/net/ethernet/realtek/8139too.c
-+++ b/drivers/net/ethernet/realtek/8139too.c
-@@ -234,7 +234,7 @@ static const struct {
- };
- 
- 
--static DEFINE_PCI_DEVICE_TABLE(rtl8139_pci_tbl) = {
-+static const struct pci_device_id rtl8139_pci_tbl[] = {
- 	{0x10ec, 0x8139, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
- 	{0x10ec, 0x8138, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
- 	{0x1113, 0x1211, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
 diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
 index 9887bcb..91652e7 100644
 --- a/drivers/net/ethernet/realtek/r8169.c

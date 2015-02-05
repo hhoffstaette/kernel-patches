@@ -1,0 +1,44 @@
+From 9baa3c34ac4e27f7e062f266f50cc5dbea26a6c1 Mon Sep 17 00:00:00 2001
+From: Benoit Taine <benoit.taine@lip6.fr>
+Date: Fri, 8 Aug 2014 15:56:03 +0200
+Subject: PCI: Remove DEFINE_PCI_DEVICE_TABLE macro use
+
+We should prefer `struct pci_device_id` over `DEFINE_PCI_DEVICE_TABLE` to
+meet kernel coding style guidelines.  This issue was reported by checkpatch.
+
+A simplified version of the semantic patch that makes this change is as
+follows (http://coccinelle.lip6.fr/):
+
+// <smpl>
+
+@@
+identifier i;
+declarer name DEFINE_PCI_DEVICE_TABLE;
+initializer z;
+@@
+
+- DEFINE_PCI_DEVICE_TABLE(i)
++ const struct pci_device_id i[]
+= z;
+
+// </smpl>
+
+[bhelgaas: add semantic patch]
+Signed-off-by: Benoit Taine <benoit.taine@lip6.fr>
+Signed-off-by: Bjorn Helgaas <bhelgaas@google.com>
+
+diff --git a/drivers/net/ethernet/realtek/8139too.c b/drivers/net/ethernet/realtek/8139too.c
+index 2e5df14..007b38c 100644
+--- a/drivers/net/ethernet/realtek/8139too.c
++++ b/drivers/net/ethernet/realtek/8139too.c
+@@ -234,7 +234,7 @@ static const struct {
+ };
+ 
+ 
+-static DEFINE_PCI_DEVICE_TABLE(rtl8139_pci_tbl) = {
++static const struct pci_device_id rtl8139_pci_tbl[] = {
+ 	{0x10ec, 0x8139, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
+ 	{0x10ec, 0x8138, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
+ 	{0x1113, 0x1211, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
+-- 
+cgit v0.10.1
