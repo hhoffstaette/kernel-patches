@@ -1,0 +1,110 @@
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix fsync race leading to ordered extent memory leaks
+Date: Fri,  6 Feb 2015 12:34:08 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42775>
+
+We can have two concurrent fsync operations against the same file
+that target different ranges of the file, in which case both fsyncs
+will process ordered extents that overlap both ranges. This allows
+for a time window where a race can lead to those ordered extents
+never getting their reference count decremented to 0, leading to
+memory leaks, getting referenced by multiple lists and resulting in
+inode leaks too (an iput for the ordered extent's inode is scheduled
+only when the ordered extent's refcount drops to 0).
+The following sequence diagram explains this race:
+
+         CPU 1                                        CPU 2
+
+btrfs_sync_file() range [0, 8K]              btrfs_sync_file() range [8K, 16K]
+
+  mutex_lock(inode->i_mutex)
+  btrfs_log_inode()
+    btrfs_get_logged_extents()
+      --> collected ordered extent X that
+          covers range [4K, 12K]
+      --> incremented ordered extent X's
+          refcount
+    btrfs_submit_logged_extents()
+  mutex_unlock(inode->i_mutex)
+
+                                               mutex_lock(inode->i_mutex)
+                                               btrfs_log_inode()
+                                                  btrfs_get_logged_extents()
+                                                    --> collected ordered extent X
+                                                        as well
+                                                    --> incremented ordered extent
+                                                        X's refcount
+                                                    --> ordered extent X is now
+                                                        referenced by 2 different
+                                                        lists, due to use of
+                                                        list_add() and not list_move()
+                                                  btrfs_submit_logged_extents()
+                                               mutex_unlock(inode->i_mutex)
+
+  btrfs_sync_log()
+     btrfs_wait_logged_extents()
+       --> set flag BTRFS_ORDERED_LOGGED
+           on ordered extent X and adds it
+           to trans->ordered
+  btrfs_sync_log() finishes
+
+                                               btrfs_sync_log()
+                                                 btrfs_wait_logged_extents()
+                                                   --> Sees flag BTRFS_ORDERED_LOGGED set
+                                                       in ordered extent and therefore
+                                                       won't do anything with it
+                                                   --> The increment on ordered extent
+                                                       X's refcount done before by the
+                                                       task at CPU 2 will never have a
+                                                       matching decrement
+
+Fix this by using the flag BTRFS_ORDERED_LOGGED differently. Use it to
+mean that an ordered extent is already being processed by an fsync call,
+which prevents it from ever being collected by multiple concurrent
+fsync operations against the same inode.
+
+This race was introduced with the following change (added in 3.19 and
+backported to stable 3.18 and 3.17):
+
+  Btrfs: make sure logged extents complete in the current transaction V3
+  commit 50d9aa99bd35c77200e0e3dd7a72274f8304701f
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/ordered-data.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
+index 534544e..87c8976 100644
+--- a/fs/btrfs/ordered-data.c
++++ b/fs/btrfs/ordered-data.c
+@@ -454,7 +454,7 @@ void btrfs_get_logged_extents(struct inode *inode,
+ 			break;
+ 		if (!list_empty(&ordered->log_list))
+ 			continue;
+-		if (test_bit(BTRFS_ORDERED_LOGGED, &ordered->flags))
++		if (test_and_set_bit(BTRFS_ORDERED_LOGGED, &ordered->flags))
+ 			continue;
+ 		list_add(&ordered->log_list, logged_list);
+ 		atomic_inc(&ordered->refs);
+@@ -470,6 +470,7 @@ void btrfs_put_logged_extents(struct list_head *logged_list)
+ 		ordered = list_first_entry(logged_list,
+ 					   struct btrfs_ordered_extent,
+ 					   log_list);
++		clear_bit(BTRFS_ORDERED_LOGGED, &ordered->flags);
+ 		list_del_init(&ordered->log_list);
+ 		btrfs_put_ordered_extent(ordered);
+ 	}
+@@ -511,8 +512,7 @@ void btrfs_wait_logged_extents(struct btrfs_trans_handle *trans,
+ 		wait_event(ordered->wait, test_bit(BTRFS_ORDERED_IO_DONE,
+ 						   &ordered->flags));
+ 
+-		if (!test_and_set_bit(BTRFS_ORDERED_LOGGED, &ordered->flags))
+-			list_add_tail(&ordered->trans_list, &trans->ordered);
++		list_add_tail(&ordered->trans_list, &trans->ordered);
+ 		spin_lock_irq(&log->log_extents_lock[index]);
+ 	}
+ 	spin_unlock_irq(&log->log_extents_lock[index]);
+-- 
+2.1.3
