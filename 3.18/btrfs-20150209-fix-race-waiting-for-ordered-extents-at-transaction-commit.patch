@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
-Newsgroups: gmane.comp.file-systems.btrfs,gmane.linux.kernel.stable
-Subject: [PATCH] Btrfs: fix race waiting for ordered extents at transaction commit
-Date: Fri,  6 Feb 2015 12:25:44 +0000
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42774>
+Newsgroups: gmane.linux.kernel.stable,gmane.comp.file-systems.btrfs
+Subject: [PATCH v2] Btrfs: fix race waiting for ordered extents at transaction commit
+Date: Mon,  9 Feb 2015 12:21:04 +0000
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/124167>
 
 There's a short time window where a race can happen between two or more
 tasks that hold a transaction handle for the same transaction and where
@@ -60,7 +60,7 @@ btrfs_commit_transaction()
   inode is done only when the ordered extent's
   refcount drops to zero)
 
-So fix this by processing the transaction's pending_order list
+So fix this by processing the transaction's pending_ordered list again
 after the number of writers decreases to 1.
 
 I ran into this issue while running xfstests/generic/113 in a loop, which
@@ -180,30 +180,34 @@ backported to stable 3.18 and 3.17):
 CC: <stable@vger.kernel.org> # 3.19, 3.18 and 3.17
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/transaction.c | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+
+V2: Changed approach to leave the current wait for pending ordered
+    extents before waiting for the transaction's number of writers to
+    decrease to 1 and added a second wait after to process any ordered
+    extents that might have been added by other tasks while waiting
+    for the number of writers to decrease to 1. This helps reducing
+    the amount of time the transaction is in the state
+    TRANS_STATE_COMMIT_DOING.
+
+ fs/btrfs/transaction.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
 
 diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
-index d4e81a5..6ecfdc7 100644
+index d4e81a5..87004c0 100644
 --- a/fs/btrfs/transaction.c
 +++ b/fs/btrfs/transaction.c
-@@ -1858,8 +1858,6 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
- 
- 	btrfs_wait_delalloc_flush(root->fs_info);
- 
--	btrfs_wait_pending_ordered(cur_trans, root->fs_info);
--
- 	btrfs_scrub_pause(root);
- 	/*
- 	 * Ok now we need to make sure to block out any other joins while we
-@@ -1872,6 +1870,8 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
- 	wait_event(cur_trans->writer_wait,
- 		   atomic_read(&cur_trans->num_writers) == 1);
- 
+@@ -1877,6 +1877,14 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
+ 		ret = cur_trans->aborted;
+ 		goto scrub_continue;
+ 	}
++
++	/*
++	 * Wait for any new pending ordered extents that might have been added
++	 * by other tasks that were attached to this transaction while we were
++	 * waiting for cur_trans->num_writers to decrease to 1.
++	 */
 +	btrfs_wait_pending_ordered(cur_trans, root->fs_info);
 +
- 	/* ->aborted might be set after the previous check, so check it */
- 	if (unlikely(ACCESS_ONCE(cur_trans->aborted))) {
- 		ret = cur_trans->aborted;
--- 
-2.1.3
+ 	/*
+ 	 * the reloc mutex makes sure that we stop
+ 	 * the balancing code from coming in and moving
