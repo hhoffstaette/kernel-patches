@@ -1,20 +1,23 @@
 From: Forrest Liu <forrestl@synology.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH v2] Btrfs: btrfs_release_extent_buffer_page didn't free pages of dummy extent
-Date: Wed,  4 Feb 2015 20:10:37 +0800
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42708>
+Subject: [PATCH v3] Btrfs: btrfs_release_extent_buffer_page didn't free pages of dummy extent
+Date: Mon,  9 Feb 2015 17:31:45 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42863>
 
 btrfs_release_extent_buffer_page() can't handle dummy extent that
-allocated by btrfs_clone_extent_buffer() properly.
-
-Reference count of pages that allocated by btrfs_clone_extent_buffer()
+allocated by btrfs_clone_extent_buffer() properly. That is because
+reference count of pages that allocated by btrfs_clone_extent_buffer()
 was 2, 1 by alloc_page(), and another by attach_extent_buffer_page().
+
+Running following command repeatly can check this memory leak problem
+
+    btrfs inspect-internal inode-resolve 256 /mnt/btrfs
 
 Signed-off-by: Chien-Kuan Yeh <ckya@synology.com>
 Signed-off-by: Forrest Liu <forrestl@synology.com>
 ---
-changelog:
-v2: do not call PagePrivate() if page is NULL 
+V2: do not call PagePrivate if page is NULL
+V3: add reproducing step in commit message
 
  fs/btrfs/extent_io.c | 51 ++++++++++++++++++++++++++-------------------------
  1 file changed, 26 insertions(+), 25 deletions(-)
