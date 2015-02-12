@@ -1,0 +1,43 @@
+From: Josef Bacik <jbacik@fb.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 2/3] Btrfs: don't set and clear delalloc for O_DIRECT writes
+Date: Wed, 11 Feb 2015 15:08:58 -0500
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42984>
+
+We do this to get the space accounting, but this is just needless churn on the
+io_tree, so just drop setting/clearing delalloc and just drop the reserved data
+space when we have a successfull allocation.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+---
+ fs/btrfs/inode.c | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index e78a2fd..fb16fd3 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -7142,7 +7142,7 @@ static int btrfs_get_blocks_direct(struct inode *inode, sector_t iblock,
+ 	int ret = 0;
+ 
+ 	if (create)
+-		unlock_bits |= EXTENT_DELALLOC | EXTENT_DIRTY;
++		unlock_bits |= EXTENT_DIRTY;
+ 	else
+ 		len = min_t(u64, len, root->sectorsize);
+ 
+@@ -7278,11 +7278,7 @@ unlock:
+ 			BTRFS_I(inode)->outstanding_extents++;
+ 			spin_unlock(&BTRFS_I(inode)->lock);
+ 		}
+-
+-		ret = set_extent_bit(&BTRFS_I(inode)->io_tree, lockstart,
+-				     lockstart + len - 1, EXTENT_DELALLOC, NULL,
+-				     &cached_state, GFP_NOFS);
+-		BUG_ON(ret);
++		btrfs_free_reserved_data_space(inode, len);
+ 	}
+ 
+ 	/*
+-- 
+1.8.3.1
