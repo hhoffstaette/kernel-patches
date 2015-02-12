@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.linux.kernel.stable,gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: fix fsync data loss after adding hard link to inode
-Date: Thu, 12 Feb 2015 16:50:07 +0000
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/124396>
+Subject: [PATCH v2] Btrfs: fix fsync data loss after adding hard link to inode
+Date: Thu, 12 Feb 2015 22:07:57 +0000
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/124406>
 
 We have a scenario where after the fsync log replay we can lose file data
 that had been previously fsync'ed if we added an hard link for our inode
@@ -57,25 +57,98 @@ xfstests shows this:
   echo "File content after:"
   od -t x1 $SCRATCH_MNT/foo
 
+Another alternative test, that doesn't need to fsync an inode in the same
+transaction it was created, is:
+
+  _scratch_mkfs >> $seqres.full 2>&1
+  _init_flakey
+  _mount_flakey
+
+  # Create our test file with some data.
+  $XFS_IO_PROG -f -c "pwrite -S 0xaa -b 8K 0 8K" \
+       $SCRATCH_MNT/foo | _filter_xfs_io
+
+  # Make sure the file is durably persisted.
+  sync
+
+  # Append some data to our file, to increase its size.
+  $XFS_IO_PROG -f -c "pwrite -S 0xcc -b 4K 8K 4K" \
+       $SCRATCH_MNT/foo | _filter_xfs_io
+
+  # Fsync the file, so from this point on if a crash/power failure happens, our
+  # new data is guaranteed to be there next time the fs is mounted.
+  $XFS_IO_PROG -c "fsync" $SCRATCH_MNT/foo
+
+  # Add one hard link to our file. This made btrfs write into the in memory fsync
+  # log a special inode with generation 0. Note that this didn't update the inode
+  # in the fsync log on disk.
+  ln $SCRATCH_MNT/foo $SCRATCH_MNT/foo_link
+
+  # Now make sure the in memory fsync log is durably persisted.
+  # Creating and fsync'ing another file will do it.
+  touch $SCRATCH_MNT/bar
+  $XFS_IO_PROG -c "fsync" $SCRATCH_MNT/bar
+
+  # As expected, before the crash/power failure, we should be able to read the
+  # 12Kb of file data.
+  echo "File content before:"
+  od -t x1 $SCRATCH_MNT/foo
+
+  # Simulate a crash/power loss.
+  _load_flakey_table $FLAKEY_DROP_WRITES
+  _unmount_flakey
+
+  _load_flakey_table $FLAKEY_ALLOW_WRITES
+  _mount_flakey
+
+  # After mounting the fs again, the fsync log was replayed.
+  # The btrfs fsync log replay code didn't update the size of the persisted inode
+  # with the size of the size found in the fsync log's inode metadata. This made
+  # the last 4Kb of file data inaccessible.
+  echo "File content after:"
+  od -t x1 $SCRATCH_MNT/foo
+
 This isn't a new issue/regression. This problem has been around since the
 log tree code was added in 2008:
 
   Btrfs: Add a write ahead tree log to optimize synchronous operations
   (commit e02119d5a7b4396c5a872582fddc8bd6d305a70a)
 
-A test case for xfstests follows soon.
+Test cases for xfstests follow soon.
 
 CC: <stable@vger.kernel.org>
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/tree-log.c | 3 +--
- 1 file changed, 1 insertion(+), 2 deletions(-)
+
+V2: Fixed additional similar case where the inode already existed in
+    the fs/subvol tree.
+    Made an xfstest for that case too.
+
+ fs/btrfs/tree-log.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index ea0431d..8d8ae1e 100644
+index ea0431d..f4a59d3 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
-@@ -3263,14 +3263,13 @@ static void fill_inode_item(struct btrfs_trans_handle *trans,
+@@ -490,8 +490,15 @@ insert:
+ 		src_item = (struct btrfs_inode_item *)src_ptr;
+ 		dst_item = (struct btrfs_inode_item *)dst_ptr;
+ 
+-		if (btrfs_inode_generation(eb, src_item) == 0)
++		if (btrfs_inode_generation(eb, src_item) == 0) {
++			struct btrfs_map_token token;
++			const u64 ino_size = btrfs_inode_size(eb, src_item);
++
++			btrfs_init_map_token(&token);
++			btrfs_set_token_inode_size(path->nodes[0], dst_item,
++						   ino_size, &token);
+ 			goto no_copy;
++		}
+ 
+ 		if (overwrite_root &&
+ 		    S_ISDIR(btrfs_inode_mode(eb, src_item)) &&
+@@ -3263,14 +3270,13 @@ static void fill_inode_item(struct btrfs_trans_handle *trans,
  		 * to say 'update this inode with these values'
  		 */
  		btrfs_set_token_inode_generation(leaf, item, 0, &token);
