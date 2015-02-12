@@ -1,8 +1,8 @@
 From: Josef Bacik <jbacik@fb.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 3/3] Btrfs: account for large extents with enospc
-Date: Wed, 11 Feb 2015 15:08:59 -0500
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42985>
+Subject: [PATCH 3/3 v2] Btrfs: account for large extents with enospc
+Date: Thu, 12 Feb 2015 11:16:51 -0500
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43047>
 
 On our gluster boxes we stream large tar balls of backups onto our fses.  With
 160gb of ram this means we get really large contiguous ranges of dirty data, but
@@ -15,27 +15,37 @@ be sure to have enough reserved metadata space.  Thanks,
 
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 ---
- fs/btrfs/ctree.h       |  2 ++
- fs/btrfs/extent-tree.c | 16 +++++++++----
+V1->V2:
+-use bit shift instead of div64_u64.
+-skip math if num_bytes < max_size in drop_outstanding_extents
+
+ fs/btrfs/ctree.h       |  8 ++++++++
+ fs/btrfs/extent-tree.c | 16 ++++++++++-----
  fs/btrfs/extent_io.c   |  2 +-
- fs/btrfs/inode.c       | 63 +++++++++++++++++++++++++++++++++++++++++++++++++-
- 4 files changed, 76 insertions(+), 7 deletions(-)
+ fs/btrfs/inode.c       | 54 +++++++++++++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 73 insertions(+), 7 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index 0b4683f..1675602 100644
+index 0b4683f..afdae42 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
-@@ -198,6 +198,8 @@ static int btrfs_csum_sizes[] = { 4, 0 };
+@@ -198,6 +198,14 @@ static int btrfs_csum_sizes[] = { 4, 0 };
  
  #define BTRFS_DIRTY_METADATA_THRESH	(32 * 1024 * 1024)
  
 +#define BTRFS_MAX_EXTENT_SIZE (128 * 1024 * 1024)
++#define BTRFS_MAX_EXTENT_BIT 27
++
++static inline u64 btrfs_num_extents(u64 num_bytes)
++{
++	return (num_bytes + BTRFS_MAX_EXTENT_SIZE - 1) >> BTRFS_MAX_EXTENT_BIT;
++}
 +
  /*
   * The key defines the order in the tree, and so it also defines (optimal)
   * block layout.
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index a346487..eb30b90 100644
+index a346487..18e8a5a 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
 @@ -4966,19 +4966,25 @@ void btrfs_subvolume_release_metadata(struct btrfs_root *root,
@@ -58,9 +68,9 @@ index a346487..eb30b90 100644
  
 -	BUG_ON(!BTRFS_I(inode)->outstanding_extents);
 -	BTRFS_I(inode)->outstanding_extents--;
-+	num_extents = (unsigned)div64_u64(num_bytes +
-+					  BTRFS_MAX_EXTENT_SIZE - 1,
-+					  BTRFS_MAX_EXTENT_SIZE);
++	num_extents = (num_bytes > BTRFS_MAX_EXTENT_SIZE) ?
++		(unsigned)btrfs_num_extents(num_bytes) : 1;
++
 +	ASSERT(num_extents);
 +	ASSERT(BTRFS_I(inode)->outstanding_extents >= num_extents);
 +	BTRFS_I(inode)->outstanding_extents -= num_extents;
@@ -99,10 +109,10 @@ index 4ebabd2..3fbc177 100644
  			delalloc_start = delalloc_end + 1;
  			continue;
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index fb16fd3..4564975 100644
+index fb16fd3..324cb6d 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -1530,10 +1530,45 @@ static int run_delalloc_range(struct inode *inode, struct page *locked_page,
+@@ -1530,10 +1530,41 @@ static int run_delalloc_range(struct inode *inode, struct page *locked_page,
  static void btrfs_split_extent_hook(struct inode *inode,
  				    struct extent_state *orig, u64 split)
  {
@@ -114,7 +124,6 @@ index fb16fd3..4564975 100644
  
 +	size = orig->end - orig->start + 1;
 +	if (size > BTRFS_MAX_EXTENT_SIZE) {
-+		u64 num_extents;
 +		u64 new_size;
 +
 +		/*
@@ -138,22 +147,18 @@ index fb16fd3..4564975 100644
 +		if ((split - orig->start) > new_size)
 +			new_size = split - orig->start;
 +
-+		num_extents = div64_u64(size + BTRFS_MAX_EXTENT_SIZE - 1,
-+					BTRFS_MAX_EXTENT_SIZE);
-+		if (div64_u64(new_size + BTRFS_MAX_EXTENT_SIZE - 1,
-+			      BTRFS_MAX_EXTENT_SIZE) < num_extents)
++		if (btrfs_num_extents(size) > btrfs_num_extents(new_size))
 +			return;
 +	}
 +
  	spin_lock(&BTRFS_I(inode)->lock);
  	BTRFS_I(inode)->outstanding_extents++;
  	spin_unlock(&BTRFS_I(inode)->lock);
-@@ -1549,10 +1584,34 @@ static void btrfs_merge_extent_hook(struct inode *inode,
+@@ -1549,10 +1580,30 @@ static void btrfs_merge_extent_hook(struct inode *inode,
  				    struct extent_state *new,
  				    struct extent_state *other)
  {
 +	u64 new_size, old_size;
-+	u64 num_extents;
 +
  	/* not delalloc, ignore it */
  	if (!(other->state & EXTENT_DELALLOC))
@@ -174,25 +179,21 @@ index fb16fd3..4564975 100644
 +	 * If we grew by another max_extent, just return, we want to keep that
 +	 * reserved amount.
 +	 */
-+	num_extents = div64_u64(old_size + BTRFS_MAX_EXTENT_SIZE - 1,
-+				BTRFS_MAX_EXTENT_SIZE);
-+	if (div64_u64(new_size + BTRFS_MAX_EXTENT_SIZE - 1,
-+		      BTRFS_MAX_EXTENT_SIZE) > num_extents)
++	if (btrfs_num_extents(new_size) > btrfs_num_extents(old_size))
 +		return;
 +
  	spin_lock(&BTRFS_I(inode)->lock);
  	BTRFS_I(inode)->outstanding_extents--;
  	spin_unlock(&BTRFS_I(inode)->lock);
-@@ -1648,6 +1707,8 @@ static void btrfs_clear_bit_hook(struct inode *inode,
+@@ -1648,6 +1699,7 @@ static void btrfs_clear_bit_hook(struct inode *inode,
  				 unsigned long *bits)
  {
  	u64 len = state->end + 1 - state->start;
-+	u64 num_extents = div64_u64(len + BTRFS_MAX_EXTENT_SIZE -1,
-+				    BTRFS_MAX_EXTENT_SIZE);
++	u64 num_extents = btrfs_num_extents(len);
  
  	spin_lock(&BTRFS_I(inode)->lock);
  	if ((state->state & EXTENT_DEFRAG) && (*bits & EXTENT_DEFRAG))
-@@ -1667,7 +1728,7 @@ static void btrfs_clear_bit_hook(struct inode *inode,
+@@ -1667,7 +1719,7 @@ static void btrfs_clear_bit_hook(struct inode *inode,
  			*bits &= ~EXTENT_FIRST_DELALLOC;
  		} else if (!(*bits & EXTENT_DO_ACCOUNTING)) {
  			spin_lock(&BTRFS_I(inode)->lock);
