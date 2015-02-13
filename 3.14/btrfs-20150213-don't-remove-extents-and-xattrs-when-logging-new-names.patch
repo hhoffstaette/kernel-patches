@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: don't remove extents and xattrs when logging new names
-Date: Fri, 13 Feb 2015 12:38:44 +0000
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43077>
+Subject: [PATCH v2] Btrfs: don't remove extents and xattrs when logging new names
+Date: Fri, 13 Feb 2015 16:15:09 +0000
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43092>
 
 If we are recording in the tree log that an inode has new names (new hard
 links were added), we would drop items, belonging to the inode, that we
@@ -108,23 +108,30 @@ The test case for xfstests follows soon.
 
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/tree-log.c | 19 ++++++++++++++-----
- 1 file changed, 14 insertions(+), 5 deletions(-)
+
+V2: Added missing assignment to max_key.type for directory inode case.
+
+ fs/btrfs/tree-log.c | 23 +++++++++++++++++------
+ 1 file changed, 17 insertions(+), 6 deletions(-)
 
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index b0fe52a..0f00569 100644
+index b0fe52a..5c91645 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
-@@ -4070,7 +4070,7 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
+@@ -4069,8 +4069,10 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
+ 	if (S_ISDIR(inode->i_mode)) {
  		int max_key_type = BTRFS_DIR_LOG_INDEX_KEY;
  
- 		if (inode_only == LOG_INODE_EXISTS)
+-		if (inode_only == LOG_INODE_EXISTS)
 -			max_key_type = BTRFS_XATTR_ITEM_KEY;
++		if (inode_only == LOG_INODE_EXISTS) {
 +			max_key_type = BTRFS_INODE_EXTREF_KEY;
++			max_key.type = max_key_type;
++		}
  		ret = drop_objectid_items(trans, log, path, ino, max_key_type);
  	} else {
  		if (inode_only == LOG_INODE_EXISTS) {
-@@ -4096,14 +4096,23 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
+@@ -4096,14 +4098,23 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
  				       &BTRFS_I(inode)->runtime_flags)) {
  			clear_bit(BTRFS_INODE_COPY_EVERYTHING,
  				  &BTRFS_I(inode)->runtime_flags);
