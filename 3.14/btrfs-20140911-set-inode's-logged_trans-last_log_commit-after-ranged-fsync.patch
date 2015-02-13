@@ -1,0 +1,76 @@
+From 125c4cf9f37c98fed2c08229b31358cfec63dcf6 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Thu, 11 Sep 2014 21:22:14 +0100
+Subject: Btrfs: set inode's logged_trans/last_log_commit after ranged fsync
+
+When a ranged fsync finishes if there are still extent maps in the modified
+list, still set the inode's logged_trans and last_log_commit. This is important
+in case an inode is fsync'ed and unlinked in the same transaction, to ensure its
+inode ref gets deleted from the log and the respective dentries in its parent
+are deleted too from the log (if the parent directory was fsync'ed in the same
+transaction).
+
+Instead make btrfs_inode_in_log() return false if the list of modified extent
+maps isn't empty.
+
+This is an incremental on top of the v4 version of the patch:
+
+    "Btrfs: fix fsync data loss after a ranged fsync"
+
+which was added to its v5, but didn't make it on time.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/btrfs_inode.h b/fs/btrfs/btrfs_inode.h
+index 43527fd..56b8522 100644
+--- a/fs/btrfs/btrfs_inode.h
++++ b/fs/btrfs/btrfs_inode.h
+@@ -234,8 +234,17 @@ static inline int btrfs_inode_in_log(struct inode *inode, u64 generation)
+ 	    BTRFS_I(inode)->last_sub_trans <=
+ 	    BTRFS_I(inode)->last_log_commit &&
+ 	    BTRFS_I(inode)->last_sub_trans <=
+-	    BTRFS_I(inode)->root->last_log_commit)
+-		return 1;
++	    BTRFS_I(inode)->root->last_log_commit) {
++		/*
++		 * After a ranged fsync we might have left some extent maps
++		 * (that fall outside the fsync's range). So return false
++		 * here if the list isn't empty, to make sure btrfs_log_inode()
++		 * will be called and process those extent maps.
++		 */
++		smp_mb();
++		if (list_empty(&BTRFS_I(inode)->extent_tree.modified_extents))
++			return 1;
++	}
+ 	return 0;
+ }
+ 
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index d296efe..1d1ba08 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -4093,18 +4093,8 @@ log_extents:
+ 		}
+ 	}
+ 
+-	write_lock(&em_tree->lock);
+-	/*
+-	 * If we're doing a ranged fsync and there are still modified extents
+-	 * in the list, we must run on the next fsync call as it might cover
+-	 * those extents (a full fsync or an fsync for other range).
+-	 */
+-	if (list_empty(&em_tree->modified_extents)) {
+-		BTRFS_I(inode)->logged_trans = trans->transid;
+-		BTRFS_I(inode)->last_log_commit =
+-			BTRFS_I(inode)->last_sub_trans;
+-	}
+-	write_unlock(&em_tree->lock);
++	BTRFS_I(inode)->logged_trans = trans->transid;
++	BTRFS_I(inode)->last_log_commit = BTRFS_I(inode)->last_sub_trans;
+ out_unlock:
+ 	if (unlikely(err))
+ 		btrfs_put_logged_extents(&logged_list);
+-- 
+cgit v0.10.2
+
