@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.linux.kernel.stable,gmane.comp.file-systems.btrfs
-Subject: [PATCH v2] Btrfs: fix fsync data loss after adding hard link to inode
-Date: Thu, 12 Feb 2015 22:07:57 +0000
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/124406>
+Subject: [PATCH v3] Btrfs: fix fsync data loss after adding hard link to inode
+Date: Fri, 13 Feb 2015 00:16:06 +0000
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/124411>
 
 We have a scenario where after the fsync log replay we can lose file data
 that had been previously fsync'ed if we added an hard link for our inode
@@ -123,32 +123,38 @@ Signed-off-by: Filipe Manana <fdmanana@suse.com>
 V2: Fixed additional similar case where the inode already existed in
     the fs/subvol tree.
     Made an xfstest for that case too.
+V3: Apply logic only to regular files.
 
- fs/btrfs/tree-log.c | 12 +++++++++---
- 1 file changed, 9 insertions(+), 3 deletions(-)
+ fs/btrfs/tree-log.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
 
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index ea0431d..f4a59d3 100644
+index ea0431d..2959935 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
-@@ -490,8 +490,15 @@ insert:
+@@ -490,8 +490,20 @@ insert:
  		src_item = (struct btrfs_inode_item *)src_ptr;
  		dst_item = (struct btrfs_inode_item *)dst_ptr;
  
 -		if (btrfs_inode_generation(eb, src_item) == 0)
 +		if (btrfs_inode_generation(eb, src_item) == 0) {
-+			struct btrfs_map_token token;
-+			const u64 ino_size = btrfs_inode_size(eb, src_item);
++			struct extent_buffer *dst_eb = path->nodes[0];
 +
-+			btrfs_init_map_token(&token);
-+			btrfs_set_token_inode_size(path->nodes[0], dst_item,
-+						   ino_size, &token);
++			if (S_ISREG(btrfs_inode_mode(eb, src_item)) &&
++			    S_ISREG(btrfs_inode_mode(dst_eb, dst_item))) {
++				struct btrfs_map_token token;
++				u64 ino_size = btrfs_inode_size(eb, src_item);
++
++				btrfs_init_map_token(&token);
++				btrfs_set_token_inode_size(dst_eb, dst_item,
++							   ino_size, &token);
++			}
  			goto no_copy;
 +		}
  
  		if (overwrite_root &&
  		    S_ISDIR(btrfs_inode_mode(eb, src_item)) &&
-@@ -3263,14 +3270,13 @@ static void fill_inode_item(struct btrfs_trans_handle *trans,
+@@ -3263,14 +3275,13 @@ static void fill_inode_item(struct btrfs_trans_handle *trans,
  		 * to say 'update this inode with these values'
  		 */
  		btrfs_set_token_inode_generation(leaf, item, 0, &token);
