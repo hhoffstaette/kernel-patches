@@ -1,0 +1,141 @@
+From fccb84c94a9755f48668e43d0a44d6ecc750900f Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Mon, 29 Sep 2014 23:53:21 +0200
+Subject: btrfs: move checks for DUMMY_ROOT into a helper
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 533657c..ce1d71d 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -1506,10 +1506,9 @@ static inline int should_cow_block(struct btrfs_trans_handle *trans,
+ 				   struct btrfs_root *root,
+ 				   struct extent_buffer *buf)
+ {
+-#ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+-	if (unlikely(test_bit(BTRFS_ROOT_DUMMY_ROOT, &root->state)))
++	if (btrfs_test_is_dummy_root(root))
+ 		return 0;
+-#endif
++
+ 	/* ensure we can see the force_cow */
+ 	smp_rmb();
+ 
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index bae025a..557fd95 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -4131,4 +4131,13 @@ int btrfs_verify_qgroup_counts(struct btrfs_fs_info *fs_info, u64 qgroupid,
+ 			       u64 rfer, u64 excl);
+ #endif
+ 
++static inline int btrfs_test_is_dummy_root(struct btrfs_root *root)
++{
++#ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
++	if (unlikely(test_bit(BTRFS_ROOT_DUMMY_ROOT, &root->state)))
++		return 1;
++#endif
++	return 0;
++}
++
+ #endif
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 0abf4b0..14117f8 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1130,11 +1130,9 @@ struct extent_buffer *btrfs_find_tree_block(struct btrfs_root *root,
+ struct extent_buffer *btrfs_find_create_tree_block(struct btrfs_root *root,
+ 						 u64 bytenr, u32 blocksize)
+ {
+-#ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+-	if (unlikely(test_bit(BTRFS_ROOT_DUMMY_ROOT, &root->state)))
++	if (btrfs_test_is_dummy_root(root))
+ 		return alloc_test_extent_buffer(root->fs_info, bytenr,
+ 						blocksize);
+-#endif
+ 	return alloc_extent_buffer(root->fs_info, bytenr, blocksize);
+ }
+ 
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 44d0497..7895db9 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3073,10 +3073,10 @@ static int __btrfs_mod_ref(struct btrfs_trans_handle *trans,
+ 	int (*process_func)(struct btrfs_trans_handle *, struct btrfs_root *,
+ 			    u64, u64, u64, u64, u64, u64, int);
+ 
+-#ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+-	if (unlikely(test_bit(BTRFS_ROOT_DUMMY_ROOT, &root->state)))
++
++	if (btrfs_test_is_dummy_root(root))
+ 		return 0;
+-#endif
++
+ 	ref_root = btrfs_header_owner(buf);
+ 	nritems = btrfs_header_nritems(buf);
+ 	level = btrfs_header_level(buf);
+@@ -6264,10 +6264,9 @@ int btrfs_free_extent(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+ 	int ret;
+ 	struct btrfs_fs_info *fs_info = root->fs_info;
+ 
+-#ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+-	if (unlikely(test_bit(BTRFS_ROOT_DUMMY_ROOT, &root->state)))
++	if (btrfs_test_is_dummy_root(root))
+ 		return 0;
+-#endif
++
+ 	add_pinned_bytes(root->fs_info, num_bytes, owner, root_objectid);
+ 
+ 	/*
+@@ -7336,15 +7335,14 @@ struct extent_buffer *btrfs_alloc_free_block(struct btrfs_trans_handle *trans,
+ 	bool skinny_metadata = btrfs_fs_incompat(root->fs_info,
+ 						 SKINNY_METADATA);
+ 
+-#ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+-	if (unlikely(test_bit(BTRFS_ROOT_DUMMY_ROOT, &root->state))) {
++	if (btrfs_test_is_dummy_root(root)) {
+ 		buf = btrfs_init_new_buffer(trans, root, root->alloc_bytenr,
+ 					    blocksize, level);
+ 		if (!IS_ERR(buf))
+ 			root->alloc_bytenr += blocksize;
+ 		return buf;
+ 	}
+-#endif
++
+ 	block_rsv = use_block_rsv(trans, root, blocksize);
+ 	if (IS_ERR(block_rsv))
+ 		return ERR_CAST(block_rsv);
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index cd9717e..48b60db 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -539,10 +539,9 @@ static int add_qgroup_item(struct btrfs_trans_handle *trans,
+ 	struct extent_buffer *leaf;
+ 	struct btrfs_key key;
+ 
+-#ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+-	if (unlikely(test_bit(BTRFS_ROOT_DUMMY_ROOT, &quota_root->state)))
++	if (btrfs_test_is_dummy_root(quota_root))
+ 		return 0;
+-#endif
++
+ 	path = btrfs_alloc_path();
+ 	if (!path)
+ 		return -ENOMEM;
+@@ -698,10 +697,9 @@ static int update_qgroup_info_item(struct btrfs_trans_handle *trans,
+ 	int ret;
+ 	int slot;
+ 
+-#ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+-	if (unlikely(test_bit(BTRFS_ROOT_DUMMY_ROOT, &root->state)))
++	if (btrfs_test_is_dummy_root(root))
+ 		return 0;
+-#endif
++
+ 	key.objectid = 0;
+ 	key.type = BTRFS_QGROUP_INFO_KEY;
+ 	key.offset = qgroup->qgroupid;
+-- 
+cgit v0.10.2
+

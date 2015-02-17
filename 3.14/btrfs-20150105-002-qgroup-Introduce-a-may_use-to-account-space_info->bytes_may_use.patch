@@ -112,7 +112,7 @@ index 88b4e32..d1a7ce0 100644
  	btrfs_put_block_group(block_group);
  	return ret;
  }
-@@ -7360,6 +7374,10 @@ struct extent_buffer *btrfs_alloc_tree_block(struct btrfs_trans_handle *trans,
+@@ -7360,5 +7374,9 @@ struct extent_buffer *btrfs_alloc_tree_block(struct btrfs_trans_handle *trans,
  		return ERR_PTR(ret);
  	}
  
@@ -120,8 +120,7 @@ index 88b4e32..d1a7ce0 100644
 +					   root_objectid,
 +					   ins.offset, 1);
 +
- 	buf = btrfs_init_new_buffer(trans, root, ins.objectid,
- 				    blocksize, level);
+ 	buf = btrfs_init_new_buffer(trans, root, ins.objectid, level);
  	BUG_ON(IS_ERR(buf)); /* -ENOMEM */
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
 index e687bb0..e350cd6 100644
