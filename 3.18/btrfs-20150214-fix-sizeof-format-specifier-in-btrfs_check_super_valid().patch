@@ -1,0 +1,30 @@
+From 41d6b13ea7b459cd51d4446c9b264128a52db993 Mon Sep 17 00:00:00 2001
+From: Fabian Frederick <fabf@skynet.be>
+Date: Sat, 14 Feb 2015 13:10:22 +0100
+Subject: btrfs: fix sizeof format specifier in btrfs_check_super_valid()
+
+This patch fixes mips compilation warning:
+
+fs/btrfs/disk-io.c: In function 'btrfs_check_super_valid':
+fs/btrfs/disk-io.c:3927:21: warning: format '%lu' expects argument
+of type 'long unsigned int', but argument 3 has type 'unsigned int' [-Wformat]
+
+Signed-off-by: Fabian Frederick <fabf@skynet.be>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 83671f8..6911aa4 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -3923,7 +3923,7 @@ static int btrfs_check_super_valid(struct btrfs_fs_info *fs_info,
+ 	}
+ 	if (btrfs_super_sys_array_size(sb) < sizeof(struct btrfs_disk_key)
+ 			+ sizeof(struct btrfs_chunk)) {
+-		printk(KERN_ERR "BTRFS: system chunk array too small %u < %lu\n",
++		printk(KERN_ERR "BTRFS: system chunk array too small %u < %zu\n",
+ 				btrfs_super_sys_array_size(sb),
+ 				sizeof(struct btrfs_disk_key)
+ 				+ sizeof(struct btrfs_chunk));
+-- 
+cgit v0.10.2
+
