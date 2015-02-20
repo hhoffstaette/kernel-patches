@@ -1,0 +1,36 @@
+From: Neal Cardwell <ncardwell@google.com>
+Newsgroups: gmane.linux.network
+Subject: [PATCH net-next] tcp: fix tcp_should_expand_sndbuf() to use tcp_packets_in_flight()
+Date: Fri, 20 Feb 2015 13:33:16 -0500
+Archived-At: <http://permalink.gmane.org/gmane.linux.network/351054>
+
+tcp_should_expand_sndbuf() does not expand the send buffer if we have
+filled the congestion window.
+
+However, it should use tcp_packets_in_flight() instead of
+tp->packets_out to make this check.
+
+Testing has established that the difference matters a lot if there are
+many SACKed packets, causing a needless performance shortfall.
+
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: Nandita Dukkipati <nanditad@google.com>
+---
+ net/ipv4/tcp_input.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 8fdd27b..fb4cf8b 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -4770,7 +4770,7 @@ static bool tcp_should_expand_sndbuf(const struct sock *sk)
+ 		return false;
+ 
+ 	/* If we filled the congestion window, do not expand.  */
+-	if (tp->packets_out >= tp->snd_cwnd)
++	if (tcp_packets_in_flight(tp) >= tp->snd_cwnd)
+ 		return false;
+ 
+ 	return true;
