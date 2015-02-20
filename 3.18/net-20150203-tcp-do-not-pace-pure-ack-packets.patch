@@ -1,0 +1,138 @@
+From 9878196578286c5ed494778ada01da094377a686 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Tue, 3 Feb 2015 18:31:53 -0800
+Subject: tcp: do not pace pure ack packets
+
+When we added pacing to TCP, we decided to let sch_fq take care
+of actual pacing.
+
+All TCP had to do was to compute sk->pacing_rate using simple formula:
+
+sk->pacing_rate = 2 * cwnd * mss / rtt
+
+It works well for senders (bulk flows), but not very well for receivers
+or even RPC :
+
+cwnd on the receiver can be less than 10, rtt can be around 100ms, so we
+can end up pacing ACK packets, slowing down the sender.
+
+Really, only the sender should pace, according to its own logic.
+
+Instead of adding a new bit in skb, or call yet another flow
+dissection, we tweak skb->truesize to a small value (2), and
+we instruct sch_fq to use new helper and not pace pure ack.
+
+Note this also helps TCP small queue, as ack packets present
+in qdisc/NIC do not prevent sending a data packet (RPC workload)
+
+This helps to reduce tx completion overhead, ack packets can use regular
+sock_wfree() instead of tcp_wfree() which is a bit more expensive.
+
+This has no impact in the case packets are sent to loopback interface,
+as we do not coalesce ack packets (were we would detect skb->truesize
+lie)
+
+In case netem (with a delay) is used, skb_orphan_partial() also sets
+skb->truesize to 1.
+
+This patch is a combination of two patches we used for about one year at
+Google.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index b8fdc6b..637ee49 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -1713,4 +1713,19 @@ static inline struct ip_options_rcu *tcp_v4_save_options(struct sk_buff *skb)
+ 	return dopt;
+ }
+ 
++/* locally generated TCP pure ACKs have skb->truesize == 2
++ * (check tcp_send_ack() in net/ipv4/tcp_output.c )
++ * This is much faster than dissecting the packet to find out.
++ * (Think of GRE encapsulations, IPv4, IPv6, ...)
++ */
++static inline bool skb_is_tcp_pure_ack(const struct sk_buff *skb)
++{
++	return skb->truesize == 2;
++}
++
++static inline void skb_set_tcp_pure_ack(struct sk_buff *skb)
++{
++	skb->truesize = 2;
++}
++
+ #endif	/* _TCP_H */
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 20ab06b..1b326ed 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -948,7 +948,7 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
+ 
+ 	skb_orphan(skb);
+ 	skb->sk = sk;
+-	skb->destructor = tcp_wfree;
++	skb->destructor = skb_is_tcp_pure_ack(skb) ? sock_wfree : tcp_wfree;
+ 	skb_set_hash_from_sk(skb, sk);
+ 	atomic_add(skb->truesize, &sk->sk_wmem_alloc);
+ 
+@@ -3265,6 +3265,14 @@ void tcp_send_ack(struct sock *sk)
+ 	skb_reserve(buff, MAX_TCP_HEADER);
+ 	tcp_init_nondata_skb(buff, tcp_acceptable_seq(sk), TCPHDR_ACK);
+ 
++	/* We do not want pure acks influencing TCP Small Queues or fq/pacing
++	 * too much.
++	 * SKB_TRUESIZE(max(1 .. 66, MAX_TCP_HEADER)) is unfortunately ~784
++	 * We also avoid tcp_wfree() overhead (cache line miss accessing
++	 * tp->tsq_flags) by using regular sock_wfree()
++	 */
++	skb_set_tcp_pure_ack(buff);
++
+ 	/* Send it off, this clears delayed acks for us. */
+ 	skb_mstamp_get(&buff->skb_mstamp);
+ 	tcp_transmit_skb(sk, buff, 0, sk_gfp_atomic(sk, GFP_ATOMIC));
+diff --git a/net/sched/sch_fq.c b/net/sched/sch_fq.c
+index 2a50f5c..69a3dbf 100644
+--- a/net/sched/sch_fq.c
++++ b/net/sched/sch_fq.c
+@@ -52,6 +52,7 @@
+ #include <net/pkt_sched.h>
+ #include <net/sock.h>
+ #include <net/tcp_states.h>
++#include <net/tcp.h>
+ 
+ /*
+  * Per flow structure, dynamically allocated
+@@ -445,7 +446,9 @@ begin:
+ 		goto begin;
+ 	}
+ 
+-	if (unlikely(f->head && now < f->time_next_packet)) {
++	skb = f->head;
++	if (unlikely(skb && now < f->time_next_packet &&
++		     !skb_is_tcp_pure_ack(skb))) {
+ 		head->first = f->next;
+ 		fq_flow_set_throttled(q, f);
+ 		goto begin;
+@@ -464,12 +467,15 @@ begin:
+ 		goto begin;
+ 	}
+ 	prefetch(&skb->end);
+-	f->time_next_packet = now;
+ 	f->credit -= qdisc_pkt_len(skb);
+ 
+ 	if (f->credit > 0 || !q->rate_enable)
+ 		goto out;
+ 
++	/* Do not pace locally generated ack packets */
++	if (skb_is_tcp_pure_ack(skb))
++		goto out;
++
+ 	rate = q->flow_max_rate;
+ 	if (skb->sk)
+ 		rate = min(skb->sk->sk_pacing_rate, rate);
+-- 
+cgit v0.10.2
+
