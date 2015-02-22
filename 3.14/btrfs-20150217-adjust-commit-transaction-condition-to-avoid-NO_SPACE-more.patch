@@ -1,0 +1,36 @@
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] btrfs: Adjust commit-transaction condition to avoid NO_SPACE more
+Date: Tue, 17 Feb 2015 17:42:00 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43166>
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+If we have any chance to make a successful write, we should not give up.
+
+This patch adjust commit-transaction condition from:
+  pinned >= wanted
+to
+  left + pinned >= wanted
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/extent-tree.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 414d533..4ffce64 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3751,7 +3751,8 @@ alloc:
+		 * allocation don't bother committing the transaction.
+ 		 */
+ 		if (percpu_counter_compare(&data_sinfo->total_bytes_pinned,
+-					   bytes) < 0)
++					   used + bytes -
++					   data_sinfo->total_bytes) < 0)
+ 			have_pinned_space = 0;
+ 		spin_unlock(&data_sinfo->lock);
+ 
+-- 
+1.8.5.1
