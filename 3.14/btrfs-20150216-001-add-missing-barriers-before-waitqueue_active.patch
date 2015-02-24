@@ -1,0 +1,111 @@
+From 17483cf32d53059bb3e6aa1662fe2f35727829bc Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Mon, 16 Feb 2015 19:35:07 +0100
+Subject: btrfs: add missing barriers before waitqueue_active
+
+The waitqueue might miss a wakeup due to memory ordering issues, the
+explicit barrier is required unless there's an implicit one.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index 5ec03d9..30b8668 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -451,6 +451,10 @@ static void btrfs_rm_dev_replace_blocked(struct btrfs_fs_info *fs_info)
+ static void btrfs_rm_dev_replace_unblocked(struct btrfs_fs_info *fs_info)
+ {
+ 	clear_bit(BTRFS_FS_STATE_DEV_REPLACING, &fs_info->fs_state);
++	/*
++	 * Make sure counter is updated before we wake up waiters.
++	 */
++	smp_mb();
+ 	if (waitqueue_active(&fs_info->replace_wait))
+ 		wake_up(&fs_info->replace_wait);
+ }
+@@ -916,7 +920,10 @@ void btrfs_bio_counter_inc_noblocked(struct btrfs_fs_info *fs_info)
+ void btrfs_bio_counter_sub(struct btrfs_fs_info *fs_info, s64 amount)
+ {
+ 	percpu_counter_sub(&fs_info->bio_counter, amount);
+-
++	/*
++	 * Make sure counter is updated before we wake up waiters.
++	 */
++	smp_mb();
+ 	if (waitqueue_active(&fs_info->replace_wait))
+ 		wake_up(&fs_info->replace_wait);
+ }
+diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
+index 5264858..b460e19 100644
+--- a/fs/btrfs/raid56.c
++++ b/fs/btrfs/raid56.c
+@@ -809,11 +809,18 @@ static noinline void unlock_stripe(struct btrfs_raid_bio *rbio)
+ 			}
+ 
+ 			goto done_nolock;
+-		} else  if (waitqueue_active(&h->wait)) {
+-			spin_unlock(&rbio->bio_list_lock);
+-			spin_unlock_irqrestore(&h->lock, flags);
+-			wake_up(&h->wait);
+-			goto done_nolock;
++		} else {
++			/*
++			 * Make sure counter is updated before we wake up
++			 * waiters.
++			 */
++			smp_mb();
++			if (waitqueue_active(&h->wait)) {
++				spin_unlock(&rbio->bio_list_lock);
++				spin_unlock_irqrestore(&h->lock, flags);
++				wake_up(&h->wait);
++				goto done_nolock;
++			}
+ 		}
+ 	}
+ done:
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 038fcf6..90ba0c3 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -90,8 +90,11 @@ static void clear_btree_io_tree(struct extent_io_tree *tree)
+ 		/*
+ 		 * btree io trees aren't supposed to have tasks waiting for
+ 		 * changes in the flags of extent states ever.
++		 *
++		 * Barrier required to make sure counter is updated before we
++		 * wake up waiters.
+ 		 */
+-		ASSERT(!waitqueue_active(&state->wq));
++		ASSERT(({ smp_mb(); !waitqueue_active(&state->wq); }));
+ 		free_extent_state(state);
+ 		if (need_resched()) {
+ 			spin_unlock(&tree->lock);
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index f96996a..121df0f 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -2739,6 +2739,10 @@ out_wake_log_root:
+ 	atomic_set(&log_root_tree->log_commit[index2], 0);
+ 	mutex_unlock(&log_root_tree->log_mutex);
+ 
++	/*
++	 * Make sure counter is updated before we wake up waiters.
++	 */
++	smp_mb();
+ 	if (waitqueue_active(&log_root_tree->log_commit_wait[index2]))
+ 		wake_up(&log_root_tree->log_commit_wait[index2]);
+ out:
+@@ -2750,6 +2754,10 @@ out:
+ 	atomic_set(&root->log_commit[index1], 0);
+ 	mutex_unlock(&root->log_mutex);
+ 
++	/*
++	 * Make sure counter is updated before we wake up waiters.
++	 */
++	smp_mb();
+ 	if (waitqueue_active(&root->log_commit_wait[index1]))
+ 		wake_up(&root->log_commit_wait[index1]);
+ 	return ret;
+-- 
+cgit v0.10.2
+
