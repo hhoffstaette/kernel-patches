@@ -1,0 +1,40 @@
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 2/3] btrfs: add WARN_ON() to check is space_info op current
+Date: Tue, 24 Feb 2015 23:37:28 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43254>
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+space_info's value calculation is some complex and easy to cause
+bug, add WARN_ON() to help debug.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/extent-tree.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 3e7a4af..8b51eb5 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -9471,9 +9471,17 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
+ 
+ 	spin_lock(&block_group->space_info->lock);
+ 	list_del_init(&block_group->ro_list);
++
++	WARN_ON(block_group->space_info->total_bytes
++		< block_group->key.offset);
++	WARN_ON(block_group->space_info->bytes_readonly
++		< block_group->key.offset);
++	WARN_ON(block_group->space_info->disk_total
++		< block_group->key.offset * factor);
+ 	block_group->space_info->total_bytes -= block_group->key.offset;
+ 	block_group->space_info->bytes_readonly -= block_group->key.offset;
+ 	block_group->space_info->disk_total -= block_group->key.offset * factor;
++
+ 	spin_unlock(&block_group->space_info->lock);
+ 
+ 	memcpy(&key, &block_group->key, sizeof(key));
+-- 
+1.8.5.1
