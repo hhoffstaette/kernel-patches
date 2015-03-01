@@ -1,0 +1,46 @@
+From: Florian Westphal <fw@strlen.de>
+Newsgroups: gmane.linux.network
+Subject: [PATCH -next] r8169: add support for xmit_more
+Date: Wed,  7 Jan 2015 10:49:49 +0100
+Archived-At: <http://permalink.gmane.org/gmane.linux.network/345059>
+
+Delay update of hw tail descriptor if we know that another skb is going
+to be sent.
+
+Signed-off-by: Florian Westphal <fw@strlen.de>
+---
+ drivers/net/ethernet/realtek/r8169.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 14a1c5c..3a28059 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -7049,6 +7049,7 @@ static netdev_tx_t rtl8169_start_xmit(struct sk_buff *skb,
+ 	u32 status, len;
+ 	u32 opts[2];
+ 	int frags;
++	bool stop_queue;
+ 
+ 	if (unlikely(!TX_FRAGS_READY_FOR(tp, skb_shinfo(skb)->nr_frags))) {
+ 		netif_err(tp, drv, dev, "BUG! Tx Ring full when queue awake!\n");
+@@ -7105,11 +7106,16 @@ static netdev_tx_t rtl8169_start_xmit(struct sk_buff *skb,
+ 
+ 	tp->cur_tx += frags + 1;
+ 
+-	RTL_W8(TxPoll, NPQ);
++	stop_queue = !TX_FRAGS_READY_FOR(tp, MAX_SKB_FRAGS);
+ 
+-	mmiowb();
++	if (!skb->xmit_more || stop_queue ||
++	    netif_xmit_stopped(netdev_get_tx_queue(dev, 0))) {
++		RTL_W8(TxPoll, NPQ);
++
++		mmiowb();
++	}
+ 
+-	if (!TX_FRAGS_READY_FOR(tp, MAX_SKB_FRAGS)) {
++	if (stop_queue) {
+ 		/* Avoid wrongly optimistic queue wake-up: rtl_tx thread must
+ 		 * not miss a ring update when it notices a stopped queue.
+ 		 */
