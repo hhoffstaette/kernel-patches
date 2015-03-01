@@ -1,0 +1,57 @@
+From: "J. Bruce Fields" <bfields@redhat.com>
+Newsgroups: gmane.linux.kernel,gmane.linux.nfs
+Subject: [PATCH] nfsd4: tweak rd_dircount accounting
+Date: Wed, 7 Jan 2015 15:06:24 -0500
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/1861084>
+
+RFC 3530 14.2.24 says
+
+	This value represents the length of the names of the directory
+	entries and the cookie value for these entries.  This length
+	represents the XDR encoding of the data (names and cookies)...
+
+The "xdr encoding" of the name should probably include the 4 bytes for
+the length.
+
+But this is all just a hint so not worth e.g. backporting to stable.
+
+Also reshuffle some lines to more clearly group together the
+dircount-related code.
+
+Signed-off-by: J. Bruce Fields <bfields@redhat.com>
+---
+ fs/nfsd/nfs4xdr.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+On Wed, Jan 07, 2015 at 01:21:41PM -0500, bfields wrote:
+> But anyway that reproducer worked and confirmed the following which I'll
+> probably pass along upstream today or tomorrow....
+
+I also noticed this nit while I was there.  I'm planning to queue this
+up for 3.20.--b.
+
+diff --git a/fs/nfsd/nfs4xdr.c b/fs/nfsd/nfs4xdr.c
+index 15f7b73e0c0f..91f7a3644ffb 100644
+--- a/fs/nfsd/nfs4xdr.c
++++ b/fs/nfsd/nfs4xdr.c
+@@ -2768,16 +2768,17 @@ nfsd4_encode_dirent(void *ccdv, const char *name, int namlen,
+ 	if (entry_bytes > cd->rd_maxcount)
+ 		goto fail;
+ 	cd->rd_maxcount -= entry_bytes;
+-	if (!cd->rd_dircount)
+-		goto fail;
+ 	/*
+ 	 * RFC 3530 14.2.24 describes rd_dircount as only a "hint", so
+ 	 * let's always let through the first entry, at least:
+ 	 */
+-	name_and_cookie = 4 * XDR_QUADLEN(namlen) + 8;
++	if (!cd->rd_dircount)
++		goto fail;
++	name_and_cookie = 4 + 4 * XDR_QUADLEN(namlen) + 8;
+ 	if (name_and_cookie > cd->rd_dircount && cd->cookie_offset)
+ 		goto fail;
+ 	cd->rd_dircount -= min(cd->rd_dircount, name_and_cookie);
++
+ 	cd->cookie_offset = cookie_offset;
+ skip_entry:
+ 	cd->common.err = nfs_ok;
