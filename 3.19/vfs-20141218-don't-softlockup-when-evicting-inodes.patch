@@ -1,0 +1,37 @@
+From 29249e14d6e3379a5c4bb098dd4beddfefbc606f Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Thu, 18 Dec 2014 11:34:23 -0500
+Subject: fs: don't softlockup when evicting inodes
+
+If I run an fs_mark job that creates millions of empty files and then
+immediately unmount the file system I will get a softlockup during unmount.
+This box has ~140gb of RAM so we never hit sufficient memory pressure to evict
+enough inodes during the runtime of the benchmark, which means I see around 80
+million inodes being evicted at unmount time.  With this patch my box no longer
+softlocks up.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/inode.c b/fs/inode.c
+index ad60555..f266765 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -581,6 +581,7 @@ static void dispose_list(struct list_head *head)
+ 		list_del_init(&inode->i_lru);
+ 
+ 		evict(inode);
++		cond_resched();
+ 	}
+ }
+ 
+@@ -613,6 +614,7 @@ void evict_inodes(struct super_block *sb)
+ 		inode_lru_list_del(inode);
+ 		spin_unlock(&inode->i_lock);
+ 		list_add(&inode->i_lru, &dispose);
++		cond_resched_lock(&inode_sb_list_lock);
+ 	}
+ 	spin_unlock(&inode_sb_list_lock);
+ 
+-- 
+cgit v0.10.2
+
