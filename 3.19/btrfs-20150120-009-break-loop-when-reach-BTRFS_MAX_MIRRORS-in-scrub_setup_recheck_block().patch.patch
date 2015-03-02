@@ -1,0 +1,32 @@
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 09/15] Btrfs: Break loop when reach BTRFS_MAX_MIRRORS in scrub_setup_recheck_block()
+Date: Tue, 20 Jan 2015 15:11:39 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42361>
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+Use break instead of useless loop should be more suitable in this
+case.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+---
+ fs/btrfs/scrub.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index c93c43f..9afc6dd 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -1386,7 +1386,7 @@ static int scrub_setup_recheck_block(struct scrub_ctx *sctx,
+ 			struct scrub_page *page;
+ 
+ 			if (mirror_index >= BTRFS_MAX_MIRRORS)
+-				continue;
++				break;
+ 
+ 			sblock = sblocks_for_recheck + mirror_index;
+ 			sblock->sctx = sctx;
+-- 
+1.8.5.1

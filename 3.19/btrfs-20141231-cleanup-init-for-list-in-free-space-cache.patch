@@ -1,0 +1,46 @@
+From: Gui Hecheng <guihc.fnst@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] btrfs: cleanup init for list in free-space-cache
+Date: Wed, 31 Dec 2014 09:51:35 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/41908>
+
+o removed an unecessary INIT_LIST_HEAD after LIST_HEAD
+
+o merge a declare & INIT_LIST_HEAD pair into one LIST_HEAD
+
+Signed-off-by: Gui Hecheng <guihc.fnst@cn.fujitsu.com>
+---
+ fs/btrfs/free-space-cache.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index d6c03f7..8d346d3 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -651,15 +651,13 @@ static int __load_free_space_cache(struct btrfs_root *root, struct inode *inode,
+ 	struct io_ctl io_ctl;
+ 	struct btrfs_key key;
+ 	struct btrfs_free_space *e, *n;
+-	struct list_head bitmaps;
++	LIST_HEAD(bitmaps);
+ 	u64 num_entries;
+ 	u64 num_bitmaps;
+ 	u64 generation;
+ 	u8 type;
+ 	int ret = 0;
+ 
+-	INIT_LIST_HEAD(&bitmaps);
+-
+ 	/* Nothing in the space cache, goodbye */
+ 	if (!i_size_read(inode))
+ 		return 0;
+@@ -2903,7 +2901,6 @@ int btrfs_find_space_cluster(struct btrfs_root *root,
+ 	trace_btrfs_find_cluster(block_group, offset, bytes, empty_size,
+ 				 min_bytes);
+ 
+-	INIT_LIST_HEAD(&bitmaps);
+ 	ret = setup_cluster_no_bitmap(block_group, cluster, &bitmaps, offset,
+ 				      bytes + empty_size,
+ 				      cont1_bytes, min_bytes);
+-- 
+1.8.1.4

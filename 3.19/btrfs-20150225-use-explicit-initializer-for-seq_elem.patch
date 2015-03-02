@@ -1,0 +1,93 @@
+From 7e953cd77cc6217036222484a076f1b045b4a30c Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Wed, 25 Feb 2015 15:47:32 +0100
+Subject: btrfs: use explicit initializer for seq_elem
+
+Using {} as initializer for struct seq_elem does not properly initialize
+the list_head member, but it currently works because it gets set through
+btrfs_get_tree_mod_seq if 'seq' is 0.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/backref.c b/fs/btrfs/backref.c
+index f55721f..9de772e 100644
+--- a/fs/btrfs/backref.c
++++ b/fs/btrfs/backref.c
+@@ -1206,7 +1206,7 @@ int btrfs_check_shared(struct btrfs_trans_handle *trans,
+ 	struct ulist *roots = NULL;
+ 	struct ulist_iterator uiter;
+ 	struct ulist_node *node;
+-	struct seq_list elem = {};
++	struct seq_list elem = SEQ_LIST_INIT(elem);
+ 	int ret = 0;
+ 
+ 	tmp = ulist_alloc(GFP_NOFS);
+@@ -1610,7 +1610,7 @@ int iterate_extent_inodes(struct btrfs_fs_info *fs_info,
+ 	struct ulist *roots = NULL;
+ 	struct ulist_node *ref_node = NULL;
+ 	struct ulist_node *root_node = NULL;
+-	struct seq_list tree_mod_seq_elem = {};
++	struct seq_list tree_mod_seq_elem = SEQ_LIST_INIT(tree_mod_seq_elem);
+ 	struct ulist_iterator ref_uiter;
+ 	struct ulist_iterator root_uiter;
+ 
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index b3dd55f..36e009e 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -1328,6 +1328,8 @@ struct seq_list {
+ 	u64 seq;
+ };
+ 
++#define SEQ_LIST_INIT(name)	{ .list = LIST_HEAD_INIT((name).list), .seq = 0 }
++
+ enum btrfs_orphan_cleanup_state {
+ 	ORPHAN_CLEANUP_STARTED	= 1,
+ 	ORPHAN_CLEANUP_DONE	= 2,
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index d49fe8a..0a9fe21 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -3039,7 +3039,7 @@ out:
+ static int check_ref(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+ 		     u64 disko)
+ {
+-	struct seq_list tree_mod_seq_elem = {};
++	struct seq_list tree_mod_seq_elem = SEQ_LIST_INIT(tree_mod_seq_elem);
+ 	struct ulist *roots;
+ 	struct ulist_iterator uiter;
+ 	struct ulist_node *root_node = NULL;
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 97159a8..7f7eb39 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -1845,7 +1845,7 @@ static int qgroup_shared_accounting(struct btrfs_trans_handle *trans,
+ 	struct ulist *roots = NULL;
+ 	struct ulist *qgroups, *tmp;
+ 	struct btrfs_qgroup *qgroup;
+-	struct seq_list elem = {};
++	struct seq_list elem = SEQ_LIST_INIT(elem);
+ 	u64 seq;
+ 	int old_roots = 0;
+ 	int new_roots = 0;
+@@ -1967,7 +1967,7 @@ static int qgroup_subtree_accounting(struct btrfs_trans_handle *trans,
+ 	int err;
+ 	struct btrfs_qgroup *qg;
+ 	u64 root_obj = 0;
+-	struct seq_list elem = {};
++	struct seq_list elem = SEQ_LIST_INIT(elem);
+ 
+ 	parents = ulist_alloc(GFP_NOFS);
+ 	if (!parents)
+@@ -2522,7 +2522,7 @@ qgroup_rescan_leaf(struct btrfs_fs_info *fs_info, struct btrfs_path *path,
+ {
+ 	struct btrfs_key found;
+ 	struct ulist *roots = NULL;
+-	struct seq_list tree_mod_seq_elem = {};
++	struct seq_list tree_mod_seq_elem = SEQ_LIST_INIT(tree_mod_seq_elem);
+ 	u64 num_bytes;
+ 	u64 seq;
+ 	int new_roots;
+-- 
+cgit v0.10.2
+

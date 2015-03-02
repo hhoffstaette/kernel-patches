@@ -1,0 +1,28 @@
+From 40ba40b949918aa932c1ad1ae8e61d1d83703e3b Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Tue, 24 Feb 2015 19:07:26 +0100
+Subject: btrfs: remove shadowing variables in __btrfs_buffered_write
+
+There are lockstart and lockend defined in the function and not used
+after their duplicate definition scope ends, it's safe to reuse them.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index e409025..a93df65 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1635,8 +1635,8 @@ again:
+ 			btrfs_end_write_no_snapshoting(root);
+ 
+ 		if (only_release_metadata && copied > 0) {
+-			u64 lockstart = round_down(pos, root->sectorsize);
+-			u64 lockend = lockstart +
++			lockstart = round_down(pos, root->sectorsize);
++			lockend = lockstart +
+ 				(dirty_pages << PAGE_CACHE_SHIFT) - 1;
+ 
+ 			set_extent_bit(&BTRFS_I(inode)->io_tree, lockstart,
+-- 
+cgit v0.10.2
+

@@ -1,0 +1,40 @@
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 08/15] Btrfs: btrfs_rm_dev_replace_blocked(): Use wait_event()
+Date: Tue, 20 Jan 2015 15:11:38 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42362>
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: Miao Xie <miaox@cn.fujitsu.com>
+---
+ fs/btrfs/dev-replace.c | 13 ++-----------
+ 1 file changed, 2 insertions(+), 11 deletions(-)
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index 92109b7..5ec03d9 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -440,18 +440,9 @@ leave:
+  */
+ static void btrfs_rm_dev_replace_blocked(struct btrfs_fs_info *fs_info)
+ {
+-	s64 writers;
+-	DEFINE_WAIT(wait);
+-
+ 	set_bit(BTRFS_FS_STATE_DEV_REPLACING, &fs_info->fs_state);
+-	do {
+-		prepare_to_wait(&fs_info->replace_wait, &wait,
+-				TASK_UNINTERRUPTIBLE);
+-		writers = percpu_counter_sum(&fs_info->bio_counter);
+-		if (writers)
+-			schedule();
+-		finish_wait(&fs_info->replace_wait, &wait);
+-	} while (writers);
++	wait_event(fs_info->replace_wait, !percpu_counter_sum(
++		   &fs_info->bio_counter));
+ }
+ 
+ /*
+-- 
+1.8.5.1

@@ -1,0 +1,38 @@
+From 6a9c3d503399cd57821509de23a6eb7bc15feb5e Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Fri, 19 Dec 2014 18:12:03 +0100
+Subject: btrfs: update message levels after checksum errors
+
+The errors are worth noting and might get missed with INFO level.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 3b69419..6e986a3 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -318,7 +318,7 @@ static int csum_tree_block(struct btrfs_root *root, struct extent_buffer *buf,
+ 			memcpy(&found, result, csum_size);
+ 
+ 			read_extent_buffer(buf, &val, 0, csum_size);
+-			printk_ratelimited(KERN_INFO
++			printk_ratelimited(KERN_WARNING
+ 				"BTRFS: %s checksum verify failed on %llu wanted %X found %X "
+ 				"level %d\n",
+ 				root->fs_info->sb->s_id, buf->start,
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index ff6d98d..a91d9ff 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -2945,7 +2945,7 @@ static int __readpage_endio_check(struct inode *inode,
+ 	return 0;
+ zeroit:
+ 	if (__ratelimit(&_rs))
+-		btrfs_info(BTRFS_I(inode)->root->fs_info,
++		btrfs_warn(BTRFS_I(inode)->root->fs_info,
+ 			   "csum failed ino %llu off %llu csum %u expected csum %u",
+ 			   btrfs_ino(inode), start, csum, csum_expected);
+ 	memset(kaddr + pgoff, 1, len);
+-- 
+cgit v0.10.1
+

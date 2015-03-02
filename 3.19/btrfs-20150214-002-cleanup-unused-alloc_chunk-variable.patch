@@ -1,0 +1,40 @@
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] btrfs: cleanup unused alloc_chunk varible
+Date: Sat, 14 Feb 2015 21:43:40 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43107>
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+Remove int alloc_chunk in btrfs_check_data_free_space()
+for not necessary.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/extent-tree.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 414d533..1c340cd 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3679,7 +3679,7 @@ int btrfs_check_data_free_space(struct inode *inode, u64 bytes)
+ 	struct btrfs_root *root = BTRFS_I(inode)->root;
+ 	struct btrfs_fs_info *fs_info = root->fs_info;
+ 	u64 used;
+-	int ret = 0, committed = 0, have_pinned_space = 1, alloc_chunk = 1;
++	int ret = 0, committed = 0, have_pinned_space = 1;
+ 
+ 	/* make sure bytes are sectorsize aligned */
+ 	bytes = ALIGN(bytes, root->sectorsize);
+@@ -3707,7 +3707,7 @@ again:
+ 		 * if we don't have enough free bytes in this space then we need
+ 		 * to alloc a new chunk.
+ 		 */
+-		if (!data_sinfo->full && alloc_chunk) {
++		if (!data_sinfo->full) {
+ 			u64 alloc_target;
+ 
+ 			data_sinfo->force_alloc = CHUNK_ALLOC_FORCE;
+-- 
+1.8.5.1
