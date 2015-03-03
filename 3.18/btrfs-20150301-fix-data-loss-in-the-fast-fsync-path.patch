@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.linux.kernel.stable,gmane.comp.file-systems.btrfs
-Subject: [PATCH v2] Btrfs: fix data loss in the fast fsync path
-Date: Sun,  1 Mar 2015 09:08:38 +0000
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/125808>
+Subject: [PATCH v3] Btrfs: fix data loss in the fast fsync path
+Date: Sun,  1 Mar 2015 20:36:00 +0000
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/125841>
 
 When using the fast file fsync code path we can miss the fact that new
 writes happened since the last file fsync and therefore return without
@@ -142,10 +142,28 @@ if the inode's last_trans is <= fs_info->last_trans_committed, or if
 the inode is already in the log. Also remove setting the inode's
 last_trans in btrfs_file_write_iter since it's useless/unreliable.
 
+Also because btrfs_file_write_iter no longer sets inode->last_trans to
+fs_info->generation + 1, don't set last_trans to 0 if we bail out and don't
+bail out if last_trans is 0, otherwise something as simple as the following
+example wouldn't log the second write on the last fsync:
+
+  1. write to file
+
+  2. fsync file
+
+  3. fsync file
+       |--> btrfs_inode_in_log() returns true and it set last_trans to 0
+
+  4. write to file
+       |--> btrfs_file_write_iter() no longers sets last_trans, so it
+            remained with a value of 0
+  5. fsync
+       |--> inode->last_trans == 0, so it bails out without logging the
+            second write
+
 A test case for xfstests will be sent soon.
 
 CC: <stable@vger.kernel.org>
-Reviewed-by: Liu Bo <bo.li.liu@oracle.com>
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
 
@@ -153,11 +171,17 @@ V2: Removed dead assignment of inode->last_trans in btrfs_file_write_iter
     (and the respective comment) since it's useless now. Added stable to
     cc because it's a data loss fix.
 
- fs/btrfs/file.c | 45 ++++++++++++++++++++++++++++-----------------
- 1 file changed, 28 insertions(+), 17 deletions(-)
+V3: After removing the statement that sets inode->last_trans to generation + 1
+    in btrfs_file_write_iter() we would bail out on an fsync if before it
+    there was a double fsync followed by a new write. Updated bail out logic
+    to not set last_trans to 0 and updated commit message to explicitly talk
+    about this case.
+
+ fs/btrfs/file.c | 56 ++++++++++++++++++++++++++++----------------------------
+ 1 file changed, 28 insertions(+), 28 deletions(-)
 
 diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
-index 2bd72cd..b7334c9 100644
+index 2bd72cd..8f256b1 100644
 --- a/fs/btrfs/file.c
 +++ b/fs/btrfs/file.c
 @@ -1811,22 +1811,10 @@ static ssize_t btrfs_file_write_iter(struct kiocb *iocb,
@@ -183,10 +207,19 @@ index 2bd72cd..b7334c9 100644
  	BTRFS_I(inode)->last_sub_trans = root->log_transid;
  	if (num_written > 0) {
  		err = generic_write_sync(file, pos, num_written);
-@@ -1971,14 +1959,37 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
- 	}
+@@ -1962,25 +1950,37 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
+ 	atomic_inc(&root->log_batch);
  
  	/*
+-	 * check the transaction that last modified this inode
+-	 * and see if its already been committed
+-	 */
+-	if (!BTRFS_I(inode)->last_trans) {
+-		mutex_unlock(&inode->i_mutex);
+-		goto out;
+-	}
+-
+-	/*
 -	 * if the last transaction that changed this file was before
 -	 * the current transaction, we can bail out now without any
 -	 * syncing
@@ -221,8 +254,10 @@ index 2bd72cd..b7334c9 100644
  	if (btrfs_inode_in_log(inode, root->fs_info->generation) ||
 -	    BTRFS_I(inode)->last_trans <=
 -	    root->fs_info->last_trans_committed) {
+-		BTRFS_I(inode)->last_trans = 0;
+-
 +	    (full_sync && BTRFS_I(inode)->last_trans <=
 +	     root->fs_info->last_trans_committed)) {
- 		BTRFS_I(inode)->last_trans = 0;
- 
  		/*
+ 		 * We'v had everything committed since the last time we were
+ 		 * modified so clear this flag in case it was set for whatever
