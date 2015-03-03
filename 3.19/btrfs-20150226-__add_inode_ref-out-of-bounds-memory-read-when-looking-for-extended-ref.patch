@@ -1,0 +1,28 @@
+From: Quentin Casasnovas <quentin.casasnovas@oracle.com>
+Subject: [PATCH] Btrfs:__add_inode_ref: out of bounds memory read when looking for extended ref.
+Newsgroups: gmane.linux.kernel
+Date: 2015-02-26 16:00:37 GMT (4 days, 22 hours and 49 minutes ago)
+
+Improper arithmetics when calculting the address of the extended ref could
+lead to an out of bounds memory read and kernel panic.
+
+Signed-off-by: Quentin Casasnovas <quentin.casasnovas@oracle.com>
+---
+ fs/btrfs/tree-log.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git fs/btrfs/tree-log.c fs/btrfs/tree-log.c
+index 9a37f8b..c5b8ba3 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -1012,7 +1012,7 @@ again:
+ 		base = btrfs_item_ptr_offset(leaf, path->slots[0]);
+
+ 		while (cur_offset < item_size) {
+-			extref = (struct btrfs_inode_extref *)base + cur_offset;
++			extref = (struct btrfs_inode_extref *)(base + cur_offset);
+
+ 			victim_name_len = btrfs_inode_extref_name_len(leaf, extref);
+
+-- 
+2.0.5
