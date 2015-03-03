@@ -1,5 +1,4 @@
-
-From: Filipe Manana <fdmanana <at> suse.com>
+From: Filipe Manana <fdmanana@suse.com>
 Subject: [PATCH] Btrfs: shrink further sizeof(struct extent_buffer)
 Newsgroups: gmane.comp.file-systems.btrfs
 Date: 2014-08-14 11:25:14 GMT

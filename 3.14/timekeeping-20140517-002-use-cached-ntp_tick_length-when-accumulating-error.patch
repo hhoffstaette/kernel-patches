@@ -1,5 +1,4 @@
-
-From: John Stultz <john.stultz <at> linaro.org>
+From: John Stultz <john.stultz@linaro.org>
 Subject: [PATCH 2/3] [RFC] timekeeping: Use cached ntp_tick_length when accumulating error
 Newsgroups: gmane.linux.kernel
 Date: 2014-05-17 00:56:43 GMT
@@ -22,11 +21,11 @@ using the new tick length, which avoids accumulating error.
 Credit to Miroslav for pointing this out and providing the original patch
 this functionality has been pulled out from, along with the rational.
 
-Cc: Miroslav Lichvar <mlichvar <at> redhat.com>
-Cc: Richard Cochran <richardcochran <at> gmail.com>
-Cc: Prarit Bhargava <prarit <at> redhat.com>
-Reported-by: Miroslav Lichvar <mlichvar <at> redhat.com>
-Signed-off-by: John Stultz <john.stultz <at> linaro.org>
+Cc: Miroslav Lichvar <mlichvar@redhat.com>
+Cc: Richard Cochran <richardcochran@gmail.com>
+Cc: Prarit Bhargava <prarit@redhat.com>
+Reported-by: Miroslav Lichvar <mlichvar@redhat.com>
+Signed-off-by: John Stultz <john.stultz@linaro.org>
 ---
  include/linux/timekeeper_internal.h | 7 +++++++
  kernel/time/timekeeping.c           | 5 ++++-
@@ -36,7 +35,7 @@ diff --git a/include/linux/timekeeper_internal.h b/include/linux/timekeeper_inte
 index 4d398f1..4fddf6c 100644
 --- a/include/linux/timekeeper_internal.h
 +++ b/include/linux/timekeeper_internal.h
- <at>  <at>  -34,6 +34,13  <at>  <at>  struct timekeeper {
+@@ -34,6 +34,13 @@ struct timekeeper {
  	/* Clock shifted nano seconds */
  	u64			xtime_nsec;
 
@@ -54,7 +53,7 @@ diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
 index d46bda2..846603e 100644
 --- a/kernel/time/timekeeping.c
 +++ b/kernel/time/timekeeping.c
- <at>  <at>  -141,6 +141,7  <at>  <at>  static void tk_setup_internals(struct timekeeper *tk, struct clocksource *clock)
+@@ -141,6 +141,7 @@ static void tk_setup_internals(struct timekeeper *tk, struct clocksource *clock)
 
  	tk->ntp_error = 0;
  	tk->ntp_error_shift = NTP_SCALE_SHIFT - clock->shift;
@@ -62,7 +61,7 @@ index d46bda2..846603e 100644
 
  	/*
  	 * The timekeeper keeps its own mult values for the currently
- <at>  <at>  -1144,6 +1145,8  <at>  <at>  static __always_inline void timekeeping_freqadjust(struct timekeeper *tk,
+@@ -1144,6 +1145,8 @@ static __always_inline void timekeeping_freqadjust(struct timekeeper *tk,
  	if (tk->ntp_err_mult)
  		xinterval -= tk->cycle_interval;
 
@@ -71,7 +70,7 @@ index d46bda2..846603e 100644
  	/* Calculate current error per tick */
  	tick_error = ntp_tick_length() >> tk->ntp_error_shift;
  	tick_error -= (xinterval + tk->xtime_remainder);
- <at>  <at>  -1289,7 +1292,7  <at>  <at>  static cycle_t logarithmic_accumulation(struct timekeeper *tk, cycle_t offset,
+@@ -1289,7 +1292,7 @@ static cycle_t logarithmic_accumulation(struct timekeeper *tk, cycle_t offset,
  	tk->raw_time.tv_nsec = raw_nsecs;
 
  	/* Accumulate error between NTP and clock interval */
