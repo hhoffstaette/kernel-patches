@@ -1,8 +1,8 @@
 From: Liu Bo <bo.li.liu@oracle.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH V2] Btrfs: catch transaction abortion after waiting for it
-Date: Thu,  5 Mar 2015 18:36:45 +0800
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43443>
+Subject: [PATCH v3] Btrfs: catch transaction abortion after waiting for it
+Date: Fri,  6 Mar 2015 20:23:44 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43464>
 
 This problem is uncovered by a test case: http://patchwork.ozlabs.org/patch/244297.
 
@@ -23,20 +23,21 @@ This add the necessary check and it now passes the test.
 
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 ---
-v2: Use a more generic title since it's not only for fsync, but for others.
+v3: Remove the unnecessary macro ACCESS_ONCE()
+v2: Use a more generic title since it's not only for fsync, but for others. 
 
  fs/btrfs/transaction.c | 3 +++
  1 file changed, 3 insertions(+)
 
 diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
-index 7e80f32..bd7ea86 100644
+index 7e80f32..d28670c 100644
 --- a/fs/btrfs/transaction.c
 +++ b/fs/btrfs/transaction.c
 @@ -1814,6 +1814,9 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
  
  		wait_for_commit(root, cur_trans);
  
-+		if (unlikely(ACCESS_ONCE(cur_trans->aborted)))
++		if (unlikely(cur_trans->aborted))
 +			ret = cur_trans->aborted;
 +
  		btrfs_put_transaction(cur_trans);
