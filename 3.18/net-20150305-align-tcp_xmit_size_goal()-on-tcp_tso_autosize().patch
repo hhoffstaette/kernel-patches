@@ -1,0 +1,52 @@
+From: Eric Dumazet <eric.dumazet@gmail.com>
+Newsgroups: gmane.linux.network
+Subject: [PATCH net] tcp: align tcp_xmit_size_goal() on tcp_tso_autosize()
+Date: Thu, 05 Mar 2015 08:03:06 -0800
+Archived-At: <http://permalink.gmane.org/gmane.linux.network/353174>
+
+From: Eric Dumazet <edumazet@google.com>
+
+With some mss values, it is possible tcp_xmit_size_goal() puts
+one segment more in TSO packet than tcp_tso_autosize().
+
+We send then one TSO packet followed by one single MSS.
+
+It is not a serious bug, but we can do slightly better, especially
+for drivers using netif_set_gso_max_size() to lower gso_max_size.
+
+Using same formula avoids these corner cases and makes
+tcp_xmit_size_goal() a bit faster.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Fixes: 605ad7f184b6 ("tcp: refine TSO autosizing")
+---
+ net/ipv4/tcp.c |   10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 9d72a0fcd928..995a2259bcfc 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -835,17 +835,13 @@ static unsigned int tcp_xmit_size_goal(struct sock *sk, u32 mss_now,
+ 				       int large_allowed)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
+-	u32 new_size_goal, size_goal, hlen;
++	u32 new_size_goal, size_goal;
+ 
+ 	if (!large_allowed || !sk_can_gso(sk))
+ 		return mss_now;
+ 
+-	/* Maybe we should/could use sk->sk_prot->max_header here ? */
+-	hlen = inet_csk(sk)->icsk_af_ops->net_header_len +
+-	       inet_csk(sk)->icsk_ext_hdr_len +
+-	       tp->tcp_header_len;
+-
+-	new_size_goal = sk->sk_gso_max_size - 1 - hlen;
++	/* Note : tcp_tso_autosize() will eventually split this later */
++	new_size_goal = sk->sk_gso_max_size - 1 - MAX_TCP_HEADER;
+ 	new_size_goal = tcp_bound_to_half_wnd(tp, new_size_goal);
+ 
+ 	/* We try hard to avoid divides here */
+
+
