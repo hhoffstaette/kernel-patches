@@ -1,0 +1,87 @@
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 5/6] btrfs: Use raid_write_end_io for scrub
+Date: Thu, 5 Mar 2015 02:41:11 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43425>
+
+No need to create additional end_io function for scrub, it can use
+existing raid_write_end_io() instead.
+
+This patch also fixed some wrong comments.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/raid56.c | 36 ++++++++----------------------------
+ 1 file changed, 8 insertions(+), 28 deletions(-)
+
+diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
+index 0a40d07..2285e78 100644
+--- a/fs/btrfs/raid56.c
++++ b/fs/btrfs/raid56.c
+@@ -897,6 +897,7 @@ static void rbio_orig_end_io(struct btrfs_raid_bio *rbio, int err, int uptodate)
+ static void raid_write_end_io(struct bio *bio, int err)
+ {
+ 	struct btrfs_raid_bio *rbio = bio->bi_private;
++	int max_errors;
+ 
+ 	if (err)
+ 		fail_bio_stripe(rbio, bio);
+@@ -906,10 +907,13 @@ static void raid_write_end_io(struct bio *bio, int err)
+ 	if (!atomic_dec_and_test(&rbio->stripes_pending))
+ 		return;
+ 
+-	err = 0;
++	/* OK, we have wrote all the stripes we need to. */
++	if (rbio->operation == BTRFS_RBIO_PARITY_SCRUB)
++		max_errors = 0;
++	else
++		max_errors = rbio->bbio->max_errors;
+ 
+-	/* OK, we have read all the stripes we need to. */
+-	if (atomic_read(&rbio->error) > rbio->bbio->max_errors)
++	if (atomic_read(&rbio->error) > max_errors)
+ 		err = -EIO;
+ 
+ 	rbio_orig_end_io(rbio, err, 0);
+@@ -2276,30 +2280,6 @@ static int alloc_rbio_essential_pages(struct btrfs_raid_bio *rbio)
+ 	return 0;
+ }
+ 
+-/*
+- * end io function used by finish_rmw.  When we finally
+- * get here, we've written a full stripe
+- */
+-static void raid_write_parity_end_io(struct bio *bio, int err)
+-{
+-	struct btrfs_raid_bio *rbio = bio->bi_private;
+-
+-	if (err)
+-		fail_bio_stripe(rbio, bio);
+-
+-	bio_put(bio);
+-
+-	if (!atomic_dec_and_test(&rbio->stripes_pending))
+-		return;
+-
+-	err = 0;
+-
+-	if (atomic_read(&rbio->error))
+-		err = -EIO;
+-
+-	rbio_orig_end_io(rbio, err, 0);
+-}
+-
+ static noinline void finish_parity_scrub(struct btrfs_raid_bio *rbio,
+ 					 int need_check)
+ {
+@@ -2452,7 +2432,7 @@ submit_write:
+ 			break;
+ 
+ 		bio->bi_private = rbio;
+-		bio->bi_end_io = raid_write_parity_end_io;
++		bio->bi_end_io = raid_write_end_io;
+ 		BUG_ON(!test_bit(BIO_UPTODATE, &bio->bi_flags));
+ 		submit_bio(WRITE, bio);
+ 	}
+-- 
+1.8.5.1

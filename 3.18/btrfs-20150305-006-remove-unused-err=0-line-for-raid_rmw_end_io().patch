@@ -1,0 +1,25 @@
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 6/6] btrfs: Remove unused err = 0 line for raid_rmw_end_io()
+Date: Thu, 5 Mar 2015 02:41:12 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43424>
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/raid56.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
+index 2285e78..c087870 100644
+--- a/fs/btrfs/raid56.c
++++ b/fs/btrfs/raid56.c
+@@ -1464,7 +1464,6 @@ static void raid_rmw_end_io(struct bio *bio, int err)
+ 	if (!atomic_dec_and_test(&rbio->stripes_pending))
+ 		return;
+ 
+-	err = 0;
+ 	if (atomic_read(&rbio->error) > rbio->bbio->max_errors)
+ 		goto cleanup;
+ 
+-- 
+1.8.5.1
