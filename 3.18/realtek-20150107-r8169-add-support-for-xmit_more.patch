@@ -1,16 +1,13 @@
+From 0bec3b700d106a8b0a34227b2976d1a582f1aab7 Mon Sep 17 00:00:00 2001
 From: Florian Westphal <fw@strlen.de>
-Newsgroups: gmane.linux.network
-Subject: [PATCH -next] r8169: add support for xmit_more
-Date: Wed,  7 Jan 2015 10:49:49 +0100
-Archived-At: <http://permalink.gmane.org/gmane.linux.network/345059>
+Date: Wed, 7 Jan 2015 10:49:49 +0100
+Subject: r8169: add support for xmit_more
 
 Delay update of hw tail descriptor if we know that another skb is going
 to be sent.
 
 Signed-off-by: Florian Westphal <fw@strlen.de>
----
- drivers/net/ethernet/realtek/r8169.c | 12 +++++++++---
- 1 file changed, 9 insertions(+), 3 deletions(-)
+Signed-off-by: David S. Miller <davem@davemloft.net>
 
 diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
 index 14a1c5c..3a28059 100644
@@ -44,3 +41,6 @@ index 14a1c5c..3a28059 100644
  		/* Avoid wrongly optimistic queue wake-up: rtl_tx thread must
  		 * not miss a ring update when it notices a stopped queue.
  		 */
+-- 
+cgit v0.10.2
+
