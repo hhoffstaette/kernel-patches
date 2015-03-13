@@ -1,0 +1,30 @@
+From: Liu Bo <bo.li.liu@oracle.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix comp_oper to get right order
+Date: Fri, 13 Mar 2015 14:24:38 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43566>
+
+Case (oper1->seq > oper2->seq) should differ with case (oper1->seq < oper2->seq).
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+This typo was hiden in a big patch, so we need to work harder on review.
+
+ fs/btrfs/qgroup.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 97159a8..058c79e 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -1259,7 +1259,7 @@ static int comp_oper(struct btrfs_qgroup_operation *oper1,
+ 	if (oper1->seq < oper2->seq)
+ 		return -1;
+ 	if (oper1->seq > oper2->seq)
+-		return -1;
++		return 1;
+ 	if (oper1->ref_root < oper2->ref_root)
+ 		return -1;
+ 	if (oper1->ref_root > oper2->ref_root)
+-- 
+1.8.1.4
