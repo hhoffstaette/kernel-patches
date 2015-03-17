@@ -1,0 +1,43 @@
+From: Liu Bo <bo.li.liu@oracle.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH v2] Btrfs: Remove the check for old-style mkfs
+Date: Tue, 17 Mar 2015 14:34:16 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43630>
+
+This was used to make sure that a fresh btrfs from an older mkfs.btrfs,
+but it also allows us to mount a buggy btrfs if this btrfs has the right
+superblock head part but has something wrong with chunk tree part[1], and
+after that we can hit BUG_ON()s set in the code to prevent something
+impossible.
+
+Since David has released "Btrfs progs v3.19-rc2", just remove the check,
+if anyone who wants to make a fresh btrfs, please use the latest one.
+
+[1]: http://www.spinics.net/lists/linux-btrfs/msg42358.html
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+v2: Refine the patch subject.
+
+ fs/btrfs/disk-io.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 41b320e..f63aacf 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -418,12 +418,6 @@ static int btrfs_check_super_csum(char *raw_disk_sb)
+ 
+ 		if (memcmp(raw_disk_sb, result, csum_size))
+ 			ret = 1;
+-
+-		if (ret && btrfs_super_generation(disk_sb) < 10) {
+-			printk(KERN_WARNING
+-				"BTRFS: super block crcs don't match, older mkfs detected\n");
+-			ret = 0;
+-		}
+ 	}
+ 
+ 	if (csum_type >= ARRAY_SIZE(btrfs_csum_sizes)) {
+-- 
+1.8.1.4
