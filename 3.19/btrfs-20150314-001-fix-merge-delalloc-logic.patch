@@ -1,0 +1,38 @@
+From 8461a3de770477a9a7b8eeaebcc4804dbc26ca38 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Fri, 13 Mar 2015 15:12:08 -0400
+Subject: Btrfs: fix merge delalloc logic
+
+My patch to properly count outstanding extents wrt MAX_EXTENT_SIZE introduced a
+regression when re-dirtying already dirty areas.  We have logic in split to make
+sure we are taking the largest space into account but didn't have it for merge,
+so it was sometimes making us think we were turning a tiny extent into a huge
+extent, when in reality we already had a huge extent and needed to use the other
+side in our logic.  This fixes the regression that was reported by a user on
+list.  Thanks,
+
+Reported-by: Markus Trippelsdorf <markus@trippelsdorf.de>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 91a87f5..97b601b 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -1592,7 +1592,12 @@ static void btrfs_merge_extent_hook(struct inode *inode,
+ 		return;
+ 
+ 	old_size = other->end - other->start + 1;
+-	new_size = old_size + (new->end - new->start + 1);
++	if (old_size < (new->end - new->start + 1))
++		old_size = (new->end - new->start + 1);
++	if (new->start > other->start)
++		new_size = new->end - other->start + 1;
++	else
++		new_size = other->end - new->start + 1;
+ 
+ 	/* we're not bigger than the max, unreserve the space and go */
+ 	if (new_size <= BTRFS_MAX_EXTENT_SIZE) {
+-- 
+cgit v0.10.2
+
