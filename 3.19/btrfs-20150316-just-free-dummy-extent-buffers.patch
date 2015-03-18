@@ -1,0 +1,31 @@
+From bcb7e449ec6350121ac7ca138c0b050ba7caca47 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Mon, 16 Mar 2015 17:38:02 -0400
+Subject: Btrfs: just free dummy extent buffers
+
+If we fail during our sanity tests we could get NULL deref's because we unload
+the module before the dummy extent buffers are free'd via RCU.  So check for
+this case and just free the things directly.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 29850d4..d13cead 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4968,6 +4968,12 @@ static int release_extent_buffer(struct extent_buffer *eb)
+ 
+ 		/* Should be safe to release our pages at this point */
+ 		btrfs_release_extent_buffer_page(eb);
++#ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
++		if (unlikely(test_bit(EXTENT_BUFFER_DUMMY, &eb->bflags))) {
++			__free_extent_buffer(eb);
++			return 1;
++		}
++#endif
+ 		call_rcu(&eb->rcu_head, btrfs_release_extent_buffer_rcu);
+ 		return 1;
+ 	}
+-- 
+cgit v0.10.2
+
