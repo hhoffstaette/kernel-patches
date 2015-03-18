@@ -25,20 +25,20 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 - net: misc. TCP fixes (TSO, pacing), r8169 support for Byte Queue Limits & xmit_more
 
 
-**LTS series: >=3.18.9**
+**LTS series: >=3.18.10**
 
 - bfq: BFQ v7r7 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v460+ ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
 - btrfs: fixes from 3.19/4.0+ (filesystem corruption, data loss, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
-- net: misc. TCP fixes (TSO, pacing), r8169 support for xmit_more
+- net: misc. TCP fixes (TSO, pacing), r8169 support for Byte Queue Limits & xmit_more
 
 
 **LTS series: >=3.14.36**
 
 - bfq: BFQ v7r7 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v454 + SMT-nice patch ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
-- btrfs: >550 patches from 3.15-4.0+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace, TRIM and automatic GC of empty blockgroups. \o/
+- btrfs: >600 patches from 3.15-4.0+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace, TRIM and automatic GC of empty blockgroups. \o/
 - ext4: corruption fixes, `renameat2`
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - locking: cancellable/optimistic spinning MCS / queued rwlocks ([patch](http://bit.ly/Xq41R6), [article]( http://lwn.net/Articles/590243/))
