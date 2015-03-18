@@ -1,0 +1,88 @@
+From dcdf7f6ddba006f3482ebee73dfa6b75aec5f07b Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Mon, 2 Mar 2015 16:37:31 -0500
+Subject: Btrfs: prepare block group cache before writing
+
+Writing the block group cache will modify the extent tree quite a bit because it
+truncates the old space cache and pre-allocates new stuff.  To try and cut down
+on the churn lets do the setup dance first, then later on hopefully we can avoid
+looping with newly dirtied roots.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index b3dd55f..a0c90a3 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -3386,6 +3386,8 @@ int btrfs_inc_extent_ref(struct btrfs_trans_handle *trans,
+ 
+ int btrfs_write_dirty_block_groups(struct btrfs_trans_handle *trans,
+ 				    struct btrfs_root *root);
++int btrfs_setup_space_cache(struct btrfs_trans_handle *trans,
++			    struct btrfs_root *root);
+ int btrfs_extent_readonly(struct btrfs_root *root, u64 bytenr);
+ int btrfs_free_block_groups(struct btrfs_fs_info *info);
+ int btrfs_read_block_groups(struct btrfs_root *root);
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 96c613b..3ac3fef 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3325,6 +3325,32 @@ out:
+ 	return ret;
+ }
+ 
++int btrfs_setup_space_cache(struct btrfs_trans_handle *trans,
++			    struct btrfs_root *root)
++{
++	struct btrfs_block_group_cache *cache, *tmp;
++	struct btrfs_transaction *cur_trans = trans->transaction;
++	struct btrfs_path *path;
++
++	if (list_empty(&cur_trans->dirty_bgs) ||
++	    !btrfs_test_opt(root, SPACE_CACHE))
++		return 0;
++
++	path = btrfs_alloc_path();
++	if (!path)
++		return -ENOMEM;
++
++	/* Could add new block groups, use _safe just in case */
++	list_for_each_entry_safe(cache, tmp, &cur_trans->dirty_bgs,
++				 dirty_list) {
++		if (cache->disk_cache_state == BTRFS_DC_CLEAR)
++			cache_save_setup(cache, trans, path);
++	}
++
++	btrfs_free_path(path);
++	return 0;
++}
++
+ int btrfs_write_dirty_block_groups(struct btrfs_trans_handle *trans,
+ 				   struct btrfs_root *root)
+ {
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 2fe3ef5..932709a 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -1025,7 +1025,6 @@ static int update_cowonly_root(struct btrfs_trans_handle *trans,
+ 	struct btrfs_root *tree_root = root->fs_info->tree_root;
+ 
+ 	old_root_used = btrfs_root_used(&root->root_item);
+-	btrfs_write_dirty_block_groups(trans, root);
+ 
+ 	while (1) {
+ 		old_root_bytenr = btrfs_root_bytenr(&root->root_item);
+@@ -1085,6 +1084,10 @@ static noinline int commit_cowonly_roots(struct btrfs_trans_handle *trans,
+ 	if (ret)
+ 		return ret;
+ 
++	ret = btrfs_setup_space_cache(trans, root);
++	if (ret)
++		return ret;
++
+ 	/* run_qgroups might have added some more refs */
+ 	ret = btrfs_run_delayed_refs(trans, root, (unsigned long)-1);
+ 	if (ret)
+-- 
+cgit v0.10.2
+
