@@ -43,7 +43,7 @@ diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
 index 8f256b1..c261ff0 100644
 --- a/fs/btrfs/file.c
 +++ b/fs/btrfs/file.c
-@@ -2677,23 +2677,35 @@ static long btrfs_fallocate(struct file *file, int mode,
+@@ -2677,23 +2677,34 @@ static long btrfs_fallocate(struct file *file, int mode,
  							1 << inode->i_blkbits,
  							offset + len,
  							&alloc_hint);
@@ -65,7 +65,6 @@ index 8f256b1..c261ff0 100644
 -			inode->i_ctime = CURRENT_TIME;
 -			i_size_write(inode, actual_end);
 -			btrfs_ordered_update_i_size(inode, actual_end, NULL);
-+			struct btrfs_root *root = BTRFS_I(inode)->root;
 +			trans = btrfs_start_transaction(root, 1);
 +			if (IS_ERR(trans)) {
 +				ret = PTR_ERR(trans);

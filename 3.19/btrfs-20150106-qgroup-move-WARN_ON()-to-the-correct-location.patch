@@ -29,8 +29,8 @@ index 48b60db..97159a8 100644
  		qgroup->excl += sign * oper->num_bytes;
 -		if (sign < 0)
 -			WARN_ON(qgroup->excl < oper->num_bytes);
-		if (sign > 0)
-			qgroup->reserved -= oper->num_bytes;
+		qgroup->excl_cmpr += sign * oper->num_bytes;
+		qgroup_dirty(fs_info, qgroup);
  
 -- 
 1.8.4.2
