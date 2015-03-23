@@ -1,0 +1,30 @@
+From: Mark Brown <broonie@kernel.org>
+Newsgroups: gmane.linux.file-systems,gmane.comp.file-systems.btrfs
+Subject: [PATCH] btrfs: Fix implicit inclusion of linux/uio.h
+Date: Sun, 22 Mar 2015 16:46:15 +0000
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/94082>
+
+The btrfs inode.c relies on implicit inclusion of linux/uio.h for
+definitions of struct iov_iter and iov_iter_alignment() which breaks the
+current ARM allmodconfig build where that implicit inclusion does not
+happen.  Add an explicit include to fix that.
+
+Signed-off-by: Mark Brown <broonie@kernel.org>
+---
+ fs/btrfs/inode.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 37dc84c..9e4a634 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -29,6 +29,7 @@
+ #include <linux/backing-dev.h>
+ #include <linux/mpage.h>
+ #include <linux/swap.h>
++#include <linux/uio.h>
+ #include <linux/writeback.h>
+ #include <linux/statfs.h>
+ #include <linux/compat.h>
+-- 
+2.1.4
