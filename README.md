@@ -16,7 +16,7 @@ release on [kernel.org](https://www.kernel.org/); if it does not then **please**
 a bug here on Github. Older release series will only see sporadic updates, if any.
 Backport requests for specific patches/features from Linus' mainline tree are also welcome!
 
-**Current stable series: >=3.19.2**
+**Current stable series: >=3.19.3**
 
 - bfq: BFQ v7r7 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v461+ ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
@@ -34,7 +34,7 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 - net: misc. TCP fixes (TSO, pacing), r8169 support for Byte Queue Limits & xmit_more
 
 
-**LTS series: >=3.14.36**
+**LTS series: >=3.14.37**
 
 - bfq: BFQ v7r7 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - bfs: BFS v454 + SMT-nice patch ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
