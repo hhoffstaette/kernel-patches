@@ -1,0 +1,66 @@
+From 14692cc150d3ce10ea8766ccb2a8f483b77b49f0 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Fri, 2 Jan 2015 18:55:46 +0100
+Subject: btrfs: cleanup, remove inode_item_info helper
+
+It's only a simple wrapper around btrfs_find_item, the locally defined
+key is not used.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/backref.c b/fs/btrfs/backref.c
+index 8729cf6..6fdf82b 100644
+--- a/fs/btrfs/backref.c
++++ b/fs/btrfs/backref.c
+@@ -1246,17 +1246,6 @@ int btrfs_check_shared(struct btrfs_trans_handle *trans,
+ 	return ret;
+ }
+ 
+-/*
+- * this makes the path point to (inum INODE_ITEM ioff)
+- */
+-int inode_item_info(u64 inum, u64 ioff, struct btrfs_root *fs_root,
+-			struct btrfs_path *path)
+-{
+-	struct btrfs_key key;
+-	return btrfs_find_item(fs_root, path, inum, ioff,
+-			BTRFS_INODE_ITEM_KEY, &key);
+-}
+-
+ static int inode_ref_info(u64 inum, u64 ioff, struct btrfs_root *fs_root,
+ 				struct btrfs_path *path,
+ 				struct btrfs_key *found_key)
+diff --git a/fs/btrfs/backref.h b/fs/btrfs/backref.h
+index 2a1ac6b..9c41fba 100644
+--- a/fs/btrfs/backref.h
++++ b/fs/btrfs/backref.h
+@@ -32,9 +32,6 @@ struct inode_fs_paths {
+ typedef int (iterate_extent_inodes_t)(u64 inum, u64 offset, u64 root,
+ 		void *ctx);
+ 
+-int inode_item_info(u64 inum, u64 ioff, struct btrfs_root *fs_root,
+-			struct btrfs_path *path);
+-
+ int extent_from_logical(struct btrfs_fs_info *fs_info, u64 logical,
+ 			struct btrfs_path *path, struct btrfs_key *found_key,
+ 			u64 *flags);
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index 9e1569f..4846f66 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -530,7 +530,11 @@ static int scrub_print_warning_inode(u64 inum, u64 offset, u64 root,
+ 		goto err;
+ 	}
+ 
+-	ret = inode_item_info(inum, 0, local_root, swarn->path);
++	/*
++	 * this makes the path point to (inum INODE_ITEM ioff)
++	 */
++	ret = btrfs_find_item(local_root, swarn->path, inum, 0,
++			BTRFS_INODE_ITEM_KEY, NULL);
+ 	if (ret) {
+ 		btrfs_release_path(swarn->path);
+ 		goto err;
+-- 
+cgit v0.10.2
+
