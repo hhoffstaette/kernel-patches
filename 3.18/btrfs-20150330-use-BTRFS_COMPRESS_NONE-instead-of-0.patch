@@ -1,0 +1,39 @@
+From: Fabian Frederick <fabf@skynet.be>
+Newsgroups: gmane.linux.kernel,gmane.comp.file-systems.btrfs
+Subject: [PATCH 1/1 linux-next] Btrfs: use BTRFS_COMPRESS_NONE instead of 0
+Date: Mon, 30 Mar 2015 22:21:11 +0200
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/1920724>
+
+cow_file_range_inline() was called with 0 instead of
+actual definition.
+
+Signed-off-by: Fabian Frederick <fabf@skynet.be>
+---
+ fs/btrfs/inode.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 686331f..f626519 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -524,7 +524,8 @@ cont:
+ 			 * to make an uncompressed inline extent.
+ 			 */
+ 			ret = cow_file_range_inline(root, inode, start, end,
+-						    0, 0, NULL);
++						    0, BTRFS_COMPRESS_NONE,
++						    NULL);
+ 		} else {
+ 			/* try making a compressed inline extent */
+ 			ret = cow_file_range_inline(root, inode, start, end,
+@@ -943,8 +944,8 @@ static noinline int cow_file_range(struct inode *inode,
+ 
+ 	if (start == 0) {
+ 		/* lets try to make an inline extent */
+-		ret = cow_file_range_inline(root, inode, start, end, 0, 0,
+-					    NULL);
++		ret = cow_file_range_inline(root, inode, start, end, 0,
++					    BTRFS_COMPRESS_NONE, NULL);
+ 		if (ret == 0) {
+ 			extent_clear_unlock_delalloc(inode, start, end, NULL,
+ 				     EXTENT_LOCKED | EXTENT_DELALLOC |
