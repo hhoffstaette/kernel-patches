@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: fix range cloning when same inode used as source and destination
-Date: Tue, 31 Mar 2015 14:56:46 +0100
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44015>
+Subject: [PATCH v2] Btrfs: fix range cloning when same inode used as source and destination
+Date: Thu,  2 Apr 2015 18:25:11 +0100
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44121>
 
 While searching for extents to clone we might find one where we only use
 a part of it coming from its tail. If our destination inode is the same
@@ -90,23 +90,27 @@ A test case for fstests follows soon.
 
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/ioctl.c | 6 ++++--
- 1 file changed, 4 insertions(+), 2 deletions(-)
+
+V2: Fixed a warning about potentially uninitialized variable. David
+    got this warning on a 4.5.1 gcc, but I didn't on a 4.9.2 gcc
+    however.
+
+ fs/btrfs/ioctl.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
-index 09a566a..869e39d 100644
+index 09a566a..029f4da 100644
 --- a/fs/btrfs/ioctl.c
 +++ b/fs/btrfs/ioctl.c
-@@ -3205,6 +3205,8 @@ static int btrfs_clone(struct inode *src, struct inode *inode,
- 	key.offset = off;
+@@ -3254,6 +3254,7 @@ process_slot:
+ 			u64 datao = 0, datal = 0;
+ 			u8 comp;
+ 			u64 drop_start;
++			u64 next_key_min_offset;
  
- 	while (1) {
-+		u64 next_key_min_offset;
-+
- 		/*
- 		 * note the key will change type as we walk through the
- 		 * tree.
-@@ -3285,7 +3287,7 @@ process_slot:
+ 			extent = btrfs_item_ptr(leaf, slot,
+ 						struct btrfs_file_extent_item);
+@@ -3285,7 +3286,7 @@ process_slot:
  			} else if (key.offset >= off + len) {
  				break;
  			}
@@ -115,12 +119,16 @@ index 09a566a..869e39d 100644
  			size = btrfs_item_size_nr(leaf, slot);
  			read_extent_buffer(leaf, buf,
  					   btrfs_item_ptr_offset(leaf, slot),
-@@ -3500,7 +3502,7 @@ process_slot:
+@@ -3498,9 +3499,11 @@ process_slot:
+ 				goto out;
+ 			if (new_key.offset + datal >= destoff + len)
  				break;
++			key.offset = next_key_min_offset;
++		} else {
++			key.offset++;
  		}
  		btrfs_release_path(path);
 -		key.offset++;
-+		key.offset = next_key_min_offset;
  	}
  	ret = 0;
  
