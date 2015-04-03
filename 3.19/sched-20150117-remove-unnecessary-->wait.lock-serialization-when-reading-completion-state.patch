@@ -1,0 +1,33 @@
+From de30ec47302c101c7badc8fe687641fd75e596e7 Mon Sep 17 00:00:00 2001
+From: Nicholas Mc Guire <der.herr@hofr.at>
+Date: Sat, 17 Jan 2015 05:05:34 +0100
+Subject: sched/completion: Remove unnecessary ->wait.lock serialization when reading completion state
+
+Signed-off-by: Nicholas Mc Guire <der.herr@hofr.at>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Link: http://lkml.kernel.org/r/1421467534-22834-1-git-send-email-der.herr@hofr.at
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/kernel/sched/completion.c b/kernel/sched/completion.c
+index 607f852..9d1fe32d 100644
+--- a/kernel/sched/completion.c
++++ b/kernel/sched/completion.c
+@@ -288,13 +288,6 @@ EXPORT_SYMBOL(try_wait_for_completion);
+  */
+ bool completion_done(struct completion *x)
+ {
+-	unsigned long flags;
+-	int ret = 1;
+-
+-	spin_lock_irqsave(&x->wait.lock, flags);
+-	if (!x->done)
+-		ret = 0;
+-	spin_unlock_irqrestore(&x->wait.lock, flags);
+-	return ret;
++	return !!ACCESS_ONCE(x->done);
+ }
+ EXPORT_SYMBOL(completion_done);
+-- 
+cgit v0.10.2
+
