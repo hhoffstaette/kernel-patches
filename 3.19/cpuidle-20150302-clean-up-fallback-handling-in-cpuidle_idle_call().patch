@@ -1,0 +1,60 @@
+From dfcacc154fb38fdb2c243c3dbbdc1f26a64cedc8 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Mon, 2 Mar 2015 22:25:37 +0100
+Subject: cpuidle: Clean up fallback handling in cpuidle_idle_call()
+
+Move the fallback code path in cpuidle_idle_call() to the end of the
+function to avoid jumping to a label in an if () branch.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+
+diff --git a/kernel/sched/idle.c b/kernel/sched/idle.c
+index f59198b..84b93b6 100644
+--- a/kernel/sched/idle.c
++++ b/kernel/sched/idle.c
+@@ -124,20 +124,8 @@ static void cpuidle_idle_call(void)
+ 	 * Fall back to the default arch idle method on errors.
+ 	 */
+ 	next_state = cpuidle_select(drv, dev);
+-	if (next_state < 0) {
+-use_default:
+-		/*
+-		 * We can't use the cpuidle framework, let's use the default
+-		 * idle routine.
+-		 */
+-		if (current_clr_polling_and_test())
+-			local_irq_enable();
+-		else
+-			arch_cpu_idle();
+-
+-		goto exit_idle;
+-	}
+-
++	if (next_state < 0)
++		goto use_default;
+ 
+ 	/*
+ 	 * The idle task must be scheduled, it is pointless to
+@@ -195,6 +183,19 @@ exit_idle:
+ 
+ 	rcu_idle_exit();
+ 	start_critical_timings();
++	return;
++
++use_default:
++	/*
++	 * We can't use the cpuidle framework, let's use the default
++	 * idle routine.
++	 */
++	if (current_clr_polling_and_test())
++		local_irq_enable();
++	else
++		arch_cpu_idle();
++
++	goto exit_idle;
+ }
+ 
+ /*
+-- 
+cgit v0.10.2
+
