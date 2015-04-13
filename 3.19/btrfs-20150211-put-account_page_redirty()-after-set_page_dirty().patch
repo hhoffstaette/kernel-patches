@@ -1,0 +1,31 @@
+From 8d38633c3b4093aca7524945f1e9249d7d3a44da Mon Sep 17 00:00:00 2001
+From: Konstantin Khebnikov <khlebnikov@yandex-team.ru>
+Date: Wed, 11 Feb 2015 15:26:55 -0800
+Subject: page_writeback: put account_page_redirty() after set_page_dirty()
+
+Helper account_page_redirty() fixes dirty pages counter for redirtied
+pages.  This patch puts it after dirtying and prevents temporary
+underflows of dirtied pages counters on zone/bdi and current->nr_dirtied.
+
+Signed-off-by: Konstantin Khebnikov <khlebnikov@yandex-team.ru>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 790dbae..c73df6a 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -1407,8 +1407,8 @@ int extent_range_redirty_for_io(struct inode *inode, u64 start, u64 end)
+ 	while (index <= end_index) {
+ 		page = find_get_page(inode->i_mapping, index);
+ 		BUG_ON(!page); /* Pages should be in the extent_io_tree */
+-		account_page_redirty(page);
+ 		__set_page_dirty_nobuffers(page);
++		account_page_redirty(page);
+ 		page_cache_release(page);
+ 		index++;
+ 	}
+ 
+-- 
+cgit v0.10.2
+
