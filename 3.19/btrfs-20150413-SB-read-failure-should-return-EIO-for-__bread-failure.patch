@@ -1,0 +1,99 @@
+From: Anand Jain <anand.jain@oracle.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 1/1] Btrfs: SB read failure should return EIO for __bread failure
+Date: Mon, 13 Apr 2015 22:49:07 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44369>
+
+This will return EIO when __bread() fails to read SB,
+instead of EINVAL.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+---
+ fs/btrfs/disk-io.c | 18 +++++++++++++++---
+ fs/btrfs/volumes.c |  8 ++++----
+ 2 files changed, 19 insertions(+), 7 deletions(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 53c83c9..f47c643 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -2410,8 +2410,8 @@ int open_ctree(struct super_block *sb,
+ 	 * Read super block and check the signature bytes only
+ 	 */
+ 	bh = btrfs_read_dev_super(fs_devices->latest_bdev);
+-	if (!bh) {
+-		err = -EINVAL;
++	if (IS_ERR(bh)) {
++		err = PTR_ERR(bh);
+ 		goto fail_alloc;
+ 	}
+ 
+@@ -3093,6 +3093,7 @@ struct buffer_head *btrfs_read_dev_super(struct block_device *bdev)
+ 	int i;
+ 	u64 transid = 0;
+ 	u64 bytenr;
++	int ret = -EINVAL;
+ 
+ 	/* we would like to check all the supers, but that would make
+ 	 * a btrfs mount succeed after a mkfs from a different FS.
+@@ -3106,13 +3107,20 @@ struct buffer_head *btrfs_read_dev_super(struct block_device *bdev)
+ 			break;
+ 		bh = __bread(bdev, bytenr / 4096,
+ 					BTRFS_SUPER_INFO_SIZE);
+-		if (!bh)
++		/*
++		 * If we fail to read from the underlaying drivers, as of now
++		 * the best option we have is to mark it EIO.
++		 */
++		if (!bh) {
++			ret = -EIO;
+ 			continue;
++		}
+ 
+ 		super = (struct btrfs_super_block *)bh->b_data;
+ 		if (btrfs_super_bytenr(super) != bytenr ||
+ 		    btrfs_super_magic(super) != BTRFS_MAGIC) {
+ 			brelse(bh);
++			ret = -EINVAL;
+ 			continue;
+ 		}
+ 
+@@ -3124,6 +3132,10 @@ struct buffer_head *btrfs_read_dev_super(struct block_device *bdev)
+ 			brelse(bh);
+ 		}
+ 	}
++
++	if (!latest)
++		return ERR_PTR(ret);
++
+ 	return latest;
+ }
+ 
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 0009fde..5536281 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -212,8 +212,8 @@ btrfs_get_bdev_and_sb(const char *device_path, fmode_t flags, void *holder,
+ 	}
+ 	invalidate_bdev(*bdev);
+ 	*bh = btrfs_read_dev_super(*bdev);
+-	if (!*bh) {
+-		ret = -EINVAL;
++	if (IS_ERR(*bh)) {
++		ret = PTR_ERR(*bh);
+ 		blkdev_put(*bdev, flags);
+ 		goto error;
+ 	}
+@@ -6770,8 +6770,8 @@ int btrfs_scratch_superblock(struct btrfs_device *device)
+ 	struct btrfs_super_block *disk_super;
+ 
+ 	bh = btrfs_read_dev_super(device->bdev);
+-	if (!bh)
+-		return -EINVAL;
++	if (IS_ERR(bh))
++		return PTR_ERR(bh);
+ 	disk_super = (struct btrfs_super_block *)bh->b_data;
+ 
+ 	memset(&disk_super->magic, 0, sizeof(disk_super->magic));
+-- 
+2.0.0.153.g79dcccc
