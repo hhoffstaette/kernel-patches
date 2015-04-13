@@ -1,0 +1,34 @@
+From 8d38633c3b4093aca7524945f1e9249d7d3a44da Mon Sep 17 00:00:00 2001
+From: Konstantin Khebnikov <khlebnikov@yandex-team.ru>
+Date: Wed, 11 Feb 2015 15:26:55 -0800
+Subject: page_writeback: put account_page_redirty() after set_page_dirty()
+
+Helper account_page_redirty() fixes dirty pages counter for redirtied
+pages.  This patch puts it after dirtying and prevents temporary
+underflows of dirtied pages counters on zone/bdi and current->nr_dirtied.
+
+Signed-off-by: Konstantin Khebnikov <khlebnikov@yandex-team.ru>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index fb71e9d..6a73e47 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -2168,9 +2168,12 @@ EXPORT_SYMBOL(account_page_redirty);
+  */
+ int redirty_page_for_writepage(struct writeback_control *wbc, struct page *page)
+ {
++	int ret;
++
+ 	wbc->pages_skipped++;
++	ret = __set_page_dirty_nobuffers(page);
+ 	account_page_redirty(page);
+-	return __set_page_dirty_nobuffers(page);
++	return ret;
+ }
+ EXPORT_SYMBOL(redirty_page_for_writepage);
+ 
+-- 
+cgit v0.10.2
+
