@@ -1,0 +1,45 @@
+From 00ccb4821b3ba1a75ae91d42b6caf259279b9152 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Tue, 24 Feb 2015 19:45:15 +0100
+Subject: btrfs: remove shadowing variables in __btrfs_map_block
+
+1) We can safely use the function's 'i'. Fixes warning
+
+fs/btrfs/volumes.c:5257:7: warning: declaration of 'i' shadows a previous local
+fs/btrfs/volumes.c:4951:6: warning: shadowed declaration is here
+
+2) A local variable duplicates name of an argument, we can use the value
+directly. Fixes warning
+
+fs/btrfs/volumes.c:5433:8: warning: declaration of 'length' shadows a parameter
+fs/btrfs/volumes.c:4935:27: warning: shadowed declaration is here
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 8222f6f..08a7757 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -5261,7 +5261,7 @@ static int __btrfs_map_block(struct btrfs_fs_info *fs_info, int rw,
+ 	    need_raid_map && ((rw & (REQ_WRITE | REQ_GET_READ_MIRRORS)) ||
+ 	    mirror_num > 1)) {
+ 		u64 tmp;
+-		int i, rot;
++		int rot;
+ 
+ 		bbio->raid_map = (u64 *)((void *)bbio->stripes +
+ 				 sizeof(struct btrfs_bio_stripe) *
+@@ -5437,9 +5437,7 @@ static int __btrfs_map_block(struct btrfs_fs_info *fs_info, int rw,
+ 			}
+ 		}
+ 		if (found) {
+-			u64 length = map->stripe_len;
+-
+-			if (physical_of_found + length <=
++			if (physical_of_found + map->stripe_len <=
+ 			    dev_replace->cursor_left) {
+ 				struct btrfs_bio_stripe *tgtdev_stripe =
+ 					bbio->stripes + num_stripes;
+-- 
+cgit v0.10.2
+

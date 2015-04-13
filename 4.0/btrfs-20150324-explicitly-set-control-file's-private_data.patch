@@ -1,0 +1,74 @@
+From: Tom Van Braeckel <tomvanbraeckel@gmail.com>
+Newsgroups: gmane.linux.kernel,gmane.comp.file-systems.btrfs
+Subject: [PATCH v2] btrfs: explicitly set control file's private_data
+Date: Tue, 24 Mar 2015 16:35:49 +0100
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/1915964>
+
+The private_data member of the Btrfs control device file
+(/dev/btrfs-control) is used to hold the current transaction and needs
+to be initialized to NULL to signify that no transaction is in progress.
+
+We explicitly set the control file's private_data to NULL to be
+independent of whatever value the misc subsystem initializes it to.
+
+Backstory:
+----------
+
+The misc subsystem (which is used by /dev/btrfs-control) initializes
+a file's private_data to point to the misc device when a driver has
+registered a custom open file operation and initializes it to NULL
+when a custom open file operation has *not* been provided.
+
+This subtle quirk is confusing, to the point where kernel code registers
+*empty* file open operations to have private_data point to the misc
+device structure.
+
+And it leads to bugs, where the addition or removal of a custom open
+file operation surprisingly changes the initial contents of a file's
+private_data structure.
+
+To simplify things in the misc subsystem, a patch [1] has been proposed
+to *always* set private_data to point to the misc device instead of
+only doing this when a custom open file operation has been registered.
+
+But before we can fix this in the misc subsystem itself, we need to
+modify the (few) drivers that rely on this very subtle behavior.
+
+[1] https://lkml.org/lkml/2014/12/4/939
+
+Signed-off-by: Martin Kepplinger <martink@posteo.de>
+Signed-off-by: Tom Van Braeckel <tomvanbraeckel@gmail.com>
+---
+ fs/btrfs/super.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 05fef19..3c30195 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -1908,6 +1908,17 @@ static struct file_system_type btrfs_fs_type = {
+ };
+ MODULE_ALIAS_FS("btrfs");
+ 
++static int btrfs_control_open(struct inode *inode, struct file *file)
++{
++	/*
++	 * The control file's private_data is used to hold the
++	 * transaction when it is started and is used to keep
++	 * track of whether a transaction is already in progress.
++	 */
++	file->private_data = NULL;
++	return 0;
++}
++
+ /*
+  * used by btrfsctl to scan devices when no FS is mounted
+  */
+@@ -2009,6 +2020,7 @@ static const struct super_operations btrfs_super_ops = {
+ };
+ 
+ static const struct file_operations btrfs_ctl_fops = {
++	.open = btrfs_control_open,
+ 	.unlocked_ioctl	 = btrfs_control_ioctl,
+ 	.compat_ioctl = btrfs_control_ioctl,
+ 	.owner	 = THIS_MODULE,

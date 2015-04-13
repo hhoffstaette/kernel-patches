@@ -1,0 +1,30 @@
+From 620ff16527bd711e7b6677ba7d5ecfb4467c231a Mon Sep 17 00:00:00 2001
+From: Gerhard Heift <gerhard@heift.name>
+Date: Thu, 6 Nov 2014 11:30:10 +0100
+Subject: [PATCH] btrfs: fix address space cast in TREE_SEARCH_V2
+
+This patches fixes an invalid cast of an user space address to kernel space,
+but is still used as user space in the called function.
+
+This cast would have not been necessary, if I had choosen the type of
+(struct btrfs_ioctl_search_args_v2).buf as char[] and not as __u64[], which I
+did for for unknown reasons.
+
+Signed-off-by: Gerhard Heift <gerhard@heift.name>
+---
+ fs/btrfs/ioctl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 6ea1546..dbd577e 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -2201,7 +2201,7 @@ static noinline int btrfs_ioctl_tree_search_v2(struct file *file,
+ 
+ 	inode = file_inode(file);
+ 	ret = search_ioctl(inode, &args.key, &buf_size,
+-			   (char *)(&uarg->buf[0]));
++			   (char __user *)(&uarg->buf[0]));
+ 	if (ret == 0 && copy_to_user(&uarg->key, &args.key, sizeof(args.key)))
+ 		ret = -EFAULT;
+ 	else if (ret == -EOVERFLOW &&

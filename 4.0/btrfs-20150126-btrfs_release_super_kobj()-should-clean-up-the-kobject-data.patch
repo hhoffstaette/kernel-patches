@@ -1,0 +1,51 @@
+From: Anand Jain <anand.jain@oracle.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 1/1] Btrfs: btrfs_release_super_kobj() should clean up the kobject data
+Date: Mon, 26 Jan 2015 09:59:20 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/42507>
+
+The following test case which is a fair tweak with in the funcation
+open_ctree() fails with an error from kobject module, indicating that
+thread tried to init an initialized object.
+
+kernel: [232104.016513] kobject (ffff880006c1c980): tried to init an initialized object, something is seriously wrong.
+
+btrfs_sysfs_remove_one() self test code:
+
+open_tree()
+{
+ ::
+        ret = btrfs_sysfs_add_one(fs_info);
+	if (ret) {
+              pr_err("BTRFS: failed to init sysfs interface: %d\n", ret);
+                goto fail_block_groups;
+        }
++       btrfs_sysfs_remove_one(fs_info);
++       ret = btrfs_sysfs_add_one(fs_info);
++       if (ret) {
++               pr_err("BTRFS: failed to init sysfs interface: %d\n", ret);
++               goto fail_block_groups;
++       }
+
+cleaning up the unregistered kobject fixes this.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+---
+ fs/btrfs/sysfs.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 92db3f6..68dcd17 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -439,6 +439,8 @@ static struct attribute *btrfs_attrs[] = {
+ static void btrfs_release_super_kobj(struct kobject *kobj)
+ {
+ 	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
++
++	memset(&fs_info->super_kobj, 0, sizeof(struct kobject));
+ 	complete(&fs_info->kobj_unregister);
+ }
+ 
+-- 
+2.0.0.153.g79dcccc

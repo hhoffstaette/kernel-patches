@@ -1,0 +1,25 @@
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 4/6] btrfs: Clear PageUptodate bit in alloc_rbio_parity_pages()
+Date: Thu, 5 Mar 2015 02:41:10 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43423>
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/raid56.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
+index 0d902ac..0a40d07 100644
+--- a/fs/btrfs/raid56.c
++++ b/fs/btrfs/raid56.c
+@@ -1049,6 +1049,7 @@ static int alloc_rbio_parity_pages(struct btrfs_raid_bio *rbio)
+ 		if (!page)
+ 			return -ENOMEM;
+ 		rbio->stripe_pages[i] = page;
++		ClearPageUptodate(page);
+ 	}
+ 	return 0;
+ }
+-- 
+1.8.5.1

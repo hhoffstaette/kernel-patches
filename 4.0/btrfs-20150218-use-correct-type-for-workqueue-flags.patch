@@ -1,0 +1,74 @@
+From 6f0110581911623df08bf4b65fdef4548ebcda0a Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Mon, 16 Feb 2015 18:34:01 +0100
+Subject: btrfs: use correct type for workqueue flags
+
+Through all the local wrappers to alloc_workqueue, __alloc_workqueue_key
+takes an unsigned int.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/async-thread.c b/fs/btrfs/async-thread.c
+index 4dabeb8..df9932b 100644
+--- a/fs/btrfs/async-thread.c
++++ b/fs/btrfs/async-thread.c
+@@ -87,7 +87,7 @@ BTRFS_WORK_HELPER(scrubwrc_helper);
+ BTRFS_WORK_HELPER(scrubnc_helper);
+ 
+ static struct __btrfs_workqueue *
+-__btrfs_alloc_workqueue(const char *name, int flags, int max_active,
++__btrfs_alloc_workqueue(const char *name, unsigned int flags, int max_active,
+ 			 int thresh)
+ {
+ 	struct __btrfs_workqueue *ret = kzalloc(sizeof(*ret), GFP_NOFS);
+@@ -132,7 +132,7 @@ static inline void
+ __btrfs_destroy_workqueue(struct __btrfs_workqueue *wq);
+ 
+ struct btrfs_workqueue *btrfs_alloc_workqueue(const char *name,
+-					      int flags,
++					      unsigned int flags,
+ 					      int max_active,
+ 					      int thresh)
+ {
+diff --git a/fs/btrfs/async-thread.h b/fs/btrfs/async-thread.h
+index e386c29..ec2ee47 100644
+--- a/fs/btrfs/async-thread.h
++++ b/fs/btrfs/async-thread.h
+@@ -66,7 +66,7 @@ BTRFS_WORK_HELPER_PROTO(scrubwrc_helper);
+ BTRFS_WORK_HELPER_PROTO(scrubnc_helper);
+ 
+ struct btrfs_workqueue *btrfs_alloc_workqueue(const char *name,
+-					      int flags,
++					      unsigned int flags,
+ 					      int max_active,
+ 					      int thresh);
+ void btrfs_init_work(struct btrfs_work *work, btrfs_work_func_t helper,
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index c7546d6..29cb50b 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -2227,7 +2227,7 @@ static int btrfs_init_workqueues(struct btrfs_fs_info *fs_info,
+ 		struct btrfs_fs_devices *fs_devices)
+ {
+ 	int max_active = fs_info->thread_pool_size;
+-	int flags = WQ_MEM_RECLAIM | WQ_FREEZABLE | WQ_UNBOUND;
++	unsigned int flags = WQ_MEM_RECLAIM | WQ_FREEZABLE | WQ_UNBOUND;
+ 
+ 	fs_info->workers =
+ 		btrfs_alloc_workqueue("worker", flags | WQ_HIGHPRI,
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index db21f17..4af5f49 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -3561,7 +3561,7 @@ static noinline_for_stack int scrub_workers_get(struct btrfs_fs_info *fs_info,
+ 						int is_dev_replace)
+ {
+ 	int ret = 0;
+-	int flags = WQ_FREEZABLE | WQ_UNBOUND;
++	unsigned int flags = WQ_FREEZABLE | WQ_UNBOUND;
+ 	int max_active = fs_info->thread_pool_size;
+ 
+ 	if (fs_info->scrub_workers_refcnt == 0) {
+-- 
+cgit v0.10.2
+
