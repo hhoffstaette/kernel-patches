@@ -1,0 +1,165 @@
+From 28ed1345a50491d78e1454ad4005dc5d3557a69e Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Wed, 17 Dec 2014 09:41:04 -0800
+Subject: btrfs: actively run the delayed refs while deleting large files
+
+When we are deleting large files with large extents, we are building up
+a huge set of delayed refs for processing.  Truncate isn't checking
+often enough to see if we need to back off and process those, or let
+a commit proceed.
+
+The end result is long stalls after the rm, and very long commit times.
+During the commits, other processes back up waiting to start new
+transactions and we get into trouble.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index 764528a..c514820 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -235,6 +235,8 @@ int btrfs_truncate_free_space_cache(struct btrfs_root *root,
+ 	/*
+ 	 * We don't need an orphan item because truncating the free space cache
+ 	 * will never be split across transactions.
++	 * We don't need to check for -EAGAIN because we're a free space
++	 * cache inode
+ 	 */
+ 	ret = btrfs_truncate_inode_items(trans, root, inode,
+ 					 0, BTRFS_EXTENT_DATA_KEY);
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 97bc1ff..e3fe137f 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -4197,10 +4197,20 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
+ 	int extent_type = -1;
+ 	int ret;
+ 	int err = 0;
++	int be_nice = 0;
+ 	u64 ino = btrfs_ino(inode);
++	u64 bytes_deleted = 0;
+ 
+ 	BUG_ON(new_size > 0 && min_type != BTRFS_EXTENT_DATA_KEY);
+ 
++	/*
++	 * for non-free space inodes and ref cows, we want to back off from
++	 * time to time
++	 */
++	if (!btrfs_is_free_space_inode(inode) &&
++	    test_bit(BTRFS_ROOT_REF_COWS, &root->state))
++		be_nice = 1;
++
+ 	path = btrfs_alloc_path();
+ 	if (!path)
+ 		return -ENOMEM;
+@@ -4230,6 +4240,19 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
+ 	key.type = (u8)-1;
+ 
+ search_again:
++	/*
++	 * with a 16K leaf size and 128MB extents, you can actually queue
++	 * up a huge file in a single leaf.  Most of the time that
++	 * bytes_deleted is > 0, it will be huge by the time we get here
++	 */
++	if (be_nice && bytes_deleted > 32 * 1024 * 1024) {
++		if (btrfs_should_end_transaction(trans, root)) {
++			err = -EAGAIN;
++			goto error;
++		}
++	}
++
++
+ 	path->leave_spinning = 1;
+ 	ret = btrfs_search_slot(trans, root, &key, path, -1, 1);
+ 	if (ret < 0) {
+@@ -4376,11 +4399,18 @@ delete:
+ 		    (test_bit(BTRFS_ROOT_REF_COWS, &root->state) ||
+ 		     root == root->fs_info->tree_root)) {
+ 			btrfs_set_path_blocking(path);
++			bytes_deleted += extent_num_bytes;
+ 			ret = btrfs_free_extent(trans, root, extent_start,
+ 						extent_num_bytes, 0,
+ 						btrfs_header_owner(leaf),
+ 						ino, extent_offset, 0);
+ 			BUG_ON(ret);
++			if (be_nice && pending_del_nr &&
++			    (pending_del_nr % 16 == 0) &&
++			    bytes_deleted > 1024 * 1024) {
++				btrfs_async_run_delayed_refs(root,
++					trans->delayed_ref_updates * 2, 0);
++			}
+ 		}
+ 
+ 		if (found_type == BTRFS_INODE_ITEM_KEY)
+@@ -4416,7 +4446,18 @@ error:
+ 	if (last_size != (u64)-1 &&
+ 	    root->root_key.objectid != BTRFS_TREE_LOG_OBJECTID)
+ 		btrfs_ordered_update_i_size(inode, last_size, NULL);
++
+ 	btrfs_free_path(path);
++
++	if (be_nice && bytes_deleted > 32 * 1024 * 1024) {
++		unsigned long updates = trans->delayed_ref_updates;
++		if (updates) {
++			trans->delayed_ref_updates = 0;
++			ret = btrfs_run_delayed_refs(trans, root, updates * 2);
++			if (ret && !err)
++				err = ret;
++		}
++	}
+ 	return err;
+ }
+ 
+@@ -5013,7 +5054,7 @@ void btrfs_evict_inode(struct inode *inode)
+ 		trans->block_rsv = rsv;
+ 
+ 		ret = btrfs_truncate_inode_items(trans, root, inode, 0, 0);
+-		if (ret != -ENOSPC)
++		if (ret != -ENOSPC && ret != -EAGAIN)
+ 			break;
+ 
+ 		trans->block_rsv = &root->fs_info->trans_block_rsv;
+@@ -8582,7 +8623,7 @@ static int btrfs_truncate(struct inode *inode)
+ 		ret = btrfs_truncate_inode_items(trans, root, inode,
+ 						 inode->i_size,
+ 						 BTRFS_EXTENT_DATA_KEY);
+-		if (ret != -ENOSPC) {
++		if (ret != -ENOSPC && ret != -EAGAIN) {
+ 			err = ret;
+ 			break;
+ 		}
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 91c303a..ba831ee 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -718,7 +718,7 @@ int btrfs_should_end_transaction(struct btrfs_trans_handle *trans,
+ 	updates = trans->delayed_ref_updates;
+ 	trans->delayed_ref_updates = 0;
+ 	if (updates) {
+-		err = btrfs_run_delayed_refs(trans, root, updates);
++		err = btrfs_run_delayed_refs(trans, root, updates * 2);
+ 		if (err) /* Error code will also eval true */
+ 			return err;
+ 	}
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index 016c90f..a089b59 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -4251,8 +4251,12 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
+ 					  &BTRFS_I(inode)->runtime_flags);
+ 				clear_bit(BTRFS_INODE_COPY_EVERYTHING,
+ 					  &BTRFS_I(inode)->runtime_flags);
+-				ret = btrfs_truncate_inode_items(trans, log,
+-								 inode, 0, 0);
++				while(1) {
++					ret = btrfs_truncate_inode_items(trans,
++							 log, inode, 0, 0);
++					if (ret != -EAGAIN)
++						break;
++				}
+ 			}
+ 		} else if (test_and_clear_bit(BTRFS_INODE_COPY_EVERYTHING,
+ 					      &BTRFS_I(inode)->runtime_flags) ||
+-- 
+cgit v0.10.2
+
