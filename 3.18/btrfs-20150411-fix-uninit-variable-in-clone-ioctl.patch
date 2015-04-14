@@ -1,0 +1,27 @@
+From de249e66a73d696666281cd812087979c6fae552 Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Sat, 11 Apr 2015 05:09:06 -0700
+Subject: Btrfs: fix uninit variable in clone ioctl
+
+Commit 0d97a64e0 creates a new variable but doesn't always set it up.
+This puts it back to the original method (key.offset + 1) for the cases
+not covered by Filipe's new logic.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 97b782f..ca0736c 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -3205,7 +3205,7 @@ static int btrfs_clone(struct inode *src, struct inode *inode,
+ 	key.offset = off;
+ 
+ 	while (1) {
+-		u64 next_key_min_offset;
++		u64 next_key_min_offset = key.offset + 1;
+ 
+ 		/*
+ 		 * note the key will change type as we walk through the
+-- 
+cgit v0.10.2
+
