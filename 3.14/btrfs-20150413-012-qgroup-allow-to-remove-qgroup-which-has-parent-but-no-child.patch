@@ -1,0 +1,112 @@
+From f5a6b1c53bdd44f79e3904c0f5e59f956b49b2c8 Mon Sep 17 00:00:00 2001
+From: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Date: Mon, 24 Nov 2014 10:27:09 -0500
+Subject: btrfs: qgroup: allow to remove qgroup which has parent but no child.
+
+When a qgroup has parents but no child, it should be removable in
+Theory I think. But currently, we can not remove it when it has
+either parent or child.
+
+Example:
+	# btrfs quota enable /mnt
+	# btrfs qgroup create 1/0 /mnt
+	# btrfs qgroup create 2/0 /mnt
+	# btrfs qgroup assign 1/0 2/0 /mnt
+	# btrfs qgroup show -pcre /mnt
+qgroupid rfer  excl  max_rfer max_excl parent  child
+-------- ----  ----  -------- -------- ------  -----
+0/5      16384 16384 0        0        ---     ---
+1/0      0     0     0        0        2/0     ---
+2/0      0     0     0        0        ---     1/0
+
+At this time, there is no subvol or qgroup depending on it.
+Just a qgroup 2/0 is its parent, but 2/0 can work well without
+1/0. So I think 1/0 should be removalbe. But:
+	# btrfs qgroup destroy 1/0 /mnt
+ERROR: unable to destroy quota group: Device or resource busy
+
+This patch remove the check of qgroup->parent in removing it,
+then we can remove a qgroup when it has a parent.
+
+Signed-off-by: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 4ec86b3..464d1e2 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -1048,7 +1048,7 @@ out:
+ 	return ret;
+ }
+ 
+-int btrfs_del_qgroup_relation(struct btrfs_trans_handle *trans,
++int __del_qgroup_relation(struct btrfs_trans_handle *trans,
+ 			      struct btrfs_fs_info *fs_info, u64 src, u64 dst)
+ {
+ 	struct btrfs_root *quota_root;
+@@ -1058,7 +1058,6 @@ int btrfs_del_qgroup_relation(struct btrfs_trans_handle *trans,
+ 	int ret = 0;
+ 	int err;
+ 
+-	mutex_lock(&fs_info->qgroup_ioctl_lock);
+ 	quota_root = fs_info->quota_root;
+ 	if (!quota_root) {
+ 		ret = -EINVAL;
+@@ -1089,7 +1088,18 @@ exist:
+ 	del_relation_rb(fs_info, src, dst);
+ 	spin_unlock(&fs_info->qgroup_lock);
+ out:
++	return ret;
++}
++
++int btrfs_del_qgroup_relation(struct btrfs_trans_handle *trans,
++			      struct btrfs_fs_info *fs_info, u64 src, u64 dst)
++{
++	int ret = 0;
++
++	mutex_lock(&fs_info->qgroup_ioctl_lock);
++	ret = __del_qgroup_relation(trans, fs_info, src, dst);
+ 	mutex_unlock(&fs_info->qgroup_ioctl_lock);
++
+ 	return ret;
+ }
+ 
+@@ -1132,6 +1142,7 @@ int btrfs_remove_qgroup(struct btrfs_trans_handle *trans,
+ {
+ 	struct btrfs_root *quota_root;
+ 	struct btrfs_qgroup *qgroup;
++	struct btrfs_qgroup_list *list;
+ 	int ret = 0;
+ 
+ 	mutex_lock(&fs_info->qgroup_ioctl_lock);
+@@ -1146,15 +1157,24 @@ int btrfs_remove_qgroup(struct btrfs_trans_handle *trans,
+ 		ret = -ENOENT;
+ 		goto out;
+ 	} else {
+-		/* check if there are no relations to this qgroup */
+-		if (!list_empty(&qgroup->groups) ||
+-		    !list_empty(&qgroup->members)) {
++		/* check if there are no children of this qgroup */
++		if (!list_empty(&qgroup->members)) {
+ 			ret = -EBUSY;
+ 			goto out;
+ 		}
+ 	}
+ 	ret = del_qgroup_item(trans, quota_root, qgroupid);
+ 
++	while (!list_empty(&qgroup->groups)) {
++		list = list_first_entry(&qgroup->groups,
++					struct btrfs_qgroup_list, next_group);
++		ret = __del_qgroup_relation(trans, fs_info,
++					   qgroupid,
++					   list->group->qgroupid);
++		if (ret)
++			goto out;
++	}
++
+ 	spin_lock(&fs_info->qgroup_lock);
+ 	del_qgroup_rb(quota_root->fs_info, qgroupid);
+ 	spin_unlock(&fs_info->qgroup_lock);
+-- 
+cgit v0.10.2
+

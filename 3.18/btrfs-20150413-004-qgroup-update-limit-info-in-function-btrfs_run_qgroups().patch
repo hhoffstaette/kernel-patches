@@ -1,0 +1,31 @@
+From d3001ed3a82ec2696bb13c78092d0a3460003fd7 Mon Sep 17 00:00:00 2001
+From: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Date: Thu, 20 Nov 2014 21:04:56 -0500
+Subject: btrfs: qgroup: update limit info in function btrfs_run_qgroups().
+
+When we commit_transaction(), qgroups in btree should be updated.
+But, limit info is not considered currently. It will cause a problem
+when a qgroup of a snapshot inherit the limit info from srcqgroup,
+then there is an inconsistency.
+
+Signed-off-by: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index bf0702a..5d1d756 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -2154,6 +2154,10 @@ int btrfs_run_qgroups(struct btrfs_trans_handle *trans,
+ 		if (ret)
+ 			fs_info->qgroup_flags |=
+ 					BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT;
++		ret = update_qgroup_limit_item(trans, quota_root, qgroup);
++		if (ret)
++			fs_info->qgroup_flags |=
++					BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT;
+ 		spin_lock(&fs_info->qgroup_lock);
+ 	}
+ 	if (fs_info->quota_enabled)
+-- 
+cgit v0.10.2
+

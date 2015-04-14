@@ -1,0 +1,35 @@
+From 8ea0ec9e011eb542a3e7b1171776aa4877cf8a90 Mon Sep 17 00:00:00 2001
+From: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Date: Fri, 27 Feb 2015 16:24:26 +0800
+Subject: btrfs: qgroup: clear STATUS_FLAG_ON in disabling quota.
+
+we forgot to clear STATUS_FLAG_ON in quota_disable(), it
+will cause a problem shown as below:
+
+	# mount /dev/sdc /mnt
+	# btrfs quota enable /mnt
+	# btrfs quota disable /mnt
+	# btrfs quota rescan /mnt
+	quota rescan started <--- expecting it fail here.
+	# echo $?
+	0
+
+Signed-off-by: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Reviewed-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 2e04e99..f5f2baa 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -966,6 +966,7 @@ int btrfs_quota_disable(struct btrfs_trans_handle *trans,
+ 	fs_info->pending_quota_state = 0;
+ 	quota_root = fs_info->quota_root;
+ 	fs_info->quota_root = NULL;
++	fs_info->qgroup_flags &= ~BTRFS_QGROUP_STATUS_FLAG_ON;
+ 	spin_unlock(&fs_info->qgroup_lock);
+ 
+ 	btrfs_free_qgroup_config(fs_info);
+-- 
+cgit v0.10.2
+

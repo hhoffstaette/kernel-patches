@@ -1,0 +1,75 @@
+From 4087cf24ae2af17f7dd9fd34e22fde816952d421 Mon Sep 17 00:00:00 2001
+From: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Date: Sun, 18 Jan 2015 10:59:23 -0500
+Subject: Btrfs: qgroup: cleanup, remove an unsued parameter in
+ btrfs_create_qgroup().
+
+Signed-off-by: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index ca0736c..2e66d8e 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -4679,8 +4679,7 @@ static long btrfs_ioctl_qgroup_create(struct file *file, void __user *arg)
+ 
+ 	/* FIXME: check if the IDs really exist */
+ 	if (sa->create) {
+-		ret = btrfs_create_qgroup(trans, root->fs_info, sa->qgroupid,
+-					  NULL);
++		ret = btrfs_create_qgroup(trans, root->fs_info, sa->qgroupid);
+ 	} else {
+ 		ret = btrfs_remove_qgroup(trans, root->fs_info, sa->qgroupid);
+ 	}
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 5c2aacc..de321c9 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -1094,7 +1094,7 @@ out:
+ }
+ 
+ int btrfs_create_qgroup(struct btrfs_trans_handle *trans,
+-			struct btrfs_fs_info *fs_info, u64 qgroupid, char *name)
++			struct btrfs_fs_info *fs_info, u64 qgroupid)
+ {
+ 	struct btrfs_root *quota_root;
+ 	struct btrfs_qgroup *qgroup;
+diff --git a/fs/btrfs/qgroup.h b/fs/btrfs/qgroup.h
+index 18cc68c..c5242aa 100644
+--- a/fs/btrfs/qgroup.h
++++ b/fs/btrfs/qgroup.h
+@@ -70,8 +70,7 @@ int btrfs_add_qgroup_relation(struct btrfs_trans_handle *trans,
+ int btrfs_del_qgroup_relation(struct btrfs_trans_handle *trans,
+ 			      struct btrfs_fs_info *fs_info, u64 src, u64 dst);
+ int btrfs_create_qgroup(struct btrfs_trans_handle *trans,
+-			struct btrfs_fs_info *fs_info, u64 qgroupid,
+-			char *name);
++			struct btrfs_fs_info *fs_info, u64 qgroupid);
+ int btrfs_remove_qgroup(struct btrfs_trans_handle *trans,
+ 			      struct btrfs_fs_info *fs_info, u64 qgroupid);
+ int btrfs_limit_qgroup(struct btrfs_trans_handle *trans,
+diff --git a/fs/btrfs/tests/qgroup-tests.c b/fs/btrfs/tests/qgroup-tests.c
+index 73f299e..c32a7ba 100644
+--- a/fs/btrfs/tests/qgroup-tests.c
++++ b/fs/btrfs/tests/qgroup-tests.c
+@@ -232,7 +232,7 @@ static int test_no_shared_qgroup(struct btrfs_root *root)
+ 	init_dummy_trans(&trans);
+ 
+ 	test_msg("Qgroup basic add\n");
+-	ret = btrfs_create_qgroup(NULL, fs_info, 5, NULL);
++	ret = btrfs_create_qgroup(NULL, fs_info, 5);
+ 	if (ret) {
+ 		test_msg("Couldn't create a qgroup %d\n", ret);
+ 		return ret;
+@@ -301,7 +301,7 @@ static int test_multiple_refs(struct btrfs_root *root)
+ 	test_msg("Qgroup multiple refs test\n");
+ 
+ 	/* We have 5 created already from the previous test */
+-	ret = btrfs_create_qgroup(NULL, fs_info, 256, NULL);
++	ret = btrfs_create_qgroup(NULL, fs_info, 256);
+ 	if (ret) {
+ 		test_msg("Couldn't create a qgroup %d\n", ret);
+ 		return ret;
+-- 
+cgit v0.10.2
+

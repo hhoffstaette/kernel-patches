@@ -1,0 +1,36 @@
+From 804ca127fb93988c6a9d5f2bf4a8f1a780c9a2d0 Mon Sep 17 00:00:00 2001
+From: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Date: Fri, 12 Dec 2014 16:44:34 +0800
+Subject: Btrfs: qgroup: free reserved in exceeding quota.
+
+When we exceed quota limit in writing, we will free
+some reserved extent when we need to drop but not free
+account in qgroup. It means, each time we exceed quota
+in writing, there will be some remain space in qg->reserved
+we can not use any more. If things go on like this, the
+all space will be ate up.
+
+Signed-off-by: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Reviewed-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 2713dcb..695d511 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -5475,8 +5475,11 @@ out_fail:
+ 			to_free = 0;
+ 	}
+ 	spin_unlock(&BTRFS_I(inode)->lock);
+-	if (dropped)
++	if (dropped) {
++		if (root->fs_info->quota_enabled)
++			btrfs_qgroup_free(root, dropped * root->nodesize);
+ 		to_free += btrfs_calc_trans_metadata_size(root, dropped);
++	}
+ 
+ 	if (to_free) {
+ 		btrfs_block_rsv_release(root, block_rsv, to_free);
+-- 
+cgit v0.10.2
+

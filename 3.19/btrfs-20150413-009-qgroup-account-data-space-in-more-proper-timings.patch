@@ -1,0 +1,139 @@
+From 237c0e9f1fbfdca7287f3539f1fa73e5063156b5 Mon Sep 17 00:00:00 2001
+From: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Date: Mon, 29 Dec 2014 06:23:05 -0500
+Subject: Btrfs: qgroup, Account data space in more proper timings.
+
+Currenly, in data writing, ->reserved is accounted in
+fill_delalloc(), but ->may_use is released in clear_bit_hook()
+which is called by btrfs_finish_ordered_io(). That's too late,
+that said, between fill_delalloc() and btrfs_finish_ordered_io(),
+the data is doublely accounted by qgroup. It will cause some
+unexpected -EDQUOT.
+
+Example:
+	# btrfs quota enable /root/btrfs-auto-test/
+	# btrfs subvolume create /root/btrfs-auto-test//sub
+	Create subvolume '/root/btrfs-auto-test/sub'
+	# btrfs qgroup limit 1G /root/btrfs-auto-test//sub
+	dd if=/dev/zero of=/root/btrfs-auto-test//sub/file bs=1024 count=1500000
+	dd: error writing '/root/btrfs-auto-test//sub/file': Disk quota exceeded
+	681353+0 records in
+	681352+0 records out
+	697704448 bytes (698 MB) copied, 8.15563 s, 85.5 MB/s
+It's (698 MB) when we got an -EDQUOT, but we limit it by 1G.
+
+This patch move the btrfs_qgroup_reserve/free() for data from
+btrfs_delalloc_reserve/release_metadata() to btrfs_check_data_free_space()
+and btrfs_free_reserved_data_space(). Then the accounter in qgroup
+will be updated at the same time with the accounter in space_info updated.
+In this way, the unexpected -EDQUOT will be killed.
+
+Reported-by: Satoru Takeuchi <takeuchi_satoru@jp.fujitsu.com>
+Signed-off-by: Dongsheng Yang <yangds.fnst@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 3113e0b..4d37746 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3969,12 +3969,16 @@ commit_trans:
+ 					      data_sinfo->flags, bytes, 1);
+ 		return -ENOSPC;
+ 	}
++	ret = btrfs_qgroup_reserve(root, bytes);
++	if (ret)
++		goto out;
+ 	data_sinfo->bytes_may_use += bytes;
+ 	trace_btrfs_space_reservation(root->fs_info, "space_info",
+ 				      data_sinfo->flags, bytes, 1);
++out:
+ 	spin_unlock(&data_sinfo->lock);
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ /*
+@@ -3991,6 +3995,7 @@ void btrfs_free_reserved_data_space(struct inode *inode, u64 bytes)
+ 	data_sinfo = root->fs_info->data_sinfo;
+ 	spin_lock(&data_sinfo->lock);
+ 	WARN_ON(data_sinfo->bytes_may_use < bytes);
++	btrfs_qgroup_free(root, bytes);
+ 	data_sinfo->bytes_may_use -= bytes;
+ 	trace_btrfs_space_reservation(root->fs_info, "space_info",
+ 				      data_sinfo->flags, bytes, 0);
+@@ -5391,8 +5396,7 @@ int btrfs_delalloc_reserve_metadata(struct inode *inode, u64 num_bytes)
+ 	spin_unlock(&BTRFS_I(inode)->lock);
+ 
+ 	if (root->fs_info->quota_enabled) {
+-		ret = btrfs_qgroup_reserve(root, num_bytes +
+-					   nr_extents * root->nodesize);
++		ret = btrfs_qgroup_reserve(root, nr_extents * root->nodesize);
+ 		if (ret)
+ 			goto out_fail;
+ 	}
+@@ -5400,8 +5404,7 @@ int btrfs_delalloc_reserve_metadata(struct inode *inode, u64 num_bytes)
+ 	ret = reserve_metadata_bytes(root, block_rsv, to_reserve, flush);
+ 	if (unlikely(ret)) {
+ 		if (root->fs_info->quota_enabled)
+-			btrfs_qgroup_free(root, num_bytes +
+-						nr_extents * root->nodesize);
++			btrfs_qgroup_free(root, nr_extents * root->nodesize);
+ 		goto out_fail;
+ 	}
+ 
+@@ -5522,8 +5525,7 @@ void btrfs_delalloc_release_metadata(struct inode *inode, u64 num_bytes)
+ 	trace_btrfs_space_reservation(root->fs_info, "delalloc",
+ 				      btrfs_ino(inode), to_free, 0);
+ 	if (root->fs_info->quota_enabled) {
+-		btrfs_qgroup_free(root, num_bytes +
+-					dropped * root->nodesize);
++		btrfs_qgroup_free(root, dropped * root->nodesize);
+ 	}
+ 
+ 	btrfs_block_rsv_release(root, &root->fs_info->delalloc_block_rsv,
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index fd105c1..faef1d6 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2549,7 +2549,6 @@ static long btrfs_fallocate(struct file *file, int mode,
+ {
+ 	struct inode *inode = file_inode(file);
+ 	struct extent_state *cached_state = NULL;
+-	struct btrfs_root *root = BTRFS_I(inode)->root;
+ 	u64 cur_offset;
+ 	u64 last_byte;
+ 	u64 alloc_start;
+@@ -2577,11 +2576,6 @@ static long btrfs_fallocate(struct file *file, int mode,
+ 	ret = btrfs_check_data_free_space(inode, alloc_end - alloc_start);
+ 	if (ret)
+ 		return ret;
+-	if (root->fs_info->quota_enabled) {
+-		ret = btrfs_qgroup_reserve(root, alloc_end - alloc_start);
+-		if (ret)
+-			goto out_reserve_fail;
+-	}
+ 
+ 	mutex_lock(&inode->i_mutex);
+ 	ret = inode_newsize_ok(inode, alloc_end);
+@@ -2674,6 +2668,7 @@ static long btrfs_fallocate(struct file *file, int mode,
+ 		} else if (actual_end > inode->i_size &&
+ 			   !(mode & FALLOC_FL_KEEP_SIZE)) {
+ 			struct btrfs_trans_handle *trans;
++			struct btrfs_root *root = BTRFS_I(inode)->root;
+ 
+ 			/*
+ 			 * We didn't need to allocate any more space, but we
+@@ -2710,9 +2705,6 @@ static long btrfs_fallocate(struct file *file, int mode,
+ 			     &cached_state, GFP_NOFS);
+ out:
+ 	mutex_unlock(&inode->i_mutex);
+-	if (root->fs_info->quota_enabled)
+-		btrfs_qgroup_free(root, alloc_end - alloc_start);
+-out_reserve_fail:
+ 	/* Let go of our reservation. */
+ 	btrfs_free_reserved_data_space(inode, alloc_end - alloc_start);
+ 	return ret;
+-- 
+cgit v0.10.2
+
