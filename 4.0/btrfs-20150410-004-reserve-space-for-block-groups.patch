@@ -1,0 +1,83 @@
+From cb723e491955ac11a1591ae25cada7c3b1470609 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Wed, 18 Feb 2015 08:06:57 -0800
+Subject: Btrfs: reserve space for block groups
+
+This changes our delayed refs calculations to include the space needed
+to write back dirty block groups.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 75f4bed..ae8db3ba 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -2657,7 +2657,8 @@ int btrfs_check_space_for_delayed_refs(struct btrfs_trans_handle *trans,
+ 	struct btrfs_block_rsv *global_rsv;
+ 	u64 num_heads = trans->transaction->delayed_refs.num_heads_ready;
+ 	u64 csum_bytes = trans->transaction->delayed_refs.pending_csums;
+-	u64 num_bytes;
++	u64 num_dirty_bgs = trans->transaction->num_dirty_bgs;
++	u64 num_bytes, num_dirty_bgs_bytes;
+ 	int ret = 0;
+ 
+ 	num_bytes = btrfs_calc_trans_metadata_size(root, 1);
+@@ -2666,17 +2667,21 @@ int btrfs_check_space_for_delayed_refs(struct btrfs_trans_handle *trans,
+ 		num_bytes += (num_heads - 1) * root->nodesize;
+ 	num_bytes <<= 1;
+ 	num_bytes += btrfs_csum_bytes_to_leaves(root, csum_bytes) * root->nodesize;
++	num_dirty_bgs_bytes = btrfs_calc_trans_metadata_size(root,
++							     num_dirty_bgs);
+ 	global_rsv = &root->fs_info->global_block_rsv;
+ 
+ 	/*
+ 	 * If we can't allocate any more chunks lets make sure we have _lots_ of
+ 	 * wiggle room since running delayed refs can create more delayed refs.
+ 	 */
+-	if (global_rsv->space_info->full)
++	if (global_rsv->space_info->full) {
++		num_dirty_bgs_bytes <<= 1;
+ 		num_bytes <<= 1;
++	}
+ 
+ 	spin_lock(&global_rsv->lock);
+-	if (global_rsv->reserved <= num_bytes)
++	if (global_rsv->reserved <= num_bytes + num_dirty_bgs_bytes)
+ 		ret = 1;
+ 	spin_unlock(&global_rsv->lock);
+ 	return ret;
+@@ -5408,6 +5413,7 @@ static int update_block_group(struct btrfs_trans_handle *trans,
+ 		if (list_empty(&cache->dirty_list)) {
+ 			list_add_tail(&cache->dirty_list,
+ 				      &trans->transaction->dirty_bgs);
++				trans->transaction->num_dirty_bgs++;
+ 			btrfs_get_block_group(cache);
+ 		}
+ 		spin_unlock(&trans->transaction->dirty_bgs_lock);
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 8b9eea8..234d606 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -251,6 +251,7 @@ loop:
+ 	INIT_LIST_HEAD(&cur_trans->switch_commits);
+ 	INIT_LIST_HEAD(&cur_trans->pending_ordered);
+ 	INIT_LIST_HEAD(&cur_trans->dirty_bgs);
++	cur_trans->num_dirty_bgs = 0;
+ 	spin_lock_init(&cur_trans->dirty_bgs_lock);
+ 	list_add_tail(&cur_trans->list, &fs_info->trans_list);
+ 	extent_io_tree_init(&cur_trans->dirty_pages,
+diff --git a/fs/btrfs/transaction.h b/fs/btrfs/transaction.h
+index 96b189b..4cb0ae2 100644
+--- a/fs/btrfs/transaction.h
++++ b/fs/btrfs/transaction.h
+@@ -64,6 +64,7 @@ struct btrfs_transaction {
+ 	struct list_head pending_ordered;
+ 	struct list_head switch_commits;
+ 	struct list_head dirty_bgs;
++	u64 num_dirty_bgs;
+ 	spinlock_t dirty_bgs_lock;
+ 	struct btrfs_delayed_ref_root delayed_refs;
+ 	int aborted;
+-- 
+cgit v0.10.2
+
