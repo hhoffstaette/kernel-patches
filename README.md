@@ -18,16 +18,17 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 
 **Current  series: >=4.0**
 
+- bfs: [BFS v462](http://ck-hack.blogspot.com/2015/04/bfs-462-linux-40-ck1.html)
 - btrfs: fixes from 3.19+/4.1+ (cleanups, data loss, performance)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: r8169 support for Byte Queue Limits & xmit_more
 - vfs: scalability fixes
 
 
-**Previous stable series: >=3.19.4**
+**Previous stable series: >=3.19.5**
 
-- bfs: BFS v461+ ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
-- btrfs: fixes from 3.19+/4.0+ (cleanups, data loss, performance)
+- bfs: [BFS v461](http://ck-hack.blogspot.de/2015/02/bfs-461-linux-319-ck1.html)
+- btrfs: fixes from 3.19+/4.1+ (cleanups, data loss, performance)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: misc. TCP fixes (TSO, pacing), r8169 support for Byte Queue Limits & xmit_more
 - vfs: scalability fixes
@@ -35,17 +36,17 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 
 **LTS series: >=3.18.11**
 
-- bfs: BFS v460+ ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
-- btrfs: fixes from 3.19/4.0+ (filesystem corruption, data loss, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM)
+- bfs: [BFS v460+](http://ck-hack.blogspot.de/2014/12/bfs-460-linux-318-ck1.html)
+- btrfs: fixes from 3.19/4.1+ (filesystem corruption, data loss, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: misc. TCP fixes (TSO, pacing), r8169 support for Byte Queue Limits & xmit_more
 - vfs: scalability fixes
 
 
-**LTS series: >=3.14.38**
+**LTS series: >=3.14.39**
 
-- bfs: BFS v454 + SMT-nice patch ([Con Colivas' low-latency CPU scheduler](http://ck-hack.blogspot.com/))
-- btrfs: >600 patches from 3.15-4.0+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace, TRIM and automatic GC of empty blockgroups. \o/
+- bfs: [BFS v454](http://ck-hack.blogspot.de/2014/08/bfs-453454455456-and-316-ck2.html) + [SMT-nice patches](http://ck-hack.blogspot.de/2014/08/smthyperthreading-nice-and-scheduling.html)
+- btrfs: >650 patches from 3.15-4.1+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace, TRIM and automatic GC of empty blockgroups. \o/
 - ext4: corruption fixes, `renameat2`
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - locking: cancellable/optimistic spinning MCS / queued rwlocks ([patch](http://bit.ly/Xq41R6), [article]( http://lwn.net/Articles/590243/))
