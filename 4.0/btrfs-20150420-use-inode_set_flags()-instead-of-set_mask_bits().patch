@@ -1,0 +1,33 @@
+From: Zhang Zhen <zhenzhang.zhang@huawei.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] fs/btrfs: use inode_set_flags() instead of set_mask_bits()
+Date: Mon, 20 Apr 2015 16:43:21 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44517>
+
+Use inode_set_flags() instead of set_mask_bits() according to
+commit 5f16f3225b062 ("ext4: atomically set inode->i_flags in
+ext4_set_inode_flags()").
+
+Signed-off-by: Zhang Zhen <zhenzhang.zhang@huawei.com>
+---
+ fs/btrfs/ioctl.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 74609b9..728b487 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -149,9 +149,8 @@ void btrfs_update_iflags(struct inode *inode)
+ 	if (ip->flags & BTRFS_INODE_DIRSYNC)
+ 		new_fl |= S_DIRSYNC;
+
+-	set_mask_bits(&inode->i_flags,
+-		      S_SYNC | S_APPEND | S_IMMUTABLE | S_NOATIME | S_DIRSYNC,
+-		      new_fl);
++	inode_set_flags(inode, new_fl,
++		      S_SYNC | S_APPEND | S_IMMUTABLE | S_NOATIME | S_DIRSYNC);
+ }
+
+ /*
+-- 
+1.9.1
