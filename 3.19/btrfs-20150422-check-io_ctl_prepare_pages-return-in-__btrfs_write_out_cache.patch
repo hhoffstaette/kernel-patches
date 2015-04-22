@@ -1,0 +1,57 @@
+From 2f2394735ce137d2862adaf9d0ce581136d5a157 Mon Sep 17 00:00:00 2001
+From: Omar Sandoval <osandov@osandov.com>
+Date: Tue, 24 Feb 2015 02:47:06 -0800
+Subject: btrfs: check io_ctl_prepare_pages return in __btrfs_write_out_cache
+
+If io_ctl_prepare_pages fails, the pages in io_ctl.pages are not valid.
+When we try to access them later, things will blow up in various ways.
+
+Also fix the comment about the return value, which is an errno on error,
+not -1, and update the cases where it was not.
+
+Reviewed-by: Liu Bo <bo.li.liu@oracle.com>
+Signed-off-by: Omar Sandoval <osandov@osandov.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index 253cb74..5a4f5d1 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -1212,7 +1212,7 @@ out:
+  *
+  * This function writes out a free space cache struct to disk for quick recovery
+  * on mount.  This will return 0 if it was successfull in writing the cache out,
+- * and -1 if it was not.
++ * or an errno if it was not.
+  */
+ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
+ 				   struct btrfs_free_space_ctl *ctl,
+@@ -1229,12 +1229,12 @@ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
+ 	int must_iput = 0;
+ 
+ 	if (!i_size_read(inode))
+-		return -1;
++		return -EIO;
+ 
+ 	WARN_ON(io_ctl->pages);
+ 	ret = io_ctl_init(io_ctl, inode, root, 1);
+ 	if (ret)
+-		return -1;
++		return ret;
+ 
+ 	if (block_group && (block_group->flags & BTRFS_BLOCK_GROUP_DATA)) {
+ 		down_write(&block_group->data_rwsem);
+@@ -1252,7 +1252,9 @@ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
+ 	}
+ 
+ 	/* Lock all pages first so we can lock the extent safely. */
+-	io_ctl_prepare_pages(io_ctl, inode, 0);
++	ret = io_ctl_prepare_pages(io_ctl, inode, 0);
++	if (ret)
++		goto out;
+ 
+ 	lock_extent_bits(&BTRFS_I(inode)->io_tree, 0, i_size_read(inode) - 1,
+ 			 0, &cached_state);
+-- 
+cgit v0.10.2
+
