@@ -1,0 +1,36 @@
+From c1e31ffc317e4c28d242b1d961c9c6fe673c0377 Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Sat, 18 Apr 2015 05:22:48 -0700
+Subject: Btrfs: don't check for delalloc_bytes in cache_save_setup
+
+Now that we're doing free space cache writeback outside the critical
+section in the commit, there is a bigger window for delalloc_bytes to
+be added after a cache has been written.  find_free_extent may do this
+without putting the block group back into the dirty list, and also
+without a transaction running.
+
+Checking for delalloc_bytes in cache_save_setup means we might leave the
+cache marked as written without invalidating it.  Consistency checks
+during mount will toss the cache, but it's better to get rid of the
+check in cache_save_setup and let it get invalidated by the checks
+already done during cache write out.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 1eef4ee..5fe2d0b 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3305,8 +3305,7 @@ again:
+ 
+ 	spin_lock(&block_group->lock);
+ 	if (block_group->cached != BTRFS_CACHE_FINISHED ||
+-	    !btrfs_test_opt(root, SPACE_CACHE) ||
+-	    block_group->delalloc_bytes) {
++	    !btrfs_test_opt(root, SPACE_CACHE)) {
+ 		/*
+ 		 * don't bother trying to write stuff out _if_
+ 		 * a) we're not cached,
+-- 
+cgit v0.10.2
+
