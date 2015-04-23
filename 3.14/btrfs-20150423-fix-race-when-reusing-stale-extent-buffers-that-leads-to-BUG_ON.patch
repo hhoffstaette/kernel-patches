@@ -1,0 +1,214 @@
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix race when reusing stale extent buffers that leads to BUG_ON
+Date: Thu, 23 Apr 2015 11:28:48 +0100
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44611>
+
+There's a race between releasing extent buffers that are flagged as stale
+and recycling them that makes us it the following BUG_ON at
+btrfs_release_extent_buffer_page:
+
+    BUG_ON(extent_buffer_under_io(eb))
+
+The BUG_ON is triggered because the extent buffer has the flag
+EXTENT_BUFFER_DIRTY set as a consequence of having been reused and made
+dirty by another concurrent task.
+
+Here follows a sequence of steps that leads to the BUG_ON.
+
+      CPU 0                                                    CPU 1                                                CPU 2
+
+path->nodes[0] == eb X
+X->refs == 2 (1 for the tree, 1 for the path)
+btrfs_header_generation(X) == current trans id
+flag EXTENT_BUFFER_DIRTY set on X
+
+btrfs_release_path(path)
+    unlocks X
+
+                                                      reads eb X
+                                                         X->refs incremented to 3
+                                                      locks eb X
+                                                      btrfs_del_items(X)
+                                                         X becomes empty
+                                                         clean_tree_block(X)
+                                                             clear EXTENT_BUFFER_DIRTY from X
+                                                         btrfs_del_leaf(X)
+                                                             unlocks X
+                                                             extent_buffer_get(X)
+                                                                X->refs incremented to 4
+                                                             btrfs_free_tree_block(X)
+                                                                X's range is not pinned
+                                                                X's range added to free
+                                                                  space cache
+                                                             free_extent_buffer_stale(X)
+                                                                lock X->refs_lock
+                                                                set EXTENT_BUFFER_STALE on X
+                                                                release_extent_buffer(X)
+                                                                    X->refs decremented to 3
+                                                                    unlocks X->refs_lock
+                                                      btrfs_release_path()
+                                                         unlocks X
+                                                         free_extent_buffer(X)
+                                                             X->refs becomes 2
+
+                                                                                                      __btrfs_cow_block(Y)
+                                                                                                          btrfs_alloc_tree_block()
+                                                                                                              btrfs_reserve_extent()
+                                                                                                                  find_free_extent()
+                                                                                                                      gets offset == X->start
+                                                                                                              btrfs_init_new_buffer(X->start)
+                                                                                                                  btrfs_find_create_tree_block(X->start)
+                                                                                                                      alloc_extent_buffer(X->start)
+                                                                                                                          find_extent_buffer(X->start)
+                                                                                                                              finds eb X in radix tree
+
+    free_extent_buffer(X)
+        lock X->refs_lock
+            test X->refs == 2
+            test bit EXTENT_BUFFER_STALE is set
+            test !extent_buffer_under_io(eb)
+
+                                                                                                                              increments X->refs to 3
+                                                                                                                              mark_extent_buffer_accessed(X)
+                                                                                                                                  check_buffer_tree_ref(X)
+                                                                                                                                    --> does nothing,
+                                                                                                                                        X->refs >= 2 and
+                                                                                                                                        EXTENT_BUFFER_TREE_REF
+                                                                                                                                        is set in X
+                                                                                                              clear EXTENT_BUFFER_STALE from X
+                                                                                                              locks X
+                                                                                                          btrfs_mark_buffer_dirty()
+                                                                                                              set_extent_buffer_dirty(X)
+                                                                                                                  check_buffer_tree_ref(X)
+                                                                                                                     --> does nothing, X->refs >= 2 and
+                                                                                                                         EXTENT_BUFFER_TREE_REF is set
+                                                                                                                  sets EXTENT_BUFFER_DIRTY on X
+
+            test and clear EXTENT_BUFFER_TREE_REF
+            decrements X->refs to 2
+        release_extent_buffer(X)
+            decrements X->refs to 1
+            unlock X->refs_lock
+
+                                                                                                      unlock X
+                                                                                                      free_extent_buffer(X)
+                                                                                                          lock X->refs_lock
+                                                                                                          release_extent_buffer(X)
+                                                                                                              decrements X->refs to 0
+                                                                                                              btrfs_release_extent_buffer_page(X)
+                                                                                                                   BUG_ON(extent_buffer_under_io(X))
+                                                                                                                       --> EXTENT_BUFFER_DIRTY set on X
+
+Fix this by making find_extent buffer wait for any ongoing task currently
+executing free_extent_buffer()/free_extent_buffer_stale() if the extent
+buffer has the stale flag set.
+A more clean alternative would be to always increment the extent buffer's
+reference count while holding its refs_lock spinlock but find_extent_buffer
+is a performance critical area and that would cause lock contention whenever
+multiple tasks search for the same extent buffer concurrently.
+
+A build server running a SLES 12 kernel (3.12 kernel + over 450 upstream
+btrfs patches backported from newer kernels) was hitting this often:
+
+[1212302.461948] kernel BUG at ../fs/btrfs/extent_io.c:4507!
+(...)
+[1212302.470219] CPU: 1 PID: 19259 Comm: bs_sched Not tainted 3.12.36-38-default #1
+[1212302.540792] Hardware name: Supermicro PDSM4/PDSM4, BIOS 6.00 04/17/2006
+[1212302.540792] task: ffff8800e07e0100 ti: ffff8800d6412000 task.ti: ffff8800d6412000
+[1212302.540792] RIP: 0010:[<ffffffffa0507081>]  [<ffffffffa0507081>] btrfs_release_extent_buffer_page.constprop.51+0x101/0x110 [btrfs]
+(...)
+[1212302.630008] Call Trace:
+[1212302.630008]  [<ffffffffa05070cd>] release_extent_buffer+0x3d/0xa0 [btrfs]
+[1212302.630008]  [<ffffffffa04c2d9d>] btrfs_release_path+0x1d/0xa0 [btrfs]
+[1212302.630008]  [<ffffffffa04c5c7e>] read_block_for_search.isra.33+0x13e/0x3a0 [btrfs]
+[1212302.630008]  [<ffffffffa04c8094>] btrfs_search_slot+0x3f4/0xa80 [btrfs]
+[1212302.630008]  [<ffffffffa04cf5d8>] lookup_inline_extent_backref+0xf8/0x630 [btrfs]
+[1212302.630008]  [<ffffffffa04d13dd>] __btrfs_free_extent+0x11d/0xc40 [btrfs]
+[1212302.630008]  [<ffffffffa04d64a4>] __btrfs_run_delayed_refs+0x394/0x11d0 [btrfs]
+[1212302.630008]  [<ffffffffa04db379>] btrfs_run_delayed_refs.part.66+0x69/0x280 [btrfs]
+[1212302.630008]  [<ffffffffa04ed2ad>] __btrfs_end_transaction+0x2ad/0x3d0 [btrfs]
+[1212302.630008]  [<ffffffffa04f7505>] btrfs_evict_inode+0x4a5/0x500 [btrfs]
+[1212302.630008]  [<ffffffff811b9e28>] evict+0xa8/0x190
+[1212302.630008]  [<ffffffff811b0330>] do_unlinkat+0x1a0/0x2b0
+
+I was also able to reproduce this on a 3.19 kernel, corresponding to Chris'
+integration branch from about a month ago, running the following stress
+test on a qemu/kvm guest (with 4 virtual cpus and 16Gb of ram):
+
+  while true; do
+     mkfs.btrfs -l 4096 -f -b `expr 20 \* 1024 \* 1024 \* 1024` /dev/sdd
+     mount /dev/sdd /mnt
+     snapshot_cmd="btrfs subvolume snapshot -r /mnt"
+     snapshot_cmd="$snapshot_cmd /mnt/snap_\`date +'%H_%M_%S_%N'\`"
+     fsstress -d /mnt -n 25000 -p 8 -x "$snapshot_cmd" -X 100
+     umount /mnt
+  done
+
+Which usually triggers the BUG_ON within less than 24 hours:
+
+[49558.618097] ------------[ cut here ]------------
+[49558.619732] kernel BUG at fs/btrfs/extent_io.c:4551!
+(...)
+[49558.620031] CPU: 3 PID: 23908 Comm: fsstress Tainted: G        W      3.19.0-btrfs-next-7+ #3
+[49558.620031] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.7.5-0-ge51488c-20140602_164612-nilsson.home.kraxel.org 04/01/2014
+[49558.620031] task: ffff8800319fc0d0 ti: ffff880220da8000 task.ti: ffff880220da8000
+[49558.620031] RIP: 0010:[<ffffffffa0476b1a>]  [<ffffffffa0476b1a>] btrfs_release_extent_buffer_page+0x20/0xe9 [btrfs]
+(...)
+[49558.620031] Call Trace:
+[49558.620031]  [<ffffffffa0476c73>] release_extent_buffer+0x90/0xd3 [btrfs]
+[49558.620031]  [<ffffffff8142b10c>] ? _raw_spin_lock+0x3b/0x43
+[49558.620031]  [<ffffffffa0477052>] ? free_extent_buffer+0x37/0x94 [btrfs]
+[49558.620031]  [<ffffffffa04770ab>] free_extent_buffer+0x90/0x94 [btrfs]
+[49558.620031]  [<ffffffffa04396d5>] btrfs_release_path+0x4a/0x69 [btrfs]
+[49558.620031]  [<ffffffffa0444907>] __btrfs_free_extent+0x778/0x80c [btrfs]
+[49558.620031]  [<ffffffffa044a485>] __btrfs_run_delayed_refs+0xad2/0xc62 [btrfs]
+[49558.728054]  [<ffffffff811420d5>] ? kmemleak_alloc_recursive.constprop.52+0x16/0x18
+[49558.728054]  [<ffffffffa044c1e8>] btrfs_run_delayed_refs+0x6d/0x1ba [btrfs]
+[49558.728054]  [<ffffffffa045917f>] ? join_transaction.isra.9+0xb9/0x36b [btrfs]
+[49558.728054]  [<ffffffffa045a75c>] btrfs_commit_transaction+0x4c/0x981 [btrfs]
+[49558.728054]  [<ffffffffa0434f86>] btrfs_sync_fs+0xd5/0x10d [btrfs]
+[49558.728054]  [<ffffffff81155923>] ? iterate_supers+0x60/0xc4
+[49558.728054]  [<ffffffff8117966a>] ? do_sync_work+0x91/0x91
+[49558.728054]  [<ffffffff8117968a>] sync_fs_one_sb+0x20/0x22
+[49558.728054]  [<ffffffff81155939>] iterate_supers+0x76/0xc4
+[49558.728054]  [<ffffffff811798e8>] sys_sync+0x55/0x83
+[49558.728054]  [<ffffffff8142bbd2>] system_call_fastpath+0x12/0x17
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/extent_io.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 62e8706..46d6e68 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4768,6 +4768,25 @@ struct extent_buffer *find_extent_buffer(struct btrfs_fs_info *fs_info,
+ 			       start >> PAGE_CACHE_SHIFT);
+ 	if (eb && atomic_inc_not_zero(&eb->refs)) {
+ 		rcu_read_unlock();
++		/*
++		 * Lock our eb's refs_lock to avoid races with
++		 * free_extent_buffer. When we get our eb it might be flagged
++		 * with EXTENT_BUFFER_STALE and another task running
++		 * free_extent_buffer might have seen that flag set,
++		 * eb->refs == 2, that the buffer isn't under IO (dirty and
++		 * writeback flags not set) and it's still in the tree (flag
++		 * EXTENT_BUFFER_TREE_REF set), therefore being in the process
++		 * of decrementing the extent buffer's reference count twice.
++		 * So here we could race and increment the eb's reference count,
++		 * clear its stale flag, mark it as dirty and drop our reference
++		 * before the other task finishes executing free_extent_buffer,
++		 * which would later result in an attempt to free an extent
++		 * buffer that is dirty.
++		 */
++		if (test_bit(EXTENT_BUFFER_STALE, &eb->bflags)) {
++			spin_lock(&eb->refs_lock);
++			spin_unlock(&eb->refs_lock);
++		}
+ 		mark_extent_buffer_accessed(eb, NULL);
+ 		return eb;
+ 	}
+-- 
+2.1.3
