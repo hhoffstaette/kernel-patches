@@ -16,7 +16,7 @@ release on [kernel.org](https://www.kernel.org/); if it does not then **please**
 a bug here on Github. Older release series will only see sporadic updates, if any.
 Backport requests for specific patches/features from Linus' mainline tree are also welcome!
 
-**Current  series: >=4.0**
+**Current series: >=4.0**
 
 - bfs: [BFS v462](http://ck-hack.blogspot.com/2015/04/bfs-462-linux-40-ck1.html)
 - btrfs: fixes from 3.19+/4.1+ (cleanups, data loss, performance)
@@ -34,7 +34,7 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 - vfs: scalability fixes
 
 
-**LTS series: >=3.18.11**
+**LTS series: >=3.18.13**
 
 - bfs: [BFS v460+](http://ck-hack.blogspot.de/2014/12/bfs-460-linux-318-ck1.html)
 - btrfs: fixes from 3.19/4.1+ (filesystem corruption, data loss, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM)
