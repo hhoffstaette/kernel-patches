@@ -1,0 +1,51 @@
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH v2 1/2] btrfs: Fix superblock csum type check.
+Date: Fri, 24 Apr 2015 09:12:40 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44661>
+
+Old csum type check is wrong and can't catch csum_type 1(not supported).
+
+Fix it to avoid hostile 0 division.
+
+Reported-by: Lukas Lueg <lukas.lueg@gmail.com>
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+---
+Changelog:
+v2:
+   Fix existing codes other than adding new one.
+---
+ fs/btrfs/ctree.h   | 1 +
+ fs/btrfs/disk-io.c | 4 ++--
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index f9c89ca..d6f3aa0 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -173,6 +173,7 @@ struct btrfs_ordered_sum;
+ 
+ /* csum types */
+ #define BTRFS_CSUM_TYPE_CRC32	0
++#define BTRFS_CSUM_LAST_TYPE	0
+ 
+ static int btrfs_csum_sizes[] = { 4, 0 };
+ 
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 639f266..e33a01b 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -426,9 +426,9 @@ static int btrfs_check_super_csum(char *raw_disk_sb)
+ 		}
+ 	}
+ 
+-	if (csum_type >= ARRAY_SIZE(btrfs_csum_sizes)) {
++	if (csum_type > BTRFS_CSUM_LAST_TYPE) {
+ 		printk(KERN_ERR "BTRFS: unsupported checksum algorithm %u\n",
+-				csum_type);
++		       csum_type);
+ 		ret = 1;
+ 	}
+ 
+-- 
+2.3.5
