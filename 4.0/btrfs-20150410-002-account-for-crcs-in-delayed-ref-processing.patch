@@ -126,7 +126,7 @@ index 41e5812..a6f88eb 100644
  			locked_ref = NULL;
  		}
 @@ -2626,11 +2632,31 @@ static inline u64 heads_to_leaves(struct btrfs_root *root, u64 heads)
- 	return div64_u64(num_bytes, BTRFS_LEAF_DATA_SIZE(root));
+ 	return div_u64(num_bytes, BTRFS_LEAF_DATA_SIZE(root));
  }
  
 +/*
@@ -179,7 +179,7 @@ index 41e5812..a6f88eb 100644
  	    BTRFS_I(inode)->csum_bytes == 0)
  		return 0;
  
--	old_csums = (int)div64_u64(BTRFS_I(inode)->csum_bytes, root->sectorsize);
+-	old_csums = (int)div_u64(BTRFS_I(inode)->csum_bytes, root->sectorsize);
 +	old_csums = csum_bytes_to_leaves(root, BTRFS_I(inode)->csum_bytes);
 +
  	if (reserve)
@@ -187,10 +187,10 @@ index 41e5812..a6f88eb 100644
  	else
  		BTRFS_I(inode)->csum_bytes -= num_bytes;
 -	csum_size = BTRFS_LEAF_DATA_SIZE(root) - sizeof(struct btrfs_item);
--	num_csums_per_leaf = (int)div64_u64(csum_size,
+-	num_csums_per_leaf = (int)div_u64(csum_size,
 -					    sizeof(struct btrfs_csum_item) +
 -					    sizeof(struct btrfs_disk_key));
--	num_csums = (int)div64_u64(BTRFS_I(inode)->csum_bytes, root->sectorsize);
+-	num_csums = (int)div_u64(BTRFS_I(inode)->csum_bytes, root->sectorsize);
 -	num_csums = num_csums + num_csums_per_leaf - 1;
 -	num_csums = num_csums / num_csums_per_leaf;
 -
