@@ -43,7 +43,7 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 - vfs: scalability fixes
 
 
-**LTS series: >=3.14.39**
+**LTS series: >=3.14.40**
 
 - bfs: [BFS v454](http://ck-hack.blogspot.de/2014/08/bfs-453454455456-and-316-ck2.html) + [SMT-nice patches](http://ck-hack.blogspot.de/2014/08/smthyperthreading-nice-and-scheduling.html)
 - btrfs: >650 patches from 3.15-4.1+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace, TRIM and automatic GC of empty blockgroups. \o/
