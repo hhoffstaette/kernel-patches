@@ -19,7 +19,7 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 **Current stable series: >=4.0.2**
 
 - bfs: [BFS v462](http://ck-hack.blogspot.com/2015/04/bfs-462-linux-40-ck1.html)
-- btrfs: fixes from 3.19+/4.1+ (cleanups, data loss, performance)
+- btrfs: fixes from 3.19+/4.1+ (cleanups, data loss, performance, TRIM)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: r8169 support for Byte Queue Limits & xmit_more
 - vfs: scalability fixes
@@ -28,7 +28,7 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 **Previous stable series: >=3.19.7**
 
 - bfs: [BFS v461](http://ck-hack.blogspot.de/2015/02/bfs-461-linux-319-ck1.html)
-- btrfs: fixes from 3.19+/4.1+ (cleanups, data loss, performance)
+- btrfs: fixes from 3.19+/4.1+ (cleanups, data loss, performance, TRIM)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: misc. TCP fixes (TSO, pacing), r8169 support for Byte Queue Limits & xmit_more
 - vfs: scalability fixes
@@ -37,7 +37,7 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 **LTS series: >=3.18.13**
 
 - bfs: [BFS v460+](http://ck-hack.blogspot.de/2014/12/bfs-460-linux-318-ck1.html)
-- btrfs: fixes from 3.19-4.1+ (filesystem corruption, data loss, error handling, RAID 5/6 scrub/replace, block group GC, improved TRIM)
+- btrfs: fixes from 3.19-4.1+ (filesystem corruption, data loss, error handling, RAID 5/6 scrub/replace, block group GC, TRIM)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: misc. TCP fixes (TSO, pacing), r8169 support for Byte Queue Limits & xmit_more
 - vfs: scalability fixes
