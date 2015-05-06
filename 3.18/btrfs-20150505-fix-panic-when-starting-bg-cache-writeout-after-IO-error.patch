@@ -1,0 +1,105 @@
+From: Filipe Manana <fdmanana@suse.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix panic when starting bg cache writeout after IO error
+Date: Tue,  5 May 2015 19:03:10 +0100
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44908>
+
+When waiting for the writeback of block group cache we returned
+immediately if there was an error during writeback without waiting
+for the ordered extent to complete. This left a short time window
+where if some other task attempts to start the writeout for the same
+block group cache it can attempt to add a new ordered extent, starting
+at the same offset (0) before the previous one is removed from the
+ordered tree, causing an ordered tree panic (calls BUG()).
+
+This normally doesn't happen in other write paths, such as buffered
+writes or direct IO writes for regular files, since before marking
+page ranges dirty we lock the ranges and wait for any ordered extents
+within the range to complete first.
+
+Fix this by making btrfs_wait_ordered_range() not return immediately
+if it gets an error from the writeback, waiting for all ordered extents
+to complete first.
+
+This issue happened often when running the fstest btrfs/088 and it's
+easy to trigger it by running in a loop until the panic happens:
+
+  for ((i = 1; i <= 10000; i++)) do ./check btrfs/088 ; done
+
+[17156.862573] BTRFS critical (device sdc): panic in ordered_data_tree_panic:70: Inconsistency in ordered tree at offset 0 (errno=-17 Object already exists)
+[17156.864052] ------------[ cut here ]------------
+[17156.864052] kernel BUG at fs/btrfs/ordered-data.c:70!
+(...)
+[17156.864052] Call Trace:
+[17156.864052]  [<ffffffffa03876e3>] btrfs_add_ordered_extent+0x12/0x14 [btrfs]
+[17156.864052]  [<ffffffffa03787e2>] run_delalloc_nocow+0x5bf/0x747 [btrfs]
+[17156.864052]  [<ffffffffa03789ff>] run_delalloc_range+0x95/0x353 [btrfs]
+[17156.864052]  [<ffffffffa038b7fe>] writepage_delalloc.isra.16+0xb9/0x13f [btrfs]
+[17156.864052]  [<ffffffffa038d75b>] __extent_writepage+0x129/0x1f7 [btrfs]
+[17156.864052]  [<ffffffffa038da5a>] extent_write_cache_pages.isra.15.constprop.28+0x231/0x2f4 [btrfs]
+[17156.864052]  [<ffffffff810ad2af>] ? __module_text_address+0x12/0x59
+[17156.864052]  [<ffffffff8107d33d>] ? trace_hardirqs_on+0xd/0xf
+[17156.864052]  [<ffffffffa038df76>] extent_writepages+0x4b/0x5c [btrfs]
+[17156.864052]  [<ffffffff81144431>] ? kmem_cache_free+0x9b/0xce
+[17156.864052]  [<ffffffffa0376a46>] ? btrfs_submit_direct+0x3fc/0x3fc [btrfs]
+[17156.864052]  [<ffffffffa0389cd6>] ? free_extent_state+0x8c/0xc1 [btrfs]
+[17156.864052]  [<ffffffffa0374871>] btrfs_writepages+0x28/0x2a [btrfs]
+[17156.864052]  [<ffffffff8110c4c8>] do_writepages+0x23/0x2c
+[17156.864052]  [<ffffffff81102f36>] __filemap_fdatawrite_range+0x5a/0x61
+[17156.864052]  [<ffffffff81102f6e>] filemap_fdatawrite_range+0x13/0x15
+[17156.864052]  [<ffffffffa0383ef7>] btrfs_fdatawrite_range+0x21/0x48 [btrfs]
+[17156.864052]  [<ffffffffa03ab89e>] __btrfs_write_out_cache.isra.14+0x2d9/0x3a7 [btrfs]
+[17156.864052]  [<ffffffffa03ac1ab>] ? btrfs_write_out_cache+0x41/0xdc [btrfs]
+[17156.864052]  [<ffffffffa03ac1fd>] btrfs_write_out_cache+0x93/0xdc [btrfs]
+[17156.864052]  [<ffffffffa0363847>] ? btrfs_start_dirty_block_groups+0x13a/0x2b2 [btrfs]
+[17156.864052]  [<ffffffffa03638e6>] btrfs_start_dirty_block_groups+0x1d9/0x2b2 [btrfs]
+[17156.864052]  [<ffffffff8107d33d>] ? trace_hardirqs_on+0xd/0xf
+[17156.864052]  [<ffffffffa037209e>] btrfs_commit_transaction+0x130/0x9c9 [btrfs]
+[17156.864052]  [<ffffffffa034c748>] btrfs_sync_fs+0xe1/0x12d [btrfs]
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/ordered-data.c | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
+index 6c4f8e7..8f391fd 100644
+--- a/fs/btrfs/ordered-data.c
++++ b/fs/btrfs/ordered-data.c
+@@ -736,6 +736,7 @@ void btrfs_start_ordered_extent(struct inode *inode,
+ int btrfs_wait_ordered_range(struct inode *inode, u64 start, u64 len)
+ {
+ 	int ret = 0;
++	int ret_wb = 0;
+ 	u64 end;
+ 	u64 orig_end;
+ 	struct btrfs_ordered_extent *ordered;
+@@ -755,9 +756,14 @@ int btrfs_wait_ordered_range(struct inode *inode, u64 start, u64 len)
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = filemap_fdatawait_range(inode->i_mapping, start, orig_end);
+-	if (ret)
+-		return ret;
++	/*
++	 * If we have a writeback error don't return immediately. Wait first
++	 * for any ordered extents that haven't completed yet. This is to make
++	 * sure no one can dirty the same page ranges and call writepages()
++	 * before the ordered extents complete - to avoid failures (-EEXIST)
++	 * when adding the new ordered extents to the ordered tree.
++	 */
++	ret_wb = filemap_fdatawait_range(inode->i_mapping, start, orig_end);
+ 
+ 	end = orig_end;
+ 	while (1) {
+@@ -781,7 +787,7 @@ int btrfs_wait_ordered_range(struct inode *inode, u64 start, u64 len)
+ 			break;
+ 		end--;
+ 	}
+-	return ret;
++	return ret_wb ? ret_wb : ret;
+ }
+ 
+ /*
+-- 
+2.1.3
