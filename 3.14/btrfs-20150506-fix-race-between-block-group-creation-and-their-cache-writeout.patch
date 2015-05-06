@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: fix race between block group creation and their cache writeout
-Date: Wed,  6 May 2015 11:22:36 +0100
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44939>
+Subject: [PATCH v2] Btrfs: fix race between block group creation and their cache writeout
+Date: Wed,  6 May 2015 16:15:09 +0100
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44944>
 
 So creating a block group has 2 distinct phases:
 
@@ -34,15 +34,12 @@ write_one_cache_group() is called, it won't find the block group items
 in the extent tree and abort the current transaction with -ENOENT,
 turning the fs into readonly mode and require a remount.
 
-Fix this by adding the block group items to the extent tree in phase 1,
-before the new block groups can be used for space allocations by concurrent
-tasks. This is a simple solution and is not more expensive than doing
-it at phase 2 - alternatively if write_one_cache_group() couldn't find
-a block group's item in the extent tree, we could not abort the transaction
-and re-add the block group to the dirty list - but this is slightly more
-complex and implies writing the block again in the commit critical section,
-not to mention hiding other potential bugs related to missing block group
-items in the extent tree.
+Fix this by ignoring -ENOENT when looking for block group items in the
+extent tree when we attempt to start the writeout of the block group
+caches outside the critical section of the transaction commit. We will
+try again later during the critical section and if there we still don't
+find the block group item in the extent tree, we then abort the current
+transaction.
 
 This issue happened twice, once while running fstests btrfs/067 and once
 for btrfs/078, which produced the following trace:
@@ -75,60 +72,75 @@ Fixes: 1bbc621ef284 ("Btrfs: allow block group cache writeout
 
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/extent-tree.c | 27 +++++++++++++++++++++------
- 1 file changed, 21 insertions(+), 6 deletions(-)
+
+V2: Change the approach. Former version inserted the block group items into the
+    extent tree while were holding the chunks mutex, which can be a problem if
+    the insertion into the extent tree requires allocating a new metadata block
+    group (deadlock, attempting to acquire the chunks mutex again).
+    So just make btrfs_start_dirty_block_groups() skip block groups for which
+    the item is missing in the extent tree - we'll try it again in the critical
+    section of the transaction commit.
+
+ fs/btrfs/extent-tree.c | 31 +++++++++++++++++++++++++++----
+ 1 file changed, 27 insertions(+), 4 deletions(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 0ec8e22..d916778 100644
+index 0ec8e22..7effed6 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -9466,10 +9466,6 @@ void btrfs_create_pending_block_groups(struct btrfs_trans_handle *trans,
- 		memcpy(&key, &block_group->key, sizeof(key));
- 		spin_unlock(&block_group->lock);
+@@ -3180,8 +3180,6 @@ static int write_one_cache_group(struct btrfs_trans_handle *trans,
+ 	btrfs_mark_buffer_dirty(leaf);
+ fail:
+ 	btrfs_release_path(path);
+-	if (ret)
+-		btrfs_abort_transaction(trans, root, ret);
+ 	return ret;
  
--		ret = btrfs_insert_item(trans, extent_root, &key, &item,
--					sizeof(item));
--		if (ret)
--			btrfs_abort_transaction(trans, extent_root, ret);
- 		ret = btrfs_finish_chunk_alloc(trans, extent_root,
- 					       key.objectid, key.offset);
- 		if (ret)
-@@ -9490,8 +9486,6 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
+ }
+@@ -3487,8 +3485,30 @@ again:
+ 				ret = 0;
+ 			}
+ 		}
+-		if (!ret)
++		if (!ret) {
+ 			ret = write_one_cache_group(trans, root, path, cache);
++			/*
++			 * Our block group might still be attached to the list
++			 * of new block groups in the transaction handle of some
++			 * other task (struct btrfs_trans_handle->new_bgs). This
++			 * means its block group item isn't yet in the extent
++			 * tree. If this happens ignore the error, as we will
++			 * try again later in the critical section of the
++			 * transaction commit.
++			 */
++			if (ret == -ENOENT) {
++				ret = 0;
++				spin_lock(&cur_trans->dirty_bgs_lock);
++				if (list_empty(&cache->dirty_list)) {
++					list_add_tail(&cache->dirty_list,
++						      &cur_trans->dirty_bgs);
++					btrfs_get_block_group(cache);
++				}
++				spin_unlock(&cur_trans->dirty_bgs_lock);
++			} else if (ret) {
++				btrfs_abort_transaction(trans, root, ret);
++			}
++		}
  
- 	extent_root = root->fs_info->extent_root;
+ 		/* if its not on the io list, we need to put the block group */
+ 		if (should_put)
+@@ -3597,8 +3617,11 @@ int btrfs_write_dirty_block_groups(struct btrfs_trans_handle *trans,
+ 				ret = 0;
+ 			}
+ 		}
+-		if (!ret)
++		if (!ret) {
+ 			ret = write_one_cache_group(trans, root, path, cache);
++			if (ret)
++				btrfs_abort_transaction(trans, root, ret);
++		}
  
--	btrfs_set_log_full_commit(root->fs_info, trans);
--
- 	cache = btrfs_create_block_group_cache(root, chunk_offset, size);
- 	if (!cache)
- 		return -ENOMEM;
-@@ -9519,6 +9513,27 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
- 
- 	free_excluded_extents(root, cache);
- 
-+	ret = btrfs_insert_item(trans, extent_root, &cache->key, &cache->item,
-+				sizeof(cache->item));
-+	if (ret) {
-+		btrfs_remove_free_space_cache(cache);
-+		btrfs_put_block_group(cache);
-+		btrfs_abort_transaction(trans, root, ret);
-+		return ret;
-+	}
-+
-+	/*
-+	 * We must make sure our block group item is in the extent tree before
-+	 * we force fsyncs to commit the current transaction and before the
-+	 * block group is made visible to other tasks that are about to allocate
-+	 * space (and therefore mark our block group dirty). This is because if
-+	 * we didn't do this, other tasks could start the writeout of the block
-+	 * group caches (btrfs_start_dirty_block_groups()) and not find our
-+	 * block group's item in the extent tree, resulting in an abortion of
-+	 * the current transaction and turning the fs into readonly mode.
-+	 */
-+	btrfs_set_log_full_commit(root->fs_info, trans);
-+
- 	ret = btrfs_add_block_group_cache(root->fs_info, cache);
- 	if (ret) {
- 		btrfs_remove_free_space_cache(cache);
+ 		/* if its not on the io list, we need to put the block group */
+ 		if (should_put)
 -- 
 2.1.3
