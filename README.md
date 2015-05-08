@@ -25,7 +25,7 @@ Backport requests for specific patches/features from Linus' mainline tree are al
 - vfs: scalability fixes
 
 
-**Previous stable series: >=3.19.7**
+**Previous stable series: 3.19.8 (EOL)**
 
 - bfs: [BFS v461](http://ck-hack.blogspot.de/2015/02/bfs-461-linux-319-ck1.html)
 - btrfs: fixes from 3.19+/4.1+ (cleanups, data loss, performance, TRIM)
