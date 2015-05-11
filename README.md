@@ -8,13 +8,19 @@ These patches were born out of an initial need to apply "just a few fixes"
 to [btrfs](https://btrfs.wiki.kernel.org/), and eventually grew to include both
 additional features and performance/scalability improvements to the entire kernel.
 
-To apply over a -stable release simply run `patch -s -p1 < ../kernel-patches/version/*.patch`
-when in the kernel directory, and build as usual.
+To apply over a -stable release:
+
+- check out the branch you want, or use master for the latest stable version
+- run `patch -s -p1 < ../kernel-patches/version/*.patch` when in the kernel directory
+- build as usual
+
+You can disable e.g. BFS (but why? :) via menuconfig, but all patches of a series
+must be applied, as some have interdependencies (e.g. btrfs/block/vfs layers).
 
 A patch series should apply cleanly to the *latest* version of the respective -stable
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
-Backport requests for specific patches/features from Linus' mainline tree are also welcome!
+
 
 **Current stable series: >=4.0.2**
 
