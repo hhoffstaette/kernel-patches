@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: fix block group ->space_info null pointer dereference
-Date: Mon, 11 May 2015 17:16:20 +0100
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45087>
+Subject: [PATCH v2] Btrfs: fix block group ->space_info null pointer dereference
+Date: Mon, 11 May 2015 17:33:33 +0100
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45090>
 
 When we create a block group we add it to the rbtree of block groups
 before setting its ->space_info field (while it's NULL). This is
@@ -80,11 +80,14 @@ the block group to the rbtree.
 
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
+
+V2: Fixed a few typos/grammar in the comments. Node code changes.
+
  fs/btrfs/extent-tree.c | 17 +++++++++++++++++
  1 file changed, 17 insertions(+)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 7effed6..2c7ac17 100644
+index 7effed6..1678f7f 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
 @@ -9542,6 +9542,19 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
@@ -92,9 +95,9 @@ index 7effed6..2c7ac17 100644
  	free_excluded_extents(root, cache);
  
 +	/*
-+	 * Call to ensure space_info object is created, don't update its
-+	 * counters just yet. We want our block group to be added to the rbtree
-+	 * with its ->space_info set.
++	 * Call to ensure the corresponding space_info object is created and
++	 * assigned to our block group, but don't update its counters just yet.
++	 * We want our bg to be added to the rbtree with its ->space_info set.
 +	 */
 +	ret = update_space_info(root->fs_info, cache->flags, 0, 0,
 +				&cache->space_info);
@@ -112,8 +115,8 @@ index 7effed6..2c7ac17 100644
  	}
  
 +	/*
-+	 * Now that our block group has its ->space_info set, update the space
-+	 * info's counters.
++	 * Now that our block group has its ->space_info set and is inserted in
++	 * the rbtree, update the space info's counters.
 +	 */
  	ret = update_space_info(root->fs_info, cache->flags, size, bytes_used,
  				&cache->space_info);
