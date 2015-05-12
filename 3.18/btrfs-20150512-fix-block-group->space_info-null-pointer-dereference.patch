@@ -1,8 +1,8 @@
 From: Filipe Manana <fdmanana@suse.com>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH v2] Btrfs: fix block group ->space_info null pointer dereference
-Date: Mon, 11 May 2015 17:33:33 +0100
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45090>
+Subject: [PATCH v3] Btrfs: fix block group ->space_info null pointer dereference
+Date: Tue, 12 May 2015 00:28:11 +0100
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45099>
 
 When we create a block group we add it to the rbtree of block groups
 before setting its ->space_info field (while it's NULL). This is
@@ -82,15 +82,38 @@ Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
 
 V2: Fixed a few typos/grammar in the comments. Node code changes.
+V3: Don't set space_info->full to false when total_bytes == 0.
 
- fs/btrfs/extent-tree.c | 17 +++++++++++++++++
- 1 file changed, 17 insertions(+)
+ fs/btrfs/extent-tree.c | 25 +++++++++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 7effed6..1678f7f 100644
+index 7effed6..4bf489b 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -9542,6 +9542,19 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
+@@ -3693,7 +3693,8 @@ static int update_space_info(struct btrfs_fs_info *info, u64 flags,
+ 		found->disk_total += total_bytes * factor;
+ 		found->bytes_used += bytes_used;
+ 		found->disk_used += bytes_used * factor;
+-		found->full = 0;
++		if (total_bytes > 0)
++			found->full = 0;
+ 		spin_unlock(&found->lock);
+ 		*space_info = found;
+ 		return 0;
+@@ -3721,7 +3722,10 @@ static int update_space_info(struct btrfs_fs_info *info, u64 flags,
+ 	found->bytes_reserved = 0;
+ 	found->bytes_readonly = 0;
+ 	found->bytes_may_use = 0;
+-	found->full = 0;
++	if (total_bytes > 0)
++		found->full = 0;
++	else
++		found->full = 1;
+ 	found->force_alloc = CHUNK_ALLOC_NO_FORCE;
+ 	found->chunk_alloc = 0;
+ 	found->flush = 0;
+@@ -9542,6 +9546,19 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
  
  	free_excluded_extents(root, cache);
  
@@ -110,7 +133,7 @@ index 7effed6..1678f7f 100644
  	ret = btrfs_add_block_group_cache(root->fs_info, cache);
  	if (ret) {
  		btrfs_remove_free_space_cache(cache);
-@@ -9549,6 +9562,10 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
+@@ -9549,6 +9566,10 @@ int btrfs_make_block_group(struct btrfs_trans_handle *trans,
  		return ret;
  	}
  
