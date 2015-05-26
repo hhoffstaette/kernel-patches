@@ -32,15 +32,6 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - vfs: scalability fixes
 
 
-**Previous stable series: 3.19.8 (EOL)**
-
-- bfs: [BFS v461](http://ck-hack.blogspot.de/2015/02/bfs-461-linux-319-ck1.html)
-- btrfs: fixes from 3.19-4.1+ (cleanups, data loss, performance, TRIM)
-- kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
-- net: misc. TCP fixes (TSO, pacing), r8169 support for Byte Queue Limits & xmit_more
-- vfs: scalability fixes
-
-
 **LTS series: >=3.18.14**
 
 - bfs: [BFS v460+](http://ck-hack.blogspot.de/2014/12/bfs-460-linux-318-ck1.html)
