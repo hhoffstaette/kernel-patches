@@ -1,0 +1,71 @@
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 2/2] btrfs: Fix xfstests btrfs/070
+Date: Fri, 22 May 2015 13:46:54 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45341>
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+xfstests btrfs/070 sometimes failed.
+In my test machine, its fail rate is about 30%.
+In another vm(vmware), its fail rate is about 50%.
+
+Reason:
+btrfs/070 do replace and defrag with fsstress simultaneously,
+after above operation, checksum error is found by scrub.
+Actually, it have no relationship with defrag operation, only
+replace with fsstress can trigger this bug.
+New data writen to target device have possibility rewrited by
+old data from source device by replace code in debug, and can
+be fixed by set chunk to ro in replace operation.
+
+Before patch(4.1-rc3):
+  30% failed in 100 xfstests.
+After patch:
+  0% failed in 300 xfstests.
+
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/scrub.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index ab58115..469c8a5 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -3446,6 +3446,23 @@ int scrub_enumerate_chunks(struct scrub_ctx *sctx,
+ 		if (!cache)
+ 			goto skip;
+ 
++		/*
++		 * we need call btrfs_inc_block_group_ro() with scrubs_paused,
++		 * to avoid deadlock caused by:
++		 * btrfs_inc_block_group_ro()
++		 * -> btrfs_wait_for_commit()
++		 * -> btrfs_commit_transaction()
++		 * -> btrfs_scrub_pause()
++		 */
++		atomic_inc(&fs_info->scrubs_paused);
++		wake_up(&fs_info->scrub_pause_wait);
++		btrfs_inc_block_group_ro(root, cache);
++		mutex_lock(&fs_info->scrub_lock);
++		__scrub_blocked_if_needed(fs_info);
++		atomic_dec(&fs_info->scrubs_paused);
++		mutex_unlock(&fs_info->scrub_lock);
++		wake_up(&fs_info->scrub_pause_wait);
++
+ 		dev_replace->cursor_right = found_key.offset + length;
+ 		dev_replace->cursor_left = found_key.offset;
+ 		dev_replace->item_needs_writeback = 1;
+@@ -3489,6 +3506,8 @@ int scrub_enumerate_chunks(struct scrub_ctx *sctx,
+ 		mutex_unlock(&fs_info->scrub_lock);
+ 		wake_up(&fs_info->scrub_pause_wait);
+ 
++		btrfs_dec_block_group_ro(root, cache);
++
+ 		btrfs_put_block_group(cache);
+ 		if (ret)
+ 			break;
+-- 
+1.8.5.1
