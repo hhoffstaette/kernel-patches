@@ -1,0 +1,261 @@
+From: Liu Bo <bo.li.liu@oracle.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 2/2] [PATCH 2/2] Btrfs: fix up read_tree_block to return proper error
+Date: Mon, 25 May 2015 17:30:15 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45370>
+
+The return value of read_tree_block() can confuse callers as it always
+returns NULL for either -ENOMEM or -EIO, so it's likely that callers
+parse it to a wrong error, for instance, in btrfs_read_tree_root().
+
+This fixes the above issue.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+This is based on the latest for-linus-4.1.
+
+ fs/btrfs/backref.c     |  9 +++++++--
+ fs/btrfs/ctree.c       | 16 ++++++++++------
+ fs/btrfs/disk-io.c     | 28 +++++++++++++++-------------
+ fs/btrfs/extent-tree.c | 11 ++++++++---
+ fs/btrfs/relocation.c  | 19 ++++++++++++++-----
+ 5 files changed, 54 insertions(+), 29 deletions(-)
+
+diff --git a/fs/btrfs/backref.c b/fs/btrfs/backref.c
+index 614aaa1..679dc97 100644
+--- a/fs/btrfs/backref.c
++++ b/fs/btrfs/backref.c
+@@ -491,7 +491,9 @@ static int __add_missing_keys(struct btrfs_fs_info *fs_info,
+ 		BUG_ON(!ref->wanted_disk_byte);
+ 		eb = read_tree_block(fs_info->tree_root, ref->wanted_disk_byte,
+ 				     0);
+-		if (!eb || !extent_buffer_uptodate(eb)) {
++		if (IS_ERR(eb)) {
++			return PTR_ERR(eb);
++		} else if (!extent_buffer_uptodate(eb)) {
+ 			free_extent_buffer(eb);
+ 			return -EIO;
+ 		}
+@@ -1034,7 +1036,10 @@ again:
+ 
+ 				eb = read_tree_block(fs_info->extent_root,
+ 							   ref->parent, 0);
+-				if (!eb || !extent_buffer_uptodate(eb)) {
++				if (IS_ERR(eb)) {
++					ret = PTR_ERR(eb);
++					goto out;
++				} else if (!extent_buffer_uptodate(eb)) {
+ 					free_extent_buffer(eb);
+ 					ret = -EIO;
+ 					goto out;
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 0f11ebc..54114b4 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -1439,8 +1439,9 @@ get_old_root(struct btrfs_root *root, u64 time_seq)
+ 		btrfs_tree_read_unlock(eb_root);
+ 		free_extent_buffer(eb_root);
+ 		old = read_tree_block(root, logical, 0);
+-		if (WARN_ON(!old || !extent_buffer_uptodate(old))) {
+-			free_extent_buffer(old);
++		if (WARN_ON(IS_ERR(old) || !extent_buffer_uptodate(old))) {
++			if (!IS_ERR(old))
++				free_extent_buffer(old);
+ 			btrfs_warn(root->fs_info,
+ 				"failed to read tree block %llu from get_old_root", logical);
+ 		} else {
+@@ -1685,7 +1686,9 @@ int btrfs_realloc_node(struct btrfs_trans_handle *trans,
+ 		if (!cur || !uptodate) {
+ 			if (!cur) {
+ 				cur = read_tree_block(root, blocknr, gen);
+-				if (!cur || !extent_buffer_uptodate(cur)) {
++				if (IS_ERR(cur)) {
++					return PTR_ERR(cur);
++				} else if (!extent_buffer_uptodate(cur)) {
+ 					free_extent_buffer(cur);
+ 					return -EIO;
+ 				}
+@@ -1864,8 +1867,9 @@ static noinline struct extent_buffer *read_node_slot(struct btrfs_root *root,
+ 
+ 	eb = read_tree_block(root, btrfs_node_blockptr(parent, slot),
+ 			     btrfs_node_ptr_generation(parent, slot));
+-	if (eb && !extent_buffer_uptodate(eb)) {
+-		free_extent_buffer(eb);
++	if (IS_ERR(eb) || !extent_buffer_uptodate(eb)) {
++		if (!IS_ERR(eb))
++			free_extent_buffer(eb);
+ 		eb = NULL;
+ 	}
+ 
+@@ -2494,7 +2498,7 @@ read_block_for_search(struct btrfs_trans_handle *trans,
+ 
+ 	ret = -EAGAIN;
+ 	tmp = read_tree_block(root, blocknr, 0);
+-	if (tmp) {
++	if (!IS_ERR(tmp)) {
+ 		/*
+ 		 * If the read above didn't mark this buffer up to date,
+ 		 * it will never end up being up to date.  Set ret to EIO now
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 2ef9a4b..7f83778 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1149,12 +1149,12 @@ struct extent_buffer *read_tree_block(struct btrfs_root *root, u64 bytenr,
+ 
+ 	buf = btrfs_find_create_tree_block(root, bytenr);
+ 	if (!buf)
+-		return NULL;
++		return ERR_PTR(-ENOMEM);
+ 
+ 	ret = btree_read_extent_buffer_pages(root, buf, 0, parent_transid);
+ 	if (ret) {
+ 		free_extent_buffer(buf);
+-		return NULL;
++		return ERR_PTR(ret);
+ 	}
+ 	return buf;
+ 
+@@ -1509,20 +1509,19 @@ static struct btrfs_root *btrfs_read_tree_root(struct btrfs_root *tree_root,
+ 	generation = btrfs_root_generation(&root->root_item);
+ 	root->node = read_tree_block(root, btrfs_root_bytenr(&root->root_item),
+ 				     generation);
+-	if (!root->node) {
+-		ret = -ENOMEM;
++	if (IS_ERR(root->node)) {
++		ret = PTR_ERR(root->node);
+ 		goto find_fail;
+ 	} else if (!btrfs_buffer_uptodate(root->node, generation, 0)) {
+ 		ret = -EIO;
+-		goto read_fail;
++		free_extent_buffer(root->node);
++		goto find_fail;
+ 	}
+ 	root->commit_root = btrfs_root_node(root);
+ out:
+ 	btrfs_free_path(path);
+ 	return root;
+ 
+-read_fail:
+-	free_extent_buffer(root->node);
+ find_fail:
+ 	kfree(root);
+ alloc_fail:
+@@ -2320,8 +2319,11 @@ static int btrfs_replay_log(struct btrfs_fs_info *fs_info,
+ 
+ 	log_tree_root->node = read_tree_block(tree_root, bytenr,
+ 			fs_info->generation + 1);
+-	if (!log_tree_root->node ||
+-	    !extent_buffer_uptodate(log_tree_root->node)) {
++	if (IS_ERR(log_tree_root->node)) {
++		printk(KERN_ERR "BTRFS: failed to read log tree\n");
++		kfree(log_tree_root);
++		return PTR_ERR(log_tree_root->node);
++	} else if (!extent_buffer_uptodate(log_tree_root->node)) {
+ 		printk(KERN_ERR "BTRFS: failed to read log tree\n");
+ 		free_extent_buffer(log_tree_root->node);
+ 		kfree(log_tree_root);
+@@ -2797,8 +2799,8 @@ int open_ctree(struct super_block *sb,
+ 	chunk_root->node = read_tree_block(chunk_root,
+ 					   btrfs_super_chunk_root(disk_super),
+ 					   generation);
+-	if (!chunk_root->node ||
+-	    !test_bit(EXTENT_BUFFER_UPTODATE, &chunk_root->node->bflags)) {
++	if (IS_ERR(chunk_root->node) ||
++	    !extent_buffer_uptodate(chunk_root->node)) {
+ 		printk(KERN_ERR "BTRFS: failed to read chunk root on %s\n",
+ 		       sb->s_id);
+ 		goto fail_tree_roots;
+@@ -2834,8 +2836,8 @@ retry_root_backup:
+ 	tree_root->node = read_tree_block(tree_root,
+ 					  btrfs_super_root(disk_super),
+ 					  generation);
+-	if (!tree_root->node ||
+-	    !test_bit(EXTENT_BUFFER_UPTODATE, &tree_root->node->bflags)) {
++	if (IS_ERR(tree_root->node) ||
++	    !extent_buffer_uptodate(tree_root->node)) {
+ 		printk(KERN_WARNING "BTRFS: failed to read tree root on %s\n",
+ 		       sb->s_id);
+ 
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index a129254..dfae474 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -7920,9 +7920,12 @@ walk_down:
+ 			child_gen = btrfs_node_ptr_generation(eb, parent_slot);
+ 
+ 			eb = read_tree_block(root, child_bytenr, child_gen);
+-			if (!eb || !extent_buffer_uptodate(eb)) {
+-				ret = -EIO;
++			if (IS_ERR(eb)) {
++				ret = PTR_ERR(eb);
++				goto out;
++			} else if (!extent_buffer_uptodate(eb)) {
+ 				free_extent_buffer(eb);
++				ret = -EIO;
+ 				goto out;
+ 			}
+ 
+@@ -8152,7 +8155,9 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
+ 		if (reada && level == 1)
+ 			reada_walk_down(trans, root, wc, path);
+ 		next = read_tree_block(root, bytenr, generation);
+-		if (!next || !extent_buffer_uptodate(next)) {
++		if (IS_ERR(next)) {
++			return PTR_ERR(next);
++		} else if (!extent_buffer_uptodate(next)) {
+ 			free_extent_buffer(next);
+ 			return -EIO;
+ 		}
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 74b24b0..827951f 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -1847,8 +1847,10 @@ again:
+ 			}
+ 
+ 			eb = read_tree_block(dest, old_bytenr, old_ptr_gen);
+-			if (!eb || !extent_buffer_uptodate(eb)) {
+-				ret = (!eb) ? -ENOMEM : -EIO;
++			if (IS_ERR(eb)) {
++				ret = PTR_ERR(eb);
++			} else if (!extent_buffer_uptodate(eb)) {
++				ret = -EIO;
+ 				free_extent_buffer(eb);
+ 				break;
+ 			}
+@@ -2002,7 +2004,9 @@ int walk_down_reloc_tree(struct btrfs_root *root, struct btrfs_path *path,
+ 
+ 		bytenr = btrfs_node_blockptr(eb, path->slots[i]);
+ 		eb = read_tree_block(root, bytenr, ptr_gen);
+-		if (!eb || !extent_buffer_uptodate(eb)) {
++		if (IS_ERR(eb)) {
++			return PTR_ERR(eb);
++		} else if (!extent_buffer_uptodate(eb)) {
+ 			free_extent_buffer(eb);
+ 			return -EIO;
+ 		}
+@@ -2710,7 +2714,10 @@ static int do_relocation(struct btrfs_trans_handle *trans,
+ 		blocksize = root->nodesize;
+ 		generation = btrfs_node_ptr_generation(upper->eb, slot);
+ 		eb = read_tree_block(root, bytenr, generation);
+-		if (!eb || !extent_buffer_uptodate(eb)) {
++		if (IS_ERR(eb)) {
++			err = PTR_ERR(eb);
++			goto next;
++		} else if (!extent_buffer_uptodate(eb)) {
+ 			free_extent_buffer(eb);
+ 			err = -EIO;
+ 			goto next;
+@@ -2873,7 +2880,9 @@ static int get_tree_block_key(struct reloc_control *rc,
+ 	BUG_ON(block->key_ready);
+ 	eb = read_tree_block(rc->extent_root, block->bytenr,
+ 			     block->key.offset);
+-	if (!eb || !extent_buffer_uptodate(eb)) {
++	if (IS_ERR(eb)) {
++		return PTR_ERR(eb);
++	} else if (!extent_buffer_uptodate(eb)) {
+ 		free_extent_buffer(eb);
+ 		return -EIO;
+ 	}
+-- 
+2.1.0
