@@ -1,0 +1,78 @@
+From: Liu Bo <bo.li.liu@oracle.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: remove csum_bytes_left
+Date: Mon, 25 May 2015 11:20:22 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45363>
+
+After commit 8407f553268a
+("Btrfs: fix data corruption after fast fsync and writeback error"),
+during wait_ordered_extents(), we wait for ordered extent setting
+BTRFS_ORDERED_IO_DONE or BTRFS_ORDERED_IOERR, at which point we've
+already got checksum information, so we don't need to check
+(csum_bytes_left == 0) in the whole logging path.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/ordered-data.c | 7 -------
+ fs/btrfs/ordered-data.h | 3 ---
+ fs/btrfs/tree-log.c     | 6 ------
+ 3 files changed, 16 deletions(-)
+
+diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
+index 157cc54..e3c7540 100644
+--- a/fs/btrfs/ordered-data.c
++++ b/fs/btrfs/ordered-data.c
+@@ -198,9 +198,6 @@ static int __btrfs_add_ordered_extent(struct inode *inode, u64 file_offset,
+ 	entry->file_offset = file_offset;
+ 	entry->start = start;
+ 	entry->len = len;
+-	if (!(BTRFS_I(inode)->flags & BTRFS_INODE_NODATASUM) &&
+-	    !(type == BTRFS_ORDERED_NOCOW))
+-		entry->csum_bytes_left = disk_len;
+ 	entry->disk_len = disk_len;
+ 	entry->bytes_left = len;
+ 	entry->inode = igrab(inode);
+@@ -286,10 +283,6 @@ void btrfs_add_ordered_sum(struct inode *inode,
+ 	tree = &BTRFS_I(inode)->ordered_tree;
+ 	spin_lock_irq(&tree->lock);
+ 	list_add_tail(&sum->list, &entry->list);
+-	WARN_ON(entry->csum_bytes_left < sum->len);
+-	entry->csum_bytes_left -= sum->len;
+-	if (entry->csum_bytes_left == 0)
+-		wake_up(&entry->wait);
+ 	spin_unlock_irq(&tree->lock);
+ }
+ 
+diff --git a/fs/btrfs/ordered-data.h b/fs/btrfs/ordered-data.h
+index e96cd4c..a82cd75 100644
+--- a/fs/btrfs/ordered-data.h
++++ b/fs/btrfs/ordered-data.h
+@@ -89,9 +89,6 @@ struct btrfs_ordered_extent {
+ 	/* number of bytes that still need writing */
+ 	u64 bytes_left;
+ 
+-	/* number of bytes that still need csumming */
+-	u64 csum_bytes_left;
+-
+ 	/*
+ 	 * the end of the ordered extent which is behind it but
+ 	 * didn't update disk_i_size. Please see the comment of
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index c5b8ba3..6989b42 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -3734,12 +3734,6 @@ static int wait_ordered_extents(struct btrfs_trans_handle *trans,
+ 				     &ordered->flags))
+ 			continue;
+ 
+-		if (ordered->csum_bytes_left) {
+-			btrfs_start_ordered_extent(inode, ordered, 0);
+-			wait_event(ordered->wait,
+-				   ordered->csum_bytes_left == 0);
+-		}
+-
+ 		list_for_each_entry(sum, &ordered->list, list) {
+ 			ret = btrfs_csum_file_blocks(trans, log, sum);
+ 			if (ret)
+-- 
+2.1.0
