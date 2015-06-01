@@ -1,0 +1,40 @@
+From 2159184ea01e4ae7d15f2017e296d4bc82d5aeb0 Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Thu, 28 May 2015 23:09:19 -0400
+Subject: d_walk() might skip too much
+
+when we find that a child has died while we'd been trying to ascend,
+we should go into the first live sibling itself, rather than its sibling.
+
+Off-by-one in question had been introduced in "deal with deadlock in
+d_walk()" and the fix needs to be backported to all branches this one
+has been backported to.
+
+Cc: stable@vger.kernel.org # 3.2 and later
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index 656ce52..37b5afd 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -1239,13 +1239,13 @@ ascend:
+ 		/* might go back up the wrong parent if we have had a rename. */
+ 		if (need_seqretry(&rename_lock, seq))
+ 			goto rename_retry;
+-		next = child->d_child.next;
+-		while (unlikely(child->d_flags & DCACHE_DENTRY_KILLED)) {
++		/* go into the first sibling still alive */
++		do {
++			next = child->d_child.next;
+ 			if (next == &this_parent->d_subdirs)
+ 				goto ascend;
+ 			child = list_entry(next, struct dentry, d_child);
+-			next = next->next;
+-		}
++		} while (unlikely(child->d_flags & DCACHE_DENTRY_KILLED));
+ 		rcu_read_unlock();
+ 		goto resume;
+ 	}
+-- 
+cgit v0.10.2
+
