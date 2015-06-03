@@ -1,8 +1,8 @@
 From: Omar Sandoval <osandov@osandov.com>
-Newsgroups: gmane.comp.file-systems.btrfs,gmane.linux.kernel.stable
-Subject: [PATCH] Btrfs: don't invalidate root dentry when subvolume deletion fails
-Date: Sat, 30 May 2015 01:59:26 -0700
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45448>
+Newsgroups: gmane.linux.kernel.stable,gmane.comp.file-systems.btrfs
+Subject: [PATCH v2] Btrfs: don't invalidate root dentry when subvolume deletion fails
+Date: Tue,  2 Jun 2015 17:31:00 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/137544>
 
 Since commit bafc9b754f75 ("vfs: More precise tests in d_invalidate"),
 mounted subvolumes can be deleted because d_invalidate() won't fail.
@@ -30,27 +30,36 @@ Markus reported that this same scenario simply led to a kernel oops.
 This happens because in btrfs_ioctl_snap_destroy(), we call
 d_invalidate() before we check may_destroy_subvol(), which means that we
 detach the submounts and drop the dentry before erroring out. Instead,
-we should only invalidate the dentry once we know that we're going
-through with the deletion.
+we should only invalidate the dentry once the deletion has succeeded.
+Additionally, the shrink_dcache_sb() isn't necessary; d_invalidate()
+will prune the dcache for the deleted subvolume.
 
 Cc: <stable@vger.kernel.org>
 Fixes: bafc9b754f75 ("vfs: More precise tests in d_invalidate")
 Reported-by: Markus Schauler <mschauler@gmail.com>
 Signed-off-by: Omar Sandoval <osandov@osandov.com>
 ---
-The other fix for preventing all mounted subvolumes from being deleted
-would preclude this, but it sounded like we were leaning towards
-enforcing that in userspace once subvolume info becomes available in
-/proc/mounts, so this should be fixed separately.
+v1->v2:
+- Move d_invalidate() to only happen if the whole deletion was
+  successful instead of after may_destroy_subvol() succeeds (pointed out
+  by Filipe)
+- Remove unnecessary shrink_dcache_sb()
 
- fs/btrfs/ioctl.c | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+As I mentioned in the thread for v1
+(http://thread.gmane.org/gmane.comp.file-systems.btrfs/45448), I don't
+know why that shrink_dcache_sb() is in there. The commit that introduced
+it, efefb1438be2 ("Btrfs: remove negative dentry when deleting
+subvolumne"), doesn't explain why it was added, but maybe someone can
+enlighten me :)
+
+ fs/btrfs/ioctl.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
 
 diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
-index 1c22c6518504..8edb8544088b 100644
+index 1c22c6518504..6f790bcddfc1 100644
 --- a/fs/btrfs/ioctl.c
 +++ b/fs/btrfs/ioctl.c
-@@ -2413,14 +2413,14 @@ static noinline int btrfs_ioctl_snap_destroy(struct file *file,
+@@ -2413,8 +2413,6 @@ static noinline int btrfs_ioctl_snap_destroy(struct file *file,
  		goto out_unlock_inode;
  	}
  
@@ -59,13 +68,12 @@ index 1c22c6518504..8edb8544088b 100644
  	down_write(&root->fs_info->subvol_sem);
  
  	err = may_destroy_subvol(dest);
- 	if (err)
- 		goto out_up_write;
- 
-+	d_invalidate(dentry);
-+
- 	btrfs_init_block_rsv(&block_rsv, BTRFS_BLOCK_RSV_TEMP);
- 	/*
- 	 * One for dir inode, two for dir entries, two for root
--- 
-2.4.2
+@@ -2508,7 +2506,7 @@ out_up_write:
+ out_unlock_inode:
+ 	mutex_unlock(&inode->i_mutex);
+ 	if (!err) {
+-		shrink_dcache_sb(root->fs_info->sb);
++		d_invalidate(dentry);
+ 		btrfs_invalidate_inodes(dest);
+ 		d_delete(dentry);
+ 		ASSERT(dest->send_in_progress == 0);
