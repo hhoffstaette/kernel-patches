@@ -22,7 +22,7 @@ release on [kernel.org](https://www.kernel.org/); if it does not then **please**
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
 
-**Current stable series: >=4.0.4**
+**Current stable series: >=4.0.5**
 
 - bfs: [BFS v462](http://ck-hack.blogspot.com/2015/04/bfs-462-linux-40-ck1.html)
 - btrfs: fixes from 3.19-4.1+ (cleanups, data loss, performance, TRIM)
@@ -41,7 +41,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - vfs: scalability fixes
 
 
-**LTS series: >=3.14.43**
+**LTS series: >=3.14.44**
 
 - bfs: [BFS v454](http://ck-hack.blogspot.de/2014/08/bfs-453454455456-and-316-ck2.html) + [SMT-nice patches](http://ck-hack.blogspot.de/2014/08/smthyperthreading-nice-and-scheduling.html)
 - btrfs: >650 patches from 3.15-4.1+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace, TRIM and automatic GC of empty blockgroups. \o/
