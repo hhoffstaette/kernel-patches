@@ -1,0 +1,80 @@
+From c0d19e2b9a521bbdc33049ad92c94b517afda1f0 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Fri, 24 Apr 2015 19:11:57 +0200
+Subject: btrfs: add 'cold' compiler annotations to all error handling
+ functions
+
+The annotated functios will be placed into .text.unlikely section. The
+annotation also hints compiler to move the code out of the hot paths,
+and may implicitly mark if-statement leading to that block as unlikely.
+
+This is a heuristic, the impact on the generated code is not
+significant.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 98b3347..670e4be 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -4050,6 +4050,7 @@ void btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...)
+ 
+ #ifdef CONFIG_BTRFS_ASSERT
+ 
++__cold
+ static inline void assfail(char *expr, char *file, int line)
+ {
+ 	pr_err("BTRFS: assertion failed: %s, file: %s, line: %d",
+@@ -4065,10 +4066,12 @@ static inline void assfail(char *expr, char *file, int line)
+ 
+ #define btrfs_assert()
+ __printf(5, 6)
++__cold
+ void __btrfs_std_error(struct btrfs_fs_info *fs_info, const char *function,
+ 		     unsigned int line, int errno, const char *fmt, ...);
+ 
+ 
++__cold
+ void __btrfs_abort_transaction(struct btrfs_trans_handle *trans,
+ 			       struct btrfs_root *root, const char *function,
+ 			       unsigned int line, int errno);
+@@ -4138,6 +4141,7 @@ do {								\
+ } while (0)
+ 
+ __printf(5, 6)
++__cold
+ void __btrfs_panic(struct btrfs_fs_info *fs_info, const char *function,
+ 		   unsigned int line, int errno, const char *fmt, ...);
+ 
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 3c72eea..c761d8e 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -135,6 +135,7 @@ static void btrfs_handle_error(struct btrfs_fs_info *fs_info)
+  * __btrfs_std_error decodes expected errors from the caller and
+  * invokes the approciate error response.
+  */
++__cold
+ void __btrfs_std_error(struct btrfs_fs_info *fs_info, const char *function,
+ 		       unsigned int line, int errno, const char *fmt, ...)
+ {
+@@ -247,6 +248,7 @@ void __btrfs_std_error(struct btrfs_fs_info *fs_info, const char *function,
+  * We'll complete the cleanup in btrfs_end_transaction and
+  * btrfs_commit_transaction.
+  */
++__cold
+ void __btrfs_abort_transaction(struct btrfs_trans_handle *trans,
+ 			       struct btrfs_root *root, const char *function,
+ 			       unsigned int line, int errno)
+@@ -273,6 +275,7 @@ void __btrfs_abort_transaction(struct btrfs_trans_handle *trans,
+  * __btrfs_panic decodes unexpected, fatal errors from the caller,
+  * issues an alert, and either panics or BUGs, depending on mount options.
+  */
++__cold
+ void __btrfs_panic(struct btrfs_fs_info *fs_info, const char *function,
+ 		   unsigned int line, int errno, const char *fmt, ...)
+ {
+-- 
+cgit v0.10.2
+
