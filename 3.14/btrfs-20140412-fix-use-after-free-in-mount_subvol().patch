@@ -1,0 +1,54 @@
+From 0040e606e35a0db80fc3fac04ccc7c7176a8e2b1 Mon Sep 17 00:00:00 2001
+From: Christoph Jaeger <christophjaeger@linux.com>
+Date: Sat, 12 Apr 2014 13:33:13 +0200
+Subject: btrfs: fix use-after-free in mount_subvol()
+
+Pointer 'newargs' is used after the memory that it points to has already
+been freed.
+
+Picked up by Coverity - CID 1201425.
+
+Fixes: 0723a0473f ("btrfs: allow mounting btrfs subvolumes with
+different ro/rw options")
+Signed-off-by: Christoph Jaeger <christophjaeger@linux.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 994c409..53bc373 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -1186,7 +1186,6 @@ static struct dentry *mount_subvol(const char *subvol_name, int flags,
+ 		return ERR_PTR(-ENOMEM);
+ 	mnt = vfs_kern_mount(&btrfs_fs_type, flags, device_name,
+ 			     newargs);
+-	kfree(newargs);
+ 
+ 	if (PTR_RET(mnt) == -EBUSY) {
+ 		if (flags & MS_RDONLY) {
+@@ -1196,17 +1195,22 @@ static struct dentry *mount_subvol(const char *subvol_name, int flags,
+ 			int r;
+ 			mnt = vfs_kern_mount(&btrfs_fs_type, flags | MS_RDONLY, device_name,
+ 					     newargs);
+-			if (IS_ERR(mnt))
++			if (IS_ERR(mnt)) {
++				kfree(newargs);
+ 				return ERR_CAST(mnt);
++			}
+ 
+ 			r = btrfs_remount(mnt->mnt_sb, &flags, NULL);
+ 			if (r < 0) {
+ 				/* FIXME: release vfsmount mnt ??*/
++				kfree(newargs);
+ 				return ERR_PTR(r);
+ 			}
+ 		}
+ 	}
+ 
++	kfree(newargs);
++
+ 	if (IS_ERR(mnt))
+ 		return ERR_CAST(mnt);
+ 
+-- 
+cgit v0.10.2
+
