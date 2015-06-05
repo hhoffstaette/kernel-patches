@@ -1,8 +1,10 @@
-From: Jeff Mahoney <jeffm@suse.com>
+From: jeffm@suse.com
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH v2] btrfs: iterate over unused chunk space in FITRIM
-Date: Tue, 05 May 2015 14:19:17 -0400
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/44911>
+Subject: [PATCH 1/3] btrfs: iterate over unused chunk space in FITRIM
+Date: Wed,  3 Jun 2015 10:47:52 -0400
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45542>
+
+From: Jeff Mahoney <jeffm@suse.com>
 
 Since we now clean up block groups automatically as they become
 empty, iterating over block groups is no longer sufficient to discard
@@ -23,19 +25,34 @@ normally.  Since the running transaction can commit and disappear while
 we're using the transaction pointer, we take a reference to it and
 release it after the search.  This is safe since it would happen normally
 at the end of the transaction commit after any locks are released anyway.
+We also take the commit_root_sem to protect against a transaction starting
+and committing while we're running.
+
+v1->v2:
+- Doesn't take a transaction, so the entire run is transactionless
+- The loop can be interrupted while waiting on the chunk mutex
+  and after the discard has completed.
+- The only lock held for the duration is the device_list_mutex. The chunk
+  mutex is taken per loop iteration, so normal operation should continue
+  while we're running even on large file systems.
+
+v2->v3:
+- Cleaned up pointer tricks that abused &NULL->member.
+- Take commit_root_sem across loop iteration to protect against transaction
+  commit.
 
 Signed-off-by: Jeff Mahoney <jeffm@suse.com>
 ---
- fs/btrfs/extent-tree.c | 96 ++++++++++++++++++++++++++++++++++++++++++++++++++
- fs/btrfs/volumes.c     | 61 ++++++++++++++++++++------------
- fs/btrfs/volumes.h     |  3 ++
- 3 files changed, 137 insertions(+), 23 deletions(-)
+ fs/btrfs/extent-tree.c | 100 +++++++++++++++++++++++++++++++++++++++++++++++++
+ fs/btrfs/volumes.c     |  60 +++++++++++++++++------------
+ fs/btrfs/volumes.h     |   3 ++
+ 3 files changed, 140 insertions(+), 23 deletions(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 0ec8e22..6d1d74d 100644
+index 0ec3acd..fb4dbfc 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -10031,10 +10031,94 @@ int btrfs_error_unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
+@@ -10074,10 +10074,98 @@ int btrfs_error_unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
  	return unpin_extent_range(root, start, end, false);
  }
  
@@ -83,6 +100,8 @@ index 0ec8e22..6d1d74d 100644
 +		if (ret)
 +			return ret;
 +
++		down_read(&fs_info->commit_root_sem);
++
 +		spin_lock(&fs_info->trans_lock);
 +		trans = fs_info->running_transaction;
 +		if (trans)
@@ -95,6 +114,7 @@ index 0ec8e22..6d1d74d 100644
 +			btrfs_put_transaction(trans);
 +
 +		if (ret) {
++			up_read(&fs_info->commit_root_sem);
 +			mutex_unlock(&fs_info->chunk_mutex);
 +			if (ret == -ENOSPC)
 +				ret = 0;
@@ -102,6 +122,7 @@ index 0ec8e22..6d1d74d 100644
 +		}
 +
 +		ret = btrfs_issue_discard(device->bdev, start, len);
++		up_read(&fs_info->commit_root_sem);
 +		mutex_unlock(&fs_info->chunk_mutex);
 +
 +		if (ret)
@@ -130,7 +151,7 @@ index 0ec8e22..6d1d74d 100644
  	u64 group_trimmed;
  	u64 start;
  	u64 end;
-@@ -10089,6 +10173,18 @@ int btrfs_trim_fs(struct btrfs_root *root, struct fstrim_range *range)
+@@ -10132,6 +10220,18 @@ int btrfs_trim_fs(struct btrfs_root *root, struct fstrim_range *range)
  		cache = next_block_group(fs_info->tree_root, cache);
  	}
  
@@ -150,10 +171,10 @@ index 0ec8e22..6d1d74d 100644
  	return ret;
  }
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 96aebf3..ada8965 100644
+index 174f5e1..7fdde31 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
-@@ -1051,15 +1051,19 @@ out:
+@@ -1051,15 +1051,18 @@ out:
  	return ret;
  }
  
@@ -165,28 +186,27 @@ index 96aebf3..ada8965 100644
 +	struct btrfs_fs_info *fs_info = device->dev_root->fs_info;
  	struct extent_map *em;
 -	struct list_head *search_list = &trans->transaction->pending_chunks;
-+	struct list_head *search_list = &transaction->pending_chunks;
++	struct list_head *search_list = &fs_info->pinned_chunks;
  	int ret = 0;
  	u64 physical_start = *start;
  
-+	if (!transaction)
-+		search_list = &fs_info->pinned_chunks;
-+
++	if (transaction)
++		search_list = &transaction->pending_chunks;
  again:
  	list_for_each_entry(em, search_list, list) {
  		struct map_lookup *map;
-@@ -1078,8 +1082,8 @@ again:
+@@ -1078,8 +1081,8 @@ again:
  			ret = 1;
  		}
  	}
 -	if (search_list == &trans->transaction->pending_chunks) {
 -		search_list = &trans->root->fs_info->pinned_chunks;
-+	if (search_list == &transaction->pending_chunks) {
++	if (search_list != &fs_info->pinned_chunks) {
 +		search_list = &fs_info->pinned_chunks;
  		goto again;
  	}
  
-@@ -1088,12 +1092,13 @@ again:
+@@ -1088,12 +1091,13 @@ again:
  
  
  /*
@@ -206,7 +226,7 @@ index 96aebf3..ada8965 100644
   *
   * this uses a pretty simple search, the expectation is that it is
   * called very infrequently and that a given device has a small number
-@@ -1107,9 +1112,9 @@ again:
+@@ -1107,9 +1111,9 @@ again:
   * But if we don't find suitable free space, it is used to store the size of
   * the max free space.
   */
@@ -219,7 +239,7 @@ index 96aebf3..ada8965 100644
  {
  	struct btrfs_key key;
  	struct btrfs_root *root = device->dev_root;
-@@ -1119,19 +1124,11 @@ int find_free_dev_extent(struct btrfs_trans_handle *trans,
+@@ -1119,19 +1123,11 @@ int find_free_dev_extent(struct btrfs_trans_handle *trans,
  	u64 max_hole_start;
  	u64 max_hole_size;
  	u64 extent_end;
@@ -239,7 +259,7 @@ index 96aebf3..ada8965 100644
  	path = btrfs_alloc_path();
  	if (!path)
  		return -ENOMEM;
-@@ -1192,7 +1189,7 @@ again:
+@@ -1192,7 +1188,7 @@ again:
  			 * Have to check before we set max_hole_start, otherwise
  			 * we could end up sending back this offset anyway.
  			 */
@@ -248,7 +268,7 @@ index 96aebf3..ada8965 100644
  						    &search_start,
  						    hole_size)) {
  				if (key.offset >= search_start) {
-@@ -1241,7 +1238,7 @@ next:
+@@ -1241,7 +1237,7 @@ next:
  	if (search_end > search_start) {
  		hole_size = search_end - search_start;
  
@@ -257,7 +277,7 @@ index 96aebf3..ada8965 100644
  					    hole_size)) {
  			btrfs_release_path(path);
  			goto again;
-@@ -1267,6 +1264,24 @@ out:
+@@ -1267,6 +1263,24 @@ out:
  	return ret;
  }
  
@@ -297,4 +317,4 @@ index ebc3133..30918a8 100644
  			 struct btrfs_device *device, u64 num_bytes,
  			 u64 *start, u64 *max_avail);
 -- 
-1.8.5.6
+1.8.4.5
