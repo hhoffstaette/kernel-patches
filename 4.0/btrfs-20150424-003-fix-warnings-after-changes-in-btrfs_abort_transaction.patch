@@ -1,0 +1,57 @@
+From 6d13f5497f9c44597ba566f741f7ce66ed099456 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Fri, 24 Apr 2015 19:12:01 +0200
+Subject: btrfs: fix warnings after changes in btrfs_abort_transaction
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+fs/btrfs/volumes.c: In function ‘btrfs_create_uuid_tree’:
+fs/btrfs/volumes.c:3909:3: warning: format ‘%d’ expects argument of type ‘int’, but argument 4 has type ‘long int’ [-Wformat=]
+   btrfs_abort_transaction(trans, tree_root,
+   ^
+  CC [M]  fs/btrfs/ioctl.o
+fs/btrfs/ioctl.c: In function ‘create_subvol’:
+fs/btrfs/ioctl.c:549:3: warning: format ‘%d’ expects argument of type ‘int’, but argument 4 has type ‘long int’ [-Wformat=]
+   btrfs_abort_transaction(trans, root, PTR_ERR(new_root));
+
+PTR_ERR returns long, but we're really using 'int' for the error codes
+everywhere so just set and use the local variable.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 6f790bc..f77f6b3 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -553,8 +553,8 @@ static noinline int create_subvol(struct inode *dir,
+ 	key.offset = (u64)-1;
+ 	new_root = btrfs_read_fs_root_no_name(root->fs_info, &key);
+ 	if (IS_ERR(new_root)) {
+-		btrfs_abort_transaction(trans, root, PTR_ERR(new_root));
+ 		ret = PTR_ERR(new_root);
++		btrfs_abort_transaction(trans, root, ret);
+ 		goto fail;
+ 	}
+ 
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index d0582b7..1fcbd93 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -3908,9 +3908,9 @@ int btrfs_create_uuid_tree(struct btrfs_fs_info *fs_info)
+ 	uuid_root = btrfs_create_tree(trans, fs_info,
+ 				      BTRFS_UUID_TREE_OBJECTID);
+ 	if (IS_ERR(uuid_root)) {
+-		btrfs_abort_transaction(trans, tree_root,
+-					PTR_ERR(uuid_root));
+-		return PTR_ERR(uuid_root);
++		ret = PTR_ERR(uuid_root);
++		btrfs_abort_transaction(trans, tree_root, ret);
++		return ret;
+ 	}
+ 
+ 	fs_info->uuid_root = uuid_root;
+-- 
+cgit v0.10.2
+
