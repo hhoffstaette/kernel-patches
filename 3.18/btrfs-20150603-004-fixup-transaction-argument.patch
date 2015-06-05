@@ -1,0 +1,15 @@
+
+Required fix on top of:
+btrfs-20150602-check-pending-chunks-when-shrinking-fs-to-avoid-corruption.patch
+
+--- a/fs/btrfs/volumes.c~	2015-06-05 13:55:15.000000000 +0200
++++ a/fs/btrfs/volumes.c	2015-06-05 14:01:56.991506402 +0200
+@@ -4145,7 +4145,7 @@
+ 		u64 start = new_size;
+ 		u64 len = old_size - new_size;
+ 
+-		if (contains_pending_extent(trans, device, &start, len)) {
++		if (contains_pending_extent(trans->transaction, device, &start, len)) {
+ 			unlock_chunks(root);
+ 			checked_pending_chunks = true;
+ 			failed = 0;
