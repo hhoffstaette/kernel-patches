@@ -1,0 +1,33 @@
+From 33b97e43279a60729eee502809cf5269b3a64cf3 Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Fri, 8 May 2015 04:34:35 +0800
+Subject: Btrfs: check error before reporting missing device and add uuid
+
+Report missing device when add is successful,
+otherwise it would exit as ENOMEM. And add uuid
+to the report.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 38d3a0f3..403ed1f 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6230,10 +6230,11 @@ static int read_one_dev(struct btrfs_root *root,
+ 		if (!btrfs_test_opt(root, DEGRADED))
+ 			return -EIO;
+ 
+-		btrfs_warn(root->fs_info, "devid %llu missing", devid);
+ 		device = add_missing_dev(root, fs_devices, devid, dev_uuid);
+ 		if (!device)
+ 			return -ENOMEM;
++		btrfs_warn(root->fs_info, "devid %llu uuid %pU missing",
++				devid, dev_uuid);
+ 	} else {
+ 		if (!device->bdev && !btrfs_test_opt(root, DEGRADED))
+ 			return -EIO;
+-- 
+cgit v0.10.2
+
