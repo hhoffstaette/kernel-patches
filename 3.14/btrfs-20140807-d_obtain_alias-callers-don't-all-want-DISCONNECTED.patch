@@ -1,0 +1,53 @@
+From 1a0a397e41cb1bf70cfe45fd0eeff08c7c501ec0 Mon Sep 17 00:00:00 2001
+From: "J. Bruce Fields" <bfields@redhat.com>
+Date: Fri, 14 Feb 2014 17:35:37 -0500
+Subject: dcache: d_obtain_alias callers don't all want DISCONNECTED
+
+There are a few d_obtain_alias callers that are using it to get the
+root of a filesystem which may already have an alias somewhere else.
+
+This is not the same as the filehandle-lookup case, and none of them
+actually need DCACHE_DISCONNECTED set.
+
+It isn't really a serious problem, but it would really be clearer if we
+reserved DCACHE_DISCONNECTED for those cases where it's actually needed.
+
+In the btrfs case this was causing a spurious printk from
+nfsd/nfsfh.c:fh_verify when it found an unexpected DCACHE_DISCONNECTED
+dentry.  Josef worked around this by unsetting DCACHE_DISCONNECTED
+manually in 3a0dfa6a12e "Btrfs: unset DCACHE_DISCONNECTED when mounting
+default subvol", and this replaces that workaround.
+
+Cc: Josef Bacik <jbacik@fb.com>
+Signed-off-by: J. Bruce Fields <bfields@redhat.com>
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 8e16bca..67b48b9 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -851,7 +851,6 @@ static struct dentry *get_default_root(struct super_block *sb,
+ 	struct btrfs_path *path;
+ 	struct btrfs_key location;
+ 	struct inode *inode;
+-	struct dentry *dentry;
+ 	u64 dir_id;
+ 	int new = 0;
+ 
+@@ -922,13 +921,7 @@ setup_root:
+ 		return dget(sb->s_root);
+ 	}
+ 
+-	dentry = d_obtain_alias(inode);
+-	if (!IS_ERR(dentry)) {
+-		spin_lock(&dentry->d_lock);
+-		dentry->d_flags &= ~DCACHE_DISCONNECTED;
+-		spin_unlock(&dentry->d_lock);
+-	}
+-	return dentry;
++	return d_obtain_root(inode);
+ }
+ 
+ static int btrfs_fill_super(struct super_block *sb,
+-- 
+cgit v0.10.1
