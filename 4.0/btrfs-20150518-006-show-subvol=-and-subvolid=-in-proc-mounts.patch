@@ -1,0 +1,42 @@
+From c8d3fe028f64054d75c72566efb9ecf3c75ee161 Mon Sep 17 00:00:00 2001
+From: Omar Sandoval <osandov@osandov.com>
+Date: Mon, 18 May 2015 02:16:31 -0700
+Subject: Btrfs: show subvol= and subvolid= in /proc/mounts
+
+Now that we're guaranteed to have a meaningful root dentry, we can just
+export seq_dentry() and use it in btrfs_show_options(). The subvolume ID
+is easy to get and can also be useful, so put that in there, too.
+
+Reviewed-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Omar Sandoval <osandov@osandov.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 6fa4aaf..cd7ef34 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -1188,6 +1188,10 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
+ 		seq_puts(seq, ",fatal_errors=panic");
+ 	if (info->commit_interval != BTRFS_DEFAULT_COMMIT_INTERVAL)
+ 		seq_printf(seq, ",commit=%d", info->commit_interval);
++	seq_printf(seq, ",subvolid=%llu",
++		  BTRFS_I(dentry->d_inode)->root->root_key.objectid);
++	seq_puts(seq, ",subvol=");
++	seq_dentry(seq, dentry, " \t\n\\");
+ 	return 0;
+ }
+ 
+diff --git a/fs/seq_file.c b/fs/seq_file.c
+index 555f821..52b4927 100644
+--- a/fs/seq_file.c
++++ b/fs/seq_file.c
+@@ -538,6 +538,7 @@ int seq_dentry(struct seq_file *m, struct dentry *dentry, const char *esc)
+ 
+ 	return res;
+ }
++EXPORT_SYMBOL(seq_dentry);
+ 
+ static void *single_start(struct seq_file *p, loff_t *pos)
+ {
+-- 
+cgit v0.10.2
