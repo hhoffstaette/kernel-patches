@@ -1,0 +1,82 @@
+From 0723a0473fb48a1c93b113a28665b64ce5faf35a Mon Sep 17 00:00:00 2001
+From: Harald Hoyer <harald@redhat.com>
+Date: Tue, 19 Nov 2013 11:36:05 +0100
+Subject: btrfs: allow mounting btrfs subvolumes with different ro/rw options
+
+Given the following /etc/fstab entries:
+
+/dev/sda3 /mnt/foo btrfs subvol=foo,ro 0 0
+/dev/sda3 /mnt/bar btrfs subvol=bar,rw 0 0
+
+you can't issue:
+
+$ mount /mnt/foo
+$ mount /mnt/bar
+
+You would have to do:
+
+$ mount /mnt/foo
+$ mount -o remount,rw /mnt/foo
+$ mount --bind -o remount,ro /mnt/foo
+$ mount /mnt/bar
+
+or
+
+$ mount /mnt/bar
+$ mount --rw /mnt/foo
+$ mount --bind -o remount,ro /mnt/foo
+
+With this patch you can do
+
+$ mount /mnt/foo
+$ mount /mnt/bar
+
+$ cat /proc/self/mountinfo
+49 33 0:41 /foo /mnt/foo ro,relatime shared:36 - btrfs /dev/sda3 rw,ssd,space_cache
+87 33 0:41 /bar /mnt/bar rw,relatime shared:74 - btrfs /dev/sda3 rw,ssd,space_cache
+
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index d4878dd..994c409 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -66,6 +66,8 @@
+ static const struct super_operations btrfs_super_ops;
+ static struct file_system_type btrfs_fs_type;
+ 
++static int btrfs_remount(struct super_block *sb, int *flags, char *data);
++
+ static const char *btrfs_decode_error(int errno)
+ {
+ 	char *errstr = "unknown";
+@@ -1185,6 +1187,26 @@ static struct dentry *mount_subvol(const char *subvol_name, int flags,
+ 	mnt = vfs_kern_mount(&btrfs_fs_type, flags, device_name,
+ 			     newargs);
+ 	kfree(newargs);
++
++	if (PTR_RET(mnt) == -EBUSY) {
++		if (flags & MS_RDONLY) {
++			mnt = vfs_kern_mount(&btrfs_fs_type, flags & ~MS_RDONLY, device_name,
++					     newargs);
++		} else {
++			int r;
++			mnt = vfs_kern_mount(&btrfs_fs_type, flags | MS_RDONLY, device_name,
++					     newargs);
++			if (IS_ERR(mnt))
++				return ERR_CAST(mnt);
++
++			r = btrfs_remount(mnt->mnt_sb, &flags, NULL);
++			if (r < 0) {
++				/* FIXME: release vfsmount mnt ??*/
++				return ERR_PTR(r);
++			}
++		}
++	}
++
+ 	if (IS_ERR(mnt))
+ 		return ERR_CAST(mnt);
+ 
+-- 
+cgit v0.10.2
+
