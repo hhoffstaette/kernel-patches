@@ -1,0 +1,74 @@
+From 1a9a8a71ed1d457d4f03284ebfd3e40fe1e217ac Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.cz>
+Date: Fri, 24 Apr 2015 19:11:54 +0200
+Subject: btrfs: report exact callsite where transaction abort occurs
+
+WARN is called from a single location and all bugreports say that's in
+super.c __btrfs_abort_transaction. This is slightly confusing as we'd
+rather want to know the exact callsite. Whereas this information is
+printed in the syslog below the stacktrace, this requires further look
+and we usually see only the headline from WARNING.
+
+Moving the WARN into the macro has to inline some code and increases
+code by a few kilobytes:
+
+  text    data     bss     dec     hex filename
+835481   20305   14120  869906   d4612 btrfs.ko.before
+842883   20305   14120  877308   d62fc btrfs.ko.after
+
+The delta is +7k (130+ calls), measured on 3.19 x86_64, distro config.
+The increase is not small and could lead to worse icache use. The code
+is on error/exit paths that can be recognized by compiler as cold and
+moved out of the way so the impact is speculated to be low, if
+measurable at all.
+
+Signed-off-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 6f364e1..98b3347 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -4111,11 +4111,17 @@ static inline int __btrfs_fs_incompat(struct btrfs_fs_info *fs_info, u64 flag)
+  * Call btrfs_abort_transaction as early as possible when an error condition is
+  * detected, that way the exact line number is reported.
+  */
+-
+ #define btrfs_abort_transaction(trans, root, errno)		\
+ do {								\
+-	__btrfs_abort_transaction(trans, root, __func__,	\
+-				  __LINE__, errno);		\
++	/* Report first abort since mount */			\
++	if (!test_and_set_bit(BTRFS_FS_STATE_TRANS_ABORTED,	\
++			&((root)->fs_info->fs_state))) {	\
++		WARN(1, KERN_DEBUG				\
++		"BTRFS: Transaction aborted (error %d)\n",	\
++		(errno));					\
++	}							\
++	__btrfs_abort_transaction((trans), (root), __func__,	\
++				  __LINE__, (errno));		\
+ } while (0)
+ 
+ #define btrfs_std_error(fs_info, errno)				\
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 9e66f5e..3c72eea 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -251,14 +251,6 @@ void __btrfs_abort_transaction(struct btrfs_trans_handle *trans,
+ 			       struct btrfs_root *root, const char *function,
+ 			       unsigned int line, int errno)
+ {
+-	/*
+-	 * Report first abort since mount
+-	 */
+-	if (!test_and_set_bit(BTRFS_FS_STATE_TRANS_ABORTED,
+-				&root->fs_info->fs_state)) {
+-		WARN(1, KERN_DEBUG "BTRFS: Transaction aborted (error %d)\n",
+-				errno);
+-	}
+ 	trans->aborted = errno;
+ 	/* Nothing used. The other threads that have joined this
+ 	 * transaction may be able to continue. */
+-- 
+cgit v0.10.2
+
