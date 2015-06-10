@@ -1,0 +1,99 @@
+From 4617ea3a52cfe8ae407ef406ab999f40a558c369 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Tue, 9 Jun 2015 17:48:21 +0100
+Subject: Btrfs: fix necessary chunk tree space calculation when allocating a chunk
+
+When allocating a new chunk or removing one we need to update num_devs
+device items and insert or remove a chunk item in the chunk tree, so
+in the worst case the space needed in the chunk space_info is:
+
+  btrfs_calc_trunc_metadata_size(chunk_root, num_devs) +
+     btrfs_calc_trans_metadata_size(chunk_root, 1)
+
+That is, in the worst case we need to cow num_devs paths and cow 1 other
+path that can result in splitting every node and leaf, and each path
+consisting of BTRFS_MAX_LEVEL - 1 nodes and 1 leaf. We were requiring
+some additional chunk_root->nodesize * BTRFS_MAX_LEVEL * num_devs bytes,
+which were unnecessary since updating the existing device items does
+not result in splitting the nodes and leaf since after updating them
+they remain with the same size.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 92e9083..5e09834 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -3518,8 +3518,7 @@ int btrfs_start_write_no_snapshoting(struct btrfs_root *root);
+ void btrfs_end_write_no_snapshoting(struct btrfs_root *root);
+ void check_system_chunk(struct btrfs_trans_handle *trans,
+ 			struct btrfs_root *root,
+-			const u64 type,
+-			const bool is_allocation);
++			const u64 type);
+ /* ctree.c */
+ int btrfs_bin_search(struct extent_buffer *eb, struct btrfs_key *key,
+ 		     int level, int *slot);
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index f1d1216..4eefabc 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -4116,8 +4116,7 @@ static u64 get_profile_num_devs(struct btrfs_root *root, u64 type)
+  */
+ void check_system_chunk(struct btrfs_trans_handle *trans,
+ 			struct btrfs_root *root,
+-			u64 type,
+-			const bool is_allocation)
++			u64 type)
+ {
+ 	struct btrfs_space_info *info;
+ 	u64 left;
+@@ -4141,11 +4140,8 @@ void check_system_chunk(struct btrfs_trans_handle *trans,
+ 	num_devs = get_profile_num_devs(root, type);
+ 
+ 	/* num_devs device items to update and 1 chunk item to add or remove */
+-	if (is_allocation)
+-		thresh = btrfs_calc_trans_metadata_size(root, num_devs + 1);
+-	else
+-		thresh = btrfs_calc_trans_metadata_size(root, num_devs) +
+-			btrfs_calc_trunc_metadata_size(root, 1);
++	thresh = btrfs_calc_trunc_metadata_size(root, num_devs) +
++		btrfs_calc_trans_metadata_size(root, 1);
+ 
+ 	if (left < thresh && btrfs_test_opt(root, ENOSPC_DEBUG)) {
+ 		btrfs_info(root->fs_info, "left=%llu, need=%llu, flags=%llu",
+@@ -4258,7 +4254,7 @@ again:
+ 	 * Check if we have enough space in SYSTEM chunk because we may need
+ 	 * to update devices.
+ 	 */
+-	check_system_chunk(trans, extent_root, flags, true);
++	check_system_chunk(trans, extent_root, flags);
+ 
+ 	ret = btrfs_alloc_chunk(trans, extent_root, flags);
+ 	trans->allocating_chunk = false;
+@@ -8926,7 +8922,7 @@ out:
+ 	if (cache->flags & BTRFS_BLOCK_GROUP_SYSTEM) {
+ 		alloc_flags = update_block_group_flags(root, cache->flags);
+ 		lock_chunks(root->fs_info->chunk_root);
+-		check_system_chunk(trans, root, alloc_flags, true);
++		check_system_chunk(trans, root, alloc_flags);
+ 		unlock_chunks(root->fs_info->chunk_root);
+ 	}
+ 	mutex_unlock(&root->fs_info->ro_block_group_mutex);
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index d766875..c208d6a 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -2626,7 +2626,7 @@ int btrfs_remove_chunk(struct btrfs_trans_handle *trans,
+ 	}
+ 	map = (struct map_lookup *)em->bdev;
+ 	lock_chunks(root->fs_info->chunk_root);
+-	check_system_chunk(trans, extent_root, map->type, false);
++	check_system_chunk(trans, extent_root, map->type);
+ 	unlock_chunks(root->fs_info->chunk_root);
+ 
+ 	for (i = 0; i < map->num_stripes; i++) {
+-- 
+cgit v0.10.2
+
