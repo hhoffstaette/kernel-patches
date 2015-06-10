@@ -24,6 +24,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **Current stable series: >=4.0.5**
 
 - bfs: [BFS v462](http://ck-hack.blogspot.com/2015/04/bfs-462-linux-40-ck1.html)
+- bfq: BFQ v7r8 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - btrfs: fixes from 3.19-4.2+ (cleanups, data loss, performance, subvolumes, TRIM)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: r8169 support for Byte Queue Limits & xmit_more
