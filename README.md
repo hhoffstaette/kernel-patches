@@ -24,6 +24,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **LTS series: >=3.14.44**
 
 - bfs: [BFS v454](http://ck-hack.blogspot.de/2014/08/bfs-453454455456-and-316-ck2.html) + [SMT-nice patches](http://ck-hack.blogspot.de/2014/08/smthyperthreading-nice-and-scheduling.html)
+- bfq: BFQ v7r8 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
 - btrfs: >720 patches from 3.15-4.2+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace, TRIM and automatic GC of empty blockgroups. \o/
 - ext4: corruption fixes, `renameat2`
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
