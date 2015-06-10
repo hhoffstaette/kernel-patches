@@ -1,0 +1,35 @@
+From: Zhaolei <zhaolei@cn.fujitsu.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] btrfs: Update out-of-date "skip parity stripe" comment
+Date: Wed, 10 Jun 2015 19:45:48 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45680>
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+Because btrfs support scrub raid56 parity stripe now.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/scrub.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index a13f91a..5ee5630 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -3202,12 +3202,12 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+ 	 */
+ 	ret = 0;
+ 	while (physical < physical_end) {
+-		/* for raid56, we skip parity stripe */
+ 		if (map->type & BTRFS_BLOCK_GROUP_RAID56_MASK) {
+ 			ret = get_raid56_logic_offset(physical, num,
+ 					map, &logical, &stripe_logical);
+ 			logical += base;
+ 			if (ret) {
++				/* it is parity strip */
+ 				stripe_logical += base;
+ 				stripe_end = stripe_logical + increment - 1;
+ 				ret = scrub_raid56_parity(sctx, map, scrub_dev,
+-- 
+1.8.5.1
