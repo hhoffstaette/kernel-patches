@@ -1,0 +1,36 @@
+From: fdmanana@kernel.org
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH] Btrfs: fix a comment in inode.c:evict_inode_truncate_pages()
+Date: Wed, 10 Jun 2015 13:02:12 +0100
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45682>
+
+From: Filipe Manana <fdmanana@suse.com>
+
+The comment was not correct about the part where it says the endio
+callback of the bio might have not yet been called - update it
+to mention that by that time the endio callback execution might
+still be in progress only.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/inode.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 855935f..a21ad34 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -4989,8 +4989,9 @@ static void evict_inode_truncate_pages(struct inode *inode)
+ 	/*
+ 	 * Keep looping until we have no more ranges in the io tree.
+ 	 * We can have ongoing bios started by readpages (called from readahead)
+-	 * that didn't get their end io callbacks called yet or they are still
+-	 * in progress ((extent_io.c:end_bio_extent_readpage()). This means some
++	 * that have their endio callback (extent_io.c:end_bio_extent_readpage)
++	 * still in progress (unlocked the pages in the bio but did not yet
++	 * unlocked the ranges in the io tree). Therefore this means some
+ 	 * ranges can still be locked and eviction started because before
+ 	 * submitting those bios, which are executed by a separate task (work
+ 	 * queue kthread), inode references (inode->i_count) were not taken
+-- 
+2.1.3
