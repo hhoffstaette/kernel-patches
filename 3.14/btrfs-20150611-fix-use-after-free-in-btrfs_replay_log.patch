@@ -1,0 +1,29 @@
+From de72ac1c6612441bd5e1a314a05c38d727e12121 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Thu, 11 Jun 2015 14:16:44 +0800
+Subject: [PATCH] Btrfs: fix use-after-free in btrfs_replay_log
+
+log_tree_root should not be referenced after kfree.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/disk-io.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 7f83778..3e49d80 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -2321,8 +2321,9 @@ static int btrfs_replay_log(struct btrfs_fs_info *fs_info,
+ 			fs_info->generation + 1);
+ 	if (IS_ERR(log_tree_root->node)) {
+ 		printk(KERN_ERR "BTRFS: failed to read log tree\n");
++		ret = PTR_ERR(log_tree_root->node);
+ 		kfree(log_tree_root);
+-		return PTR_ERR(log_tree_root->node);
++		return ret;
+ 	} else if (!extent_buffer_uptodate(log_tree_root->node)) {
+ 		printk(KERN_ERR "BTRFS: failed to read log tree\n");
+ 		free_extent_buffer(log_tree_root->node);
+-- 
+2.1.0
