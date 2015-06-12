@@ -1,0 +1,55 @@
+From c5a86e7dc66eca271d03bcc71fc31b571bef2109 Mon Sep 17 00:00:00 2001
+From: Dave Chinner <dchinner@redhat.com>
+Date: Wed, 4 Mar 2015 14:40:19 -0500
+Subject: writeback: periodically trim the writeback list
+
+Inodes are removed lazily from the bdi writeback list, so in the
+absence of sync(2) work inodes will build up on the bdi writback
+list even though they are no longer under IO. Use the periodic
+kupdate work check to remove inodes no longer under IO from the
+writeback list.
+
+Signed-off-by: Dave Chinner <dchinner@redhat.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Reviewed-by: Jan Kara <jack@suse.cz>
+
+diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
+index 3f5b2ff..383b469 100644
+--- a/fs/fs-writeback.c
++++ b/fs/fs-writeback.c
+@@ -1055,6 +1055,23 @@ static long wb_check_background_flush(struct bdi_writeback *wb)
+ 	return 0;
+ }
+ 
++/*
++ * clean out writeback list for all inodes that don't have IO in progress
++ */
++static void wb_trim_writeback_list(struct bdi_writeback *wb)
++{
++	struct inode *inode;
++	struct inode *tmp;
++
++	spin_lock(&wb->list_lock);
++	list_for_each_entry_safe(inode, tmp, &wb->b_writeback, i_wb_list) {
++		if (!mapping_tagged(inode->i_mapping, PAGECACHE_TAG_WRITEBACK))
++			list_del_init(&inode->i_wb_list);
++	}
++	spin_unlock(&wb->list_lock);
++
++}
++
+ static long wb_check_old_data_flush(struct bdi_writeback *wb)
+ {
+ 	unsigned long expired;
+@@ -1071,6 +1088,8 @@ static long wb_check_old_data_flush(struct bdi_writeback *wb)
+ 	if (time_before(jiffies, expired))
+ 		return 0;
+ 
++	wb_trim_writeback_list(wb);
++
+ 	wb->last_old_flush = jiffies;
+ 	nr_pages = get_nr_dirty_pages();
+ 
+-- 
+cgit v0.10.2
+

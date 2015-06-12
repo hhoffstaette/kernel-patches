@@ -1,0 +1,75 @@
+From 0f526fc8630a170f2df954ad29b1caba5b072735 Mon Sep 17 00:00:00 2001
+From: Dave Chinner <dchinner@redhat.com>
+Date: Wed, 4 Mar 2015 11:16:36 -0500
+Subject: writeback: plug writeback at a high level
+
+Doing writeback on lots of little files causes terrible IOPS storms
+because of the per-mapping writeback plugging we do. This
+essentially causes imeediate dispatch of IO for each mapping,
+regardless of the context in which writeback is occurring.
+
+IOWs, running a concurrent write-lots-of-small 4k files using fsmark
+on XFS results in a huge number of IOPS being issued for data
+writes.  Metadata writes are sorted and plugged at a high level by
+XFS, so aggregate nicely into large IOs. However, data writeback IOs
+are dispatched in individual 4k IOs, even when the blocks of two
+consecutively written files are adjacent.
+
+Test VM: 8p, 8GB RAM, 4xSSD in RAID0, 100TB sparse XFS filesystem,
+metadata CRCs enabled.
+
+Kernel: 3.10-rc5 + xfsdev + my 3.11 xfs queue (~70 patches)
+
+Test:
+
+$ ./fs_mark  -D  10000  -S0  -n  10000  -s  4096  -L  120  -d
+/mnt/scratch/0  -d  /mnt/scratch/1  -d  /mnt/scratch/2  -d
+/mnt/scratch/3  -d  /mnt/scratch/4  -d  /mnt/scratch/5  -d
+/mnt/scratch/6  -d  /mnt/scratch/7
+
+Result:
+
+		wall	sys	create rate	Physical write IO
+		time	CPU	(avg files/s)	 IOPS	Bandwidth
+		-----	-----	------------	------	---------
+unpatched	6m56s	15m47s	24,000+/-500	26,000	130MB/s
+patched		5m06s	13m28s	32,800+/-600	 1,500	180MB/s
+improvement	-26.44%	-14.68%	  +36.67%	-94.23%	+38.46%
+
+If I use zero length files, this workload at about 500 IOPS, so
+plugging drops the data IOs from roughly 25,500/s to 1000/s.
+3 lines of code, 35% better throughput for 15% less CPU.
+
+The benefits of plugging at this layer are likely to be higher for
+spinning media as the IO patterns for this workload are going make a
+much bigger difference on high IO latency devices.....
+
+Signed-off-by: Dave Chinner <dchinner@redhat.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Reviewed-by: Jan Kara <jack@suse.cz>
+
+diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
+index 32a8bbd..43b6555 100644
+--- a/fs/fs-writeback.c
++++ b/fs/fs-writeback.c
+@@ -677,7 +677,9 @@ static long writeback_sb_inodes(struct super_block *sb,
+ 	unsigned long start_time = jiffies;
+ 	long write_chunk;
+ 	long wrote = 0;  /* count both pages and inodes */
++	struct blk_plug plug;
+ 
++	blk_start_plug(&plug);
+ 	while (!list_empty(&wb->b_io)) {
+ 		struct inode *inode = wb_inode(wb->b_io.prev);
+ 
+@@ -774,6 +776,7 @@ static long writeback_sb_inodes(struct super_block *sb,
+ 				break;
+ 		}
+ 	}
++	blk_finish_plug(&plug);
+ 	return wrote;
+ }
+ 
+-- 
+cgit v0.10.2
+

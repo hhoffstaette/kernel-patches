@@ -1,60 +1,62 @@
-From e4a58b71ff981b098ac3371f4d573dc6a90006ce Mon Sep 17 00:00:00 2001
-From: Josef Bacik <jbacik@fb.com>
-Date: Fri, 19 Dec 2014 13:24:26 -0500
-Subject: vfs: make inode_sb_list_lock per sb
+From 23a56621e9654d21d0145171c5efcdcca32f983e Mon Sep 17 00:00:00 2001
+From: Dave Chinner <dchinner@redhat.com>
+Date: Wed, 4 Mar 2015 12:37:22 -0500
+Subject: inode: convert inode_sb_list_lock to per-sb
 
-When doing fs_mark tests I was noticing other things getting starved out of
-doing operations while the fs was unmounting.  This is because we protect all
-super_block's s_inodes list with a global lock, which is kind of a bummer.
-There doesn't seem to be any reason we do this so make it a per-sb lock.  This
-makes sure that we don't add latency to anybody trying to add/remove inodes from
-the per sb list while somebody else is unmounting or evicting inodes.  Thanks,
+The process of reducing contention on per-superblock inode lists
+starts with moving the locking to match the per-superblock inode
+list. This takes the global lock out of the picture and reduces the
+contention problems to within a single filesystem. This doesn't get
+rid of contention as the locks still have global CPU scope, but it
+does isolate operations on different superblocks form each other.
 
+Signed-off-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Josef Bacik <jbacik@fb.com>
+Reviewed-by: Jan Kara <jack@suse.cz>
 
 diff --git a/fs/block_dev.c b/fs/block_dev.c
-index b48c41b..06c93a5 100644
+index c7e4163..f2a89be 100644
 --- a/fs/block_dev.c
 +++ b/fs/block_dev.c
-@@ -1730,7 +1730,7 @@ void iterate_bdevs(void (*func)(struct block_device *, void *), void *arg)
+@@ -1762,7 +1762,7 @@ void iterate_bdevs(void (*func)(struct block_device *, void *), void *arg)
  {
  	struct inode *inode, *old_inode = NULL;
  
 -	spin_lock(&inode_sb_list_lock);
-+	spin_lock(&blockdev_superblock->s_inodes_list_lock);
++	spin_lock(&blockdev_superblock->s_inode_list_lock);
  	list_for_each_entry(inode, &blockdev_superblock->s_inodes, i_sb_list) {
  		struct address_space *mapping = inode->i_mapping;
  
-@@ -1742,13 +1742,13 @@ void iterate_bdevs(void (*func)(struct block_device *, void *), void *arg)
+@@ -1774,13 +1774,13 @@ void iterate_bdevs(void (*func)(struct block_device *, void *), void *arg)
  		}
  		__iget(inode);
  		spin_unlock(&inode->i_lock);
 -		spin_unlock(&inode_sb_list_lock);
-+		spin_unlock(&blockdev_superblock->s_inodes_list_lock);
++		spin_unlock(&blockdev_superblock->s_inode_list_lock);
  		/*
  		 * We hold a reference to 'inode' so it couldn't have been
  		 * removed from s_inodes list while we dropped the
 -		 * inode_sb_list_lock.  We cannot iput the inode now as we can
-+		 * sb->s_inodes_list_lock.  We cannot iput the inode now as we can
++		 * s_inode_list_lock  We cannot iput the inode now as we can
  		 * be holding the last reference and we cannot iput it under
 -		 * inode_sb_list_lock. So we keep the reference and iput it
-+		 * sb->s_inodes_list_lock. So we keep the reference and iput it
++		 * s_inode_list_lock. So we keep the reference and iput it
  		 * later.
  		 */
  		iput(old_inode);
-@@ -1756,8 +1756,8 @@ void iterate_bdevs(void (*func)(struct block_device *, void *), void *arg)
+@@ -1788,8 +1788,8 @@ void iterate_bdevs(void (*func)(struct block_device *, void *), void *arg)
  
  		func(I_BDEV(inode), arg);
  
 -		spin_lock(&inode_sb_list_lock);
-+		spin_lock(&blockdev_superblock->s_inodes_list_lock);
++		spin_lock(&blockdev_superblock->s_inode_list_lock);
  	}
 -	spin_unlock(&inode_sb_list_lock);
-+	spin_unlock(&blockdev_superblock->s_inodes_list_lock);
++	spin_unlock(&blockdev_superblock->s_inode_list_lock);
  	iput(old_inode);
  }
 diff --git a/fs/drop_caches.c b/fs/drop_caches.c
-index 2bc2c87..b469e9a 100644
+index 5718cb9..d72d52b 100644
 --- a/fs/drop_caches.c
 +++ b/fs/drop_caches.c
 @@ -17,7 +17,7 @@ static void drop_pagecache_sb(struct super_block *sb, void *unused)
@@ -62,102 +64,106 @@ index 2bc2c87..b469e9a 100644
  	struct inode *inode, *toput_inode = NULL;
  
 -	spin_lock(&inode_sb_list_lock);
-+	spin_lock(&sb->s_inodes_list_lock);
++	spin_lock(&sb->s_inode_list_lock);
  	list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
  		spin_lock(&inode->i_lock);
  		if ((inode->i_state & (I_FREEING|I_WILL_FREE|I_NEW)) ||
-@@ -27,13 +27,13 @@ static void drop_pagecache_sb(struct super_block *sb, void *unused)
+@@ -27,13 +27,15 @@ static void drop_pagecache_sb(struct super_block *sb, void *unused)
  		}
  		__iget(inode);
  		spin_unlock(&inode->i_lock);
 -		spin_unlock(&inode_sb_list_lock);
-+		spin_unlock(&sb->s_inodes_list_lock);
++		spin_unlock(&sb->s_inode_list_lock);
++
  		invalidate_mapping_pages(inode->i_mapping, 0, -1);
  		iput(toput_inode);
  		toput_inode = inode;
 -		spin_lock(&inode_sb_list_lock);
-+		spin_lock(&sb->s_inodes_list_lock);
++
++		spin_lock(&sb->s_inode_list_lock);
  	}
 -	spin_unlock(&inode_sb_list_lock);
-+	spin_unlock(&sb->s_inodes_list_lock);
++	spin_unlock(&sb->s_inode_list_lock);
  	iput(toput_inode);
  }
  
 diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
-index 2d609a5..6731c2c 100644
+index 43b6555..333afa3 100644
 --- a/fs/fs-writeback.c
 +++ b/fs/fs-writeback.c
-@@ -1249,7 +1249,7 @@ static void wait_sb_inodes(struct super_block *sb)
+@@ -1371,7 +1371,7 @@ static void wait_sb_inodes(struct super_block *sb)
  	 */
  	WARN_ON(!rwsem_is_locked(&sb->s_umount));
  
 -	spin_lock(&inode_sb_list_lock);
-+	spin_lock(&sb->s_inodes_list_lock);
++	spin_lock(&sb->s_inode_list_lock);
  
  	/*
  	 * Data integrity sync. Must wait for all pages under writeback,
-@@ -1269,14 +1269,14 @@ static void wait_sb_inodes(struct super_block *sb)
+@@ -1391,14 +1391,14 @@ static void wait_sb_inodes(struct super_block *sb)
  		}
  		__iget(inode);
  		spin_unlock(&inode->i_lock);
 -		spin_unlock(&inode_sb_list_lock);
-+		spin_unlock(&sb->s_inodes_list_lock);
++		spin_unlock(&sb->s_inode_list_lock);
  
  		/*
  		 * We hold a reference to 'inode' so it couldn't have been
  		 * removed from s_inodes list while we dropped the
 -		 * inode_sb_list_lock.  We cannot iput the inode now as we can
-+		 * sb->s_inodes_list_lock.  We cannot iput the inode now as we can
++		 * s_inode_list_lock.  We cannot iput the inode now as we can
  		 * be holding the last reference and we cannot iput it under
 -		 * inode_sb_list_lock. So we keep the reference and iput it
-+		 * sb->s_inodes_list_lock. So we keep the reference and iput it
++		 * s_inode_list_lock. So we keep the reference and iput it
  		 * later.
  		 */
  		iput(old_inode);
-@@ -1286,9 +1286,9 @@ static void wait_sb_inodes(struct super_block *sb)
+@@ -1408,9 +1408,9 @@ static void wait_sb_inodes(struct super_block *sb)
  
  		cond_resched();
  
 -		spin_lock(&inode_sb_list_lock);
-+		spin_lock(&sb->s_inodes_list_lock);
++		spin_lock(&sb->s_inode_list_lock);
  	}
 -	spin_unlock(&inode_sb_list_lock);
-+	spin_unlock(&sb->s_inodes_list_lock);
++	spin_unlock(&sb->s_inode_list_lock);
  	iput(old_inode);
  }
  
 diff --git a/fs/inode.c b/fs/inode.c
-index f266765..abd5e4b 100644
+index ea37cd1..12d58fa 100644
 --- a/fs/inode.c
 +++ b/fs/inode.c
-@@ -27,7 +27,7 @@
+@@ -28,8 +28,8 @@
   *   inode->i_state, inode->i_hash, __iget()
   * Inode LRU list locks protect:
   *   inode->i_sb->s_inode_lru, inode->i_lru
 - * inode_sb_list_lock protects:
-+ * sb->s_inodes_list_lock protects:
-  *   sb->s_inodes, inode->i_sb_list
+- *   sb->s_inodes, inode->i_sb_list
++ * inode->i_sb->s_inode_list_lock protects:
++ *   inode->i_sb->s_inodes, inode->i_sb_list
   * bdi->wb.list_lock protects:
-  *   bdi->wb.b_{dirty,io,more_io}, inode->i_wb_list
-@@ -36,7 +36,7 @@
+  *   bdi->wb.b_{dirty,io,more_io,dirty_time}, inode->i_wb_list
+  * inode_hash_lock protects:
+@@ -37,7 +37,7 @@
   *
   * Lock ordering:
   *
 - * inode_sb_list_lock
-+ * sb->s_inodes_list_lock
++ * inode->i_sb->s_inode_list_lock
   *   inode->i_lock
   *     Inode LRU list locks
   *
-@@ -44,7 +44,7 @@
+@@ -45,7 +45,7 @@
   *   inode->i_lock
   *
   * inode_hash_lock
 - *   inode_sb_list_lock
-+ *   sb->s_inodes_list_lock
++ *   inode->i_sb->s_inode_list_lock
   *   inode->i_lock
   *
   * iunique_lock
-@@ -56,8 +56,6 @@ static unsigned int i_hash_shift __read_mostly;
+@@ -57,8 +57,6 @@ static unsigned int i_hash_shift __read_mostly;
  static struct hlist_head *inode_hashtable __read_mostly;
  static __cacheline_aligned_in_smp DEFINE_SPINLOCK(inode_hash_lock);
  
@@ -166,15 +172,15 @@ index f266765..abd5e4b 100644
  /*
   * Empty aops. Can be used for the cases where the user does not
   * define any of the address_space operations.
-@@ -430,18 +428,18 @@ static void inode_lru_list_del(struct inode *inode)
+@@ -424,18 +422,18 @@ static void inode_lru_list_del(struct inode *inode)
   */
  void inode_sb_list_add(struct inode *inode)
  {
 -	spin_lock(&inode_sb_list_lock);
-+	spin_lock(&inode->i_sb->s_inodes_list_lock);
++	spin_lock(&inode->i_sb->s_inode_list_lock);
  	list_add(&inode->i_sb_list, &inode->i_sb->s_inodes);
 -	spin_unlock(&inode_sb_list_lock);
-+	spin_unlock(&inode->i_sb->s_inodes_list_lock);
++	spin_unlock(&inode->i_sb->s_inode_list_lock);
  }
  EXPORT_SYMBOL_GPL(inode_sb_list_add);
  
@@ -182,74 +188,72 @@ index f266765..abd5e4b 100644
  {
  	if (!list_empty(&inode->i_sb_list)) {
 -		spin_lock(&inode_sb_list_lock);
-+		spin_lock(&inode->i_sb->s_inodes_list_lock);
++		spin_lock(&inode->i_sb->s_inode_list_lock);
  		list_del_init(&inode->i_sb_list);
 -		spin_unlock(&inode_sb_list_lock);
-+		spin_unlock(&inode->i_sb->s_inodes_list_lock);
++		spin_unlock(&inode->i_sb->s_inode_list_lock);
  	}
  }
  
-@@ -599,7 +597,7 @@ void evict_inodes(struct super_block *sb)
+@@ -592,7 +590,7 @@ void evict_inodes(struct super_block *sb)
  	struct inode *inode, *next;
  	LIST_HEAD(dispose);
  
 -	spin_lock(&inode_sb_list_lock);
-+	spin_lock(&sb->s_inodes_list_lock);
++	spin_lock(&sb->s_inode_list_lock);
  	list_for_each_entry_safe(inode, next, &sb->s_inodes, i_sb_list) {
  		if (atomic_read(&inode->i_count))
  			continue;
-@@ -614,9 +612,9 @@ void evict_inodes(struct super_block *sb)
- 		inode_lru_list_del(inode);
+@@ -608,7 +606,7 @@ void evict_inodes(struct super_block *sb)
  		spin_unlock(&inode->i_lock);
  		list_add(&inode->i_lru, &dispose);
--		cond_resched_lock(&inode_sb_list_lock);
-+		cond_resched_lock(&sb->s_inodes_list_lock);
  	}
 -	spin_unlock(&inode_sb_list_lock);
-+	spin_unlock(&sb->s_inodes_list_lock);
++	spin_unlock(&sb->s_inode_list_lock);
  
  	dispose_list(&dispose);
  }
-@@ -637,7 +635,7 @@ int invalidate_inodes(struct super_block *sb, bool kill_dirty)
+@@ -629,7 +627,7 @@ int invalidate_inodes(struct super_block *sb, bool kill_dirty)
  	struct inode *inode, *next;
  	LIST_HEAD(dispose);
  
 -	spin_lock(&inode_sb_list_lock);
-+	spin_lock(&sb->s_inodes_list_lock);
++	spin_lock(&sb->s_inode_list_lock);
  	list_for_each_entry_safe(inode, next, &sb->s_inodes, i_sb_list) {
  		spin_lock(&inode->i_lock);
  		if (inode->i_state & (I_NEW | I_FREEING | I_WILL_FREE)) {
-@@ -660,7 +658,7 @@ int invalidate_inodes(struct super_block *sb, bool kill_dirty)
+@@ -652,7 +650,7 @@ int invalidate_inodes(struct super_block *sb, bool kill_dirty)
  		spin_unlock(&inode->i_lock);
  		list_add(&inode->i_lru, &dispose);
  	}
 -	spin_unlock(&inode_sb_list_lock);
-+	spin_unlock(&sb->s_inodes_list_lock);
++	spin_unlock(&sb->s_inode_list_lock);
  
  	dispose_list(&dispose);
  
-@@ -893,7 +891,7 @@ struct inode *new_inode(struct super_block *sb)
+@@ -884,7 +882,7 @@ struct inode *new_inode(struct super_block *sb)
  {
  	struct inode *inode;
  
 -	spin_lock_prefetch(&inode_sb_list_lock);
-+	spin_lock_prefetch(&sb->s_inodes_list_lock);
++	spin_lock_prefetch(&sb->s_inode_list_lock);
  
  	inode = new_inode_pseudo(sb);
  	if (inode)
 diff --git a/fs/internal.h b/fs/internal.h
-index 757ba2a..a23e5df 100644
+index 01dce1d..b6c350d 100644
 --- a/fs/internal.h
 +++ b/fs/internal.h
-@@ -110,6 +110,5 @@ extern int open_check_o_direct(struct file *f);
+@@ -111,7 +111,6 @@ extern int open_check_o_direct(struct file *f);
  /*
   * inode.c
   */
 -extern spinlock_t inode_sb_list_lock;
  extern long prune_icache_sb(struct super_block *sb, struct shrink_control *sc);
  extern void inode_add_lru(struct inode *inode);
+ 
 diff --git a/fs/notify/inode_mark.c b/fs/notify/inode_mark.c
-index 3daf513..a68ff85 100644
+index 3daf513..a4e1a8f 100644
 --- a/fs/notify/inode_mark.c
 +++ b/fs/notify/inode_mark.c
 @@ -163,17 +163,17 @@ int fsnotify_add_inode_mark(struct fsnotify_mark *mark,
@@ -257,11 +261,11 @@ index 3daf513..a68ff85 100644
  /**
   * fsnotify_unmount_inodes - an sb is unmounting.  handle any watched inodes.
 - * @list: list of inodes being unmounted (sb->s_inodes)
-+ * @sb: the sb being unmounted.
++ * @sb: superblock being unmounted.
   *
   * Called during unmount with no locks held, so needs to be safe against
 - * concurrent modifiers. We temporarily drop inode_sb_list_lock and CAN block.
-+ * concurrent modifiers. We temporarily drop sb->s_inodes_list_lock and CAN block.
++ * concurrent modifiers. We temporarily drop sb->s_inode_list_lock and CAN block.
   */
 -void fsnotify_unmount_inodes(struct list_head *list)
 +void fsnotify_unmount_inodes(struct super_block *sb)
@@ -270,7 +274,7 @@ index 3daf513..a68ff85 100644
  
 -	spin_lock(&inode_sb_list_lock);
 -	list_for_each_entry_safe(inode, next_i, list, i_sb_list) {
-+	spin_lock(&sb->s_inodes_list_lock);
++	spin_lock(&sb->s_inode_list_lock);
 +	list_for_each_entry_safe(inode, next_i, &sb->s_inodes, i_sb_list) {
  		struct inode *need_iput_tmp;
  
@@ -289,13 +293,13 @@ index 3daf513..a68ff85 100644
  
  		/*
 -		 * We can safely drop inode_sb_list_lock here because either
-+		 * We can safely drop sb->s_inodes_list_lock here because either
++		 * We can safely drop s_inode_list_lock here because either
  		 * we actually hold references on both inode and next_i or
  		 * end of list.  Also no new inodes will be added since the
  		 * umount has begun.
  		 */
 -		spin_unlock(&inode_sb_list_lock);
-+		spin_unlock(&sb->s_inodes_list_lock);
++		spin_unlock(&sb->s_inode_list_lock);
  
  		if (need_iput_tmp)
  			iput(need_iput_tmp);
@@ -304,84 +308,84 @@ index 3daf513..a68ff85 100644
  		iput(inode);
  
 -		spin_lock(&inode_sb_list_lock);
-+		spin_lock(&sb->s_inodes_list_lock);
++		spin_lock(&sb->s_inode_list_lock);
  	}
 -	spin_unlock(&inode_sb_list_lock);
-+	spin_unlock(&sb->s_inodes_list_lock);
++	spin_unlock(&sb->s_inode_list_lock);
  }
 diff --git a/fs/quota/dquot.c b/fs/quota/dquot.c
-index 8f0acef..2ae696c 100644
+index 20d1f74..2863ec6 100644
 --- a/fs/quota/dquot.c
 +++ b/fs/quota/dquot.c
-@@ -920,7 +920,7 @@ static void add_dquot_ref(struct super_block *sb, int type)
+@@ -923,7 +923,7 @@ static void add_dquot_ref(struct super_block *sb, int type)
  	int reserved = 0;
  #endif
  
 -	spin_lock(&inode_sb_list_lock);
-+	spin_lock(&sb->s_inodes_list_lock);
++	spin_lock(&sb->s_inode_list_lock);
  	list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
  		spin_lock(&inode->i_lock);
  		if ((inode->i_state & (I_FREEING|I_WILL_FREE|I_NEW)) ||
-@@ -931,7 +931,7 @@ static void add_dquot_ref(struct super_block *sb, int type)
+@@ -934,7 +934,7 @@ static void add_dquot_ref(struct super_block *sb, int type)
  		}
  		__iget(inode);
  		spin_unlock(&inode->i_lock);
 -		spin_unlock(&inode_sb_list_lock);
-+		spin_unlock(&sb->s_inodes_list_lock);
++		spin_unlock(&sb->s_inode_list_lock);
  
  #ifdef CONFIG_QUOTA_DEBUG
  		if (unlikely(inode_get_rsv_space(inode) > 0))
-@@ -943,15 +943,15 @@ static void add_dquot_ref(struct super_block *sb, int type)
+@@ -946,15 +946,15 @@ static void add_dquot_ref(struct super_block *sb, int type)
  		/*
  		 * We hold a reference to 'inode' so it couldn't have been
  		 * removed from s_inodes list while we dropped the
 -		 * inode_sb_list_lock We cannot iput the inode now as we can be
-+		 * sb->s_inodes_list_lock We cannot iput the inode now as we can be
++		 * s_inode_list_lock. We cannot iput the inode now as we can be
  		 * holding the last reference and we cannot iput it under
 -		 * inode_sb_list_lock. So we keep the reference and iput it
-+		 * sb->s_inodes_list_lock. So we keep the reference and iput it
++		 * s_inode_list_lock. So we keep the reference and iput it
  		 * later.
  		 */
  		old_inode = inode;
 -		spin_lock(&inode_sb_list_lock);
-+		spin_lock(&sb->s_inodes_list_lock);
++		spin_lock(&sb->s_inode_list_lock);
  	}
 -	spin_unlock(&inode_sb_list_lock);
-+	spin_unlock(&sb->s_inodes_list_lock);
++	spin_unlock(&sb->s_inode_list_lock);
  	iput(old_inode);
  
  #ifdef CONFIG_QUOTA_DEBUG
-@@ -1019,7 +1019,7 @@ static void remove_dquot_ref(struct super_block *sb, int type,
+@@ -1023,7 +1023,7 @@ static void remove_dquot_ref(struct super_block *sb, int type,
  	struct inode *inode;
  	int reserved = 0;
  
 -	spin_lock(&inode_sb_list_lock);
-+	spin_lock(&sb->s_inodes_list_lock);
++	spin_lock(&sb->s_inode_list_lock);
  	list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
  		/*
  		 *  We have to scan also I_NEW inodes because they can already
-@@ -1035,7 +1035,7 @@ static void remove_dquot_ref(struct super_block *sb, int type,
+@@ -1039,7 +1039,7 @@ static void remove_dquot_ref(struct super_block *sb, int type,
  		}
  		spin_unlock(&dq_data_lock);
  	}
 -	spin_unlock(&inode_sb_list_lock);
-+	spin_unlock(&sb->s_inodes_list_lock);
++	spin_unlock(&sb->s_inode_list_lock);
  #ifdef CONFIG_QUOTA_DEBUG
  	if (reserved) {
  		printk(KERN_WARNING "VFS (%s): Writes happened after quota"
 diff --git a/fs/super.c b/fs/super.c
-index eae088f..3b56fba 100644
+index 928c20f..15e57f5 100644
 --- a/fs/super.c
 +++ b/fs/super.c
-@@ -190,6 +190,7 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags)
+@@ -191,6 +191,7 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags)
  	INIT_HLIST_NODE(&s->s_instances);
  	INIT_HLIST_BL_HEAD(&s->s_anon);
  	INIT_LIST_HEAD(&s->s_inodes);
-+	spin_lock_init(&s->s_inodes_list_lock);
++	spin_lock_init(&s->s_inode_list_lock);
  
- 	if (list_lru_init(&s->s_dentry_lru))
+ 	if (list_lru_init_memcg(&s->s_dentry_lru))
  		goto fail;
-@@ -394,7 +395,7 @@ void generic_shutdown_super(struct super_block *sb)
+@@ -399,7 +400,7 @@ void generic_shutdown_super(struct super_block *sb)
  		sync_filesystem(sb);
  		sb->s_flags &= ~MS_ACTIVE;
  
@@ -391,17 +395,28 @@ index eae088f..3b56fba 100644
  		evict_inodes(sb);
  
 diff --git a/include/linux/fs.h b/include/linux/fs.h
-index 8815725..ea63753 100644
+index b841718..8607d92 100644
 --- a/include/linux/fs.h
 +++ b/include/linux/fs.h
-@@ -1234,6 +1234,7 @@ struct super_block {
+@@ -1280,7 +1280,6 @@ struct super_block {
  #endif
  	const struct xattr_handler **s_xattr;
  
-+	spinlock_t		s_inodes_list_lock ____cacheline_aligned_in_smp;
- 	struct list_head	s_inodes;	/* all inodes */
+-	struct list_head	s_inodes;	/* all inodes */
  	struct hlist_bl_head	s_anon;		/* anonymous dentries for (nfs) exporting */
  	struct list_head	s_mounts;	/* list of mounts; _not_ for fs use */
+ 	struct block_device	*s_bdev;
+@@ -1351,6 +1350,10 @@ struct super_block {
+ 	 * Indicates how deep in a filesystem stack this SB is
+ 	 */
+ 	int s_stack_depth;
++
++	/* s_inode_list_lock protects s_inodes */
++	spinlock_t		s_inode_list_lock ____cacheline_aligned_in_smp;
++	struct list_head	s_inodes;	/* all inodes */
+ };
+ 
+ extern struct timespec current_fs_time(struct super_block *sb);
 diff --git a/include/linux/fsnotify_backend.h b/include/linux/fsnotify_backend.h
 index 0f313f9..236cbc4 100644
 --- a/include/linux/fsnotify_backend.h
