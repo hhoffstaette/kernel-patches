@@ -1,8 +1,8 @@
 From: jeffm@suse.com
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 2/3] btrfs: explictly delete unused block groups in close_ctree and ro-remount
-Date: Wed,  3 Jun 2015 10:47:53 -0400
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45541>
+Subject: [PATCH 5/7] btrfs: explictly delete unused block groups in close_ctree and ro-remount
+Date: Mon, 15 Jun 2015 09:41:18 -0400
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45822>
 
 From: Jeff Mahoney <jeffm@suse.com>
 
@@ -64,4 +64,4 @@ index 9e66f5e..2ccd8d4 100644
  		btrfs_scrub_cancel(fs_info);
  		btrfs_pause_balance(fs_info);
 -- 
-1.8.4.5
+2.4.3
