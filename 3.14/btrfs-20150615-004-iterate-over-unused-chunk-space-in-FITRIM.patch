@@ -1,8 +1,8 @@
 From: jeffm@suse.com
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 1/3] btrfs: iterate over unused chunk space in FITRIM
-Date: Wed,  3 Jun 2015 10:47:52 -0400
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45542>
+Subject: [PATCH 4/7] btrfs: iterate over unused chunk space in FITRIM
+Date: Mon, 15 Jun 2015 09:41:17 -0400
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45821>
 
 From: Jeff Mahoney <jeffm@suse.com>
 
@@ -28,31 +28,18 @@ at the end of the transaction commit after any locks are released anyway.
 We also take the commit_root_sem to protect against a transaction starting
 and committing while we're running.
 
-v1->v2:
-- Doesn't take a transaction, so the entire run is transactionless
-- The loop can be interrupted while waiting on the chunk mutex
-  and after the discard has completed.
-- The only lock held for the duration is the device_list_mutex. The chunk
-  mutex is taken per loop iteration, so normal operation should continue
-  while we're running even on large file systems.
-
-v2->v3:
-- Cleaned up pointer tricks that abused &NULL->member.
-- Take commit_root_sem across loop iteration to protect against transaction
-  commit.
-
 Signed-off-by: Jeff Mahoney <jeffm@suse.com>
 ---
- fs/btrfs/extent-tree.c | 100 +++++++++++++++++++++++++++++++++++++++++++++++++
- fs/btrfs/volumes.c     |  60 +++++++++++++++++------------
+ fs/btrfs/extent-tree.c | 101 +++++++++++++++++++++++++++++++++++++++++++++++++
+ fs/btrfs/volumes.c     |  60 ++++++++++++++++++-----------
  fs/btrfs/volumes.h     |   3 ++
- 3 files changed, 140 insertions(+), 23 deletions(-)
+ 3 files changed, 141 insertions(+), 23 deletions(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 0ec3acd..fb4dbfc 100644
+index 1e44b93..24b48df 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -10074,10 +10074,98 @@ int btrfs_error_unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
+@@ -10143,10 +10143,99 @@ int btrfs_error_unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
  	return unpin_extent_range(root, start, end, false);
  }
  
@@ -95,6 +82,7 @@ index 0ec3acd..fb4dbfc 100644
 +	while (1) {
 +		struct btrfs_fs_info *fs_info = device->dev_root->fs_info;
 +		struct btrfs_transaction *trans;
++		u64 bytes;
 +
 +		ret = mutex_lock_interruptible(&fs_info->chunk_mutex);
 +		if (ret)
@@ -121,7 +109,7 @@ index 0ec3acd..fb4dbfc 100644
 +			break;
 +		}
 +
-+		ret = btrfs_issue_discard(device->bdev, start, len);
++		ret = btrfs_issue_discard(device->bdev, start, len, &bytes);
 +		up_read(&fs_info->commit_root_sem);
 +		mutex_unlock(&fs_info->chunk_mutex);
 +
@@ -129,7 +117,7 @@ index 0ec3acd..fb4dbfc 100644
 +			break;
 +
 +		start += len;
-+		*trimmed += len;
++		*trimmed += bytes;
 +
 +		if (fatal_signal_pending(current)) {
 +			ret = -ERESTARTSYS;
@@ -151,7 +139,7 @@ index 0ec3acd..fb4dbfc 100644
  	u64 group_trimmed;
  	u64 start;
  	u64 end;
-@@ -10132,6 +10220,18 @@ int btrfs_trim_fs(struct btrfs_root *root, struct fstrim_range *range)
+@@ -10201,6 +10290,18 @@ int btrfs_trim_fs(struct btrfs_root *root, struct fstrim_range *range)
  		cache = next_block_group(fs_info->tree_root, cache);
  	}
  
@@ -317,4 +305,4 @@ index ebc3133..30918a8 100644
  			 struct btrfs_device *device, u64 num_bytes,
  			 u64 *start, u64 *max_avail);
 -- 
-1.8.4.5
+2.4.3
