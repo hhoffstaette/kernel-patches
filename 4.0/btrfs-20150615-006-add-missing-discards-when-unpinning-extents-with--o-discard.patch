@@ -1,8 +1,8 @@
 From: jeffm@suse.com
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 3/3] btrfs: add missing discards when unpinning extents with -o discard
-Date: Wed,  3 Jun 2015 10:47:54 -0400
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45539>
+Subject: [PATCH 6/7] btrfs: add missing discards when unpinning extents with -o discard
+Date: Mon, 15 Jun 2015 09:41:19 -0400
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45823>
 
 From: Jeff Mahoney <jeffm@suse.com>
 
@@ -19,26 +19,15 @@ left nearly 2/3 of extents undiscarded.
 To clean up the block groups, we add the removed block group onto a list
 that will be discarded after transaction commit.
 
-v1->v2:
-- Fix ordering to ensure that we don't discard extents freed in an
-  uncommitted transaction.
-
-v2->v3:
-- Factor out get/put block_group->trimming to ensure that cleanup always
-  happens at the last reference drop.
-- Cleanup the free space cache on the last reference drop.
-- Use list_move instead of list_add in case of multiple adds.  We still
-  issue a warning, but we shouldn't fall over.
-
 Signed-off-by: Jeff Mahoney <jeffm@suse.com>
 ---
  fs/btrfs/ctree.h            |  3 ++
- fs/btrfs/extent-tree.c      | 69 ++++++++++++++++++++++++++++++++++++++++++---
+ fs/btrfs/extent-tree.c      | 68 ++++++++++++++++++++++++++++++++++++++++++---
  fs/btrfs/free-space-cache.c | 57 +++++++++++++++++++++----------------
  fs/btrfs/super.c            |  2 +-
  fs/btrfs/transaction.c      |  2 ++
  fs/btrfs/transaction.h      |  2 ++
- 6 files changed, 106 insertions(+), 29 deletions(-)
+ 6 files changed, 105 insertions(+), 29 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
 index 6f364e1..780acf1 100644
@@ -62,10 +51,10 @@ index 6f364e1..780acf1 100644
  void __btrfs_abort_transaction(struct btrfs_trans_handle *trans,
  			       struct btrfs_root *root, const char *function,
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index fb4dbfc..e53dbe9 100644
+index 24b48df..3598440 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -6034,20 +6034,19 @@ int btrfs_finish_extent_commit(struct btrfs_trans_handle *trans,
+@@ -6103,20 +6103,19 @@ int btrfs_finish_extent_commit(struct btrfs_trans_handle *trans,
  			       struct btrfs_root *root)
  {
  	struct btrfs_fs_info *fs_info = root->fs_info;
@@ -89,7 +78,7 @@ index fb4dbfc..e53dbe9 100644
  		mutex_lock(&fs_info->unused_bg_unpin_mutex);
  		ret = find_first_extent_bit(unpin, 0, &start, &end,
  					    EXTENT_DIRTY, NULL);
-@@ -6066,6 +6065,34 @@ int btrfs_finish_extent_commit(struct btrfs_trans_handle *trans,
+@@ -6135,6 +6134,34 @@ int btrfs_finish_extent_commit(struct btrfs_trans_handle *trans,
  		cond_resched();
  	}
  
@@ -124,7 +113,7 @@ index fb4dbfc..e53dbe9 100644
  	return 0;
  }
  
-@@ -9845,6 +9872,11 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
+@@ -9914,6 +9941,11 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
  	 * currently running transaction might finish and a new one start,
  	 * allowing for new block groups to be created that can reuse the same
  	 * physical device locations unless we take this special care.
@@ -136,18 +125,15 @@ index fb4dbfc..e53dbe9 100644
  	 */
  	remove_em = (atomic_read(&block_group->trimming) == 0);
  	/*
-@@ -9917,8 +9949,10 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
- 		return;
- 
+@@ -9988,6 +10020,7 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
  	spin_lock(&fs_info->unused_bgs_lock);
-+
  	while (!list_empty(&fs_info->unused_bgs)) {
  		u64 start, end;
 +		int trimming;
  
  		block_group = list_first_entry(&fs_info->unused_bgs,
  					       struct btrfs_block_group_cache,
-@@ -10016,12 +10050,39 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
+@@ -10085,12 +10118,39 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
  		spin_unlock(&block_group->lock);
  		spin_unlock(&space_info->lock);
  
@@ -311,4 +297,4 @@ index 0b24755..14325f2 100644
  	int aborted;
  	int dirty_bg_run;
 -- 
-1.8.4.5
+2.4.3
