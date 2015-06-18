@@ -1,0 +1,43 @@
+From: Liu Bo <bo.li.liu@oracle.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 1/2] Btrfs: fix hang when failing to submit bio of directIO
+Date: Wed, 17 Jun 2015 16:59:57 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45873>
+
+The hang is uncoverd by generic/019.
+
+btrfs_endio_direct_write() skips the "finish_ordered_fn" part when it hits
+an error, thus those added ordered extents will never get processed, which
+block processes that waiting for them via btrfs_start_ordered_extent().
+
+This fixes the above, and meanwhile finish_ordered_fn will do the space
+accounting work.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/inode.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 8bb0136..7bf150a 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -7855,8 +7855,6 @@ static void btrfs_endio_direct_write(struct bio *bio, int err)
+ 	struct bio *dio_bio;
+ 	int ret;
+ 
+-	if (err)
+-		goto out_done;
+ again:
+ 	ret = btrfs_dec_test_first_ordered_pending(inode, &ordered,
+ 						   &ordered_offset,
+@@ -7879,7 +7877,6 @@ out_test:
+ 		ordered = NULL;
+ 		goto again;
+ 	}
+-out_done:
+ 	dio_bio = dip->dio_bio;
+ 
+ 	kfree(dip);
+-- 
+2.1.0
