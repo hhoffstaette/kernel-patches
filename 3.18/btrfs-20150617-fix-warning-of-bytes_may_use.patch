@@ -1,0 +1,72 @@
+From: Liu Bo <bo.li.liu@oracle.com>
+Newsgroups: gmane.comp.file-systems.btrfs
+Subject: [PATCH 2/2] Btrfs: fix warning of bytes_may_use
+Date: Wed, 17 Jun 2015 16:59:58 +0800
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45872>
+
+While running generic/019, dmesg got several warnings from
+btrfs_free_reserved_data_space().
+
+Test generic/019 produces some disk failures so sumbit dio will get errors,
+in which case, btrfs_direct_IO() goes to the error handling and free
+bytes_may_use, but the problem is that bytes_may_use has been free'd
+during get_block().
+
+This adds a runtime flag to show if we've gone through get_block(), if so,
+don't do the cleanup work.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/btrfs_inode.h |  2 ++
+ fs/btrfs/inode.c       | 16 +++++++++++++---
+ 2 files changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/btrfs_inode.h b/fs/btrfs/btrfs_inode.h
+index 0ef5cc1..81220b2 100644
+--- a/fs/btrfs/btrfs_inode.h
++++ b/fs/btrfs/btrfs_inode.h
+@@ -44,6 +44,8 @@
+ #define BTRFS_INODE_IN_DELALLOC_LIST		9
+ #define BTRFS_INODE_READDIO_NEED_LOCK		10
+ #define BTRFS_INODE_HAS_PROPS		        11
++/* DIO is ready to submit */
++#define BTRFS_INODE_DIO_READY		        12
+ /*
+  * The following 3 bits are meant only for the btree inode.
+  * When any of them is set, it means an error happened while writing an
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 7bf150a..438b56f 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -7530,6 +7530,7 @@ unlock:
+ 
+ 		current->journal_info = outstanding_extents;
+ 		btrfs_free_reserved_data_space(inode, len);
++		set_bit(BTRFS_INODE_DIO_READY, &BTRFS_I(inode)->runtime_flags);
+ 	}
+ 
+ 	/*
+@@ -8311,9 +8312,18 @@ static ssize_t btrfs_direct_IO(struct kiocb *iocb, struct iov_iter *iter,
+ 				   btrfs_submit_direct, flags);
+ 	if (iov_iter_rw(iter) == WRITE) {
+ 		current->journal_info = NULL;
+-		if (ret < 0 && ret != -EIOCBQUEUED)
+-			btrfs_delalloc_release_space(inode, count);
+-		else if (ret >= 0 && (size_t)ret < count)
++		if (ret < 0 && ret != -EIOCBQUEUED) {
++			/*
++			 * If the error comes from submitting stage,
++			 * btrfs_get_blocsk_direct() has free'd data space,
++			 * and metadata space will be handled by
++			 * finish_ordered_fn, don't do that again to make
++			 * sure bytes_may_use is correct.
++			 */
++			if (!test_and_clear_bit(BTRFS_INODE_DIO_READY,
++				     &BTRFS_I(inode)->runtime_flags))
++				btrfs_delalloc_release_space(inode, count);
++		} else if (ret >= 0 && (size_t)ret < count)
+ 			btrfs_delalloc_release_space(inode,
+ 						     count - (size_t)ret);
+ 	}
+-- 
+2.1.0
