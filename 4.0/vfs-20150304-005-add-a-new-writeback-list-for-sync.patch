@@ -1,7 +1,10 @@
-From 1ac2609f0ecfdf4eb2864a2eda1faf68accb497f Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Newsgroups: gmane.linux.file-systems
+Subject: [PATCH 6/8 V4] bdi: add a new writeback list for sync
+Date: Thu, 18 Jun 2015 15:18:43 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/97194>
+
 From: Dave Chinner <dchinner@redhat.com>
-Date: Wed, 4 Mar 2015 14:36:27 -0500
-Subject: bdi: add a new writeback list for sync
 
 wait_sb_inodes() current does a walk of all inodes in the filesystem
 to find dirty one to wait on during sync. This is highly
@@ -33,9 +36,38 @@ all writeback on the inode is complete.
 
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Josef Bacik <jbacik@fb.com>
+Tested-by: Dave Chinner <dchinner@redhat.com>
+---
+V3->V4:
+-added bdi_clear_inode_writeback to kill_bdev.
+-added BUG_ON(!list_emtpy(&inode->i_wb_list)) to inode_wait_writeback
+-clarified the comment in inode_wait_writeback
+-fixed some indenting
 
+ fs/block_dev.c              |   2 +
+ fs/fs-writeback.c           | 136 ++++++++++++++++++++++++++++++++++----------
+ fs/inode.c                  |   1 +
+ include/linux/backing-dev.h |   5 ++
+ include/linux/fs.h          |   1 +
+ mm/backing-dev.c            |   1 +
+ mm/page-writeback.c         |  14 +++++
+ 7 files changed, 131 insertions(+), 29 deletions(-)
+
+diff --git a/fs/block_dev.c b/fs/block_dev.c
+index f2a89be..2726ff1 100644
+--- a/fs/block_dev.c
++++ b/fs/block_dev.c
+@@ -64,6 +64,8 @@ void kill_bdev(struct block_device *bdev)
+ {
+ 	struct address_space *mapping = bdev->bd_inode->i_mapping;
+ 
++	bdi_clear_inode_writeback(inode_to_bdi(bdev->bd_inode),
++				  bdev->bd_inode);
+ 	if (mapping->nrpages == 0 && mapping->nrshadows == 0)
+ 		return;
+ 
 diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
-index aa72536..3f5b2ff 100644
+index aa72536..3958772 100644
 --- a/fs/fs-writeback.c
 +++ b/fs/fs-writeback.c
 @@ -210,6 +210,34 @@ void inode_wb_list_del(struct inode *inode)
@@ -58,8 +90,8 @@ index aa72536..3f5b2ff 100644
 +/*
 + * clear an inode as under writeback on the given bdi
 + */
-+static void bdi_clear_inode_writeback(struct backing_dev_info *bdi,
-+				      struct inode *inode)
++void bdi_clear_inode_writeback(struct backing_dev_info *bdi,
++			       struct inode *inode)
 +{
 +	WARN_ON_ONCE(bdi != inode_to_bdi(inode));
 +	if (!list_empty(&inode->i_wb_list)) {
@@ -73,7 +105,7 @@ index aa72536..3f5b2ff 100644
   * Redirty an inode: set its when-it-was dirtied timestamp and move it to the
   * furthest end of its superblock's dirty-inode list.
   *
-@@ -383,13 +411,23 @@ static void __inode_wait_for_writeback(struct inode *inode)
+@@ -383,13 +411,28 @@ static void __inode_wait_for_writeback(struct inode *inode)
  }
  
  /*
@@ -90,15 +122,20 @@ index aa72536..3f5b2ff 100644
  	spin_unlock(&inode->i_lock);
 +
 +	/*
-+	 * bd_inode's will have already had the bdev free'd so don't bother
-+	 * doing the bdi_clear_inode_writeback.
++	 * For a bd_inode when we do inode_to_bdi we'll want to get the bdev for
++	 * the inode and then deref bdev->bd_disk, which at this point has been
++	 * set to NULL, so we would panic.  At the point we are dropping our
++	 * bd_inode we won't have any pages under writeback on the device so
++	 * this is safe.  But just in case we'll assert to make sure we don't
++	 * screw this up.
 +	 */
 +	if (!sb_is_blkdev_sb(inode->i_sb))
 +		bdi_clear_inode_writeback(inode_to_bdi(inode), inode);
++	BUG_ON(!list_empty(&inode->i_wb_list));
  }
  
  /*
-@@ -1372,7 +1410,8 @@ EXPORT_SYMBOL(__mark_inode_dirty);
+@@ -1372,7 +1415,8 @@ EXPORT_SYMBOL(__mark_inode_dirty);
   */
  static void wait_sb_inodes(struct super_block *sb)
  {
@@ -108,7 +145,7 @@ index aa72536..3f5b2ff 100644
  
  	/*
  	 * We need to be protected against the filesystem going from
-@@ -1380,48 +1419,82 @@ static void wait_sb_inodes(struct super_block *sb)
+@@ -1380,48 +1424,82 @@ static void wait_sb_inodes(struct super_block *sb)
  	 */
  	WARN_ON(!rwsem_is_locked(&sb->s_umount));
  
@@ -168,7 +205,7 @@ index aa72536..3f5b2ff 100644
 -		if ((inode->i_state & (I_FREEING|I_WILL_FREE|I_NEW)) ||
 -		    (mapping->nrpages == 0)) {
 +		if (inode->i_state & (I_FREEING|I_WILL_FREE|I_NEW)) {
-+                        list_move(&inode->i_wb_list, &bdi->wb.b_writeback);
++			list_move(&inode->i_wb_list, &bdi->wb.b_writeback);
  			spin_unlock(&inode->i_lock);
 +			cond_resched_lock(&bdi->wb.list_lock);
  			continue;
@@ -231,7 +268,7 @@ index c76a575..d1e6598 100644
  	address_space_init_once(&inode->i_data);
  	i_size_ordered_init(inode);
 diff --git a/include/linux/backing-dev.h b/include/linux/backing-dev.h
-index aff923a..12d8224 100644
+index aff923a..7764d1e 100644
 --- a/include/linux/backing-dev.h
 +++ b/include/linux/backing-dev.h
 @@ -56,6 +56,7 @@ struct bdi_writeback {
@@ -242,12 +279,14 @@ index aff923a..12d8224 100644
  	spinlock_t list_lock;		/* protects the b_* lists */
  };
  
-@@ -124,6 +125,8 @@ void bdi_start_background_writeback(struct backing_dev_info *bdi);
+@@ -124,6 +125,10 @@ void bdi_start_background_writeback(struct backing_dev_info *bdi);
  void bdi_writeback_workfn(struct work_struct *work);
  int bdi_has_dirty_io(struct backing_dev_info *bdi);
  void bdi_wakeup_thread_delayed(struct backing_dev_info *bdi);
 +void bdi_mark_inode_writeback(struct backing_dev_info *bdi,
 +			      struct inode *inode);
++void bdi_clear_inode_writeback(struct backing_dev_info *bdi,
++			       struct inode *inode);
  
  extern spinlock_t bdi_lock;
  extern struct list_head bdi_list;
@@ -306,5 +345,4 @@ index eb59f7e..f3751d1 100644
  		if (!PageDirty(page))
  			radix_tree_tag_clear(&mapping->page_tree,
 -- 
-cgit v0.10.2
-
+2.1.0
