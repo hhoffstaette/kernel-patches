@@ -21,7 +21,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Current stable series: >=4.0.5**
+**Current stable series: >=4.0.6**
 
 - bfs: [BFS v462](http://ck-hack.blogspot.com/2015/04/bfs-462-linux-40-ck1.html)
 - bfq: BFQ v7r8 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
