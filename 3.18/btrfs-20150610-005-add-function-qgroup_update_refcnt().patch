@@ -1,0 +1,86 @@
+From d810ef2be5b8b15c9b6f88f9a09b1b4b16e30871 Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Date: Sun, 12 Apr 2015 16:52:34 +0800
+Subject: btrfs: qgroup: Add function qgroup_update_refcnt().
+
+This function is used to update refcnt for qgroups.
+And is one of the two core functions used in the new qgroup implement.
+
+This is based on the old update_old/new_refcnt, but provides a unified
+logic and behavior.
+
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 26f9da2..8177317 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -1806,6 +1806,64 @@ static int qgroup_calc_new_refcnt(struct btrfs_fs_info *fs_info,
+ 	return 0;
+ }
+ 
++#define UPDATE_NEW	0
++#define UPDATE_OLD	1
++/*
++ * Walk all of the roots that points to the bytenr and adjust their refcnts.
++ */
++static int qgroup_update_refcnt(struct btrfs_fs_info *fs_info,
++				struct ulist *roots, struct ulist *tmp,
++				struct ulist *qgroups, u64 seq, int update_old)
++{
++	struct ulist_node *unode;
++	struct ulist_iterator uiter;
++	struct ulist_node *tmp_unode;
++	struct ulist_iterator tmp_uiter;
++	struct btrfs_qgroup *qg;
++	int ret = 0;
++
++	if (!roots)
++		return 0;
++	ULIST_ITER_INIT(&uiter);
++	while ((unode = ulist_next(roots, &uiter))) {
++		qg = find_qgroup_rb(fs_info, unode->val);
++		if (!qg)
++			continue;
++
++		ulist_reinit(tmp);
++		ret = ulist_add(qgroups, qg->qgroupid, ptr_to_u64(qg),
++				GFP_ATOMIC);
++		if (ret < 0)
++			return ret;
++		ret = ulist_add(tmp, qg->qgroupid, ptr_to_u64(qg), GFP_ATOMIC);
++		if (ret < 0)
++			return ret;
++		ULIST_ITER_INIT(&tmp_uiter);
++		while ((tmp_unode = ulist_next(tmp, &tmp_uiter))) {
++			struct btrfs_qgroup_list *glist;
++
++			qg = u64_to_ptr(tmp_unode->aux);
++			if (update_old)
++				btrfs_qgroup_update_old_refcnt(qg, seq, 1);
++			else
++				btrfs_qgroup_update_new_refcnt(qg, seq, 1);
++			list_for_each_entry(glist, &qg->groups, next_group) {
++				ret = ulist_add(qgroups, glist->group->qgroupid,
++						ptr_to_u64(glist->group),
++						GFP_ATOMIC);
++				if (ret < 0)
++					return ret;
++				ret = ulist_add(tmp, glist->group->qgroupid,
++						ptr_to_u64(glist->group),
++						GFP_ATOMIC);
++				if (ret < 0)
++					return ret;
++			}
++		}
++	}
++	return 0;
++}
++
+ /*
+  * This adjusts the counters for all referenced qgroups if need be.
+  */
+-- 
+cgit v0.10.2
+

@@ -1,0 +1,109 @@
+From d4b804045924d7f8d2ea988be22c4b9e6492ec11 Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Date: Mon, 20 Apr 2015 09:26:02 +0800
+Subject: btrfs: ulist: Add ulist_del() function.
+
+This function will delete unode with given (val,aux) pair.
+And with this patch, seqnum for debug usage doesn't have any meaning
+now, so remove them.
+
+This is used by later patches to skip snapshot root.
+
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/ulist.c b/fs/btrfs/ulist.c
+index 840a38b..91feb2b 100644
+--- a/fs/btrfs/ulist.c
++++ b/fs/btrfs/ulist.c
+@@ -132,6 +132,15 @@ static struct ulist_node *ulist_rbtree_search(struct ulist *ulist, u64 val)
+ 	return NULL;
+ }
+ 
++static void ulist_rbtree_erase(struct ulist *ulist, struct ulist_node *node)
++{
++	rb_erase(&node->rb_node, &ulist->root);
++	list_del(&node->list);
++	kfree(node);
++	BUG_ON(ulist->nnodes == 0);
++	ulist->nnodes--;
++}
++
+ static int ulist_rbtree_insert(struct ulist *ulist, struct ulist_node *ins)
+ {
+ 	struct rb_node **p = &ulist->root.rb_node;
+@@ -197,9 +206,6 @@ int ulist_add_merge(struct ulist *ulist, u64 val, u64 aux,
+ 
+ 	node->val = val;
+ 	node->aux = aux;
+-#ifdef CONFIG_BTRFS_DEBUG
+-	node->seqnum = ulist->nnodes;
+-#endif
+ 
+ 	ret = ulist_rbtree_insert(ulist, node);
+ 	ASSERT(!ret);
+@@ -209,6 +215,33 @@ int ulist_add_merge(struct ulist *ulist, u64 val, u64 aux,
+ 	return 1;
+ }
+ 
++/*
++ * ulist_del - delete one node from ulist
++ * @ulist:	ulist to remove node from
++ * @val:	value to delete
++ * @aux:	aux to delete
++ *
++ * The deletion will only be done when *BOTH* val and aux matches.
++ * Return 0 for successful delete.
++ * Return > 0 for not found.
++ */
++int ulist_del(struct ulist *ulist, u64 val, u64 aux)
++{
++	struct ulist_node *node;
++
++	node = ulist_rbtree_search(ulist, val);
++	/* Not found */
++	if (!node)
++		return 1;
++
++	if (node->aux != aux)
++		return 1;
++
++	/* Found and delete */
++	ulist_rbtree_erase(ulist, node);
++	return 0;
++}
++
+ /**
+  * ulist_next - iterate ulist
+  * @ulist:	ulist to iterate
+@@ -237,15 +270,7 @@ struct ulist_node *ulist_next(struct ulist *ulist, struct ulist_iterator *uiter)
+ 		uiter->cur_list = uiter->cur_list->next;
+ 	} else {
+ 		uiter->cur_list = ulist->nodes.next;
+-#ifdef CONFIG_BTRFS_DEBUG
+-		uiter->i = 0;
+-#endif
+ 	}
+ 	node = list_entry(uiter->cur_list, struct ulist_node, list);
+-#ifdef CONFIG_BTRFS_DEBUG
+-	ASSERT(node->seqnum == uiter->i);
+-	ASSERT(uiter->i >= 0 && uiter->i < ulist->nnodes);
+-	uiter->i++;
+-#endif
+ 	return node;
+ }
+diff --git a/fs/btrfs/ulist.h b/fs/btrfs/ulist.h
+index 4c29db6..a01a2c4 100644
+--- a/fs/btrfs/ulist.h
++++ b/fs/btrfs/ulist.h
+@@ -57,6 +57,7 @@ void ulist_free(struct ulist *ulist);
+ int ulist_add(struct ulist *ulist, u64 val, u64 aux, gfp_t gfp_mask);
+ int ulist_add_merge(struct ulist *ulist, u64 val, u64 aux,
+ 		    u64 *old_aux, gfp_t gfp_mask);
++int ulist_del(struct ulist *ulist, u64 val, u64 aux);
+ 
+ /* just like ulist_add_merge() but take a pointer for the aux data */
+ static inline int ulist_add_merge_ptr(struct ulist *ulist, u64 val, void *aux,
+-- 
+cgit v0.10.2
+
