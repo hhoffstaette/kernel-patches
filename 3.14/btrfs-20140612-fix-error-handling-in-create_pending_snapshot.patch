@@ -1,0 +1,39 @@
+From 47a306a74842248dcd537b85f9a36c7b156c59a9 Mon Sep 17 00:00:00 2001
+From: Eric Sandeen <sandeen@redhat.com>
+Date: Thu, 12 Jun 2014 00:53:44 -0500
+Subject: btrfs: fix error handling in create_pending_snapshot
+
+fcebe456 cut and pasted some code to a later point
+in create_pending_snapshot(), but didn't switch
+to the appropriate error handling for this stage
+of the function.
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 9630f10..511839c 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -1284,11 +1284,13 @@ static noinline int create_pending_snapshot(struct btrfs_trans_handle *trans,
+ 		goto fail;
+ 	}
+ 
+-	pending->error = btrfs_qgroup_inherit(trans, fs_info,
+-					      root->root_key.objectid,
+-					      objectid, pending->inherit);
+-	if (pending->error)
+-		goto no_free_objectid;
++	ret = btrfs_qgroup_inherit(trans, fs_info,
++				   root->root_key.objectid,
++				   objectid, pending->inherit);
++	if (ret) {
++		btrfs_abort_transaction(trans, root, ret);
++		goto fail;
++	}
+ 
+ 	/* see comments in should_cow_block() */
+ 	set_bit(BTRFS_ROOT_FORCE_COW, &root->state);
+-- 
+cgit v0.10.2
+
