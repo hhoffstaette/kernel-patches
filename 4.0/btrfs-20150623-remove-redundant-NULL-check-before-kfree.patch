@@ -1,0 +1,39 @@
+From: Maninder Singh <maninder1.s@samsung.com>
+Newsgroups: gmane.linux.kernel,gmane.comp.file-systems.btrfs
+Subject: [PATCH 1/1] Btrfs: Remove redundant NULL check before kfree
+Date: Tue, 23 Jun 2015 11:28:00 +0530
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/1981919>
+
+There is no need of NULL check before kfree,
+removing the same
+
+Signed-off-by: Maninder Singh <maninder1.s@samsung.com>
+Reviewed-by: Akhilesh Kumar <akhilesh.k@samsung.com>
+---
+ fs/btrfs/free-space-cache.c |    6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index 9dbe5b5..88f1e16 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -2101,8 +2101,7 @@ new_bitmap:
+ 
+ out:
+ 	if (info) {
+-		if (info->bitmap)
+-			kfree(info->bitmap);
++		kfree(info->bitmap);
+ 		kmem_cache_free(btrfs_free_space_cachep, info);
+ 	}
+ 
+@@ -3561,8 +3560,7 @@ again:
+ 
+ 	if (info)
+ 		kmem_cache_free(btrfs_free_space_cachep, info);
+-	if (map)
+-		kfree(map);
++	kfree(map);
+ 	return 0;
+ }
+ 
