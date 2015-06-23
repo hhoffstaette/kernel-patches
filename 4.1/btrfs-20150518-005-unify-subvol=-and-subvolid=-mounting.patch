@@ -245,7 +245,7 @@ index 3ad9795..6fa4aaf 100644
 -	 * a reference to the dentry.  We will have already gotten a reference
 -	 * to the inode in btrfs_fill_super so we're good to go.
 -	 */
--	if (!new && sb->s_root->d_inode == inode) {
+-	if (!new && d_inode(sb->s_root) == inode) {
 -		iput(inode);
 -		return dget(sb->s_root);
 -	}
@@ -339,3 +339,4 @@ index 3ad9795..6fa4aaf 100644
  	btrfs_close_devices(fs_devices);
 -- 
 cgit v0.10.2
+

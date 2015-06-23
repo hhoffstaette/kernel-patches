@@ -84,7 +84,7 @@ index 1c57c0d..dd89dd3 100644
 +	/* mount_subtree() drops our reference on the vfsmount. */
 +	mnt = NULL;
  
- 	if (!IS_ERR(root) && !is_subvolume_inode(root->d_inode)) {
+ 	if (!IS_ERR(root) && !is_subvolume_inode(d_inode(root))) {
  		struct super_block *s = root->d_sb;
  		dput(root);
  		root = ERR_PTR(-EINVAL);
@@ -115,3 +115,4 @@ index 1c57c0d..dd89dd3 100644
  	security_init_mnt_opts(&new_sec_opts);
 -- 
 cgit v0.10.2
+

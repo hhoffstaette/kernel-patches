@@ -33,14 +33,14 @@ index dd89dd3..3ad9795 100644
  	/* mount_subtree() drops our reference on the vfsmount. */
  	mnt = NULL;
  
--	if (!IS_ERR(root) && !is_subvolume_inode(root->d_inode)) {
+-	if (!IS_ERR(root) && !is_subvolume_inode(d_inode(root))) {
 +	if (!IS_ERR(root)) {
  		struct super_block *s = root->d_sb;
 -		dput(root);
 -		root = ERR_PTR(-EINVAL);
 -		deactivate_locked_super(s);
 -		pr_err("BTRFS: '%s' is not a valid subvolume\n", subvol_name);
-+		struct inode *root_inode = root->d_inode;
++		struct inode *root_inode = d_inode(root);
 +		u64 root_objectid = BTRFS_I(root_inode)->root->root_key.objectid;
 +
 +		ret = 0;
@@ -74,3 +74,4 @@ index dd89dd3..3ad9795 100644
  	security_init_mnt_opts(&new_sec_opts);
 -- 
 cgit v0.10.2
+
