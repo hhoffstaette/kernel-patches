@@ -1,8 +1,8 @@
 From: Mark Fasheh <mfasheh@suse.de>
 Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 2/2] btrfs: fix deadlock with extent-same and readpage
-Date: Thu, 18 Jun 2015 14:10:03 -0700
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45959>
+Subject: [PATCH 2/5] btrfs: fix deadlock with extent-same and readpage
+Date: Tue, 23 Jun 2015 14:28:37 -0700
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45989>
 
 ->readpage() does page_lock() before extent_lock(), we do the opposite in
 extent-same. We want to reverse the order in btrfs_extent_same() but it's
@@ -16,6 +16,7 @@ we use btrfs_cmp_data() to do the data compare as usual and btrfs_cmp_data_free(
 to clean up our context.
 
 Signed-off-by: Mark Fasheh <mfasheh@suse.de>
+Reviewed-by: David Sterba <dsterba@suse.cz>
 ---
  fs/btrfs/ioctl.c | 148 +++++++++++++++++++++++++++++++++++++++++++------------
  1 file changed, 117 insertions(+), 31 deletions(-)
