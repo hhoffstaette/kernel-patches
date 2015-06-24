@@ -1,7 +1,10 @@
-From 0f526fc8630a170f2df954ad29b1caba5b072735 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Newsgroups: gmane.linux.file-systems
+Subject: [PATCH 1/8] writeback: plug writeback at a high level
+Date: Tue, 23 Jun 2015 20:23:55 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/97330>
+
 From: Dave Chinner <dchinner@redhat.com>
-Date: Wed, 4 Mar 2015 11:16:36 -0500
-Subject: writeback: plug writeback at a high level
 
 Doing writeback on lots of little files causes terrible IOPS storms
 because of the per-mapping writeback plugging we do. This
@@ -47,6 +50,11 @@ much bigger difference on high IO latency devices.....
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 Reviewed-by: Jan Kara <jack@suse.cz>
+Tested-by: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+---
+ fs/fs-writeback.c | 3 +++
+ 1 file changed, 3 insertions(+)
 
 diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
 index 32a8bbd..43b6555 100644
@@ -71,5 +79,4 @@ index 32a8bbd..43b6555 100644
  }
  
 -- 
-cgit v0.10.2
-
+2.1.0

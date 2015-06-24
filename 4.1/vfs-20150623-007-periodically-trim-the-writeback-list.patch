@@ -1,7 +1,10 @@
-From c5a86e7dc66eca271d03bcc71fc31b571bef2109 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Newsgroups: gmane.linux.file-systems
+Subject: [PATCH 7/8] writeback: periodically trim the writeback list
+Date: Tue, 23 Jun 2015 20:24:01 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/97332>
+
 From: Dave Chinner <dchinner@redhat.com>
-Date: Wed, 4 Mar 2015 14:40:19 -0500
-Subject: writeback: periodically trim the writeback list
 
 Inodes are removed lazily from the bdi writeback list, so in the
 absence of sync(2) work inodes will build up on the bdi writback
@@ -12,12 +15,16 @@ writeback list.
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 Reviewed-by: Jan Kara <jack@suse.cz>
+Tested-by: Dave Chinner <dchinner@redhat.com>
+---
+ fs/fs-writeback.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
 
 diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
-index 3f5b2ff..383b469 100644
+index 5c005ad..a2cd363 100644
 --- a/fs/fs-writeback.c
 +++ b/fs/fs-writeback.c
-@@ -1055,6 +1055,23 @@ static long wb_check_background_flush(struct bdi_writeback *wb)
+@@ -1060,6 +1060,23 @@ static long wb_check_background_flush(struct bdi_writeback *wb)
  	return 0;
  }
  
@@ -41,7 +48,7 @@ index 3f5b2ff..383b469 100644
  static long wb_check_old_data_flush(struct bdi_writeback *wb)
  {
  	unsigned long expired;
-@@ -1071,6 +1088,8 @@ static long wb_check_old_data_flush(struct bdi_writeback *wb)
+@@ -1076,6 +1093,8 @@ static long wb_check_old_data_flush(struct bdi_writeback *wb)
  	if (time_before(jiffies, expired))
  		return 0;
  
@@ -51,5 +58,4 @@ index 3f5b2ff..383b469 100644
  	nr_pages = get_nr_dirty_pages();
  
 -- 
-cgit v0.10.2
-
+2.1.0

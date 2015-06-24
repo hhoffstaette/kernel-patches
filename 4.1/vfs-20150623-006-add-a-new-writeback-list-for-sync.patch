@@ -1,8 +1,8 @@
 From: Josef Bacik <jbacik@fb.com>
 Newsgroups: gmane.linux.file-systems
-Subject: [PATCH 6/8 V4] bdi: add a new writeback list for sync
-Date: Thu, 18 Jun 2015 15:18:43 -0700
-Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/97194>
+Subject: [PATCH 6/8] bdi: add a new writeback list for sync
+Date: Tue, 23 Jun 2015 20:24:00 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/97333>
 
 From: Dave Chinner <dchinner@redhat.com>
 
@@ -37,21 +37,16 @@ all writeback on the inode is complete.
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 Tested-by: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Jan Kara <jack@suse.cz>
 ---
-V3->V4:
--added bdi_clear_inode_writeback to kill_bdev.
--added BUG_ON(!list_emtpy(&inode->i_wb_list)) to inode_wait_writeback
--clarified the comment in inode_wait_writeback
--fixed some indenting
-
  fs/block_dev.c              |   2 +
- fs/fs-writeback.c           | 136 ++++++++++++++++++++++++++++++++++----------
+ fs/fs-writeback.c           | 148 +++++++++++++++++++++++++++++++++++---------
  fs/inode.c                  |   1 +
  include/linux/backing-dev.h |   5 ++
  include/linux/fs.h          |   1 +
  mm/backing-dev.c            |   1 +
  mm/page-writeback.c         |  14 +++++
- 7 files changed, 131 insertions(+), 29 deletions(-)
+ 7 files changed, 144 insertions(+), 28 deletions(-)
 
 diff --git a/fs/block_dev.c b/fs/block_dev.c
 index f2a89be..2726ff1 100644
@@ -67,7 +62,7 @@ index f2a89be..2726ff1 100644
  		return;
  
 diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
-index aa72536..3958772 100644
+index aa72536..5c005ad 100644
 --- a/fs/fs-writeback.c
 +++ b/fs/fs-writeback.c
 @@ -210,6 +210,34 @@ void inode_wb_list_del(struct inode *inode)
@@ -135,17 +130,18 @@ index aa72536..3958772 100644
  }
  
  /*
-@@ -1372,7 +1415,8 @@ EXPORT_SYMBOL(__mark_inode_dirty);
+@@ -1372,7 +1415,9 @@ EXPORT_SYMBOL(__mark_inode_dirty);
   */
  static void wait_sb_inodes(struct super_block *sb)
  {
 -	struct inode *inode, *old_inode = NULL;
 +	struct backing_dev_info *bdi = sb->s_bdi;
 +	LIST_HEAD(sync_list);
++	struct inode *iput_inode = NULL;
  
  	/*
  	 * We need to be protected against the filesystem going from
-@@ -1380,48 +1424,82 @@ static void wait_sb_inodes(struct super_block *sb)
+@@ -1380,48 +1425,95 @@ static void wait_sb_inodes(struct super_block *sb)
  	 */
  	WARN_ON(!rwsem_is_locked(&sb->s_umount));
  
@@ -213,7 +209,8 @@ index aa72536..3958772 100644
  		__iget(inode);
  		spin_unlock(&inode->i_lock);
 -		spin_unlock(&sb->s_inode_list_lock);
--
++		spin_unlock(&bdi->wb.list_lock);
+ 
 -		/*
 -		 * We hold a reference to 'inode' so it couldn't have been
 -		 * removed from s_inodes list while we dropped the
@@ -224,7 +221,8 @@ index aa72536..3958772 100644
 -		 */
 -		iput(old_inode);
 -		old_inode = inode;
-+		spin_unlock(&bdi->wb.list_lock);
++		if (iput_inode)
++			iput(iput_inode);
  
  		filemap_fdatawait(mapping);
 -
@@ -247,19 +245,29 @@ index aa72536..3958772 100644
 +                } else
 +			list_del_init(&inode->i_wb_list);
 +		spin_unlock_irq(&mapping->tree_lock);
-+		iput(inode);
++
++		/*
++		 * can't iput inode while holding the wb.list_lock. Save it for
++		 * the next time through the loop when we drop all our spin
++		 * locks.
++		 */
++		iput_inode = inode;
  	}
 -	spin_unlock(&sb->s_inode_list_lock);
 -	iput(old_inode);
 +	spin_unlock(&bdi->wb.list_lock);
++
++	if (iput_inode)
++		iput(iput_inode);
++
  	mutex_unlock(&sb->s_sync_lock);
  }
  
 diff --git a/fs/inode.c b/fs/inode.c
-index c76a575..d1e6598 100644
+index 770d684..8f00557 100644
 --- a/fs/inode.c
 +++ b/fs/inode.c
-@@ -356,6 +356,7 @@ void inode_init_once(struct inode *inode)
+@@ -357,6 +357,7 @@ void inode_init_once(struct inode *inode)
  	INIT_HLIST_NODE(&inode->i_hash);
  	INIT_LIST_HEAD(&inode->i_devices);
  	INIT_LIST_HEAD(&inode->i_io_list);
@@ -268,7 +276,7 @@ index c76a575..d1e6598 100644
  	address_space_init_once(&inode->i_data);
  	i_size_ordered_init(inode);
 diff --git a/include/linux/backing-dev.h b/include/linux/backing-dev.h
-index aff923a..7764d1e 100644
+index d87d8ec..0d5bca2 100644
 --- a/include/linux/backing-dev.h
 +++ b/include/linux/backing-dev.h
 @@ -56,6 +56,7 @@ struct bdi_writeback {
@@ -279,7 +287,7 @@ index aff923a..7764d1e 100644
  	spinlock_t list_lock;		/* protects the b_* lists */
  };
  
-@@ -124,6 +125,10 @@ void bdi_start_background_writeback(struct backing_dev_info *bdi);
+@@ -123,6 +124,10 @@ void bdi_start_background_writeback(struct backing_dev_info *bdi);
  void bdi_writeback_workfn(struct work_struct *work);
  int bdi_has_dirty_io(struct backing_dev_info *bdi);
  void bdi_wakeup_thread_delayed(struct backing_dev_info *bdi);
@@ -291,10 +299,10 @@ index aff923a..7764d1e 100644
  extern spinlock_t bdi_lock;
  extern struct list_head bdi_list;
 diff --git a/include/linux/fs.h b/include/linux/fs.h
-index f4d56cc..f47792f 100644
+index 6dd2ab2..d3baa08 100644
 --- a/include/linux/fs.h
 +++ b/include/linux/fs.h
-@@ -637,6 +637,7 @@ struct inode {
+@@ -636,6 +636,7 @@ struct inode {
  	struct list_head	i_io_list;	/* backing dev IO list */
  	struct list_head	i_lru;		/* inode LRU list */
  	struct list_head	i_sb_list;
@@ -303,10 +311,10 @@ index f4d56cc..f47792f 100644
  		struct hlist_head	i_dentry;
  		struct rcu_head		i_rcu;
 diff --git a/mm/backing-dev.c b/mm/backing-dev.c
-index 6e7a644..df31958 100644
+index e9ed047..ea39301 100644
 --- a/mm/backing-dev.c
 +++ b/mm/backing-dev.c
-@@ -386,6 +386,7 @@ static void bdi_wb_init(struct bdi_writeback *wb, struct backing_dev_info *bdi)
+@@ -369,6 +369,7 @@ static void bdi_wb_init(struct bdi_writeback *wb, struct backing_dev_info *bdi)
  	INIT_LIST_HEAD(&wb->b_io);
  	INIT_LIST_HEAD(&wb->b_more_io);
  	INIT_LIST_HEAD(&wb->b_dirty_time);

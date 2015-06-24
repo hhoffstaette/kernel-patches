@@ -1,7 +1,8 @@
-From 83be81cf026478f6ff6cf522d62e94277e33ee33 Mon Sep 17 00:00:00 2001
 From: Josef Bacik <jbacik@fb.com>
-Date: Wed, 4 Mar 2015 16:52:52 -0500
-Subject: inode: don't softlockup when evicting inodes
+Newsgroups: gmane.linux.file-systems
+Subject: [PATCH 8/8] inode: don't softlockup when evicting inodes
+Date: Tue, 23 Jun 2015 20:24:02 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/97334>
 
 On a box with a lot of ram (148gb) I can make the box softlockup after running
 an fs_mark job that creates hundreds of millions of empty files.  This is
@@ -12,12 +13,16 @@ in dispose_list() and if we need a resched when processing the s_inodes list do
 that and run dispose_list() on what we've currently culled.  Thanks,
 
 Signed-off-by: Josef Bacik <jbacik@fb.com>
+Reviewed-by: Jan Kara <jack@suse.cz>
+---
+ fs/inode.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
 
 diff --git a/fs/inode.c b/fs/inode.c
-index d1e6598..53a1224 100644
+index 8f00557..3cdd79c 100644
 --- a/fs/inode.c
 +++ b/fs/inode.c
-@@ -574,6 +574,7 @@ static void dispose_list(struct list_head *head)
+@@ -575,6 +575,7 @@ static void dispose_list(struct list_head *head)
  		list_del_init(&inode->i_lru);
  
  		evict(inode);
@@ -25,7 +30,7 @@ index d1e6598..53a1224 100644
  	}
  }
  
-@@ -591,6 +592,7 @@ void evict_inodes(struct super_block *sb)
+@@ -592,6 +593,7 @@ void evict_inodes(struct super_block *sb)
  	struct inode *inode, *next;
  	LIST_HEAD(dispose);
  
@@ -33,7 +38,7 @@ index d1e6598..53a1224 100644
  	spin_lock(&sb->s_inode_list_lock);
  	list_for_each_entry_safe(inode, next, &sb->s_inodes, i_sb_list) {
  		if (atomic_read(&inode->i_count))
-@@ -606,6 +608,18 @@ void evict_inodes(struct super_block *sb)
+@@ -607,6 +609,18 @@ void evict_inodes(struct super_block *sb)
  		inode_lru_list_del(inode);
  		spin_unlock(&inode->i_lock);
  		list_add(&inode->i_lru, &dispose);
@@ -53,5 +58,4 @@ index d1e6598..53a1224 100644
  	spin_unlock(&sb->s_inode_list_lock);
  
 -- 
-cgit v0.10.2
-
+2.1.0

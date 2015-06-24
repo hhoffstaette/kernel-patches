@@ -1,7 +1,10 @@
-From 932954d1068e74e4c6716fd8cab816f6c42d0e3c Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Newsgroups: gmane.linux.file-systems
+Subject: [PATCH 5/8] inode: rename i_wb_list to i_io_list
+Date: Tue, 23 Jun 2015 20:23:59 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/97335>
+
 From: Dave Chinner <dchinner@redhat.com>
-Date: Wed, 4 Mar 2015 14:07:22 -0500
-Subject: inode: rename i_wb_list to i_io_list
 
 There's a small consistency problem between the inode and writeback
 naming. Writeback calls the "for IO" inode queues b_io and
@@ -17,6 +20,14 @@ add a new "writeback list" in a subsequent patch.
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 Reviewed-by: Jan Kara <jack@suse.cz>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Tested-by: Dave Chinner <dchinner@redhat.com>
+---
+ fs/fs-writeback.c  | 22 +++++++++++-----------
+ fs/inode.c         |  6 +++---
+ include/linux/fs.h |  2 +-
+ mm/backing-dev.c   |  8 ++++----
+ 4 files changed, 19 insertions(+), 19 deletions(-)
 
 diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
 index 04fbc8a..aa72536 100644
@@ -111,7 +122,7 @@ index 04fbc8a..aa72536 100644
  			spin_unlock(&bdi->wb.list_lock);
  			trace_writeback_dirty_inode_enqueue(inode);
 diff --git a/fs/inode.c b/fs/inode.c
-index 12d58fa..c76a575 100644
+index f2c4098a..770d684 100644
 --- a/fs/inode.c
 +++ b/fs/inode.c
 @@ -31,7 +31,7 @@
@@ -123,7 +134,7 @@ index 12d58fa..c76a575 100644
   * inode_hash_lock protects:
   *   inode_hashtable, inode->i_hash
   *
-@@ -355,7 +355,7 @@ void inode_init_once(struct inode *inode)
+@@ -356,7 +356,7 @@ void inode_init_once(struct inode *inode)
  	memset(inode, 0, sizeof(*inode));
  	INIT_HLIST_NODE(&inode->i_hash);
  	INIT_LIST_HEAD(&inode->i_devices);
@@ -132,7 +143,7 @@ index 12d58fa..c76a575 100644
  	INIT_LIST_HEAD(&inode->i_lru);
  	address_space_init_once(&inode->i_data);
  	i_size_ordered_init(inode);
-@@ -523,7 +523,7 @@ static void evict(struct inode *inode)
+@@ -524,7 +524,7 @@ static void evict(struct inode *inode)
  	BUG_ON(!(inode->i_state & I_FREEING));
  	BUG_ON(!list_empty(&inode->i_lru));
  
@@ -142,10 +153,10 @@ index 12d58fa..c76a575 100644
  
  	inode_sb_list_del(inode);
 diff --git a/include/linux/fs.h b/include/linux/fs.h
-index ae23d35..f4d56cc 100644
+index 2d4d104..6dd2ab2 100644
 --- a/include/linux/fs.h
 +++ b/include/linux/fs.h
-@@ -634,7 +634,7 @@ struct inode {
+@@ -633,7 +633,7 @@ struct inode {
  	unsigned long		dirtied_time_when;
  
  	struct hlist_node	i_hash;
@@ -155,7 +166,7 @@ index ae23d35..f4d56cc 100644
  	struct list_head	i_sb_list;
  	union {
 diff --git a/mm/backing-dev.c b/mm/backing-dev.c
-index 6dc4580..6e7a644 100644
+index 000e7b3..e9ed047 100644
 --- a/mm/backing-dev.c
 +++ b/mm/backing-dev.c
 @@ -54,13 +54,13 @@ static int bdi_debug_stats_show(struct seq_file *m, void *v)
@@ -177,5 +188,4 @@ index 6dc4580..6e7a644 100644
  			nr_dirty_time++;
  	spin_unlock(&wb->list_lock);
 -- 
-cgit v0.10.2
-
+2.1.0

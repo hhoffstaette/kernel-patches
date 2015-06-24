@@ -1,7 +1,10 @@
-From a5bbd8e92f7da337020c9d7091ab3b502b6aad08 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Newsgroups: gmane.linux.file-systems
+Subject: [PATCH 4/8] sync: serialise per-superblock sync operations
+Date: Tue, 23 Jun 2015 20:23:58 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/97337>
+
 From: Dave Chinner <dchinner@redhat.com>
-Date: Wed, 4 Mar 2015 13:40:00 -0500
-Subject: sync: serialise per-superblock sync operations
 
 When competing sync(2) calls walk the same filesystem, they need to
 walk the list of inodes on the superblock to find all the inodes
@@ -19,6 +22,13 @@ contention being triggered by concurrent sync(2) calls.
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 Reviewed-by: Jan Kara <jack@suse.cz>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Tested-by: Dave Chinner <dchinner@redhat.com>
+---
+ fs/fs-writeback.c  | 11 +++++++++++
+ fs/super.c         |  1 +
+ include/linux/fs.h |  2 ++
+ 3 files changed, 14 insertions(+)
 
 diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
 index 333afa3..04fbc8a 100644
@@ -69,7 +79,7 @@ index 15e57f5..ac2b64b 100644
  	spin_lock_init(&s->s_inode_list_lock);
  
 diff --git a/include/linux/fs.h b/include/linux/fs.h
-index 8607d92..ae23d35 100644
+index 6a3f507..2d4d104 100644
 --- a/include/linux/fs.h
 +++ b/include/linux/fs.h
 @@ -1346,6 +1346,8 @@ struct super_block {
@@ -82,5 +92,4 @@ index 8607d92..ae23d35 100644
  	 * Indicates how deep in a filesystem stack this SB is
  	 */
 -- 
-cgit v0.10.2
-
+2.1.0

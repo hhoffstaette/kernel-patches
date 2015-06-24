@@ -1,7 +1,10 @@
-From 23a56621e9654d21d0145171c5efcdcca32f983e Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Newsgroups: gmane.linux.file-systems
+Subject: [PATCH 3/8] inode: convert inode_sb_list_lock to per-sb
+Date: Tue, 23 Jun 2015 20:23:57 -0700
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/97336>
+
 From: Dave Chinner <dchinner@redhat.com>
-Date: Wed, 4 Mar 2015 12:37:22 -0500
-Subject: inode: convert inode_sb_list_lock to per-sb
 
 The process of reducing contention on per-superblock inode lists
 starts with moving the locking to match the per-superblock inode
@@ -13,6 +16,20 @@ does isolate operations on different superblocks form each other.
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 Reviewed-by: Jan Kara <jack@suse.cz>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Tested-by: Dave Chinner <dchinner@redhat.com>
+---
+ fs/block_dev.c                   | 12 ++++++------
+ fs/drop_caches.c                 | 10 ++++++----
+ fs/fs-writeback.c                | 12 ++++++------
+ fs/inode.c                       | 28 +++++++++++++---------------
+ fs/internal.h                    |  1 -
+ fs/notify/inode_mark.c           | 20 ++++++++++----------
+ fs/quota/dquot.c                 | 16 ++++++++--------
+ fs/super.c                       |  3 ++-
+ include/linux/fs.h               |  5 ++++-
+ include/linux/fsnotify_backend.h |  4 ++--
+ 10 files changed, 57 insertions(+), 54 deletions(-)
 
 diff --git a/fs/block_dev.c b/fs/block_dev.c
 index c7e4163..f2a89be 100644
@@ -131,7 +148,7 @@ index 43b6555..333afa3 100644
  }
  
 diff --git a/fs/inode.c b/fs/inode.c
-index ea37cd1..12d58fa 100644
+index e8d6268..f2c4098a 100644
 --- a/fs/inode.c
 +++ b/fs/inode.c
 @@ -28,8 +28,8 @@
@@ -172,7 +189,7 @@ index ea37cd1..12d58fa 100644
  /*
   * Empty aops. Can be used for the cases where the user does not
   * define any of the address_space operations.
-@@ -424,18 +422,18 @@ static void inode_lru_list_del(struct inode *inode)
+@@ -425,18 +423,18 @@ static void inode_lru_list_del(struct inode *inode)
   */
  void inode_sb_list_add(struct inode *inode)
  {
@@ -195,7 +212,7 @@ index ea37cd1..12d58fa 100644
  	}
  }
  
-@@ -592,7 +590,7 @@ void evict_inodes(struct super_block *sb)
+@@ -593,7 +591,7 @@ void evict_inodes(struct super_block *sb)
  	struct inode *inode, *next;
  	LIST_HEAD(dispose);
  
@@ -204,7 +221,7 @@ index ea37cd1..12d58fa 100644
  	list_for_each_entry_safe(inode, next, &sb->s_inodes, i_sb_list) {
  		if (atomic_read(&inode->i_count))
  			continue;
-@@ -608,7 +606,7 @@ void evict_inodes(struct super_block *sb)
+@@ -609,7 +607,7 @@ void evict_inodes(struct super_block *sb)
  		spin_unlock(&inode->i_lock);
  		list_add(&inode->i_lru, &dispose);
  	}
@@ -213,7 +230,7 @@ index ea37cd1..12d58fa 100644
  
  	dispose_list(&dispose);
  }
-@@ -629,7 +627,7 @@ int invalidate_inodes(struct super_block *sb, bool kill_dirty)
+@@ -630,7 +628,7 @@ int invalidate_inodes(struct super_block *sb, bool kill_dirty)
  	struct inode *inode, *next;
  	LIST_HEAD(dispose);
  
@@ -222,7 +239,7 @@ index ea37cd1..12d58fa 100644
  	list_for_each_entry_safe(inode, next, &sb->s_inodes, i_sb_list) {
  		spin_lock(&inode->i_lock);
  		if (inode->i_state & (I_NEW | I_FREEING | I_WILL_FREE)) {
-@@ -652,7 +650,7 @@ int invalidate_inodes(struct super_block *sb, bool kill_dirty)
+@@ -653,7 +651,7 @@ int invalidate_inodes(struct super_block *sb, bool kill_dirty)
  		spin_unlock(&inode->i_lock);
  		list_add(&inode->i_lru, &dispose);
  	}
@@ -231,7 +248,7 @@ index ea37cd1..12d58fa 100644
  
  	dispose_list(&dispose);
  
-@@ -884,7 +882,7 @@ struct inode *new_inode(struct super_block *sb)
+@@ -885,7 +883,7 @@ struct inode *new_inode(struct super_block *sb)
  {
  	struct inode *inode;
  
@@ -395,7 +412,7 @@ index 928c20f..15e57f5 100644
  		evict_inodes(sb);
  
 diff --git a/include/linux/fs.h b/include/linux/fs.h
-index b841718..8607d92 100644
+index 6d51f47..6a3f507 100644
 --- a/include/linux/fs.h
 +++ b/include/linux/fs.h
 @@ -1280,7 +1280,6 @@ struct super_block {
@@ -440,5 +457,4 @@ index 0f313f9..236cbc4 100644
  
  #endif	/* CONFIG_FSNOTIFY */
 -- 
-cgit v0.10.2
-
+2.1.0
