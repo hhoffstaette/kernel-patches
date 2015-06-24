@@ -1,0 +1,53 @@
+From: Dan Carpenter <dan.carpenter@oracle.com>
+Newsgroups: gmane.linux.kernel.janitors,gmane.comp.file-systems.btrfs
+Subject: [patch] btrfs: delayed-ref: double free in btrfs_add_delayed_tree_ref()
+Date: Wed, 24 Jun 2015 17:32:33 +0300
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.janitors/34535>
+
+There is a cut and paste error so instead of freeing "head_ref", we free
+"ref" twice.
+
+Fixes: 3368d001ba5d ('btrfs: qgroup: Record possible quota-related extent for qgroup.')
+Signed-off-by: Dan Carpenter <dan.carpenter@oracle.com>
+
+diff --git a/fs/btrfs/delayed-ref.c b/fs/btrfs/delayed-ref.c
+index fd64fd0..ac3e81d 100644
+--- a/fs/btrfs/delayed-ref.c
++++ b/fs/btrfs/delayed-ref.c
+@@ -650,18 +650,13 @@ int btrfs_add_delayed_tree_ref(struct btrfs_fs_info *fs_info,
+ 		return -ENOMEM;
+ 
+ 	head_ref = kmem_cache_alloc(btrfs_delayed_ref_head_cachep, GFP_NOFS);
+-	if (!head_ref) {
+-		kmem_cache_free(btrfs_delayed_tree_ref_cachep, ref);
+-		return -ENOMEM;
+-	}
++	if (!head_ref)
++		goto free_ref;
+ 
+ 	if (fs_info->quota_enabled && is_fstree(ref_root)) {
+ 		record = kmalloc(sizeof(*record), GFP_NOFS);
+-		if (!record) {
+-			kmem_cache_free(btrfs_delayed_tree_ref_cachep, ref);
+-			kmem_cache_free(btrfs_delayed_ref_head_cachep, ref);
+-			return -ENOMEM;
+-		}
++		if (!record)
++			goto free_head_ref;
+ 	}
+ 
+ 	head_ref->extent_op = extent_op;
+@@ -682,6 +677,13 @@ int btrfs_add_delayed_tree_ref(struct btrfs_fs_info *fs_info,
+ 	spin_unlock(&delayed_refs->lock);
+ 
+ 	return 0;
++
++free_head_ref:
++	kmem_cache_free(btrfs_delayed_ref_head_cachep, head_ref);
++free_ref:
++	kmem_cache_free(btrfs_delayed_tree_ref_cachep, ref);
++
++	return -ENOMEM;
+ }
+ 
+ /*
