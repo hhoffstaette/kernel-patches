@@ -1,0 +1,31 @@
+From a2fd66d069d86d793e9d39d4079b96f46d13f237 Mon Sep 17 00:00:00 2001
+From: Theodore Ts'o <tytso@mit.edu>
+Date: Tue, 23 Jun 2015 11:03:54 -0400
+Subject: ext4: set lazytime on remount if MS_LAZYTIME is set by mount
+
+Newer versions of mount parse the lazytime feature and pass it to the
+mount system call via the flags field in the mount system call,
+removing the lazytime string from the mount options list.  So we need
+to check for the presence of MS_LAZYTIME and set it in sb->s_flags in
+order for this flag to be set on a remount.
+
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+Cc: stable@vger.kernel.org
+
+diff --git a/fs/ext4/super.c b/fs/ext4/super.c
+index bd4df9d..90ec13f 100644
+--- a/fs/ext4/super.c
++++ b/fs/ext4/super.c
+@@ -4971,6 +4971,9 @@ static int ext4_remount(struct super_block *sb, int *flags, char *data)
+ 		set_task_ioprio(sbi->s_journal->j_task, journal_ioprio);
+ 	}
+ 
++	if (*flags & MS_LAZYTIME)
++		sb->s_flags |= MS_LAZYTIME;
++
+ 	if ((*flags & MS_RDONLY) != (sb->s_flags & MS_RDONLY)) {
+ 		if (sbi->s_mount_flags & EXT4_MF_FS_ABORTED) {
+ 			err = -EROFS;
+-- 
+cgit v0.10.2
+
