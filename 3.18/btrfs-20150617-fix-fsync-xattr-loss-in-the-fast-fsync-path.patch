@@ -1,10 +1,7 @@
-From: fdmanana@kernel.org
-Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH] Btrfs: fix fsync xattr loss in the fast fsync path
-Date: Wed, 17 Jun 2015 12:49:49 +0100
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/45889>
-
+From 0ac3200ea9e4867fdae73340ea30e88935fa8ccf Mon Sep 17 00:00:00 2001
 From: Filipe Manana <fdmanana@suse.com>
+Date: Wed, 17 Jun 2015 10:15:21 +0100
+Subject: Btrfs: fix fsync xattr loss in the fast fsync path
 
 After commit 4f764e515361 ("Btrfs: remove deleted xattrs on fsync log
 replay"), we can end up in a situation where during log replay we end up
@@ -19,14 +16,11 @@ tree and therefore at log replay time, which makes the replay code delete
 the xattr from the fs/subvol tree as it thinks that xattr was deleted
 prior to the last fsync.
 
-Fix this by using a new item key type that represents xattrs to be deleted
-at log replay time. This key type is only used in the log tree. By using
-this explicit item we can continue to log only xattrs that were added (or
-modified) in the current transaction instead of all xattrs, while still
-keeping the the intention of commit 4f764e515361 ("Btrfs: remove deleted
-xattrs on fsync log replay").
+Fix this by always logging all xattrs, which is the simplest and most
+reliable way to detect deleted xattrs and replay the deletes at log replay
+time.
 
-This issue is reprodicible with the following test case for fstests:
+This issue is reproducible with the following test case for fstests:
 
   seq=`basename $0`
   seqres=$RESULT_DIR/$seq
@@ -50,23 +44,18 @@ This issue is reprodicible with the following test case for fstests:
   . ./common/attr
 
   # real QA test starts here
-  _supported_fs generic
+
+  # We create a lot of xattrs for a single file. Only btrfs and xfs are currently
+  # able to store such a large mount of xattrs per file, other filesystems such
+  # as ext3/4 and f2fs for example, fail with ENOSPC even if we attempt to add
+  # less than 1000 xattrs with very small values.
+  _supported_fs btrfs xfs
   _supported_os Linux
   _need_to_be_root
   _require_scratch
   _require_dm_flakey
   _require_attrs
   _require_metadata_journaling $SCRATCH_DEV
-
-  _crash_and_mount()
-  {
-      # Simulate a crash/power loss.
-      _load_flakey_table $FLAKEY_DROP_WRITES
-      _unmount_flakey
-      # Allow writes again and mount. This makes the fs replay its fsync log.
-      _load_flakey_table $FLAKEY_ALLOW_WRITES
-      _mount_flakey
-  }
 
   rm -f $seqres.full
 
@@ -75,16 +64,20 @@ This issue is reprodicible with the following test case for fstests:
   _mount_flakey
 
   # Create the test file with some initial data and make sure everything is
-  # durably persisted. We do fsync before calling sync to make sure that if the
-  # filesystem is btrfs, we get the flag BTRFS_INODE_NEEDS_FULL_SYNC cleared
-  # from the btrfs inode - a condition necessary to trigger the issue in btrfs.
-  $XFS_IO_PROG -f -c "pwrite -S 0xaa 0 32k" \
-                  -c "fsync" \
-                  $SCRATCH_MNT/foo | _filter_xfs_io
+  # durably persisted.
+  $XFS_IO_PROG -f -c "pwrite -S 0xaa 0 32k" $SCRATCH_MNT/foo | _filter_xfs_io
   sync
 
-  # Add a xattr to our file.
-  $SETFATTR_PROG -n user.attr -v somevalue $SCRATCH_MNT/foo
+  # Add many small xattrs to our file.
+  # We create such a large amount because it's needed to trigger the issue found
+  # in btrfs - we need to have an amount that causes the fs to have at least 3
+  # btree leafs with xattrs stored in them, and it must work on any leaf size
+  # (maximum leaf/node size is 64Kb).
+  num_xattrs=2000
+  for ((i = 1; i <= $num_xattrs; i++)); do
+      name="user.attr_$(printf "%04d" $i)"
+      $SETFATTR_PROG -n $name -v "val_$(printf "%04d" $i)" $SCRATCH_MNT/foo
+  done
 
   # Sync the filesystem to force a commit of the current btrfs transaction, this
   # is a necessary condition to trigger the bug on btrfs.
@@ -92,491 +85,169 @@ This issue is reprodicible with the following test case for fstests:
 
   # Now update our file's data and fsync the file.
   # After a successful fsync, if the fsync log/journal is replayed we expect to
-  # see the xattr named "user.attr" with a value of "somevalue" (and the updated
-  # file data of course). Btrfs used to remove the xattr when it replayed the
-  # fsync log/journal.
+  # see all the xattrs we added before with the same values (and the updated file
+  # data of course). Btrfs used to delete some of these xattrs when it replayed
+  # its fsync log/journal.
   $XFS_IO_PROG -c "pwrite -S 0xbb 8K 16K" \
                -c "fsync" \
                $SCRATCH_MNT/foo | _filter_xfs_io
 
-  echo "File content after fsync and before crash:"
-  od -t x1 $SCRATCH_MNT/foo
+  # Simulate a crash/power loss.
+  _load_flakey_table $FLAKEY_DROP_WRITES
+  _unmount_flakey
 
-  echo "File xattrs after fsync and before crash:"
-  $GETFATTR_PROG --absolute-names --dump $SCRATCH_MNT/foo | _filter_scratch
-
-  _crash_and_mount
+  # Allow writes again and mount. This makes the fs replay its fsync log.
+  _load_flakey_table $FLAKEY_ALLOW_WRITES
+  _mount_flakey
 
   echo "File content after crash and log replay:"
   od -t x1 $SCRATCH_MNT/foo
 
   echo "File xattrs after crash and log replay:"
-  $GETFATTR_PROG --absolute-names --dump $SCRATCH_MNT/foo | _filter_scratch
+  for ((i = 1; i <= $num_xattrs; i++)); do
+      name="user.attr_$(printf "%04d" $i)"
+      echo -n "$name="
+      $GETFATTR_PROG --absolute-names -n $name --only-values $SCRATCH_MNT/foo
+      echo
+  done
 
   status=0
   exit
 
-The expected golden output for this test:
-
-  wrote 32768/32768 bytes at offset 0
-  XXX Bytes, X ops; XX:XX:XX.X (XXX YYY/sec and XXX ops/sec)
-  wrote 16384/16384 bytes at offset 8192
-  XXX Bytes, X ops; XX:XX:XX.X (XXX YYY/sec and XXX ops/sec)
-  File content after fsync and before crash:
-  0000000 aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa
-  *
-  0020000 bb bb bb bb bb bb bb bb bb bb bb bb bb bb bb bb
-  *
-  0060000 aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa
-  *
-  0100000
-  File xattrs after fsync and before crash:
-  # file: SCRATCH_MNT/foo
-  user.attr="somevalue"
-
-  File content after crash and log replay:
-  0000000 aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa
-  *
-  0020000 bb bb bb bb bb bb bb bb bb bb bb bb bb bb bb bb
-  *
-  0060000 aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa
-  *
-  0100000
-  File xattrs after crash and log replay:
-  # file: SCRATCH_MNT/foo
-  user.attr="somevalue"
+The golden output expects all xattrs to be available, and with the correct
+values, after the fsync log is replayed.
 
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
----
- fs/btrfs/ctree.h    |  15 ++++++
- fs/btrfs/dir-item.c |  71 ++++++++++++++++++++++-----
- fs/btrfs/inode.c    |   5 +-
- fs/btrfs/tree-log.c | 138 +++++++++++++++++++++++++++++++++++++---------------
- fs/btrfs/tree-log.h |  10 ++++
- fs/btrfs/xattr.c    |  10 ++++
- 6 files changed, 198 insertions(+), 51 deletions(-)
 
-diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index 061c5b4..8d7215f 100644
---- a/fs/btrfs/ctree.h
-+++ b/fs/btrfs/ctree.h
-@@ -2106,6 +2106,11 @@ struct btrfs_ioctl_defrag_range_args {
- #define BTRFS_DEV_REPLACE_KEY	250
- 
- /*
-+ * Used to record deleted xattrs in a log tree.
-+ */
-+#define BTRFS_DELETED_XATTR_ITEM_KEY	254
-+
-+/*
-  * Stores items that allow to quickly map UUIDs to something else.
-  * These items are part of the filesystem UUID tree.
-  * The key is built like this:
-@@ -3770,11 +3775,21 @@ int btrfs_insert_xattr_item(struct btrfs_trans_handle *trans,
- 			    struct btrfs_path *path, u64 objectid,
- 			    const char *name, u16 name_len,
- 			    const void *data, u16 data_len);
-+int btrfs_insert_deleted_xattr_item(struct btrfs_trans_handle *trans,
-+				    struct btrfs_root *root,
-+				    struct btrfs_path *path, u64 objectid,
-+				    const char *name, u16 name_len);
- struct btrfs_dir_item *btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
- 					  struct btrfs_root *root,
- 					  struct btrfs_path *path, u64 dir,
- 					  const char *name, u16 name_len,
- 					  int mod);
-+struct btrfs_dir_item *
-+btrfs_lookup_deleted_xattr(struct btrfs_trans_handle *trans,
-+			   struct btrfs_root *root,
-+			   struct btrfs_path *path, u64 dir,
-+			   const char *name, u16 name_len,
-+			   int mod);
- int verify_dir_item(struct btrfs_root *root,
- 		    struct extent_buffer *leaf,
- 		    struct btrfs_dir_item *dir_item);
-diff --git a/fs/btrfs/dir-item.c b/fs/btrfs/dir-item.c
-index 1752625..71f10bd 100644
---- a/fs/btrfs/dir-item.c
-+++ b/fs/btrfs/dir-item.c
-@@ -65,11 +65,12 @@ static struct btrfs_dir_item *insert_with_overflow(struct btrfs_trans_handle
-  * xattrs work a lot like directories, this inserts an xattr item
-  * into the tree
-  */
--int btrfs_insert_xattr_item(struct btrfs_trans_handle *trans,
--			    struct btrfs_root *root,
--			    struct btrfs_path *path, u64 objectid,
--			    const char *name, u16 name_len,
--			    const void *data, u16 data_len)
-+static int do_btrfs_insert_xattr_item(struct btrfs_trans_handle *trans,
-+				      struct btrfs_root *root,
-+				      u8 key_type,
-+				      struct btrfs_path *path, u64 objectid,
-+				      const char *name, u16 name_len,
-+				      const void *data, u16 data_len)
- {
- 	int ret = 0;
- 	struct btrfs_dir_item *dir_item;
-@@ -82,7 +83,7 @@ int btrfs_insert_xattr_item(struct btrfs_trans_handle *trans,
- 	BUG_ON(name_len + data_len > BTRFS_MAX_XATTR_SIZE(root));
- 
- 	key.objectid = objectid;
--	key.type = BTRFS_XATTR_ITEM_KEY;
-+	key.type = key_type;
- 	key.offset = btrfs_name_hash(name, name_len);
- 
- 	data_size = sizeof(*dir_item) + name_len + data_len;
-@@ -109,6 +110,29 @@ int btrfs_insert_xattr_item(struct btrfs_trans_handle *trans,
- 	return ret;
- }
- 
-+int btrfs_insert_xattr_item(struct btrfs_trans_handle *trans,
-+			    struct btrfs_root *root,
-+			    struct btrfs_path *path, u64 objectid,
-+			    const char *name, u16 name_len,
-+			    const void *data, u16 data_len)
-+{
-+	return do_btrfs_insert_xattr_item(trans, root, BTRFS_XATTR_ITEM_KEY,
-+					  path, objectid, name, name_len,
-+					  data, data_len);
-+}
-+
-+int btrfs_insert_deleted_xattr_item(struct btrfs_trans_handle *trans,
-+				    struct btrfs_root *root,
-+				    struct btrfs_path *path, u64 objectid,
-+				    const char *name, u16 name_len)
-+{
-+	return do_btrfs_insert_xattr_item(trans, root,
-+					  BTRFS_DELETED_XATTR_ITEM_KEY,
-+					  path, objectid, name, name_len,
-+					  "", 0);
-+}
-+
-+
- /*
-  * insert a directory item in the tree, doing all the magic for
-  * both indexes. 'dir' indicates which objectid to insert it into,
-@@ -351,11 +375,13 @@ btrfs_search_dir_index_item(struct btrfs_root *root,
- 	return NULL;
- }
- 
--struct btrfs_dir_item *btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
--					  struct btrfs_root *root,
--					  struct btrfs_path *path, u64 dir,
--					  const char *name, u16 name_len,
--					  int mod)
-+static struct btrfs_dir_item *
-+do_btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
-+		      struct btrfs_root *root,
-+		      u8 key_type,
-+		      struct btrfs_path *path, u64 dir,
-+		      const char *name, u16 name_len,
-+		      int mod)
- {
- 	int ret;
- 	struct btrfs_key key;
-@@ -363,7 +389,7 @@ struct btrfs_dir_item *btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
- 	int cow = mod != 0;
- 
- 	key.objectid = dir;
--	key.type = BTRFS_XATTR_ITEM_KEY;
-+	key.type = key_type;
- 	key.offset = btrfs_name_hash(name, name_len);
- 	ret = btrfs_search_slot(trans, root, &key, path, ins_len, cow);
- 	if (ret < 0)
-@@ -374,6 +400,27 @@ struct btrfs_dir_item *btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
- 	return btrfs_match_dir_item_name(root, path, name, name_len);
- }
- 
-+struct btrfs_dir_item *btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
-+					  struct btrfs_root *root,
-+					  struct btrfs_path *path, u64 dir,
-+					  const char *name, u16 name_len,
-+					  int mod)
-+{
-+	return do_btrfs_lookup_xattr(trans, root, BTRFS_XATTR_ITEM_KEY, path,
-+				     dir, name, name_len, mod);
-+}
-+
-+struct btrfs_dir_item *
-+btrfs_lookup_deleted_xattr(struct btrfs_trans_handle *trans,
-+			   struct btrfs_root *root,
-+			   struct btrfs_path *path, u64 dir,
-+			   const char *name, u16 name_len,
-+			   int mod)
-+{
-+	return do_btrfs_lookup_xattr(trans, root, BTRFS_DELETED_XATTR_ITEM_KEY,
-+				     path, dir, name, name_len, mod);
-+}
-+
- /*
-  * helper function to look at the directory item pointed to by 'path'
-  * this walks through all the entries in a dir item and finds one
-diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index a21ad34..d899ed4 100644
---- a/fs/btrfs/inode.c
-+++ b/fs/btrfs/inode.c
-@@ -4260,7 +4260,10 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
- 
- 	key.objectid = ino;
- 	key.offset = (u64)-1;
--	key.type = (u8)-1;
-+	if (root->root_key.objectid == BTRFS_TREE_LOG_OBJECTID)
-+		key.type = BTRFS_DELETED_XATTR_ITEM_KEY - 1;
-+	else
-+		key.type = (u8)-1;
- 
- search_again:
- 	/*
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index 4920fce..71b1a0c 100644
+index 4920fce..7ac45cf 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
-@@ -1976,34 +1976,35 @@ static int replay_xattr_deletes(struct btrfs_trans_handle *trans,
- 		return -ENOMEM;
- 
- 	search_key.objectid = ino;
--	search_key.type = BTRFS_XATTR_ITEM_KEY;
-+	search_key.type = BTRFS_DELETED_XATTR_ITEM_KEY;
- 	search_key.offset = 0;
--again:
--	ret = btrfs_search_slot(NULL, root, &search_key, path, 0, 0);
-+	ret = btrfs_search_slot(NULL, log, &search_key, log_path, 0, 0);
- 	if (ret < 0)
- 		goto out;
- process_leaf:
--	nritems = btrfs_header_nritems(path->nodes[0]);
--	for (i = path->slots[0]; i < nritems; i++) {
-+	nritems = btrfs_header_nritems(log_path->nodes[0]);
-+	for (i = log_path->slots[0]; i < nritems; i++) {
-+		struct extent_buffer *leaf = log_path->nodes[0];
- 		struct btrfs_key key;
- 		struct btrfs_dir_item *di;
- 		struct btrfs_dir_item *log_di;
- 		u32 total_size;
- 		u32 cur;
- 
--		btrfs_item_key_to_cpu(path->nodes[0], &key, i);
--		if (key.objectid != ino || key.type != BTRFS_XATTR_ITEM_KEY) {
-+		btrfs_item_key_to_cpu(leaf, &key, i);
-+		if (key.objectid != ino ||
-+		    key.type != BTRFS_DELETED_XATTR_ITEM_KEY) {
- 			ret = 0;
- 			goto out;
- 		}
- 
--		di = btrfs_item_ptr(path->nodes[0], i, struct btrfs_dir_item);
--		total_size = btrfs_item_size_nr(path->nodes[0], i);
-+		log_di = btrfs_item_ptr(leaf, i, struct btrfs_dir_item);
-+		total_size = btrfs_item_size_nr(leaf, i);
- 		cur = 0;
- 		while (cur < total_size) {
--			u16 name_len = btrfs_dir_name_len(path->nodes[0], di);
--			u16 data_len = btrfs_dir_data_len(path->nodes[0], di);
--			u32 this_len = sizeof(*di) + name_len + data_len;
-+			u16 name_len = btrfs_dir_name_len(leaf, log_di);
-+			u16 data_len = btrfs_dir_data_len(leaf, log_di);
-+			u32 this_len = sizeof(*log_di) + name_len + data_len;
- 			char *name;
- 
- 			name = kmalloc(name_len, GFP_NOFS);
-@@ -2011,41 +2012,29 @@ process_leaf:
- 				ret = -ENOMEM;
- 				goto out;
- 			}
--			read_extent_buffer(path->nodes[0], name,
--					   (unsigned long)(di + 1), name_len);
-+			read_extent_buffer(leaf, name,
-+					   (unsigned long)(log_di + 1),
-+					   name_len);
- 
--			log_di = btrfs_lookup_xattr(NULL, log, log_path, ino,
--						    name, name_len, 0);
--			btrfs_release_path(log_path);
--			if (!log_di) {
--				/* Doesn't exist in log tree, so delete it. */
--				btrfs_release_path(path);
--				di = btrfs_lookup_xattr(trans, root, path, ino,
--							name, name_len, -1);
--				kfree(name);
--				if (IS_ERR(di)) {
--					ret = PTR_ERR(di);
--					goto out;
--				}
--				ASSERT(di);
-+			di = btrfs_lookup_xattr(trans, root, path, ino,
-+						name, name_len, -1);
-+			kfree(name);
-+			if (IS_ERR(di)) {
-+				ret = PTR_ERR(di);
-+				goto out;
-+			} else if (di) {
- 				ret = btrfs_delete_one_dir_name(trans, root,
- 								path, di);
- 				if (ret)
- 					goto out;
--				btrfs_release_path(path);
--				search_key = key;
--				goto again;
--			}
--			kfree(name);
--			if (IS_ERR(log_di)) {
--				ret = PTR_ERR(log_di);
--				goto out;
- 			}
-+			btrfs_release_path(path);
- 			cur += this_len;
--			di = (struct btrfs_dir_item *)((char *)di + this_len);
-+			log_di = (struct btrfs_dir_item *)((char *)log_di +
-+							   this_len);
- 		}
- 	}
--	ret = btrfs_next_leaf(root, path);
-+	ret = btrfs_next_leaf(log, log_path);
- 	if (ret > 0)
- 		ret = 0;
- 	else if (ret == 0)
-@@ -2254,6 +2243,9 @@ static int replay_one_buffer(struct btrfs_root *log, struct extent_buffer *eb,
- 		if (wc->stage < LOG_WALK_REPLAY_ALL)
- 			continue;
- 
-+		if (key.type == BTRFS_DELETED_XATTR_ITEM_KEY)
-+			continue;
-+
- 		/* these keys are simply copied */
- 		if (key.type == BTRFS_XATTR_ITEM_KEY) {
- 			ret = overwrite_item(wc->trans, root, path,
-@@ -3090,6 +3082,76 @@ int btrfs_del_inode_ref_in_log(struct btrfs_trans_handle *trans,
- 	return ret;
+@@ -4123,6 +4123,86 @@ static int logged_inode_size(struct btrfs_root *log, struct inode *inode,
+ 	return 0;
  }
  
-+int btrfs_record_deleted_xattr_in_log(struct btrfs_trans_handle *trans,
-+				      struct btrfs_root *root,
-+				      struct btrfs_path *path,
-+				      struct inode *inode,
-+				      const char *name, int name_len)
++/*
++ * At the moment we always log all xattrs. This is to figure out at log replay
++ * time which xattrs must have their deletion replayed. If a xattr is missing
++ * in the log tree and exists in the fs/subvol tree, we delete it. This is
++ * because if a xattr is deleted, the inode is fsynced and a power failure
++ * happens, causing the log to be replayed the next time the fs is mounted,
++ * we want the xattr to not exist anymore (same behaviour as other filesystems
++ * with a journal, ext3/4, xfs, f2fs, etc).
++ */
++static int btrfs_log_all_xattrs(struct btrfs_trans_handle *trans,
++				struct btrfs_root *root,
++				struct inode *inode,
++				struct btrfs_path *path,
++				struct btrfs_path *dst_path)
 +{
-+	struct btrfs_root *log;
-+	struct btrfs_log_ctx ctx;
 +	int ret;
++	struct btrfs_key key;
++	const u64 ino = btrfs_ino(inode);
++	int ins_nr = 0;
++	int start_slot = 0;
 +
-+	if (btrfs_test_opt(root, NOTREELOG))
-+		return 0;
++	key.objectid = ino;
++	key.type = BTRFS_XATTR_ITEM_KEY;
++	key.offset = 0;
 +
-+	btrfs_init_log_ctx(&ctx);
-+	ret = start_log_trans(trans, root, &ctx);
-+	if (ret)
++	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
++	if (ret < 0)
 +		return ret;
 +
-+	log = root->log_root;
-+	mutex_lock(&BTRFS_I(inode)->log_mutex);
-+	ret = btrfs_insert_deleted_xattr_item(trans, log, path,
-+					      btrfs_ino(inode),
-+					      name, name_len);
-+	mutex_unlock(&BTRFS_I(inode)->log_mutex);
-+	if (ret == -ENOSPC || ret == -EOVERFLOW) {
-+		btrfs_set_log_full_commit(root->fs_info, trans);
-+		ret = 0;
++	while (true) {
++		int slot = path->slots[0];
++		struct extent_buffer *leaf = path->nodes[0];
++		int nritems = btrfs_header_nritems(leaf);
++
++		if (slot >= nritems) {
++			if (ins_nr > 0) {
++				u64 last_extent = 0;
++
++				ret = copy_items(trans, inode, dst_path, path,
++						 &last_extent, start_slot,
++						 ins_nr, 1, 0);
++				/* can't be 1, extent items aren't processed */
++				ASSERT(ret <= 0);
++				if (ret < 0)
++					return ret;
++				ins_nr = 0;
++			}
++			ret = btrfs_next_leaf(root, path);
++			if (ret < 0)
++				return ret;
++			else if (ret > 0)
++				break;
++			continue;
++		}
++
++		btrfs_item_key_to_cpu(leaf, &key, slot);
++		if (key.objectid != ino || key.type != BTRFS_XATTR_ITEM_KEY)
++			break;
++
++		if (ins_nr == 0)
++			start_slot = slot;
++		ins_nr++;
++		path->slots[0]++;
++		cond_resched();
++	}
++	if (ins_nr > 0) {
++		u64 last_extent = 0;
++
++		ret = copy_items(trans, inode, dst_path, path,
++				 &last_extent, start_slot,
++				 ins_nr, 1, 0);
++		/* can't be 1, extent items aren't processed */
++		ASSERT(ret <= 0);
++		if (ret < 0)
++			return ret;
 +	}
 +
-+	btrfs_remove_log_ctx(root, &ctx);
-+	btrfs_end_log_trans(root);
-+
-+	return ret;
++	return 0;
 +}
 +
-+int btrfs_del_deleted_xattr_in_log(struct btrfs_trans_handle *trans,
-+				   struct btrfs_root *root,
-+				   struct btrfs_path *path,
-+				   struct inode *inode,
-+				   const char *name, int name_len)
-+{
-+	struct btrfs_root *log;
-+	struct btrfs_dir_item *di;
-+	int ret;
-+
-+	if (BTRFS_I(inode)->logged_trans < trans->transid)
-+		return 0;
-+
-+	ret = join_running_log_trans(root);
-+	if (ret)
-+		return 0;
-+
-+	log = root->log_root;
-+	ret = 0;
-+	mutex_lock(&BTRFS_I(inode)->log_mutex);
-+	di = btrfs_lookup_deleted_xattr(trans, log, path, btrfs_ino(inode),
-+					name, name_len, -1);
-+	if (di)
-+		ret = btrfs_delete_one_dir_name(trans, log, path, di);
-+	mutex_unlock(&BTRFS_I(inode)->log_mutex);
-+	if (ret == -ENOSPC) {
-+		btrfs_set_log_full_commit(root->fs_info, trans);
-+		ret = 0;
-+	}
-+
-+	btrfs_end_log_trans(root);
-+
-+	return ret;
-+}
-+
- /*
-  * creates a range item in the log for 'dirid'.  first_offset and
-  * last_offset tell us which parts of the key space the log should
-diff --git a/fs/btrfs/tree-log.h b/fs/btrfs/tree-log.h
-index 6916a78..ec4a653 100644
---- a/fs/btrfs/tree-log.h
-+++ b/fs/btrfs/tree-log.h
-@@ -74,6 +74,16 @@ int btrfs_del_inode_ref_in_log(struct btrfs_trans_handle *trans,
- 			       struct btrfs_root *root,
- 			       const char *name, int name_len,
- 			       struct inode *inode, u64 dirid);
-+int btrfs_record_deleted_xattr_in_log(struct btrfs_trans_handle *trans,
-+				      struct btrfs_root *root,
-+				      struct btrfs_path *path,
-+				      struct inode *inode,
-+				      const char *name, int name_len);
-+int btrfs_del_deleted_xattr_in_log(struct btrfs_trans_handle *trans,
-+				   struct btrfs_root *root,
-+				   struct btrfs_path *path,
-+				   struct inode *inode,
-+				   const char *name, int name_len);
- void btrfs_end_log_trans(struct btrfs_root *root);
- int btrfs_pin_log_trans(struct btrfs_root *root);
- void btrfs_record_unlink_dir(struct btrfs_trans_handle *trans,
-diff --git a/fs/btrfs/xattr.c b/fs/btrfs/xattr.c
-index 6f518c9..ca54ad2 100644
---- a/fs/btrfs/xattr.c
-+++ b/fs/btrfs/xattr.c
-@@ -30,6 +30,7 @@
- #include "disk-io.h"
- #include "props.h"
- #include "locking.h"
-+#include "tree-log.h"
+ /* log a single inode in the tree log.
+  * At least one parent directory for this inode must exist in the tree
+  * or be logged already.
+@@ -4295,6 +4375,25 @@ again:
+ 		if (min_key.type == BTRFS_INODE_ITEM_KEY)
+ 			need_log_inode_item = false;
  
- 
- ssize_t __btrfs_getxattr(struct inode *inode, const char *name,
-@@ -115,6 +116,11 @@ static int do_setxattr(struct btrfs_trans_handle *trans,
- 			ret = PTR_ERR(di);
- 		else if (di)
- 			ret = btrfs_delete_one_dir_name(trans, root, path, di);
-+		if (ret || !di)
-+			goto out;
-+		btrfs_release_path(path);
-+		ret = btrfs_record_deleted_xattr_in_log(trans, root, path,
-+							inode, name, name_len);
- 		goto out;
++		/* Skip xattrs, we log them later with btrfs_log_all_xattrs() */
++		if (min_key.type == BTRFS_XATTR_ITEM_KEY) {
++			if (ins_nr == 0)
++				goto next_slot;
++			ret = copy_items(trans, inode, dst_path, path,
++					 &last_extent, ins_start_slot,
++					 ins_nr, inode_only, logged_isize);
++			if (ret < 0) {
++				err = ret;
++				goto out_unlock;
++			}
++			ins_nr = 0;
++			if (ret) {
++				btrfs_release_path(path);
++				continue;
++			}
++			goto next_slot;
++		}
++
+ 		src = path->nodes[0];
+ 		if (ins_nr && ins_start_slot + ins_nr == path->slots[0]) {
+ 			ins_nr++;
+@@ -4362,6 +4461,11 @@ next_slot:
+ 		ins_nr = 0;
  	}
  
-@@ -222,6 +228,10 @@ static int do_setxattr(struct btrfs_trans_handle *trans,
- 		 * filled it.
- 		 */
- 	}
-+
 +	btrfs_release_path(path);
-+	ret = btrfs_del_deleted_xattr_in_log(trans, root, path, inode,
-+					     name, name_len);
- out:
- 	btrfs_free_path(path);
- 	return ret;
++	btrfs_release_path(dst_path);
++	err = btrfs_log_all_xattrs(trans, root, inode, path, dst_path);
++	if (err)
++		goto out_unlock;
+ log_extents:
+ 	btrfs_release_path(path);
+ 	btrfs_release_path(dst_path);
 -- 
-2.1.3
+cgit v0.10.2
+
