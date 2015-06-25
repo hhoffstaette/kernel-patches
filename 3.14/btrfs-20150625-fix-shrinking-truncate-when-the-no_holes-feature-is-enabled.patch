@@ -1,0 +1,92 @@
+From 2113a635f2c2943953eed6f742990c201606aee3 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Sat, 20 Jun 2015 18:20:09 +0100
+Subject: Btrfs: fix shrinking truncate when the no_holes feature is enabled
+
+If the no_holes feature is enabled, we attempt to shrink a file to a size
+that ends up in the middle of a hole and we don't have any file extent
+items in the fs/subvol tree that go beyond the new file size (or any
+ordered extents that will insert such file extent items), we end up not
+updating the inode's disk_i_size, we only update the inode's i_size.
+
+This means that after unmounting and mounting the filesystem, or after
+the inode is evicted and reloaded, its i_size ends up being incorrect
+(an inode's i_size is set to the disk_i_size field when an inode is
+loaded). This happens when btrfs_truncate_inode_items() doesn't find
+any file extent items to drop - in this case it never makes a call to
+btrfs_ordered_update_i_size() in order to update the inode's disk_i_size.
+
+Example reproducer:
+
+  $ mkfs.btrfs -O no-holes -f /dev/sdd
+  $ mount /dev/sdd /mnt
+
+  # Create our test file with some data and durably persist it.
+  $ xfs_io -f -c "pwrite -S 0xaa 0 128K" /mnt/foo
+  $ sync
+
+  # Append some data to the file, increasing its size, and leave a hole
+  # between the old size and the start offset if the following write. So
+  # our file gets a hole in the range [128Kb, 256Kb[.
+  $ xfs_io -c "truncate 160K" /mnt/foo
+
+  # We expect to see our file with a size of 160Kb, with the first 128Kb
+  # of data all having the value 0xaa and the remaining 32Kb of data all
+  # having the value 0x00.
+  $ od -t x1 /mnt/foo
+  0000000 aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa
+  *
+  0400000 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  *
+  0500000
+
+  # Now cleanly unmount and mount again the filesystem.
+  $ umount /mnt
+  $ mount /dev/sdd /mnt
+
+  # We expect to get the same result as before, a file with a size of
+  # 160Kb, with the first 128Kb of data all having the value 0xaa and the
+  # remaining 32Kb of data all having the value 0x00.
+  $ od -t x1 /mnt/foo
+  0000000 aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa
+  *
+  0400000
+
+In the example above the file size/data do not match what they were before
+the remount.
+
+Fix this by always calling btrfs_ordered_update_i_size() with a size
+matching the size the file was truncated to if btrfs_truncate_inode_items()
+is not called for a log tree and no file extent items were dropped. This
+ensures the same behaviour as when the no_holes feature is not enabled.
+
+A test case for fstests follows soon.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index a21ad34..1225330 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -4209,7 +4209,7 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
+ 	u64 extent_num_bytes = 0;
+ 	u64 extent_offset = 0;
+ 	u64 item_end = 0;
+-	u64 last_size = (u64)-1;
++	u64 last_size = new_size;
+ 	u32 found_type = (u8)-1;
+ 	int found_extent;
+ 	int del_item;
+@@ -4493,8 +4493,7 @@ out:
+ 			btrfs_abort_transaction(trans, root, ret);
+ 	}
+ error:
+-	if (last_size != (u64)-1 &&
+-	    root->root_key.objectid != BTRFS_TREE_LOG_OBJECTID)
++	if (root->root_key.objectid != BTRFS_TREE_LOG_OBJECTID)
+ 		btrfs_ordered_update_i_size(inode, last_size, NULL);
+ 
+ 	btrfs_free_path(path);
+-- 
+cgit v0.10.2
+
