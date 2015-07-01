@@ -1,8 +1,8 @@
 From:	fdmanana@kernel.org
 To:	linux-btrfs@vger.kernel.org
 Cc:	Filipe Manana <fdmanana@suse.com>
-Subject: [PATCH v2] Btrfs: fix memory corruption on failure to submit bio for direct IO
-Date:	Tue, 30 Jun 2015 23:17:36 +0100
+Subject: [PATCH v3] Btrfs: fix memory corruption on failure to submit bio for direct IO
+Date:	Wed,  1 Jul 2015 12:13:10 +0100
 
 From: Filipe Manana <fdmanana@suse.com>
 
@@ -68,10 +68,6 @@ done by btrfs_endio_direct_read()), so a failure submitting a bio for a
 read request would leave a range in the inode's io_tree locked forever,
 blocking any future operations (both reads and writes) against that range.
 
-We were also doing an extra bio_put() call against io_bio in some cases -
-btrfs_submit_direct_hook() often does that final bio_put() against our
-io_bio (pointed to by dip->orig_bio).
-
 So fix this by making sure we do the same cleanup that we do for the case
 where the bio submission succeeds.
 
@@ -81,47 +77,20 @@ Signed-off-by: Filipe Manana <fdmanana@suse.com>
 V2: Fixed a case where it's possible to do an extra bio_put() against
     io_bio, which results in a use-after-free bug.
 
- fs/btrfs/inode.c        | 70 +++++++++++++++++++++++++++++++++----------------
+V3: Moved back to V1 but with more comments explaining what's going on.
+    The problem in V2 couldn't actually happen due to subtle details
+    in btrfs_submit_direct_hook(), as dip->pending_bios is 0 if bio
+    is set to orig_bio.
+
+ fs/btrfs/inode.c        | 65 +++++++++++++++++++++++++++++++++++--------------
  fs/btrfs/ordered-data.c |  5 ++++
- 2 files changed, 53 insertions(+), 22 deletions(-)
+ 2 files changed, 52 insertions(+), 18 deletions(-)
 
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index f569d26..6ec1b34 100644
+index f569d26..e33dff3 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -8046,7 +8046,7 @@ err:
- }
- 
- static int btrfs_submit_direct_hook(int rw, struct btrfs_dio_private *dip,
--				    int skip_sum)
-+				    int skip_sum, bool *end_io_done)
- {
- 	struct inode *inode = dip->inode;
- 	struct btrfs_root *root = BTRFS_I(inode)->root;
-@@ -8143,7 +8143,9 @@ submit:
- 	if (!ret)
- 		return 0;
- 
--	bio_put(bio);
-+	/* Our caller is responsible for doing the final put for orig_bio. */
-+	if (bio != orig_bio)
-+		bio_put(bio);
- out_err:
- 	dip->errors = 1;
- 	/*
-@@ -8151,8 +8153,10 @@ out_err:
- 	 * make sure dip->errors is perceived to be set.
- 	 */
- 	smp_mb__before_atomic();
--	if (atomic_dec_and_test(&dip->pending_bios))
-+	if (atomic_dec_and_test(&dip->pending_bios)) {
- 		bio_io_error(dip->orig_bio);
-+		*end_io_done = true;
-+	}
- 
- 	/* bio_end_io() will handle error, so we needn't return it */
- 	return 0;
-@@ -8161,13 +8165,13 @@ out_err:
+@@ -8161,9 +8161,8 @@ out_err:
  static void btrfs_submit_direct(int rw, struct bio *dio_bio,
  				struct inode *inode, loff_t file_offset)
  {
@@ -133,12 +102,7 @@ index f569d26..6ec1b34 100644
  	struct btrfs_io_bio *btrfs_bio;
  	int skip_sum;
  	int write = rw & REQ_WRITE;
- 	int ret = 0;
-+	bool end_io_done = false;
- 
- 	skip_sum = BTRFS_I(inode)->flags & BTRFS_INODE_NODATASUM;
- 
-@@ -8180,7 +8184,7 @@ static void btrfs_submit_direct(int rw, struct bio *dio_bio,
+@@ -8180,7 +8179,7 @@ static void btrfs_submit_direct(int rw, struct bio *dio_bio,
  	dip = kzalloc(sizeof(*dip), GFP_NOFS);
  	if (!dip) {
  		ret = -ENOMEM;
@@ -147,14 +111,7 @@ index f569d26..6ec1b34 100644
  	}
  
  	dip->private = dio_bio->bi_private;
-@@ -8202,31 +8206,53 @@ static void btrfs_submit_direct(int rw, struct bio *dio_bio,
- 		dip->subio_endio = btrfs_subio_endio_read;
- 	}
- 
--	ret = btrfs_submit_direct_hook(rw, dip, skip_sum);
-+	ret = btrfs_submit_direct_hook(rw, dip, skip_sum, &end_io_done);
- 	if (!ret)
- 		return;
+@@ -8208,25 +8207,55 @@ static void btrfs_submit_direct(int rw, struct bio *dio_bio,
  
  	if (btrfs_bio->end_io)
  		btrfs_bio->end_io(btrfs_bio, ret);
@@ -183,9 +140,12 @@ index f569d26..6ec1b34 100644
 -		btrfs_put_ordered_extent(ordered);
 -		btrfs_put_ordered_extent(ordered);
 +	if (io_bio && dip) {
-+		if (!end_io_done)
-+			bio_endio(io_bio, ret);
-+		/* end io callbacks free our dip and do final put on io_bio */
++		bio_endio(io_bio, ret);
++		/*
++		 * The end io callbacks free our dip, do the final put on io_bio
++		 * and all the cleanup and final put for dio_bio (through
++		 * dio_end_io()).
++		 */
 +		dip = NULL;
 +		io_bio = NULL;
 +	} else {
@@ -199,7 +159,8 @@ index f569d26..6ec1b34 100644
 +			 * Decrements our ref on the ordered extent and removes
 +			 * the ordered extent from the inode's ordered tree,
 +			 * doing all the proper resource cleanup such as for the
-+			 * reserved space.
++			 * reserved space and waking up any waiters for this
++			 * ordered extent (through btrfs_remove_ordered_extent).
 +			 */
 +			btrfs_finish_ordered_io(ordered);
 +		} else {
@@ -207,6 +168,10 @@ index f569d26..6ec1b34 100644
 +			      file_offset + dio_bio->bi_iter.bi_size - 1);
 +		}
 +		clear_bit(BIO_UPTODATE, &dio_bio->bi_flags);
++		/*
++		 * Releases and cleans up our dio_bio, no need to bio_put()
++		 * nor bio_endio()/bio_io_error() against dio_bio.
++		 */
 +		dio_end_io(dio_bio, ret);
  	}
 -	bio_endio(dio_bio, ret);
@@ -217,10 +182,10 @@ index f569d26..6ec1b34 100644
  
  static ssize_t check_direct_IO(struct btrfs_root *root, struct kiocb *iocb,
 diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
-index 8f391fd..6c095ad 100644
+index 89656d7..52170cf 100644
 --- a/fs/btrfs/ordered-data.c
 +++ b/fs/btrfs/ordered-data.c
-@@ -559,6 +559,10 @@ void btrfs_put_ordered_extent(struct btrfs_ordered_extent *entry)
+@@ -552,6 +552,10 @@ void btrfs_put_ordered_extent(struct btrfs_ordered_extent *entry)
  	trace_btrfs_ordered_extent_put(entry->inode, entry);
  
  	if (atomic_dec_and_test(&entry->refs)) {
@@ -231,7 +196,7 @@ index 8f391fd..6c095ad 100644
  		if (entry->inode)
  			btrfs_add_delayed_iput(entry->inode);
  		while (!list_empty(&entry->list)) {
-@@ -586,6 +590,7 @@ void btrfs_remove_ordered_extent(struct inode *inode,
+@@ -579,6 +583,7 @@ void btrfs_remove_ordered_extent(struct inode *inode,
  	spin_lock_irq(&tree->lock);
  	node = &entry->rb_node;
  	rb_erase(node, &tree->tree);
@@ -241,3 +206,8 @@ index 8f391fd..6c095ad 100644
  	set_bit(BTRFS_ORDERED_COMPLETE, &entry->flags);
 -- 
 2.1.3
+
+--
+To unsubscribe from this list: send the line "unsubscribe linux-btrfs" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
