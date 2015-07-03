@@ -1,0 +1,34 @@
+From 1d1c1be3720c1f4b621c5f90a4f61bdd856a0aa8 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:37 +0800
+Subject: Btrfs: sysfs: btrfs_sysfs_remove_fsid() make it non static
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 53a327b..06eae45 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -529,7 +529,7 @@ static void __btrfs_sysfs_remove_fsid(struct btrfs_fs_devices *fs_devs)
+ }
+ 
+ /* when fs_devs is NULL it will remove all fsid kobject */
+-static void btrfs_sysfs_remove_fsid(struct btrfs_fs_devices *fs_devs)
++void btrfs_sysfs_remove_fsid(struct btrfs_fs_devices *fs_devs)
+ {
+ 	struct list_head *fs_uuids = btrfs_get_fs_uuids();
+ 
+diff --git a/fs/btrfs/sysfs.h b/fs/btrfs/sysfs.h
+index 915307f..6392527 100644
+--- a/fs/btrfs/sysfs.h
++++ b/fs/btrfs/sysfs.h
+@@ -89,4 +89,5 @@ int btrfs_kobj_rm_device(struct btrfs_fs_devices *fs_devices,
+ int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs,
+ 				struct kobject *parent);
+ int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs);
++void btrfs_sysfs_remove_fsid(struct btrfs_fs_devices *fs_devs);
+ #endif /* _BTRFS_SYSFS_H_ */
+-- 
+cgit v0.10.2
+

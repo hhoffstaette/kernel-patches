@@ -1,0 +1,40 @@
+From 8345ea31dc6e1772726d1d0b8864dedac55038e0 Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Fri, 20 Mar 2015 18:01:20 +0800
+Subject: Btrfs: sysfs: fix, kobject pointer clean up needed after kobject
+ release
+
+The sysfs clean up self test like in the below code fails, since
+fs_info->device_dir_kobject still points to its stale kobject.
+Reseting this pointer will help to fix this.
+
+open_ctree()
+{
+
+ret = btrfs_sysfs_add_one(fs_info);
+::
++       btrfs_sysfs_remove_one(fs_info);
++       ret = btrfs_sysfs_add_one(fs_info);
++       if (ret) {
++               pr_err("BTRFS: failed to init sysfs interface: %d\n", ret);
++               goto fail_block_groups;
++       }
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index ca07861..f31fcec 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -525,6 +525,7 @@ void btrfs_sysfs_remove_one(struct btrfs_fs_info *fs_info)
+ 	btrfs_kobj_rm_device(fs_info, NULL);
+ 	kobject_del(fs_info->device_dir_kobj);
+ 	kobject_put(fs_info->device_dir_kobj);
++	fs_info->device_dir_kobj = NULL;
+ 	addrm_unknown_feature_attrs(fs_info, false);
+ 	sysfs_remove_group(&fs_info->super_kobj, &btrfs_feature_attr_group);
+ 	__btrfs_sysfs_remove_one(fs_info);
+-- 
+cgit v0.10.2
+

@@ -25,7 +25,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - bfs: [BFS v460+](http://ck-hack.blogspot.de/2014/12/bfs-460-linux-318-ck1.html)
 - bfq: BFQ v7r8 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
-- btrfs: fixes from 3.19-4.2+ (filesystem corruption, data loss, error handling, RAID 5/6 scrub/replace, block group GC, TRIM)
+- btrfs: fixes from 3.19-4.2+ (filesystem corruption, data loss, error handling, RAID 5/6 scrub/replace, block group GC, sysfs, TRIM)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: misc. TCP fixes (TSO, pacing), r8169 support for Byte Queue Limits & xmit_more
 - vfs: scalability fixes

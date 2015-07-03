@@ -1,0 +1,48 @@
+From 720592157eeef627ff9a7c7c55ab1713bc48fb50 Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:26 +0800
+Subject: Btrfs: sysfs: introduce function btrfs_sysfs_add_fsid() to create
+ sysfs fsid
+
+We need it in a seperate function so that it can be called from the
+device discovery thread as well.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 8b6eff4..83c0c5d 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -690,7 +690,12 @@ static struct dentry *btrfs_debugfs_root_dentry;
+ /* Debugging tunables and exported data */
+ u64 btrfs_debugfs_test;
+ 
+-int btrfs_sysfs_add_one(struct btrfs_fs_info *fs_info)
++/*
++ * Can be called by the device discovery thread.
++ * And parent can be specified for seed device
++ */
++int btrfs_sysfs_add_fsid(struct btrfs_fs_info *fs_info,
++				struct kobject *parent)
+ {
+ 	int error;
+ 
+@@ -698,6 +703,14 @@ int btrfs_sysfs_add_one(struct btrfs_fs_info *fs_info)
+ 	fs_info->super_kobj.kset = btrfs_kset;
+ 	error = kobject_init_and_add(&fs_info->super_kobj, &btrfs_ktype, NULL,
+ 				     "%pU", fs_info->fsid);
++	return error;
++}
++
++int btrfs_sysfs_add_one(struct btrfs_fs_info *fs_info)
++{
++	int error;
++
++	error = btrfs_sysfs_add_fsid(fs_info, NULL);
+ 	if (error)
+ 		return error;
+ 
+-- 
+cgit v0.10.2
+

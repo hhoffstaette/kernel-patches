@@ -1,0 +1,21 @@
+From ef1a0daadf2b722fc1bb6c2d5cf39239591e78ec Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:36 +0800
+Subject: Btrfs: sysfs: make btrfs_sysfs_add_device() non static
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/sysfs.h b/fs/btrfs/sysfs.h
+index 4edf2a7..915307f 100644
+--- a/fs/btrfs/sysfs.h
++++ b/fs/btrfs/sysfs.h
+@@ -88,4 +88,5 @@ int btrfs_kobj_rm_device(struct btrfs_fs_devices *fs_devices,
+                 struct btrfs_device *one_device);
+ int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs,
+ 				struct kobject *parent);
++int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs);
+ #endif /* _BTRFS_SYSFS_H_ */
+-- 
+cgit v0.10.2
+

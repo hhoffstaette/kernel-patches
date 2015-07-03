@@ -1,0 +1,24 @@
+From 2421a8cd5faaa9c2c9397123c5a297bab227d965 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:40 +0800
+Subject: Btrfs: sysfs: don't fail seeding for the sake of sysfs kobject issue
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index b5cc129..b851964 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -2258,7 +2258,7 @@ int btrfs_init_new_device(struct btrfs_root *root, char *device_path)
+ 						root->fs_info->fsid);
+ 		if (kobject_rename(&root->fs_info->fs_devices->super_kobj,
+ 								fsid_buf))
+-			goto error_trans;
++			pr_warn("BTRFS: sysfs: failed to create fsid for sprout\n");
+ 	}
+ 
+ 	root->fs_info->num_tolerated_disk_barrier_failures =
+-- 
+cgit v0.10.2
+
