@@ -23,7 +23,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **Current stable series: >=4.1.0**
 
-- btrfs: fixes from 4.2+ (cleanups, data loss, performance, subvolumes, TRIM)
+- btrfs: fixes from 4.2+ (cleanups, data loss, performance, subvolumes, sysfs, TRIM)
 - ext4: lazytime fixes
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: r8169 support for Byte Queue Limits & xmit_more

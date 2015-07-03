@@ -1,0 +1,66 @@
+From 0dd2906f7229186424cdc80be8654b2c21d9c04c Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:27 +0800
+Subject: Btrfs: sysfs: let default_attrs be separate from the kset
+
+As of now btrfs_attrs are provided using the default_attrs through
+the kset. Separate them and create the default_attrs using the
+sysfs_create_files instead. By doing this we will have the
+flexibility that device discovery thread could create fsid
+kobject.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 83c0c5d..11fa8e6 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -428,7 +428,7 @@ static ssize_t btrfs_clone_alignment_show(struct kobject *kobj,
+ 
+ BTRFS_ATTR(clone_alignment, btrfs_clone_alignment_show);
+ 
+-static struct attribute *btrfs_attrs[] = {
++static const struct attribute *btrfs_attrs[] = {
+ 	BTRFS_ATTR_PTR(label),
+ 	BTRFS_ATTR_PTR(nodesize),
+ 	BTRFS_ATTR_PTR(sectorsize),
+@@ -447,7 +447,6 @@ static void btrfs_release_super_kobj(struct kobject *kobj)
+ static struct kobj_type btrfs_ktype = {
+ 	.sysfs_ops	= &kobj_sysfs_ops,
+ 	.release	= btrfs_release_super_kobj,
+-	.default_attrs	= btrfs_attrs,
+ };
+ 
+ static inline struct btrfs_fs_info *to_fs_info(struct kobject *kobj)
+@@ -531,6 +530,7 @@ void btrfs_sysfs_remove_one(struct btrfs_fs_info *fs_info)
+ 	}
+ 	addrm_unknown_feature_attrs(fs_info, false);
+ 	sysfs_remove_group(&fs_info->super_kobj, &btrfs_feature_attr_group);
++	sysfs_remove_files(&fs_info->super_kobj, btrfs_attrs);
+ 	btrfs_sysfs_remove_fsid(fs_info);
+ }
+ 
+@@ -720,13 +720,17 @@ int btrfs_sysfs_add_one(struct btrfs_fs_info *fs_info)
+ 		return error;
+ 	}
+ 
+-	error = sysfs_create_group(&fs_info->super_kobj,
+-				   &btrfs_feature_attr_group);
++	error = sysfs_create_files(&fs_info->super_kobj, btrfs_attrs);
+ 	if (error) {
+ 		btrfs_sysfs_remove_fsid(fs_info);
+ 		return error;
+ 	}
+ 
++	error = sysfs_create_group(&fs_info->super_kobj,
++				   &btrfs_feature_attr_group);
++	if (error)
++		goto failure;
++
+ 	error = addrm_unknown_feature_attrs(fs_info, true);
+ 	if (error)
+ 		goto failure;
+-- 
+cgit v0.10.2
+

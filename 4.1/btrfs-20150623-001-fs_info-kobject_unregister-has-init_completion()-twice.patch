@@ -1,0 +1,28 @@
+From 4e51f005a22a2c7795351b975437b0cee0acce3e Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:20 +0800
+Subject: Btrfs: sysfs: fix, fs_info kobject_unregister has init_completion()
+ twice
+
+kobject_unregister is to handle the release of the kobject,
+its completion init is being called in btrfs_sysfs_add_one(),
+so we don't have to do the same in the open_ctree() again.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 2ef9a4b..c42503c 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -2494,7 +2494,6 @@ int open_ctree(struct super_block *sb,
+ 	seqlock_init(&fs_info->profiles_lock);
+ 	init_rwsem(&fs_info->delayed_iput_sem);
+ 
+-	init_completion(&fs_info->kobj_unregister);
+ 	INIT_LIST_HEAD(&fs_info->dirty_cowonly_roots);
+ 	INIT_LIST_HEAD(&fs_info->space_info);
+ 	INIT_LIST_HEAD(&fs_info->tree_mod_seq_list);
+-- 
+cgit v0.10.2
+

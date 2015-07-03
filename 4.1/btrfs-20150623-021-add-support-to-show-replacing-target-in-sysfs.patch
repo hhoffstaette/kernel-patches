@@ -1,0 +1,51 @@
+From d2ff1b2008cb807102fc9496fadd8eddff98350c Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:42 +0800
+Subject: Btrfs: sysfs: add support to show replacing target in the sysfs
+
+This patch will add support to show the replacing target in sysfs
+during the process of replacement.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index f982ef3..862fbc2 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -376,6 +376,10 @@ int btrfs_dev_replace_start(struct btrfs_root *root,
+ 	WARN_ON(!tgt_device);
+ 	dev_replace->tgtdev = tgt_device;
+ 
++	ret = btrfs_kobj_add_device(tgt_device->fs_devices, tgt_device);
++	if (ret)
++		btrfs_error(root->fs_info, ret, "kobj add dev failed");
++
+ 	printk_in_rcu(KERN_INFO
+ 		      "BTRFS: dev_replace from %s (devid %llu) to %s started\n",
+ 		      src_device->missing ? "<missing disk>" :
+@@ -584,7 +588,6 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
+ 
+ 	/* replace the sysfs entry */
+ 	btrfs_kobj_rm_device(fs_info->fs_devices, src_device);
+-	btrfs_kobj_add_device(fs_info->fs_devices, tgt_device);
+ 	btrfs_rm_dev_replace_free_srcdev(fs_info, src_device);
+ 
+ 	/* write back the superblocks */
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index ea293db..2d9061f 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1940,6 +1940,9 @@ void btrfs_destroy_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
+ 	mutex_lock(&uuid_mutex);
+ 	WARN_ON(!tgtdev);
+ 	mutex_lock(&fs_info->fs_devices->device_list_mutex);
++
++	btrfs_kobj_rm_device(fs_info->fs_devices, tgtdev);
++
+ 	if (tgtdev->bdev) {
+ 		btrfs_scratch_superblock(tgtdev);
+ 		fs_info->fs_devices->open_devices--;
+-- 
+cgit v0.10.2
+

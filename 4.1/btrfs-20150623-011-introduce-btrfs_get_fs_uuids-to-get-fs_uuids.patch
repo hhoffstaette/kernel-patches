@@ -1,0 +1,37 @@
+From c73eccf75bf92e49be30884da32a169b04eb5bc9 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:30 +0800
+Subject: Btrfs: introduce btrfs_get_fs_uuids to get fs_uuids
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 39ff99e..e500bfa 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -52,6 +52,10 @@ static void btrfs_dev_stat_print_on_load(struct btrfs_device *device);
+ 
+ DEFINE_MUTEX(uuid_mutex);
+ static LIST_HEAD(fs_uuids);
++struct list_head *btrfs_get_fs_uuids(void)
++{
++	return &fs_uuids;
++}
+ 
+ static struct btrfs_fs_devices *__alloc_fs_devices(void)
+ {
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index e9780e9..ac7e938 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -542,5 +542,6 @@ static inline void unlock_chunks(struct btrfs_root *root)
+ 	mutex_unlock(&root->fs_info->chunk_mutex);
+ }
+ 
++struct list_head *btrfs_get_fs_uuids(void);
+ 
+ #endif
+-- 
+cgit v0.10.2
+
