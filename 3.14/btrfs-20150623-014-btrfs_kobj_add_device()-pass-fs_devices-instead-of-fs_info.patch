@@ -1,0 +1,80 @@
+From 1ba43816af921219d596c462baa7674ff0228229 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:33 +0800
+Subject: Btrfs: sysfs btrfs_kobj_add_device() pass fs_devices instead of
+ fs_info
+
+btrfs_kobj_add_device() does not need fs_info any more.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index 0573848..72c03ad 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -584,7 +584,7 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
+ 
+ 	/* replace the sysfs entry */
+ 	btrfs_kobj_rm_device(fs_info, src_device);
+-	btrfs_kobj_add_device(fs_info, tgt_device);
++	btrfs_kobj_add_device(fs_info->fs_devices, tgt_device);
+ 	btrfs_rm_dev_replace_free_srcdev(fs_info, src_device);
+ 
+ 	/* write back the superblocks */
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 333ed08..82e18f5 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -682,11 +682,10 @@ int btrfs_sysfs_add_device(struct btrfs_fs_devices *fs_devs)
+ 	return 0;
+ }
+ 
+-int btrfs_kobj_add_device(struct btrfs_fs_info *fs_info,
+-		struct btrfs_device *one_device)
++int btrfs_kobj_add_device(struct btrfs_fs_devices *fs_devices,
++				struct btrfs_device *one_device)
+ {
+ 	int error = 0;
+-	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
+ 	struct btrfs_device *dev;
+ 
+ 	error = btrfs_sysfs_add_device(fs_devices);
+@@ -752,7 +751,7 @@ int btrfs_sysfs_add_one(struct btrfs_fs_info *fs_info)
+ 	if (error)
+ 		return error;
+ 
+-	error = btrfs_kobj_add_device(fs_info, NULL);
++	error = btrfs_kobj_add_device(fs_devs, NULL);
+ 	if (error) {
+ 		btrfs_sysfs_remove_fsid(fs_devs);
+ 		return error;
+diff --git a/fs/btrfs/sysfs.h b/fs/btrfs/sysfs.h
+index 3a4bbed..f1d7c76 100644
+--- a/fs/btrfs/sysfs.h
++++ b/fs/btrfs/sysfs.h
+@@ -82,7 +82,7 @@ char *btrfs_printable_features(enum btrfs_feature_set set, u64 flags);
+ extern const char * const btrfs_feature_set_names[3];
+ extern struct kobj_type space_info_ktype;
+ extern struct kobj_type btrfs_raid_ktype;
+-int btrfs_kobj_add_device(struct btrfs_fs_info *fs_info,
++int btrfs_kobj_add_device(struct btrfs_fs_devices *fs_devices,
+ 		struct btrfs_device *one_device);
+ int btrfs_kobj_rm_device(struct btrfs_fs_info *fs_info,
+                 struct btrfs_device *one_device);
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 5719470..d68d394 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -2215,7 +2215,7 @@ int btrfs_init_new_device(struct btrfs_root *root, char *device_path)
+ 				    tmp + 1);
+ 
+ 	/* add sysfs device entry */
+-	btrfs_kobj_add_device(root->fs_info, device);
++	btrfs_kobj_add_device(root->fs_info->fs_devices, device);
+ 
+ 	/*
+ 	 * we've got more storage, clear any full flags on the space
+-- 
+cgit v0.10.2
+

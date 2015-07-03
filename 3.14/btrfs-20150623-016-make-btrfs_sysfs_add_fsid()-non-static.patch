@@ -1,0 +1,35 @@
+From 0c10e2d482ba7eafb9806f3ee071c8af5afcde55 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:35 +0800
+Subject: Btrfs: sysfs: make btrfs_sysfs_add_fsid() non static
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 0a5d1ee..53a327b 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -727,7 +727,7 @@ u64 btrfs_debugfs_test;
+  * Can be called by the device discovery thread.
+  * And parent can be specified for seed device
+  */
+-static int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs,
++int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs,
+ 				struct kobject *parent)
+ {
+ 	int error;
+diff --git a/fs/btrfs/sysfs.h b/fs/btrfs/sysfs.h
+index 808d12a..4edf2a7 100644
+--- a/fs/btrfs/sysfs.h
++++ b/fs/btrfs/sysfs.h
+@@ -86,4 +86,6 @@ int btrfs_kobj_add_device(struct btrfs_fs_devices *fs_devices,
+ 		struct btrfs_device *one_device);
+ int btrfs_kobj_rm_device(struct btrfs_fs_devices *fs_devices,
+                 struct btrfs_device *one_device);
++int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs,
++				struct kobject *parent);
+ #endif /* _BTRFS_SYSFS_H_ */
+-- 
+cgit v0.10.2
+

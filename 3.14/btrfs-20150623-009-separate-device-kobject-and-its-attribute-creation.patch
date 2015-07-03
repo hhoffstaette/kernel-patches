@@ -1,0 +1,54 @@
+From 00c921c23f9155597ff4ac1263a6ff46dc9e2206 Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:28 +0800
+Subject: Btrfs: sysfs: separate device kobject and its attribute creation
+
+Separate device kobject and its attribute creation so that device
+kobject can be created from the device discovery thread.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 11fa8e6..e71da32 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -645,13 +645,8 @@ int btrfs_kobj_rm_device(struct btrfs_fs_info *fs_info,
+ 	return 0;
+ }
+ 
+-int btrfs_kobj_add_device(struct btrfs_fs_info *fs_info,
+-		struct btrfs_device *one_device)
++int btrfs_sysfs_add_device(struct btrfs_fs_info *fs_info)
+ {
+-	int error = 0;
+-	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
+-	struct btrfs_device *dev;
+-
+ 	if (!fs_info->device_dir_kobj)
+ 		fs_info->device_dir_kobj = kobject_create_and_add("devices",
+ 						&fs_info->super_kobj);
+@@ -659,6 +654,20 @@ int btrfs_kobj_add_device(struct btrfs_fs_info *fs_info,
+ 	if (!fs_info->device_dir_kobj)
+ 		return -ENOMEM;
+ 
++	return 0;
++}
++
++int btrfs_kobj_add_device(struct btrfs_fs_info *fs_info,
++		struct btrfs_device *one_device)
++{
++	int error = 0;
++	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
++	struct btrfs_device *dev;
++
++	error = btrfs_sysfs_add_device(fs_info);
++	if (error)
++		return error;
++
+ 	list_for_each_entry(dev, &fs_devices->devices, dev_list) {
+ 		struct hd_struct *disk;
+ 		struct kobject *disk_kobj;
+-- 
+cgit v0.10.2
+

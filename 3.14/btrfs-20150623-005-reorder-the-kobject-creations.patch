@@ -1,0 +1,85 @@
+From aaf13305160490531b0d5ee4d56d32fc09f9bfa0 Mon Sep 17 00:00:00 2001
+From: Anand Jain <Anand.Jain@oracle.com>
+Date: Tue, 10 Mar 2015 06:38:24 +0800
+Subject: Btrfs: sysfs: reorder the kobject creations
+
+As of now the order in which the kobjects are created
+at btrfs_sysfs_add_one() is..
+ fsid
+ features
+ unknown features (dynamic features)
+ devices.
+
+Since we would move fsid and device kobject to fs_devices
+from fs_info structure, this patch will reorder in which
+the kobjects are created as below.
+ fsid
+ devices
+ features
+ unknown features (dynamic features)
+
+And hence the btrfs_sysfs_remove_one() will follow the same
+in reverse order. and the device kobject destroy now can
+be moved into the function __btrfs_sysfs_remove_one()
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 6218d31..8eb2463 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -510,6 +510,13 @@ static int addrm_unknown_feature_attrs(struct btrfs_fs_info *fs_info, bool add)
+ 
+ static void __btrfs_sysfs_remove_one(struct btrfs_fs_info *fs_info)
+ {
++	if (fs_info->device_dir_kobj) {
++		btrfs_kobj_rm_device(fs_info, NULL);
++		kobject_del(fs_info->device_dir_kobj);
++		kobject_put(fs_info->device_dir_kobj);
++		fs_info->device_dir_kobj = NULL;
++	}
++
+ 	kobject_del(&fs_info->super_kobj);
+ 	kobject_put(&fs_info->super_kobj);
+ 	wait_for_completion(&fs_info->kobj_unregister);
+@@ -522,12 +529,6 @@ void btrfs_sysfs_remove_one(struct btrfs_fs_info *fs_info)
+ 		kobject_del(fs_info->space_info_kobj);
+ 		kobject_put(fs_info->space_info_kobj);
+ 	}
+-	if (fs_info->device_dir_kobj) {
+-		btrfs_kobj_rm_device(fs_info, NULL);
+-		kobject_del(fs_info->device_dir_kobj);
+-		kobject_put(fs_info->device_dir_kobj);
+-		fs_info->device_dir_kobj = NULL;
+-	}
+ 	addrm_unknown_feature_attrs(fs_info, false);
+ 	sysfs_remove_group(&fs_info->super_kobj, &btrfs_feature_attr_group);
+ 	__btrfs_sysfs_remove_one(fs_info);
+@@ -700,6 +701,12 @@ int btrfs_sysfs_add_one(struct btrfs_fs_info *fs_info)
+ 	if (error)
+ 		return error;
+ 
++	error = btrfs_kobj_add_device(fs_info, NULL);
++	if (error) {
++		__btrfs_sysfs_remove_one(fs_info);
++		return error;
++	}
++
+ 	error = sysfs_create_group(&fs_info->super_kobj,
+ 				   &btrfs_feature_attr_group);
+ 	if (error) {
+@@ -711,10 +718,6 @@ int btrfs_sysfs_add_one(struct btrfs_fs_info *fs_info)
+ 	if (error)
+ 		goto failure;
+ 
+-	error = btrfs_kobj_add_device(fs_info, NULL);
+-	if (error)
+-		goto failure;
+-
+ 	fs_info->space_info_kobj = kobject_create_and_add("allocation",
+ 						  &fs_info->super_kobj);
+ 	if (!fs_info->space_info_kobj) {
+-- 
+cgit v0.10.2
+
