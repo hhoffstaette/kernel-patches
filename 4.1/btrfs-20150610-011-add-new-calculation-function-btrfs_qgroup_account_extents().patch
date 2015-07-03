@@ -14,9 +14,6 @@ logic.
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
 Signed-off-by: Chris Mason <clm@fb.com>
 
-diff --git a/fs/btrfs/extent-tree.h b/fs/btrfs/extent-tree.h
-new file mode 100644
-index 0000000..e69de29
 diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
 index 7b18fff..607c6ca 100644
 --- a/fs/btrfs/qgroup.c
