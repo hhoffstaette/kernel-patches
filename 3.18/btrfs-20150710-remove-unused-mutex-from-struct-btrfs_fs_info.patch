@@ -1,0 +1,51 @@
+From:	Byongho Lee <bhlee.kernel@gmail.com>
+To:	linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: remove unused mutex from struct 'btrfs_fs_info'
+Date:	Fri, 10 Jul 2015 13:10:26 +0900
+
+The code using 'ordered_extent_flush_mutex' mutex has removed by below
+commit.
+ - 8d875f95da43c6a8f18f77869f2ef26e9594fecc
+   btrfs: disable strict file flushes for renames and truncates
+But the mutex still lives in struct 'btrfs_fs_info'.
+
+So, this patch removes the mutex from struct 'btrfs_fs_info' and its
+initialization code.
+
+Signed-off-by: Byongho Lee <bhlee.kernel@gmail.com>
+---
+ fs/btrfs/ctree.h   | 6 ------
+ fs/btrfs/disk-io.c | 1 -
+ 2 files changed, 7 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index aac314e14188..cdde6d541b3a 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -1518,12 +1518,6 @@ struct btrfs_fs_info {
+ 	 */
+ 	struct mutex ordered_operations_mutex;
+ 
+-	/*
+-	 * Same as ordered_operations_mutex except this is for ordered extents
+-	 * and not the operations.
+-	 */
+-	struct mutex ordered_extent_flush_mutex;
+-
+ 	struct rw_semaphore commit_root_sem;
+ 
+ 	struct rw_semaphore cleanup_work_sem;
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index e5aad7f535aa..6ba584714c51 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -2608,7 +2608,6 @@ int open_ctree(struct super_block *sb,
+ 
+ 
+ 	mutex_init(&fs_info->ordered_operations_mutex);
+-	mutex_init(&fs_info->ordered_extent_flush_mutex);
+ 	mutex_init(&fs_info->tree_log_mutex);
+ 	mutex_init(&fs_info->chunk_mutex);
+ 	mutex_init(&fs_info->transaction_kthread_mutex);
+-- 
+2.4.5
