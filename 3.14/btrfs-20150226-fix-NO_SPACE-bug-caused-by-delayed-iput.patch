@@ -1,9 +1,7 @@
-From: Zhaolei <zhaolei@cn.fujitsu.com>
-Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 1/1] btrfs: Fix NO_SPACE bug caused by delayed-iput
-Date: Thu, 26 Feb 2015 11:20:23 +0800
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43296>
+From d7c151717a1efe289aec29fb9f94485f64262c0b Mon Sep 17 00:00:00 2001
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 26 Feb 2015 10:49:20 +0800
+Subject: btrfs: Fix NO_SPACE bug caused by delayed-iput
 
 Steps to reproduce:
   while true; do
@@ -37,8 +35,8 @@ Reason:
   [ 2569.908270] comm=btrfs-cleaner func=btrfs_evict_inode() end
 
 Fix:
-  Make btrfs_commit_transaction() wait current running delayed-iputs()
-  done in end.
+  Make btrfs_commit_transaction() wait current running btrfs-cleaner's
+  delayed-iputs() done in end.
 
 Test:
   Use script similar to above(more complex),
@@ -48,18 +46,13 @@ Test:
     0 failed in 100 * 20 loop.
 
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
----
- fs/btrfs/ctree.h       | 1 +
- fs/btrfs/disk-io.c     | 3 ++-
- fs/btrfs/inode.c       | 4 ++++
- fs/btrfs/transaction.c | 6 +++++-
- 4 files changed, 12 insertions(+), 2 deletions(-)
+Signed-off-by: Chris Mason <clm@fb.com>
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index 84c3b00..ec2dac0 100644
+index 10b6a75..d48b22f 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
-@@ -1513,6 +1513,7 @@ struct btrfs_fs_info {
+@@ -1538,6 +1538,7 @@ struct btrfs_fs_info {
  
  	spinlock_t delayed_iput_lock;
  	struct list_head delayed_iputs;
@@ -68,10 +61,10 @@ index 84c3b00..ec2dac0 100644
  	/* this protects tree_mod_seq_list */
  	spinlock_t tree_mod_seq_lock;
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index f79f385..1c0d8ec 100644
+index 62cd3b6..2ef9a4b 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
-@@ -2241,11 +2241,12 @@ int open_ctree(struct super_block *sb,
+@@ -2487,11 +2487,12 @@ int open_ctree(struct super_block *sb,
  	spin_lock_init(&fs_info->qgroup_op_lock);
  	spin_lock_init(&fs_info->buffer_lock);
  	spin_lock_init(&fs_info->unused_bgs_lock);
@@ -85,11 +78,28 @@ index f79f385..1c0d8ec 100644
  
  	init_completion(&fs_info->kobj_unregister);
  	INIT_LIST_HEAD(&fs_info->dirty_cowonly_roots);
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index be4a79a..46cb1d4 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3950,6 +3950,12 @@ commit_trans:
+ 				ret = btrfs_commit_transaction(trans, root);
+ 				if (ret)
+ 					return ret;
++				/*
++				 * make sure that all running delayed iput are
++				 * done
++				 */
++				down_write(&root->fs_info->delayed_iput_sem);
++				up_write(&root->fs_info->delayed_iput_sem);
+ 				goto again;
+ 			} else {
+ 				btrfs_end_transaction(trans, root);
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index a85c23d..a396bb9 100644
+index 141df0c..6ef97c1 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -3087,6 +3087,8 @@ void btrfs_run_delayed_iputs(struct btrfs_root *root)
+@@ -3111,6 +3111,8 @@ void btrfs_run_delayed_iputs(struct btrfs_root *root)
  	if (empty)
  		return;
  
@@ -98,32 +108,15 @@ index a85c23d..a396bb9 100644
  	spin_lock(&fs_info->delayed_iput_lock);
  	list_splice_init(&fs_info->delayed_iputs, &list);
  	spin_unlock(&fs_info->delayed_iput_lock);
-@@ -3097,6 +3099,8 @@ void btrfs_run_delayed_iputs(struct btrfs_root *root)
+@@ -3121,6 +3123,8 @@ void btrfs_run_delayed_iputs(struct btrfs_root *root)
  		iput(delayed->inode);
  		kfree(delayed);
  	}
 +
-+	up_read(&fs_info->delayed_iput_sem);
++	up_read(&root->fs_info->delayed_iput_sem);
  }
  
  /*
-diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
-index 7e80f32..175cdef 100644
---- a/fs/btrfs/transaction.c
-+++ b/fs/btrfs/transaction.c
-@@ -2068,8 +2068,12 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
- 
- 	kmem_cache_free(btrfs_trans_handle_cachep, trans);
- 
--	if (current != root->fs_info->transaction_kthread)
-+	if (current != root->fs_info->transaction_kthread) {
- 		btrfs_run_delayed_iputs(root);
-+		/* make sure that all running delayed iput are done */
-+		down_write(&root->fs_info->delayed_iput_sem);
-+		up_write(&root->fs_info->delayed_iput_sem);
-+	}
- 
- 	return ret;
- 
 -- 
-1.8.5.1
+cgit v0.10.2
+
