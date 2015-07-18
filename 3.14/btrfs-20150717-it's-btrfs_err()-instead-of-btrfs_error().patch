@@ -1,0 +1,31 @@
+From:	Anand Jain <anand.jain@oracle.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	dsterba@suse.cz, clm@fb.com
+Subject: [PATCH] btrfs: its btrfs_err() instead of btrfs_error()
+Date:	Fri, 17 Jul 2015 23:45:23 +0800
+
+sorry I indented to use btrfs_err() and I have no idea
+how btrfs_error() got there.
+infact I was thinking about these kind of oversights
+since these two func are too closely named.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+---
+ fs/btrfs/dev-replace.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index 862fbc2..564a7de 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -378,7 +378,7 @@ int btrfs_dev_replace_start(struct btrfs_root *root,
+ 
+ 	ret = btrfs_kobj_add_device(tgt_device->fs_devices, tgt_device);
+ 	if (ret)
+-		btrfs_error(root->fs_info, ret, "kobj add dev failed");
++		btrfs_err(root->fs_info, "kobj add dev failed %d\n", ret);
+ 
+ 	printk_in_rcu(KERN_INFO
+ 		      "BTRFS: dev_replace from %s (devid %llu) to %s started\n",
+-- 
+1.9.1
