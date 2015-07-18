@@ -14,8 +14,8 @@ To apply over a -stable release:
 - run `patch -s -p1 < ../kernel-patches/version/*.patch` when in the kernel directory
 - build as usual
 
-You can disable e.g. BFS (but why? :) via menuconfig, but all patches of a series
-must be applied, as some have interdependencies (e.g. btrfs/block/vfs layers).
+All patches of a series must be applied, as some have interdependencies
+(e.g. between the btrfs/vfs/block layers).
 
 A patch series should apply cleanly to the *latest* version of the respective -stable
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
@@ -24,8 +24,8 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **LTS series: >=3.14.47**
 
 - bfs: [BFS v454](http://ck-hack.blogspot.de/2014/08/bfs-453454455456-and-316-ck2.html) + [SMT-nice patches](http://ck-hack.blogspot.de/2014/08/smthyperthreading-nice-and-scheduling.html)
-- bfq: BFQ v7r8 ([Budget Fair Queueing I/O scheduler](http://algogroup.unimore.it/people/paolo/disk_sched/))
-- btrfs: >760 patches from 3.15-4.2+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace, sysfs, TRIM and automatic GC of empty blockgroups. \o/
+- bfq: [BFQ v7r8](http://algogroup.unimore.it/people/paolo/disk_sched/)
+- btrfs: >800 patches from 3.15-4.2+ to address corruption, stability, performance and all new capabilities: `O_TMPFILE`, `renameat2`, RAID 5/6 scrub/replace, sysfs, TRIM and automatic GC of empty blockgroups. \o/
 - ext4: corruption fixes, `renameat2`
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - locking: cancellable/optimistic spinning MCS / queued rwlocks ([patch](http://bit.ly/Xq41R6), [article]( http://lwn.net/Articles/590243/))
