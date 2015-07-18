@@ -1,0 +1,32 @@
+From b6e4eafcbc1bf5754d5703f80b76d22d53d6b3e6 Mon Sep 17 00:00:00 2001
+From: Alfred Chen <cchalpha@gmail.com>
+Date: Wed, 8 Jul 2015 16:15:49 +0800
+Subject: [PATCH 10/22] bfs: [Fix] Fix wrong rcu_dereference_check() usage.
+
+---
+ kernel/sched/bfs.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/kernel/sched/bfs.c b/kernel/sched/bfs.c
+index ebb5efa..2732b98 100644
+--- a/kernel/sched/bfs.c
++++ b/kernel/sched/bfs.c
+@@ -6965,6 +6965,7 @@ void __init sched_init_smp(void)
+ 		BUG();
+ 	free_cpumask_var(non_isolated_cpus);
+ 
++	mutex_lock(&sched_domains_mutex);
+ 	grq_lock_irq();
+ 	/*
+ 	 * Set up the relative cache distance of each online cpu from each
+@@ -7009,6 +7010,7 @@ void __init sched_init_smp(void)
+ #endif
+ 	}
+ 	grq_unlock_irq();
++	mutex_unlock(&sched_domains_mutex);
+ 
+ 	for_each_online_cpu(cpu) {
+ 		struct rq *rq = cpu_rq(cpu);
+-- 
+2.4.6
+

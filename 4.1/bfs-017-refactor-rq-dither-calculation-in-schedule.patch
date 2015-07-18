@@ -1,0 +1,37 @@
+From 0bff42050482ab2f51b731bcde5a3875038f46e5 Mon Sep 17 00:00:00 2001
+From: Alfred Chen <cchalpha@gmail.com>
+Date: Sun, 27 Jul 2014 09:29:33 +0800
+Subject: [PATCH 17/22] bfs: Refactor rq dither calculation in schedule().
+
+---
+ kernel/sched/bfs.c | 7 ++-----
+ 1 file changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/sched/bfs.c b/kernel/sched/bfs.c
+index 213b0f5..99b6bd8 100644
+--- a/kernel/sched/bfs.c
++++ b/kernel/sched/bfs.c
+@@ -2579,7 +2579,7 @@ ts_account:
+  * Bank in p->sched_time the ns elapsed since the last tick or switch.
+  * CPU scheduler quota accounting is also performed here in microseconds.
+  */
+-static void
++static inline void
+ update_cpu_clock_switch(struct rq *rq, struct task_struct *p)
+ {
+ 	long account_ns = rq->clock_task - rq->rq_last_ran;
+@@ -3481,10 +3481,7 @@ static void __sched __schedule(void)
+ 
+ 	update_clocks(rq);
+ 	update_cpu_clock_switch(rq, prev);
+-	if (rq->clock - rq->last_tick > HALF_JIFFY_NS)
+-		rq->dither = false;
+-	else
+-		rq->dither = true;
++	rq->dither = (rq->clock - rq->last_tick < HALF_JIFFY_NS);
+ 
+ 	clear_tsk_need_resched(prev);
+ 	clear_preempt_need_resched();
+-- 
+2.4.6
+

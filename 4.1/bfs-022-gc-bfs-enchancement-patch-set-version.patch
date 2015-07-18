@@ -1,0 +1,26 @@
+From c9f1dccc62e897b4ed157d311a6646024cc3e021 Mon Sep 17 00:00:00 2001
+From: Alfred Chen <cchalpha@gmail.com>
+Date: Mon, 15 Jun 2015 14:31:28 +0800
+Subject: [PATCH 22/22] bfs: -gc BFS enchancement patch set version.
+
+Add -gc patch set version to dmesg to identify patch set info at
+runtime.
+---
+ kernel/sched/bfs.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/sched/bfs.c b/kernel/sched/bfs.c
+index 69cae89..5ca4419 100644
+--- a/kernel/sched/bfs.c
++++ b/kernel/sched/bfs.c
+@@ -135,6 +135,7 @@
+ void print_scheduler_version(void)
+ {
+ 	printk(KERN_INFO "BFS CPU scheduler v0.462 by Con Kolivas.\n");
++	printk(KERN_INFO "BFS enhancement patch set v20150615 by Alfred Chen.\n");
+ }
+ 
+ /*
+-- 
+2.4.6
+

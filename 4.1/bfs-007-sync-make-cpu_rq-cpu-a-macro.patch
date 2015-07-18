@@ -1,0 +1,46 @@
+From a92fbafb6876664ea338582082a117e55f67fb23 Mon Sep 17 00:00:00 2001
+From: Alfred Chen <cchalpha@gmail.com>
+Date: Tue, 16 Dec 2014 10:47:30 +0800
+Subject: [PATCH 07/22] bfs: [Sync] Make cpu_rq(cpu) a macro.
+
+---
+ kernel/sched/bfs.c       | 6 ------
+ kernel/sched/bfs_sched.h | 3 +++
+ 2 files changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/kernel/sched/bfs.c b/kernel/sched/bfs.c
+index ebb41f0..16e0591 100644
+--- a/kernel/sched/bfs.c
++++ b/kernel/sched/bfs.c
+@@ -230,12 +230,6 @@ static DEFINE_MUTEX(sched_hotcpu_mutex);
+ 
+ DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+ #ifdef CONFIG_SMP
+-struct rq *cpu_rq(int cpu)
+-{
+-	return &per_cpu(runqueues, (cpu));
+-}
+-#define task_rq(p)		cpu_rq(task_cpu(p))
+-#define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
+ /*
+  * sched_domains_mutex serialises calls to init_sched_domains,
+  * detach_destroy_domains and partition_sched_domains.
+diff --git a/kernel/sched/bfs_sched.h b/kernel/sched/bfs_sched.h
+index 49aca6a..94ae861 100644
+--- a/kernel/sched/bfs_sched.h
++++ b/kernel/sched/bfs_sched.h
+@@ -104,8 +104,11 @@ static struct rq *uprq;
+ #define cpu_curr(cpu)	((uprq)->curr)
+ #else /* CONFIG_SMP */
+ DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
++#define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
+ #define this_rq()		this_cpu_ptr(&runqueues)
+ #define raw_rq()		raw_cpu_ptr(&runqueues)
++#define task_rq(p)		cpu_rq(task_cpu(p))
++#define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
+ #endif /* CONFIG_SMP */
+ 
+ static inline u64 __rq_clock_broken(struct rq *rq)
+-- 
+2.4.6
+
