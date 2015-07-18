@@ -1,0 +1,41 @@
+From:	Liu Bo <bo.li.liu@oracle.com>
+To:	linux-btrfs@vger.kernel.org
+Subject: [PATCH 1/2] Btrfs: move kobj stuff out of dev_replace lock range
+Date:	Fri, 17 Jul 2015 16:49:18 +0800
+
+To avoid deadlock described in commit 084b6e7c7607 ("btrfs: Fix a lockdep warning when running xfstest."),
+we should move kobj stuff out of dev_replace lock range.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/dev-replace.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index 862fbc2..9eb1401 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -376,10 +376,6 @@ int btrfs_dev_replace_start(struct btrfs_root *root,
+ 	WARN_ON(!tgt_device);
+ 	dev_replace->tgtdev = tgt_device;
+ 
+-	ret = btrfs_kobj_add_device(tgt_device->fs_devices, tgt_device);
+-	if (ret)
+-		btrfs_error(root->fs_info, ret, "kobj add dev failed");
+-
+ 	printk_in_rcu(KERN_INFO
+ 		      "BTRFS: dev_replace from %s (devid %llu) to %s started\n",
+ 		      src_device->missing ? "<missing disk>" :
+@@ -402,6 +398,10 @@ int btrfs_dev_replace_start(struct btrfs_root *root,
+ 	args->result = BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR;
+ 	btrfs_dev_replace_unlock(dev_replace);
+ 
++	ret = btrfs_kobj_add_device(tgt_device->fs_devices, tgt_device);
++	if (ret)
++		btrfs_error(root->fs_info, ret, "kobj add dev failed");
++
+ 	btrfs_wait_ordered_roots(root->fs_info, -1);
+ 
+ 	/* force writing the updated state information to disk */
+-- 
+2.1.0
