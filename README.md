@@ -14,8 +14,8 @@ To apply over a -stable release:
 - run `patch -s -p1 < ../kernel-patches/version/*.patch` when in the kernel directory
 - build as usual
 
-All patches of a series must be applied, as some have interdependencies (e.g.
-between the btrfs/vfs/block layers).
+All patches of a series must be applied, as some have interdependencies
+(e.g. between the btrfs/vfs/block layers).
 
 A patch series should apply cleanly to the *latest* version of the respective -stable
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
@@ -23,9 +23,10 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **Current stable series: >=4.1.0**
 
+- bfq: [BFQ v7r8](http://algogroup.unimore.it/people/paolo/disk_sched/)
 - btrfs: fixes from 4.2+ (cleanups, data loss, performance, subvolumes, sysfs, TRIM)
 - ext4: lazytime fixes
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
-- net: r8169 support for Byte Queue Limits & xmit_more
+- net: r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
 - vfs: scalability fixes
 
