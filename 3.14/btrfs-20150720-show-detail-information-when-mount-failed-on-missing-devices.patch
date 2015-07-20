@@ -1,8 +1,8 @@
 From:	Zhaolei <zhaolei@cn.fujitsu.com>
 To:	<linux-btrfs@vger.kernel.org>
 CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH] btrfs: Show detail information when mount failed on missing devices
-Date:	Thu, 16 Jul 2015 16:44:17 +0800
+Subject: [PATCH v2] btrfs: Show detail information when mount failed on missing devices
+Date:	Mon, 20 Jul 2015 17:55:19 +0800
 
 From: Zhao Lei <zhaolei@cn.fujitsu.com>
 
@@ -16,16 +16,21 @@ to above output, to let user know what really happened, and helps
 bug-report and debug.
 
 dmesg after patch:
- [  127.912406] BTRFS: too many missing devices(1 > 0), writeable mount is not allowed
- [  127.918128] BTRFS: open_ctree failed
+ [  127.050367] BTRFS: missing devices(1) exceeds the limit(0), writeable mount is not allowed
+ [  127.056099] BTRFS: open_ctree failed
 
+Changelog v1->v2:
+1: Changed to more clear description, suggested-by:
+   Anand Jain <anand.jain@oracle.com>
+
+Suggested-by: Anand Jain <anand.jain@oracle.com>
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 ---
  fs/btrfs/disk-io.c | 5 +++--
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index 2eda03b..b6600c7 100644
+index 2eda03b..5b44e02 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
 @@ -2950,8 +2950,9 @@ retry_root_backup:
@@ -34,7 +39,7 @@ index 2eda03b..b6600c7 100644
  	    !(sb->s_flags & MS_RDONLY)) {
 -		printk(KERN_WARNING "BTRFS: "
 -			"too many missing devices, writeable mount is not allowed\n");
-+		pr_warn("BTRFS: too many missing devices(%llu > %d), writeable mount is not allowed\n",
++		pr_warn("BTRFS: missing devices(%llu) exceeds the limit(%d), writeable mount is not allowed\n",
 +			fs_info->fs_devices->missing_devices,
 +			fs_info->num_tolerated_disk_barrier_failures);
  		goto fail_sysfs;
