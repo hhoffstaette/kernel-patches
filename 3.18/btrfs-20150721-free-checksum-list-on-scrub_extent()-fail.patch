@@ -1,0 +1,50 @@
+From:	Zhaolei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH 2/2] btrfs: Free checksum list on scrub_extent() fail
+Date:	Tue, 21 Jul 2015 12:22:30 +0800
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+When scrub_extent() failed, we need to free previois created
+checksum list.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/scrub.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index f8551b9..24720f6 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -2923,10 +2923,12 @@ again:
+ 						      extent_dev, flags,
+ 						      generation,
+ 						      extent_mirror_num);
++
++			scrub_free_csums(sctx);
++
+ 			if (ret)
+ 				goto out;
+ 
+-			scrub_free_csums(sctx);
+ 			if (extent_logical + extent_len <
+ 			    key.objectid + bytes) {
+ 				logic_start += map->stripe_len;
+@@ -3259,10 +3261,12 @@ again:
+ 					   extent_physical, extent_dev, flags,
+ 					   generation, extent_mirror_num,
+ 					   extent_logical - logical + physical);
++
++			scrub_free_csums(sctx);
++
+ 			if (ret)
+ 				goto out;
+ 
+-			scrub_free_csums(sctx);
+ 			if (extent_logical + extent_len <
+ 			    key.objectid + bytes) {
+ 				if (map->type & BTRFS_BLOCK_GROUP_RAID56_MASK) {
+-- 
+1.8.5.1
