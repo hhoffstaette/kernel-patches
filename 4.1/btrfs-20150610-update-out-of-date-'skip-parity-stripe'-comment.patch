@@ -27,7 +27,7 @@ index a13f91a..5ee5630 100644
  					map, &logical, &stripe_logical);
  			logical += base;
  			if (ret) {
-+				/* it is parity strip */
++				/* it is a parity stripe */
  				stripe_logical += base;
  				stripe_end = stripe_logical + increment - 1;
  				ret = scrub_raid56_parity(sctx, map, scrub_dev,
