@@ -1,0 +1,88 @@
+From:	Zhaolei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH] btrfs: Fix calculate typo caused by ambiguous meaning of logic_end
+Date:	Tue, 21 Jul 2015 15:42:26 +0800
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+For example, in scrub_raid56_parity(), following lines are used
+to judge is all data processed:
+ place1: if (key.objectid > logic_end) ...
+ place2: if (logic_start >= logic_end) ...
+ ...
+ (place2 is typo, is should be ">", it is copied from other
+  place, where logic_end's meaning is different, long story...)
+
+We can fix above typo directly, but the root reason is ambiguous
+meaning of logic_end in scrub raid56 parity.
+
+In other place, XXX_end is pointed to data which is not included,
+and we need to process segment of [XXX_start, XXX_end).
+
+But for scrub raid56 parity, logic_end is pointed to lattest data
+need to process, and introduced many "+ 1" and "- 1" in code as
+below:
+ length = sparity->logic_end - sparity->logic_start + 1
+ logic_end - logic_start + 1
+ stripe_logical + increment - 1
+
+This patch changed logic_end's meaning to make it in normal understanding
+in raid56 parity functions and data struct alone with above bugfix.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/scrub.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index 24720f6..7f56603 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -2702,7 +2702,7 @@ static void scrub_parity_check_and_repair(struct scrub_parity *sparity)
+ 			   sparity->nsectors))
+ 		goto out;
+ 
+-	length = sparity->logic_end - sparity->logic_start + 1;
++	length = sparity->logic_end - sparity->logic_start;
+ 	ret = btrfs_map_sblock(sctx->dev_root->fs_info, WRITE,
+ 			       sparity->logic_start,
+ 			       &length, &bbio, 0, 1);
+@@ -2868,7 +2868,7 @@ static noinline_for_stack int scrub_raid56_parity(struct scrub_ctx *sctx,
+ 			    key.type != BTRFS_METADATA_ITEM_KEY)
+ 				goto next;
+ 
+-			if (key.objectid > logic_end) {
++			if (key.objectid >= logic_end) {
+ 				stop_loop = 1;
+ 				break;
+ 			}
+@@ -2957,7 +2957,7 @@ next:
+ out:
+ 	if (ret < 0)
+ 		scrub_parity_mark_sectors_error(sparity, logic_start,
+-						logic_end - logic_start + 1);
++						logic_end - logic_start);
+ 	scrub_parity_put(sparity);
+ 	scrub_submit(sctx);
+ 	mutex_lock(&sctx->wr_ctx.wr_lock);
+@@ -3138,7 +3138,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+ 			logical += base;
+ 			if (ret) {
+ 				stripe_logical += base;
+-				stripe_end = stripe_logical + increment - 1;
++				stripe_end = stripe_logical + increment;
+ 				ret = scrub_raid56_parity(sctx, map, scrub_dev,
+ 							  ppath, stripe_logical,
+ 							  stripe_end);
+@@ -3284,7 +3284,7 @@ loop:
+ 					if (ret && physical < physical_end) {
+ 						stripe_logical += base;
+ 						stripe_end = stripe_logical +
+-								increment - 1;
++								increment;
+ 						ret = scrub_raid56_parity(sctx,
+ 							map, scrub_dev, ppath,
+ 							stripe_logical,
+-- 
+1.8.5.1
