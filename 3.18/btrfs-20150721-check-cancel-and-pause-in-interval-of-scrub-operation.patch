@@ -1,0 +1,102 @@
+From:	Zhaolei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH 1/2] btrfs: Check cancel and pause in interval of scrub operation
+Date:	Tue, 21 Jul 2015 12:22:29 +0800
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+Old code checking cancel and pause request inside scrub stripe
+operation, like:
+  loop() {
+    if (parity) {
+      scrub_parity_stripe();
+      continue;
+    }
+
+    check_cancel_and_pause()
+
+    scrub_normal_stripe();
+  }
+
+Reason is when introduce raid56 stripe scrub, new code is inserted
+simplely to front of loop.
+
+Better to:
+  loop() {
+    check_cancel_and_pause()
+
+    if (parity)
+      scrub_parity_stripe();
+    else
+      scrub_normal_stripe();
+  }
+
+This patch adjusted code place to realize above sequence.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/scrub.c | 34 ++++++++++++++++++----------------
+ 1 file changed, 18 insertions(+), 16 deletions(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index 94db0fa..f8551b9 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -3104,22 +3104,6 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+ 	 */
+ 	ret = 0;
+ 	while (physical < physical_end) {
+-		if (map->type & BTRFS_BLOCK_GROUP_RAID56_MASK) {
+-			ret = get_raid56_logic_offset(physical, num,
+-					map, &logical, &stripe_logical);
+-			logical += base;
+-			if (ret) {
+-				/* it is a parity stripe */
+-				stripe_logical += base;
+-				stripe_end = stripe_logical + increment - 1;
+-				ret = scrub_raid56_parity(sctx, map, scrub_dev,
+-						ppath, stripe_logical,
+-						stripe_end);
+-				if (ret)
+-					goto out;
+-				goto skip;
+-			}
+-		}
+ 		/*
+ 		 * canceled?
+ 		 */
+@@ -3144,6 +3128,24 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+ 			scrub_blocked_if_needed(fs_info);
+ 		}
+ 
++		if (map->type & BTRFS_BLOCK_GROUP_RAID56_MASK) {
++			ret = get_raid56_logic_offset(physical, num, map,
++						      &logical,
++						      &stripe_logical);
++			logical += base;
++			if (ret) {
++				/* it is a parity stripe */
++				stripe_logical += base;
++				stripe_end = stripe_logical + increment - 1;
++				ret = scrub_raid56_parity(sctx, map, scrub_dev,
++							  ppath, stripe_logical,
++							  stripe_end);
++				if (ret)
++					goto out;
++				goto skip;
++			}
++		}
++
+ 		if (btrfs_fs_incompat(fs_info, SKINNY_METADATA))
+ 			key.type = BTRFS_METADATA_ITEM_KEY;
+ 		else
+-- 
+1.8.5.1
+
+
+
+
+
+
+
