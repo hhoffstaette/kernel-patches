@@ -1,0 +1,69 @@
+From:	Zhaolei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH 2/2] btrfs: Bypass unrelated items before accessing its contents in scrub
+Date:	Wed, 22 Jul 2015 13:14:48 +0800
+
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+
+When we access extent_root in scrub_stripe() and
+scrub_raid56_parity(), we need bypass unrelated tree item firstly
+before using its contents to do other condition.
+
+It is not a bug fix, only making code sequence in logic.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/scrub.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index d72e8e1..3e8b3fc 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -2856,6 +2856,10 @@ static noinline_for_stack int scrub_raid56_parity(struct scrub_ctx *sctx,
+ 			}
+ 			btrfs_item_key_to_cpu(l, &key, slot);
+ 
++			if (key.type != BTRFS_EXTENT_ITEM_KEY &&
++			    key.type != BTRFS_METADATA_ITEM_KEY)
++				goto next;
++
+ 			if (key.type == BTRFS_METADATA_ITEM_KEY)
+ 				bytes = root->nodesize;
+ 			else
+@@ -2864,10 +2868,6 @@ static noinline_for_stack int scrub_raid56_parity(struct scrub_ctx *sctx,
+ 			if (key.objectid + bytes <= logic_start)
+ 				goto next;
+ 
+-			if (key.type != BTRFS_EXTENT_ITEM_KEY &&
+-			    key.type != BTRFS_METADATA_ITEM_KEY)
+-				goto next;
+-
+ 			if (key.objectid >= logic_end) {
+ 				stop_loop = 1;
+ 				break;
+@@ -3192,6 +3192,10 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+ 			}
+ 			btrfs_item_key_to_cpu(l, &key, slot);
+ 
++			if (key.type != BTRFS_EXTENT_ITEM_KEY &&
++			    key.type != BTRFS_METADATA_ITEM_KEY)
++				goto next;
++
+ 			if (key.type == BTRFS_METADATA_ITEM_KEY)
+ 				bytes = root->nodesize;
+ 			else
+@@ -3200,10 +3204,6 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+ 			if (key.objectid + bytes <= logical)
+ 				goto next;
+ 
+-			if (key.type != BTRFS_EXTENT_ITEM_KEY &&
+-			    key.type != BTRFS_METADATA_ITEM_KEY)
+-				goto next;
+-
+ 			if (key.objectid >= logical + map->stripe_len) {
+ 				/* out of this device extent */
+ 				if (key.objectid >= logic_end)
+-- 
+1.8.5.1
