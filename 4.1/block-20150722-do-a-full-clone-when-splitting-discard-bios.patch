@@ -1,0 +1,60 @@
+From: "Martin K. Petersen" <martin.petersen@oracle.com>
+Newsgroups: gmane.linux.kernel.stable,gmane.linux.raid
+Subject: [PATCH] block: Do a full clone when splitting discard bios
+Date: Wed, 22 Jul 2015 07:57:12 -0400
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/143133>
+
+This fixes a data corruption bug when using discard on top of MD linear,
+raid0 and raid10 personalities.
+
+Commit 20d0189b1012 "block: Introduce new bio_split()" permits sharing
+the bio_vec between the two resulting bios. That is fine for read/write
+requests where the bio_vec is immutable. For discards, however, we need
+to be able to attach a payload and update the bio_vec so the page can
+get mapped to a scatterlist entry. Therefore the bio_vec can not be
+shared when splitting discards and we must do a full clone.
+
+Signed-off-by: Martin K. Petersen <martin.petersen@oracle.com>
+Reported-by: Seunguk Shin <seunguk.shin@samsung.com>
+Tested-by: Seunguk Shin <seunguk.shin@samsung.com>
+Cc: Seunguk Shin <seunguk.shin@samsung.com>
+Cc: Jens Axboe <axboe@fb.com>
+Cc: Kent Overstreet <kent.overstreet@gmail.com>
+Cc: <stable@vger.kernel.org> # v3.14+
+---
+ block/bio.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/block/bio.c b/block/bio.c
+index 2a00d349cd68..d18de96919f3 100644
+--- a/block/bio.c
++++ b/block/bio.c
+@@ -1831,8 +1831,9 @@ EXPORT_SYMBOL(bio_endio);
+  * Allocates and returns a new bio which represents @sectors from the start of
+  * @bio, and updates @bio to represent the remaining sectors.
+  *
+- * The newly allocated bio will point to @bio's bi_io_vec; it is the caller's
+- * responsibility to ensure that @bio is not freed before the split.
++ * Unless this is a discard request the newly allocated bio will point
++ * to @bio's bi_io_vec; it is the caller's responsibility to ensure that
++ * @bio is not freed before the split.
+  */
+ struct bio *bio_split(struct bio *bio, int sectors,
+ 		      gfp_t gfp, struct bio_set *bs)
+@@ -1842,7 +1843,15 @@ struct bio *bio_split(struct bio *bio, int sectors,
+ 	BUG_ON(sectors <= 0);
+ 	BUG_ON(sectors >= bio_sectors(bio));
+ 
+-	split = bio_clone_fast(bio, gfp, bs);
++	/*
++	 * Discards need a mutable bio_vec to accommodate the payload
++	 * required by the DSM TRIM and UNMAP commands.
++	 */
++	if (bio->bi_rw & REQ_DISCARD)
++		split = bio_clone_bioset(bio, gfp, bs);
++	else
++		split = bio_clone_fast(bio, gfp, bs);
++
+ 	if (!split)
+ 		return NULL;
+ 
