@@ -1,8 +1,8 @@
 From:	fdmanana@kernel.org
 To:	linux-btrfs@vger.kernel.org
 Cc:	Filipe Manana <fdmanana@suse.com>
-Subject: [PATCH] Btrfs: fix stale directory entries after fsync log replay
-Date:	Wed, 15 Jul 2015 23:58:56 +0100
+Subject: [PATCH v2] Btrfs: fix stale directory entries after fsync log replay
+Date:	Wed, 22 Jul 2015 04:54:54 +0100
 
 From: Filipe Manana <fdmanana@suse.com>
 
@@ -121,14 +121,62 @@ possibly since the log tree feature was added (2008).
 
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/tree-log.c | 53 +++++++++++++++++++++++++++++++++++++++++++++++++++--
- 1 file changed, 51 insertions(+), 2 deletions(-)
+
+V2: Fixed path leak on error path. Made it mark a dentry's inode for link count
+    fixup only if the inode really exists (if the name was replayed), otherwise
+    this resulted in log replay failure for some scenarios:
+      touch foo
+      touch bar
+      mv bar abc
+      fsync abc
+      <power failure>
+      mount, log replay failed with -EIO (inode foo doesn't exist, but a dentry
+      points to it).
+
+ fs/btrfs/tree-log.c | 64 +++++++++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 60 insertions(+), 4 deletions(-)
 
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index 9c45431..0cf189d 100644
+index 9c45431..cb5666e 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
-@@ -1740,12 +1740,13 @@ static noinline int replay_one_dir_item(struct btrfs_trans_handle *trans,
+@@ -1613,6 +1613,9 @@ static bool name_in_log_ref(struct btrfs_root *log_root,
+  * not exist in the FS, it is skipped.  fsyncs on directories
+  * do not force down inodes inside that directory, just changes to the
+  * names or unlinks in a directory.
++ *
++ * Returns < 0 on error, 0 if the name wasn't replayed (dentry points to a
++ * non-existing inode) and 1 if the name was replayed.
+  */
+ static noinline int replay_one_name(struct btrfs_trans_handle *trans,
+ 				    struct btrfs_root *root,
+@@ -1631,6 +1634,7 @@ static noinline int replay_one_name(struct btrfs_trans_handle *trans,
+ 	int exists;
+ 	int ret = 0;
+ 	bool update_size = (key->type == BTRFS_DIR_INDEX_KEY);
++	bool name_added = false;
+ 
+ 	dir = read_one_inode(root, key->objectid);
+ 	if (!dir)
+@@ -1708,6 +1712,8 @@ out:
+ 	}
+ 	kfree(name);
+ 	iput(dir);
++	if (!ret && name_added)
++		ret = 1;
+ 	return ret;
+ 
+ insert:
+@@ -1723,6 +1729,8 @@ insert:
+ 			      name, name_len, log_type, &log_key);
+ 	if (ret && ret != -ENOENT && ret != -EEXIST)
+ 		goto out;
++	if (!ret)
++		name_added = true;
+ 	update_size = false;
+ 	ret = 0;
+ 	goto out;
+@@ -1740,12 +1748,13 @@ static noinline int replay_one_dir_item(struct btrfs_trans_handle *trans,
  					struct extent_buffer *eb, int slot,
  					struct btrfs_key *key)
  {
@@ -143,8 +191,14 @@ index 9c45431..0cf189d 100644
  
  	ptr = btrfs_item_ptr_offset(eb, slot);
  	ptr_end = ptr + item_size;
-@@ -1759,8 +1760,56 @@ static noinline int replay_one_dir_item(struct btrfs_trans_handle *trans,
- 			return ret;
+@@ -1755,12 +1764,59 @@ static noinline int replay_one_dir_item(struct btrfs_trans_handle *trans,
+ 			return -EIO;
+ 		name_len = btrfs_dir_name_len(eb, di);
+ 		ret = replay_one_name(trans, root, path, eb, di, key);
+-		if (ret)
+-			return ret;
++		if (ret < 0)
++			break;
  		ptr = (unsigned long)(di + 1);
  		ptr += name_len;
 +
@@ -175,9 +229,7 @@ index 9c45431..0cf189d 100644
 +		 * make it impossible to ever delete the parent directory has
 +		 * it would result in stale dentries that can never be deleted.
 +		 */
-+		if (btrfs_dir_type(eb, di) != BTRFS_FT_DIR &&
-+		    btrfs_dir_transid(eb, di) >
-+		    root->fs_info->last_trans_committed) {
++		if (ret == 1 && btrfs_dir_type(eb, di) != BTRFS_FT_DIR) {
 +			struct btrfs_key di_key;
 +
 +			if (!fixup_path) {
@@ -194,6 +246,7 @@ index 9c45431..0cf189d 100644
 +			if (ret)
 +				break;
 +		}
++		ret = 0;
  	}
 -	return 0;
 +	btrfs_free_path(fixup_path);
