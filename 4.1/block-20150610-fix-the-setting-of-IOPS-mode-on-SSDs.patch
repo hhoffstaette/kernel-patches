@@ -1,0 +1,95 @@
+From 0bb979472a7401022109e81dd89d777adea58710 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 10 Jun 2015 08:01:20 -0600
+Subject: cfq-iosched: fix the setting of IOPS mode on SSDs
+
+A previous commit wanted to make CFQ default to IOPS mode on
+non-rotational storage, however it did so when the queue was
+initialized and the non-rotational flag is only set later on
+in the probe.
+
+Add an elevator hook that gets called off the add_disk() path,
+at that point we know that feature probing has finished, and
+we can reliably check for the various flags that drivers can
+set.
+
+Fixes: 41c0126b ("block: Make CFQ default to IOPS mode on SSDs")
+Tested-by: Romain Francoise <romain@orebokech.com>
+Signed-off-by: Jens Axboe <axboe@fb.com>
+
+diff --git a/block/cfq-iosched.c b/block/cfq-iosched.c
+index c808ad8..d1d0cb2 100644
+--- a/block/cfq-iosched.c
++++ b/block/cfq-iosched.c
+@@ -4508,7 +4508,7 @@ static int cfq_init_queue(struct request_queue *q, struct elevator_type *e)
+ 	cfqd->cfq_slice[1] = cfq_slice_sync;
+ 	cfqd->cfq_target_latency = cfq_target_latency;
+ 	cfqd->cfq_slice_async_rq = cfq_slice_async_rq;
+-	cfqd->cfq_slice_idle = blk_queue_nonrot(q) ? 0 : cfq_slice_idle;
++	cfqd->cfq_slice_idle = cfq_slice_idle;
+ 	cfqd->cfq_group_idle = cfq_group_idle;
+ 	cfqd->cfq_latency = 1;
+ 	cfqd->hw_tag = -1;
+@@ -4525,6 +4525,18 @@ out_free:
+ 	return ret;
+ }
+ 
++static void cfq_registered_queue(struct request_queue *q)
++{
++	struct elevator_queue *e = q->elevator;
++	struct cfq_data *cfqd = e->elevator_data;
++
++	/*
++	 * Default to IOPS mode with no idling for SSDs
++	 */
++	if (blk_queue_nonrot(q))
++		cfqd->cfq_slice_idle = 0;
++}
++
+ /*
+  * sysfs parts below -->
+  */
+@@ -4640,6 +4652,7 @@ static struct elevator_type iosched_cfq = {
+ 		.elevator_may_queue_fn =	cfq_may_queue,
+ 		.elevator_init_fn =		cfq_init_queue,
+ 		.elevator_exit_fn =		cfq_exit_queue,
++		.elevator_registered_fn =	cfq_registered_queue,
+ 	},
+ 	.icq_size	=	sizeof(struct cfq_io_cq),
+ 	.icq_align	=	__alignof__(struct cfq_io_cq),
+diff --git a/block/elevator.c b/block/elevator.c
+index 59794d0..5f04527 100644
+--- a/block/elevator.c
++++ b/block/elevator.c
+@@ -810,6 +810,8 @@ int elv_register_queue(struct request_queue *q)
+ 		}
+ 		kobject_uevent(&e->kobj, KOBJ_ADD);
+ 		e->registered = 1;
++		if (e->type->ops.elevator_registered_fn)
++			e->type->ops.elevator_registered_fn(q);
+ 	}
+ 	return error;
+ }
+diff --git a/include/linux/elevator.h b/include/linux/elevator.h
+index 45a9147..638b324 100644
+--- a/include/linux/elevator.h
++++ b/include/linux/elevator.h
+@@ -39,6 +39,7 @@ typedef void (elevator_deactivate_req_fn) (struct request_queue *, struct reques
+ typedef int (elevator_init_fn) (struct request_queue *,
+ 				struct elevator_type *e);
+ typedef void (elevator_exit_fn) (struct elevator_queue *);
++typedef void (elevator_registered_fn) (struct request_queue *);
+ 
+ struct elevator_ops
+ {
+@@ -68,6 +69,7 @@ struct elevator_ops
+ 
+ 	elevator_init_fn *elevator_init_fn;
+ 	elevator_exit_fn *elevator_exit_fn;
++	elevator_registered_fn *elevator_registered_fn;
+ };
+ 
+ #define ELV_NAME_MAX	(16)
+-- 
+cgit v0.10.2
+
