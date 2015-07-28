@@ -1,0 +1,38 @@
+From:	Chandan Rajendra <chandan@linux.vnet.ibm.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	Chandan Rajendra <chandan@linux.vnet.ibm.com>, chandan@mykolab.com
+Subject: [PATCH] Btrfs: btrfs_submit_bio_hook: Use btrfs_wq_endio_type values instead of integer constants
+Date:	Mon, 27 Jul 2015 15:26:43 +0530
+
+btrfs_submit_bio_hook() uses integer constants instead of values from "enum
+btrfs_wq_endio_type". Fix this.
+
+Signed-off-by: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+---
+ fs/btrfs/inode.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index e33dff3..0695a62 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -1859,15 +1859,15 @@ static int btrfs_submit_bio_hook(struct inode *inode, int rw, struct bio *bio,
+ 			  u64 bio_offset)
+ {
+ 	struct btrfs_root *root = BTRFS_I(inode)->root;
++	enum btrfs_wq_endio_type metadata = BTRFS_WQ_ENDIO_DATA;
+ 	int ret = 0;
+ 	int skip_sum;
+-	int metadata = 0;
+ 	int async = !atomic_read(&BTRFS_I(inode)->sync_writers);
+ 
+ 	skip_sum = BTRFS_I(inode)->flags & BTRFS_INODE_NODATASUM;
+ 
+ 	if (btrfs_is_free_space_inode(inode))
+-		metadata = 2;
++		metadata = BTRFS_WQ_ENDIO_FREE_SPACE;
+ 
+ 	if (!(rw & REQ_WRITE)) {
+ 		ret = btrfs_bio_wq_end_io(root->fs_info, bio, metadata);
+-- 
+2.1.0
