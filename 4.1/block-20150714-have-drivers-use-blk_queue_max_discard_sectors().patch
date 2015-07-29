@@ -1,0 +1,198 @@
+From 2bb4cd5cc472b191a46938becb7dafdd44644329 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Tue, 14 Jul 2015 08:15:12 -0600
+Subject: block: have drivers use blk_queue_max_discard_sectors()
+
+Some drivers use it now, others just set the limits field manually.
+But in preparation for splitting this into a hard and soft limit,
+ensure that they all call the proper function for setting the hw
+limit for discards.
+
+Reviewed-by: Jeff Moyer <jmoyer@redhat.com>
+Signed-off-by: Jens Axboe <axboe@fb.com>
+
+diff --git a/drivers/block/brd.c b/drivers/block/brd.c
+index 64ab495..e573e470b 100644
+--- a/drivers/block/brd.c
++++ b/drivers/block/brd.c
+@@ -500,7 +500,7 @@ static struct brd_device *brd_alloc(int i)
+ 	blk_queue_physical_block_size(brd->brd_queue, PAGE_SIZE);
+ 
+ 	brd->brd_queue->limits.discard_granularity = PAGE_SIZE;
+-	brd->brd_queue->limits.max_discard_sectors = UINT_MAX;
++	blk_queue_max_discard_sectors(brd->brd_queue, UINT_MAX);
+ 	brd->brd_queue->limits.discard_zeroes_data = 1;
+ 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, brd->brd_queue);
+ 
+diff --git a/drivers/block/drbd/drbd_nl.c b/drivers/block/drbd/drbd_nl.c
+index 74df8cf..e80cbef 100644
+--- a/drivers/block/drbd/drbd_nl.c
++++ b/drivers/block/drbd/drbd_nl.c
+@@ -1156,14 +1156,14 @@ static void drbd_setup_queue_param(struct drbd_device *device, struct drbd_backi
+ 			/* For now, don't allow more than one activity log extent worth of data
+ 			 * to be discarded in one go. We may need to rework drbd_al_begin_io()
+ 			 * to allow for even larger discard ranges */
+-			q->limits.max_discard_sectors = DRBD_MAX_DISCARD_SECTORS;
++			blk_queue_max_discard_sectors(q, DRBD_MAX_DISCARD_SECTORS);
+ 
+ 			queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
+ 			/* REALLY? Is stacking secdiscard "legal"? */
+ 			if (blk_queue_secdiscard(b))
+ 				queue_flag_set_unlocked(QUEUE_FLAG_SECDISCARD, q);
+ 		} else {
+-			q->limits.max_discard_sectors = 0;
++			blk_queue_max_discard_sectors(q, 0);
+ 			queue_flag_clear_unlocked(QUEUE_FLAG_DISCARD, q);
+ 			queue_flag_clear_unlocked(QUEUE_FLAG_SECDISCARD, q);
+ 		}
+diff --git a/drivers/block/loop.c b/drivers/block/loop.c
+index f7a4c9d..f9889b6 100644
+--- a/drivers/block/loop.c
++++ b/drivers/block/loop.c
+@@ -675,7 +675,7 @@ static void loop_config_discard(struct loop_device *lo)
+ 	    lo->lo_encrypt_key_size) {
+ 		q->limits.discard_granularity = 0;
+ 		q->limits.discard_alignment = 0;
+-		q->limits.max_discard_sectors = 0;
++		blk_queue_max_discard_sectors(q, 0);
+ 		q->limits.discard_zeroes_data = 0;
+ 		queue_flag_clear_unlocked(QUEUE_FLAG_DISCARD, q);
+ 		return;
+@@ -683,7 +683,7 @@ static void loop_config_discard(struct loop_device *lo)
+ 
+ 	q->limits.discard_granularity = inode->i_sb->s_blocksize;
+ 	q->limits.discard_alignment = 0;
+-	q->limits.max_discard_sectors = UINT_MAX >> 9;
++	blk_queue_max_discard_sectors(q, UINT_MAX >> 9);
+ 	q->limits.discard_zeroes_data = 1;
+ 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
+ }
+diff --git a/drivers/block/nbd.c b/drivers/block/nbd.c
+index 0e385d8..f169faf 100644
+--- a/drivers/block/nbd.c
++++ b/drivers/block/nbd.c
+@@ -822,7 +822,7 @@ static int __init nbd_init(void)
+ 		queue_flag_set_unlocked(QUEUE_FLAG_NONROT, disk->queue);
+ 		queue_flag_clear_unlocked(QUEUE_FLAG_ADD_RANDOM, disk->queue);
+ 		disk->queue->limits.discard_granularity = 512;
+-		disk->queue->limits.max_discard_sectors = UINT_MAX;
++		blk_queue_max_discard_sectors(disk->queue, UINT_MAX);
+ 		disk->queue->limits.discard_zeroes_data = 0;
+ 		blk_queue_max_hw_sectors(disk->queue, 65536);
+ 		disk->queue->limits.max_sectors = 256;
+diff --git a/drivers/block/nvme-core.c b/drivers/block/nvme-core.c
+index 7920c27..d844ec4 100644
+--- a/drivers/block/nvme-core.c
++++ b/drivers/block/nvme-core.c
+@@ -1935,7 +1935,7 @@ static void nvme_config_discard(struct nvme_ns *ns)
+ 	ns->queue->limits.discard_zeroes_data = 0;
+ 	ns->queue->limits.discard_alignment = logical_block_size;
+ 	ns->queue->limits.discard_granularity = logical_block_size;
+-	ns->queue->limits.max_discard_sectors = 0xffffffff;
++	blk_queue_max_discard_sectors(ns->queue, 0xffffffff);
+ 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, ns->queue);
+ }
+ 
+diff --git a/drivers/block/rbd.c b/drivers/block/rbd.c
+index d94529d..dcc8693 100644
+--- a/drivers/block/rbd.c
++++ b/drivers/block/rbd.c
+@@ -3803,7 +3803,7 @@ static int rbd_init_disk(struct rbd_device *rbd_dev)
+ 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
+ 	q->limits.discard_granularity = segment_size;
+ 	q->limits.discard_alignment = segment_size;
+-	q->limits.max_discard_sectors = segment_size / SECTOR_SIZE;
++	blk_queue_max_discard_sectors(q, segment_size / SECTOR_SIZE);
+ 	q->limits.discard_zeroes_data = 1;
+ 
+ 	blk_queue_merge_bvec(q, rbd_merge_bvec);
+diff --git a/drivers/block/skd_main.c b/drivers/block/skd_main.c
+index 1e46eb2..586f916 100644
+--- a/drivers/block/skd_main.c
++++ b/drivers/block/skd_main.c
+@@ -4422,7 +4422,7 @@ static int skd_cons_disk(struct skd_device *skdev)
+ 	/* DISCARD Flag initialization. */
+ 	q->limits.discard_granularity = 8192;
+ 	q->limits.discard_alignment = 0;
+-	q->limits.max_discard_sectors = UINT_MAX >> 9;
++	blk_queue_max_discard_sectors(q, UINT_MAX >> 9);
+ 	q->limits.discard_zeroes_data = 1;
+ 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
+ 	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, q);
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index fb655e8..f439ad2 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -1244,7 +1244,7 @@ static int zram_add(void)
+ 	blk_queue_io_min(zram->disk->queue, PAGE_SIZE);
+ 	blk_queue_io_opt(zram->disk->queue, PAGE_SIZE);
+ 	zram->disk->queue->limits.discard_granularity = PAGE_SIZE;
+-	zram->disk->queue->limits.max_discard_sectors = UINT_MAX;
++	blk_queue_max_discard_sectors(zram->disk->queue, UINT_MAX);
+ 	/*
+ 	 * zram_bio_discard() will clear all logical blocks if logical block
+ 	 * size is identical with physical block size(PAGE_SIZE). But if it is
+diff --git a/drivers/md/bcache/super.c b/drivers/md/bcache/super.c
+index 94980bf..fc8e545 100644
+--- a/drivers/md/bcache/super.c
++++ b/drivers/md/bcache/super.c
+@@ -830,7 +830,7 @@ static int bcache_device_init(struct bcache_device *d, unsigned block_size,
+ 	q->limits.max_sectors		= UINT_MAX;
+ 	q->limits.max_segment_size	= UINT_MAX;
+ 	q->limits.max_segments		= BIO_MAX_PAGES;
+-	q->limits.max_discard_sectors	= UINT_MAX;
++	blk_queue_max_discard_sectors(q, UINT_MAX);
+ 	q->limits.discard_granularity	= 512;
+ 	q->limits.io_min		= block_size;
+ 	q->limits.logical_block_size	= block_size;
+diff --git a/drivers/mmc/card/queue.c b/drivers/mmc/card/queue.c
+index b5a2b14..5daf302 100644
+--- a/drivers/mmc/card/queue.c
++++ b/drivers/mmc/card/queue.c
+@@ -165,7 +165,7 @@ static void mmc_queue_setup_discard(struct request_queue *q,
+ 		return;
+ 
+ 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
+-	q->limits.max_discard_sectors = max_discard;
++	blk_queue_max_discard_sectors(q, max_discard);
+ 	if (card->erased_byte == 0 && !mmc_can_discard(card))
+ 		q->limits.discard_zeroes_data = 1;
+ 	q->limits.discard_granularity = card->pref_erase << 9;
+diff --git a/drivers/mtd/mtd_blkdevs.c b/drivers/mtd/mtd_blkdevs.c
+index 41acc50..1b96cf7 100644
+--- a/drivers/mtd/mtd_blkdevs.c
++++ b/drivers/mtd/mtd_blkdevs.c
+@@ -423,7 +423,7 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
+ 
+ 	if (tr->discard) {
+ 		queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, new->rq);
+-		new->rq->limits.max_discard_sectors = UINT_MAX;
++		blk_queue_max_discard_sectors(new->rq, UINT_MAX);
+ 	}
+ 
+ 	gd->queue = new->rq;
+diff --git a/drivers/scsi/sd.c b/drivers/scsi/sd.c
+index 3b2fcb4..160e44e 100644
+--- a/drivers/scsi/sd.c
++++ b/drivers/scsi/sd.c
+@@ -647,7 +647,7 @@ static void sd_config_discard(struct scsi_disk *sdkp, unsigned int mode)
+ 	switch (mode) {
+ 
+ 	case SD_LBP_DISABLE:
+-		q->limits.max_discard_sectors = 0;
++		blk_queue_max_discard_sectors(q, 0);
+ 		queue_flag_clear_unlocked(QUEUE_FLAG_DISCARD, q);
+ 		return;
+ 
+@@ -675,7 +675,7 @@ static void sd_config_discard(struct scsi_disk *sdkp, unsigned int mode)
+ 		break;
+ 	}
+ 
+-	q->limits.max_discard_sectors = max_blocks * (logical_block_size >> 9);
++	blk_queue_max_discard_sectors(q, max_blocks * (logical_block_size >> 9));
+ 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
+ }
+ 
+-- 
+cgit v0.10.2
+
