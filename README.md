@@ -21,13 +21,12 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Current stable series: >=4.1.0**
+**Current stable series: >=4.1.4**
 
 - bfs: [BFS v462-gc](http://cchalpha.blogspot.de/2015/06/time-to-have-fun-with-kernel-41.html)
 - bfq: [BFQ v7r8](http://algogroup.unimore.it/people/paolo/disk_sched/)
-- block: discard/md corruption fix, improved CFQ SSD awareness
+- block: improved CFQ SSD awareness
 - btrfs: fixes from 4.2+ (cleanups, data loss, performance, subvolumes, sysfs, TRIM)
-- ext4: lazytime fixes
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
 - vfs: scalability fixes
