@@ -1,0 +1,158 @@
+From d4d58d2fb206c4bef37e5143a3b7be1843d5ec67 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Tue, 14 Jul 2015 12:39:34 -0600
+Subject: block: make /sys/block/<dev>/queue/discard_max_bytes writeable
+
+Lots of devices support huge discard sizes these days. Depending
+on how the device handles them internally, huge discards can
+introduce massive latencies (hundreds of msec) on the device side.
+
+We have a sysfs file, discard_max_bytes, that advertises the max
+hardware supported discard size. Make this writeable, and split
+the settings into a soft and hard limit. This can be set from
+'discard_granularity' and up to the hardware limit.
+
+Add a new sysfs file, 'discard_max_hw_bytes', that shows the hw
+set limit.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+
+diff --git a/Documentation/block/queue-sysfs.txt b/Documentation/block/queue-sysfs.txt
+index 3a29f89..3748cf8 100644
+--- a/Documentation/block/queue-sysfs.txt
++++ b/Documentation/block/queue-sysfs.txt
+@@ -20,7 +20,7 @@ This shows the size of internal allocation of the device in bytes, if
+ reported by the device. A value of '0' means device does not support
+ the discard functionality.
+ 
+-discard_max_bytes (RO)
++discard_max_bytes (RW)
+ ----------------------
+ Devices that support discard functionality may have internal limits on
+ the number of bytes that can be trimmed or unmapped in a single operation.
+@@ -28,6 +28,8 @@ The discard_max_bytes parameter is set by the device driver to the maximum
+ number of bytes that can be discarded in a single operation. Discard
+ requests issued to the device must not exceed this limit. A discard_max_bytes
+ value of 0 means that the device does not support discard functionality.
++Writing a lower value to this file can limit the maximum discard size issued
++to the device, which can help latencies.
+ 
+ discard_zeroes_data (RO)
+ ------------------------
+diff --git a/block/blk-settings.c b/block/blk-settings.c
+index 12600bf..b38d8d7 100644
+--- a/block/blk-settings.c
++++ b/block/blk-settings.c
+@@ -116,6 +116,7 @@ void blk_set_default_limits(struct queue_limits *lim)
+ 	lim->chunk_sectors = 0;
+ 	lim->max_write_same_sectors = 0;
+ 	lim->max_discard_sectors = 0;
++	lim->max_hw_discard_sectors = 0;
+ 	lim->discard_granularity = 0;
+ 	lim->discard_alignment = 0;
+ 	lim->discard_misaligned = 0;
+@@ -303,6 +304,7 @@ EXPORT_SYMBOL(blk_queue_chunk_sectors);
+ void blk_queue_max_discard_sectors(struct request_queue *q,
+ 		unsigned int max_discard_sectors)
+ {
++	q->limits.max_hw_discard_sectors = max_discard_sectors;
+ 	q->limits.max_discard_sectors = max_discard_sectors;
+ }
+ EXPORT_SYMBOL(blk_queue_max_discard_sectors);
+@@ -641,6 +643,8 @@ int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
+ 
+ 		t->max_discard_sectors = min_not_zero(t->max_discard_sectors,
+ 						      b->max_discard_sectors);
++		t->max_hw_discard_sectors = min_not_zero(t->max_hw_discard_sectors,
++							 b->max_hw_discard_sectors);
+ 		t->discard_granularity = max(t->discard_granularity,
+ 					     b->discard_granularity);
+ 		t->discard_alignment = lcm_not_zero(t->discard_alignment, alignment) %
+diff --git a/block/blk-sysfs.c b/block/blk-sysfs.c
+index 6264b38..b1f34e4 100644
+--- a/block/blk-sysfs.c
++++ b/block/blk-sysfs.c
+@@ -145,12 +145,43 @@ static ssize_t queue_discard_granularity_show(struct request_queue *q, char *pag
+ 	return queue_var_show(q->limits.discard_granularity, page);
+ }
+ 
++static ssize_t queue_discard_max_hw_show(struct request_queue *q, char *page)
++{
++	unsigned long long val;
++
++	val = q->limits.max_hw_discard_sectors << 9;
++	return sprintf(page, "%llu\n", val);
++}
++
+ static ssize_t queue_discard_max_show(struct request_queue *q, char *page)
+ {
+ 	return sprintf(page, "%llu\n",
+ 		       (unsigned long long)q->limits.max_discard_sectors << 9);
+ }
+ 
++static ssize_t queue_discard_max_store(struct request_queue *q,
++				       const char *page, size_t count)
++{
++	unsigned long max_discard;
++	ssize_t ret = queue_var_store(&max_discard, page, count);
++
++	if (ret < 0)
++		return ret;
++
++	if (max_discard & (q->limits.discard_granularity - 1))
++		return -EINVAL;
++
++	max_discard >>= 9;
++	if (max_discard > UINT_MAX)
++		return -EINVAL;
++
++	if (max_discard > q->limits.max_hw_discard_sectors)
++		max_discard = q->limits.max_hw_discard_sectors;
++
++	q->limits.max_discard_sectors = max_discard;
++	return ret;
++}
++
+ static ssize_t queue_discard_zeroes_data_show(struct request_queue *q, char *page)
+ {
+ 	return queue_var_show(queue_discard_zeroes_data(q), page);
+@@ -360,9 +391,15 @@ static struct queue_sysfs_entry queue_discard_granularity_entry = {
+ 	.show = queue_discard_granularity_show,
+ };
+ 
++static struct queue_sysfs_entry queue_discard_max_hw_entry = {
++	.attr = {.name = "discard_max_hw_bytes", .mode = S_IRUGO },
++	.show = queue_discard_max_hw_show,
++};
++
+ static struct queue_sysfs_entry queue_discard_max_entry = {
+-	.attr = {.name = "discard_max_bytes", .mode = S_IRUGO },
++	.attr = {.name = "discard_max_bytes", .mode = S_IRUGO | S_IWUSR },
+ 	.show = queue_discard_max_show,
++	.store = queue_discard_max_store,
+ };
+ 
+ static struct queue_sysfs_entry queue_discard_zeroes_data_entry = {
+@@ -421,6 +458,7 @@ static struct attribute *default_attrs[] = {
+ 	&queue_io_opt_entry.attr,
+ 	&queue_discard_granularity_entry.attr,
+ 	&queue_discard_max_entry.attr,
++	&queue_discard_max_hw_entry.attr,
+ 	&queue_discard_zeroes_data_entry.attr,
+ 	&queue_write_same_max_entry.attr,
+ 	&queue_nonrot_entry.attr,
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index d4068c1..243f29e 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -268,6 +268,7 @@ struct queue_limits {
+ 	unsigned int		io_min;
+ 	unsigned int		io_opt;
+ 	unsigned int		max_discard_sectors;
++	unsigned int		max_hw_discard_sectors;
+ 	unsigned int		max_write_same_sectors;
+ 	unsigned int		discard_granularity;
+ 	unsigned int		discard_alignment;
+-- 
+cgit v0.10.2
+

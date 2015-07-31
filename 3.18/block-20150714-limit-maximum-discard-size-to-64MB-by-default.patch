@@ -1,0 +1,48 @@
+From 9d3e5d88441e427849bc94ee304e8822befc58ac Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Tue, 14 Jul 2015 12:42:35 -0600
+Subject: block: by default, limit maximum discard size to 64MB
+
+Lots of devices exhibit very high latencies for big discards, hurting
+reads and writes. By default, limit the max discard we will build to
+64MB. This value has shown good results across a number of devices.
+
+This will potentially hurt discard throughput, from a provisioning
+point of view (when the user does mkfs.xfs, for instance, and mkfs
+issues a full device discard). If that becomes an issue, we could
+have different behavior for provisioning vs runtime discards.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+
+diff --git a/block/blk-settings.c b/block/blk-settings.c
+index b38d8d7..b98d26f 100644
+--- a/block/blk-settings.c
++++ b/block/blk-settings.c
+@@ -306,6 +306,8 @@ void blk_queue_max_discard_sectors(struct request_queue *q,
+ {
+ 	q->limits.max_hw_discard_sectors = max_discard_sectors;
+ 	q->limits.max_discard_sectors = max_discard_sectors;
++	if (q->limits.max_discard_sectors > BLK_DISCARD_MAX_SECTORS)
++		q->limits.max_discard_sectors = BLK_DISCARD_MAX_SECTORS;
+ }
+ EXPORT_SYMBOL(blk_queue_max_discard_sectors);
+ 
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index 243f29e..3a01b16 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -1141,6 +1141,11 @@ enum blk_default_limits {
+ 	BLK_SAFE_MAX_SECTORS	= 255,
+ 	BLK_MAX_SEGMENT_SIZE	= 65536,
+ 	BLK_SEG_BOUNDARY_MASK	= 0xFFFFFFFFUL,
++
++	/*
++	 * Default to max 64MB of discards, to keep latencies in check
++	 */
++	BLK_DISCARD_MAX_SECTORS	= (64 * 1024 * 1024UL) >> 9,
+ };
+ 
+ #define blkdev_entry_to_request(entry) list_entry((entry), struct request, queuelist)
+-- 
+cgit v0.10.2
+
