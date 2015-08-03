@@ -1,0 +1,55 @@
+From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>, <clm@fb.com>
+Subject: [PATCH] btrfs: qgroup: Fix a regression in qgroup reserved space.
+Date:	Mon, 3 Aug 2015 14:44:29 +0800
+
+During the change to new btrfs extent-oriented qgroup implement, due to
+it doesn't use the old __qgroup_excl_accounting() for exclusive extent,
+it didn't free the reserved bytes.
+
+The bug will cause limit function go crazy as the reserved space is
+never freed, increasing limit will have no effect and still cause
+EQOUT.
+
+The fix is easy, just free reserved bytes for newly created exclusive
+extent as what it does before.
+
+Reported-by: Tsutomu Itoh <t-itoh@jp.fujitsu.com>
+Signed-off-by: Yang Dongsheng <yangds.fnst@cn.fujitsu.com>
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+---
+To Chris:
+
+Would you please consider merging this patch in the late v4.2 merge
+window?
+As it's a huge regression and the fix is small enough and just does
+what it did before in __qgroup_excl_accounting() function.
+
+The corresponding test case will follow soon.
+
+And sorry for the regression I introduced.
+
+Thanks,
+Qu
+---
+ fs/btrfs/qgroup.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index d5f1f03..1667567 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -1618,6 +1618,11 @@ static int qgroup_update_counters(struct btrfs_fs_info *fs_info,
+ 				/* Exclusive -> exclusive, nothing changed */
+ 			}
+ 		}
++
++		/* For exclusive extent, free its reserved bytes too */
++		if (nr_old_roots == 0 && nr_new_roots == 1 &&
++		    cur_new_count == nr_new_roots)
++			qg->reserved -= num_bytes;
+ 		if (dirty)
+ 			qgroup_dirty(fs_info, qg);
+ 	}
+-- 
+2.5.0
