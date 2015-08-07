@@ -1,0 +1,33 @@
+From:	Zhao Lei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH] btrfs: Add WARN_ON() for double lock in btrfs_tree_lock()
+Date:	Thu, 6 Aug 2015 22:39:36 +0800
+
+When a task trying to double lock a extent buffer, there are no
+lockdep warning about it because this lock may be in "blocking_lock"
+state, and make us hard to debug.
+
+This patch add a WARN_ON() for above condition, it can not report
+all deadlock cases(as lock between tasks), but at least helps us
+some.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/locking.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/btrfs/locking.c b/fs/btrfs/locking.c
+index f8229ef..d7e6baf 100644
+--- a/fs/btrfs/locking.c
++++ b/fs/btrfs/locking.c
+@@ -241,6 +241,7 @@ void btrfs_tree_read_unlock_blocking(struct extent_buffer *eb)
+  */
+ void btrfs_tree_lock(struct extent_buffer *eb)
+ {
++	WARN_ON(eb->lock_owner == current->pid);
+ again:
+ 	wait_event(eb->read_lock_wq, atomic_read(&eb->blocking_readers) == 0);
+ 	wait_event(eb->write_lock_wq, atomic_read(&eb->blocking_writers) == 0);
+-- 
+1.8.5.1
