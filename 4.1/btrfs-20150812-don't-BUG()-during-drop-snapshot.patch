@@ -1,0 +1,82 @@
+From 07214b5294d2772682aba893de15ef8020994598 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Wed, 12 Aug 2015 11:06:42 -0400
+Subject: [PATCH] Btrfs: don't BUG() during drop snapshot
+
+Really there's lots of things that can go wrong here, kill all the 
+BUG_ON()'s and replace the logic ones with ASSERT()'s and return EIO
+instead.  Also  fix the leak of next in one of the error conditions
+while we're at it.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+---
+  fs/btrfs/extent-tree.c | 27 +++++++++++++++++++++++----
+  1 file changed, 23 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index f7fb120..6671faf 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -8196,12 +8196,15 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
+				       &wc->flags[level - 1]);
+	if (ret < 0) {
+		btrfs_tree_unlock(next);
++		free_extent_buffer(next);
+		return ret;
+	}
+
+	if (unlikely(wc->refs[level - 1] == 0)) {
+		btrfs_err(root->fs_info, "Missing references.");
+-		BUG();
++		btrfs_tree_unlock(next);
++		free_extent_buffer(next);
++		return -EIO;
+	}
+	*lookup_info = 0;
+
+@@ -8253,7 +8256,13 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
+	}
+
+	level--;
+-	BUG_ON(level != btrfs_header_level(next));
++	ASSERT(level == btrfs_header_level(next));
++	if (level != btrfs_header_level(next)) {
++		printk(KERN_ERR "Mismatched level\n");
++		btrfs_tree_unlock(next);
++		free_extent_buffer(next);
++		return -EIO;
++	}
+	path->nodes[level] = next;
+	path->slots[level] = 0;
+	path->locks[level] = BTRFS_WRITE_LOCK_BLOCKING;
+@@ -8268,8 +8277,14 @@ skip:
+		if (wc->flags[level] & BTRFS_BLOCK_FLAG_FULL_BACKREF) {
+			parent = path->nodes[level]->start;
+		} else {
+-			BUG_ON(root->root_key.objectid !=
++			ASSERT(root->root_key.objectid ==
+			       btrfs_header_owner(path->nodes[level]));
++			if (root->root_key.objectid !=
++			    btrfs_header_owner(path->nodes[level])) {
++				printk(KERN_ERR "Mismatched block owner\n");
++				btrfs_tree_unlock(next);
++				free_extent_buffer(next);
++			}
+			parent = 0;
+		}
+
+@@ -8285,7 +8300,11 @@ skip:
+		}
+		ret = btrfs_free_extent(trans, root, bytenr, blocksize, parent,
+				root->root_key.objectid, level - 1, 0, 0);
+-		BUG_ON(ret); /* -ENOMEM */
++		if (ret) {
++			btrfs_tree_unlock(next);
++			free_extent_buffer(next);
++			return ret;
++		}
+	}
+	btrfs_tree_unlock(next);
+	free_extent_buffer(next);
+-- 
+2.1.0
