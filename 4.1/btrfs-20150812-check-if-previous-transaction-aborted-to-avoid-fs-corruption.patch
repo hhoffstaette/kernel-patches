@@ -1,0 +1,106 @@
+From:	fdmanana@kernel.org
+To:	linux-btrfs@vger.kernel.org
+Cc:	Filipe Manana <fdmanana@suse.com>
+Subject: [PATCH] Btrfs: check if previous transaction aborted to avoid fs corruption
+Date:	Wed, 12 Aug 2015 15:11:01 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+While we are committing a transaction, it's possible the previous one is
+still finishing its commit and therefore we wait for it to finish first.
+However we were not checking if that previous transaction ended up getting
+aborted after we waited for it to commit, so we ended up committing the
+current transaction which can lead to fs corruption because the new
+superblock can point to trees that have had one or more nodes/leafs that
+were never durably persisted.
+The following sequence diagram exemplifies how this is possible:
+
+          CPU 0                                                        CPU 1
+
+  transaction N starts
+
+  (...)
+
+  btrfs_commit_transaction(N)
+
+    cur_trans->state = TRANS_STATE_COMMIT_START;
+    (...)
+    cur_trans->state = TRANS_STATE_COMMIT_DOING;
+    (...)
+
+    cur_trans->state = TRANS_STATE_UNBLOCKED;
+    root->fs_info->running_transaction = NULL;
+
+                                                              btrfs_start_transaction()
+                                                                 --> starts transaction N + 1
+
+    btrfs_write_and_wait_transaction(trans, root);
+      --> starts writing all new or COWed ebs created
+          at transaction N
+
+                                                              creates some new ebs, COWs some
+                                                              existing ebs but doesn't COW or
+                                                              deletes eb X
+
+                                                              btrfs_commit_transaction(N + 1)
+                                                                (...)
+                                                                cur_trans->state = TRANS_STATE_COMMIT_START;
+                                                                (...)
+                                                                wait_for_commit(root, prev_trans);
+                                                                  --> prev_trans == transaction N
+
+    btrfs_write_and_wait_transaction() continues
+    writing ebs
+       --> fails writing eb X, we abort transaction N
+           and set bit BTRFS_FS_STATE_ERROR on
+           fs_info->fs_state, so no new transactions
+           can start after setting that bit
+
+       cleanup_transaction()
+         btrfs_cleanup_one_transaction()
+           wakes up task at CPU 1
+
+                                                                continues, doesn't abort because
+                                                                cur_trans->aborted (transaction N + 1)
+                                                                is zero, and no checks for bit
+                                                                BTRFS_FS_STATE_ERROR in fs_info->fs_state
+                                                                are made
+
+                                                                btrfs_write_and_wait_transaction(trans, root);
+                                                                  --> succeeds, no errors during writeback
+
+                                                                write_ctree_super(trans, root, 0);
+                                                                  --> succeeds
+                                                                  --> we have now a superblock that points us
+                                                                      to some root that uses eb X, which was
+                                                                      never written to disk
+
+In this scenario future attempts to read eb X from disk results in an
+error message like "parent transid verify failed on X wanted Y found Z".
+
+So fix this by aborting the current transaction if after waiting for the
+previous transaction we verify that it was aborted.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/transaction.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 51e0f0d..d15a43f 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -1893,8 +1893,11 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
+ 			spin_unlock(&root->fs_info->trans_lock);
+ 
+ 			wait_for_commit(root, prev_trans);
++			ret = prev_trans->aborted;
+ 
+ 			btrfs_put_transaction(prev_trans);
++			if (ret)
++				goto cleanup_transaction;
+ 		} else {
+ 			spin_unlock(&root->fs_info->trans_lock);
+ 		}
+-- 
+2.1.3
