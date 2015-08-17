@@ -1,0 +1,113 @@
+From:	Zhao Lei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH 1/2] btrfs: Remove useless condition in start_log_trans()
+Date:	Mon, 17 Aug 2015 18:44:45 +0800
+
+Dan Carpenter <dan.carpenter@oracle.com> reported a smatch warning
+for start_log_trans():
+ fs/btrfs/tree-log.c:178 start_log_trans()
+ warn: we tested 'root->log_root' before and it was 'false'
+
+ fs/btrfs/tree-log.c
+ 147          if (root->log_root) {
+ We test "root->log_root" here.
+ ...
+
+Reason:
+ Condition of:
+ fs/btrfs/tree-log.c:178: if (!root->log_root) {
+ is not necessary after commit: 7237f1833
+
+ It caused a smatch warning, and no functionally error.
+
+Fix:
+ Deleting above condition will make smatch shut up,
+ but a better way is to do cleanup for start_log_trans()
+ to remove duplicated code and make code more readable.
+
+Reported-by: Dan Carpenter <dan.carpenter@oracle.com>
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/tree-log.c | 43 +++++++++++++++++--------------------------
+ 1 file changed, 17 insertions(+), 26 deletions(-)
+
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index 9c45431..66a8a58 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -140,55 +140,46 @@ static int start_log_trans(struct btrfs_trans_handle *trans,
+ 			   struct btrfs_root *root,
+ 			   struct btrfs_log_ctx *ctx)
+ {
+-	int index;
+-	int ret;
++	int ret = 0;
+ 
+ 	mutex_lock(&root->log_mutex);
++
+ 	if (root->log_root) {
+ 		if (btrfs_need_log_full_commit(root->fs_info, trans)) {
+ 			ret = -EAGAIN;
+ 			goto out;
+ 		}
++
+ 		if (!root->log_start_pid) {
+-			root->log_start_pid = current->pid;
+ 			clear_bit(BTRFS_ROOT_MULTI_LOG_TASKS, &root->state);
++			root->log_start_pid = current->pid;
+ 		} else if (root->log_start_pid != current->pid) {
+ 			set_bit(BTRFS_ROOT_MULTI_LOG_TASKS, &root->state);
+ 		}
++	} else {
++		mutex_lock(&root->fs_info->tree_log_mutex);
++		if (!root->fs_info->log_root_tree)
++			ret = btrfs_init_log_root_tree(trans, root->fs_info);
++		mutex_unlock(&root->fs_info->tree_log_mutex);
++		if (ret)
++			goto out;
+ 
+-		atomic_inc(&root->log_batch);
+-		atomic_inc(&root->log_writers);
+-		if (ctx) {
+-			index = root->log_transid % 2;
+-			list_add_tail(&ctx->list, &root->log_ctxs[index]);
+-			ctx->log_transid = root->log_transid;
+-		}
+-		mutex_unlock(&root->log_mutex);
+-		return 0;
+-	}
+-
+-	ret = 0;
+-	mutex_lock(&root->fs_info->tree_log_mutex);
+-	if (!root->fs_info->log_root_tree)
+-		ret = btrfs_init_log_root_tree(trans, root->fs_info);
+-	mutex_unlock(&root->fs_info->tree_log_mutex);
+-	if (ret)
+-		goto out;
+-
+-	if (!root->log_root) {
+ 		ret = btrfs_add_log_tree(trans, root);
+ 		if (ret)
+ 			goto out;
++
++		clear_bit(BTRFS_ROOT_MULTI_LOG_TASKS, &root->state);
++		root->log_start_pid = current->pid;
+ 	}
+-	clear_bit(BTRFS_ROOT_MULTI_LOG_TASKS, &root->state);
+-	root->log_start_pid = current->pid;
++
+ 	atomic_inc(&root->log_batch);
+ 	atomic_inc(&root->log_writers);
+ 	if (ctx) {
+-		index = root->log_transid % 2;
++		int index = root->log_transid % 2;
+ 		list_add_tail(&ctx->list, &root->log_ctxs[index]);
+ 		ctx->log_transid = root->log_transid;
+ 	}
++
+ out:
+ 	mutex_unlock(&root->log_mutex);
+ 	return ret;
+-- 
+1.8.5.1
