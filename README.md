@@ -11,7 +11,7 @@ additional features and performance/scalability improvements to the entire kerne
 To apply over a -stable release:
 
 - check out the branch you want, or use master for the current stable version
-- run `patch -s -p1 < ../kernel-patches/version/*.patch` when in the kernel directory
+- run `foreach f (../kernel-patches/version/*.patch); patch -p1 -s < $f || echo "ERROR: could not apply $f"; end` when in the kernel directory
 - build as usual
 
 All patches of a series must be applied, as some have interdependencies
