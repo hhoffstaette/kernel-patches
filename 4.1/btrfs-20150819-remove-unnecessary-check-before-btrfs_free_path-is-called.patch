@@ -1,0 +1,59 @@
+From:	Tsutomu Itoh <t-itoh@jp.fujitsu.com>
+Date:	Wed, 19 Aug 2015 14:55:00 +0900
+To:	linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: cleanup: remove unnecessary check before btrfs_free_path is called
+
+We need not check path before btrfs_free_path() is called because
+path is checked in btrfs_free_path().
+
+Signed-off-by: Tsutomu Itoh <t-itoh@jp.fujitsu.com>
+---
+ fs/btrfs/dev-replace.c | 3 +--
+ fs/btrfs/inode.c       | 3 +--
+ fs/btrfs/tree-defrag.c | 3 +--
+ 3 files changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index 564a7de..e54dd59 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -183,8 +183,7 @@ no_valid_dev_replace_entry_found:
+ 	}
+ 
+ out:
+-	if (path)
+-		btrfs_free_path(path);
++	btrfs_free_path(path);
+ 	return ret;
+ }
+ 
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index e33dff3..21ba036 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -6876,8 +6876,7 @@ out:
+ 
+ 	trace_btrfs_get_extent(root, em);
+ 
+-	if (path)
+-		btrfs_free_path(path);
++	btrfs_free_path(path);
+ 	if (trans) {
+ 		ret = btrfs_end_transaction(trans, root);
+ 		if (!err)
+diff --git a/fs/btrfs/tree-defrag.c b/fs/btrfs/tree-defrag.c
+index a4b9c8b..f31db43 100644
+--- a/fs/btrfs/tree-defrag.c
++++ b/fs/btrfs/tree-defrag.c
+@@ -115,8 +115,7 @@ int btrfs_defrag_leaves(struct btrfs_trans_handle *trans,
+ 		ret = -EAGAIN;
+ 	}
+ out:
+-	if (path)
+-		btrfs_free_path(path);
++	btrfs_free_path(path);
+ 	if (ret == -EAGAIN) {
+ 		if (root->defrag_max.objectid > root->defrag_progress.objectid)
+ 			goto done;
+-- 
+2.4.5
