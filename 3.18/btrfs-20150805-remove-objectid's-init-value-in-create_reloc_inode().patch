@@ -1,0 +1,28 @@
+From:	Zhao Lei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH 2/3] btrfs: Cleanup: Remove objectid's init-value in create_reloc_inode()
+Date:	Wed, 5 Aug 2015 18:00:03 +0800
+
+objectid's init-value is not used in any case, remove it.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/relocation.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 1659c94..4698928 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -4144,7 +4144,7 @@ struct inode *create_reloc_inode(struct btrfs_fs_info *fs_info,
+ 	struct btrfs_trans_handle *trans;
+ 	struct btrfs_root *root;
+ 	struct btrfs_key key;
+-	u64 objectid = BTRFS_FIRST_FREE_OBJECTID;
++	u64 objectid;
+ 	int err = 0;
+ 
+ 	root = read_fs_root(fs_info, BTRFS_DATA_RELOC_TREE_OBJECTID);
+-- 
+1.8.5.1

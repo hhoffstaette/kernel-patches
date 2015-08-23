@@ -1,0 +1,33 @@
+From:	Zhao Lei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH 1/3] btrfs: Error handle for get_ref_objectid_v0() in relocate_block_group()
+Date:	Wed, 5 Aug 2015 18:00:02 +0800
+
+We need error checking code for get_ref_objectid_v0() in
+relocate_block_group(), to avoid unpredictable result, especially
+for accessing uninitialized value(when function failed) after
+this line.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/relocation.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 52fe55a..1659c94 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -3976,6 +3976,10 @@ restart:
+ 			       sizeof(struct btrfs_extent_item_v0));
+ 			ret = get_ref_objectid_v0(rc, path, &key, &ref_owner,
+ 						  &path_change);
++			if (ret < 0) {
++				err = ret;
++				break;
++			}
+ 			if (ref_owner < BTRFS_FIRST_FREE_OBJECTID)
+ 				flags = BTRFS_EXTENT_FLAG_TREE_BLOCK;
+ 			else
+-- 
+1.8.5.1
