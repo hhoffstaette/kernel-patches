@@ -20,16 +20,16 @@ index 7a5b514..36d84ec 100644
  {
 @@ -2655,21 +2654,21 @@ static void __d_materialise_dentry(struct dentry *dentry, struct dentry *anon)
  	dentry->d_parent = dentry;
- 	list_del_init(&dentry->d_u.d_child);
+ 	list_del_init(&dentry->d_child);
  	anon->d_parent = dparent;
-+	list_move(&anon->d_u.d_child, &dparent->d_subdirs);
++	list_move(&anon->d_child, &dparent->d_subdirs);
  	if (likely(!d_unhashed(anon))) {
  		hlist_bl_lock(&anon->d_sb->s_anon);
  		__hlist_bl_del(&anon->d_hash);
  		anon->d_hash.pprev = NULL;
  		hlist_bl_unlock(&anon->d_sb->s_anon);
  	}
--	list_move(&anon->d_u.d_child, &dparent->d_subdirs);
+-	list_move(&anon->d_child, &dparent->d_subdirs);
 +	__d_rehash(anon, d_hash(anon->d_parent, anon->d_name.hash));
  
  	write_seqcount_end(&dentry->d_seq);

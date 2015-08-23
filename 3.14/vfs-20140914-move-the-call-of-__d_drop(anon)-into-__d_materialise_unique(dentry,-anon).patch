@@ -15,7 +15,7 @@ index d30ce69..5c6e71d 100644
 +++ b/fs/dcache.c
 @@ -2656,6 +2656,12 @@ static void __d_materialise_dentry(struct dentry *dentry, struct dentry *anon)
  	dentry->d_parent = dentry;
- 	list_del_init(&dentry->d_u.d_child);
+ 	list_del_init(&dentry->d_child);
  	anon->d_parent = dparent;
 +	if (likely(!d_unhashed(anon))) {
 +		hlist_bl_lock(&anon->d_sb->s_anon);
@@ -23,7 +23,7 @@ index d30ce69..5c6e71d 100644
 +		anon->d_hash.pprev = NULL;
 +		hlist_bl_unlock(&anon->d_sb->s_anon);
 +	}
- 	list_move(&anon->d_u.d_child, &dparent->d_subdirs);
+ 	list_move(&anon->d_child, &dparent->d_subdirs);
  
  	write_seqcount_end(&dentry->d_seq);
 @@ -2714,7 +2720,6 @@ struct dentry *d_splice_alias(struct inode *inode, struct dentry *dentry)
