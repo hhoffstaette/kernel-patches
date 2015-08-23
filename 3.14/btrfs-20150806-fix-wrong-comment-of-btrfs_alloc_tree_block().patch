@@ -1,0 +1,30 @@
+From:	Zhao Lei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH 1/2] btrfs: Fix wrong comment of btrfs_alloc_tree_block()
+Date:	Thu, 6 Aug 2015 22:16:23 +0800
+
+These wrong comment was copyed from another function(expired) from
+init, this patch fixed them.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/extent-tree.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index a436bd5..792247f 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -7536,9 +7536,6 @@ static void unuse_block_rsv(struct btrfs_fs_info *fs_info,
+ 
+ /*
+  * finds a free extent and does all the dirty work required for allocation
+- * returns the key for the extent through ins, and a tree buffer for
+- * the first block of the extent through buf.
+- *
+  * returns the tree buffer or an ERR_PTR on error.
+  */
+ struct extent_buffer *btrfs_alloc_tree_block(struct btrfs_trans_handle *trans,
+-- 
+1.8.5.1

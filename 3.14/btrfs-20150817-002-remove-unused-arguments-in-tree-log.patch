@@ -1,0 +1,116 @@
+From:	Zhao Lei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH 2/2] btrfs: Remove unused arguments in tree-log.c
+Date:	Mon, 17 Aug 2015 18:44:46 +0800
+
+Following arguments are not used in tree-log.c:
+ insert_one_name(): path, type
+ wait_log_commit(): trans
+ wait_for_writer(): trans
+
+This patch remove them.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/tree-log.c | 25 +++++++++++--------------
+ 1 file changed, 11 insertions(+), 14 deletions(-)
+
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index 66a8a58..5816a5d 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -1540,9 +1540,8 @@ static noinline int link_to_fixup_dir(struct btrfs_trans_handle *trans,
+  */
+ static noinline int insert_one_name(struct btrfs_trans_handle *trans,
+ 				    struct btrfs_root *root,
+-				    struct btrfs_path *path,
+ 				    u64 dirid, u64 index,
+-				    char *name, int name_len, u8 type,
++				    char *name, int name_len,
+ 				    struct btrfs_key *location)
+ {
+ 	struct inode *inode;
+@@ -1710,8 +1709,8 @@ insert:
+ 		goto out;
+ 	}
+ 	btrfs_release_path(path);
+-	ret = insert_one_name(trans, root, path, key->objectid, key->offset,
+-			      name, name_len, log_type, &log_key);
++	ret = insert_one_name(trans, root, key->objectid, key->offset,
++			      name, name_len, &log_key);
+ 	if (ret && ret != -ENOENT && ret != -EEXIST)
+ 		goto out;
+ 	update_size = false;
+@@ -2526,8 +2525,7 @@ static int update_log_root(struct btrfs_trans_handle *trans,
+ 	return ret;
+ }
+ 
+-static void wait_log_commit(struct btrfs_trans_handle *trans,
+-			    struct btrfs_root *root, int transid)
++static void wait_log_commit(struct btrfs_root *root, int transid)
+ {
+ 	DEFINE_WAIT(wait);
+ 	int index = transid % 2;
+@@ -2552,8 +2550,7 @@ static void wait_log_commit(struct btrfs_trans_handle *trans,
+ 		 atomic_read(&root->log_commit[index]));
+ }
+ 
+-static void wait_for_writer(struct btrfs_trans_handle *trans,
+-			    struct btrfs_root *root)
++static void wait_for_writer(struct btrfs_root *root)
+ {
+ 	DEFINE_WAIT(wait);
+ 
+@@ -2633,7 +2630,7 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 
+ 	index1 = log_transid % 2;
+ 	if (atomic_read(&root->log_commit[index1])) {
+-		wait_log_commit(trans, root, log_transid);
++		wait_log_commit(root, log_transid);
+ 		mutex_unlock(&root->log_mutex);
+ 		return ctx->log_ret;
+ 	}
+@@ -2642,7 +2639,7 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 
+ 	/* wait for previous tree log sync to complete */
+ 	if (atomic_read(&root->log_commit[(index1 + 1) % 2]))
+-		wait_log_commit(trans, root, log_transid - 1);
++		wait_log_commit(root, log_transid - 1);
+ 
+ 	while (1) {
+ 		int batch = atomic_read(&root->log_batch);
+@@ -2653,7 +2650,7 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 			schedule_timeout_uninterruptible(1);
+ 			mutex_lock(&root->log_mutex);
+ 		}
+-		wait_for_writer(trans, root);
++		wait_for_writer(root);
+ 		if (batch == atomic_read(&root->log_batch))
+ 			break;
+ 	}
+@@ -2750,7 +2747,7 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 		ret = btrfs_wait_marked_extents(log, &log->dirty_log_pages,
+ 						mark);
+ 		btrfs_wait_logged_extents(trans, log, log_transid);
+-		wait_log_commit(trans, log_root_tree,
++		wait_log_commit(log_root_tree,
+ 				root_log_ctx.log_transid);
+ 		mutex_unlock(&log_root_tree->log_mutex);
+ 		if (!ret)
+@@ -2761,11 +2758,11 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 	atomic_set(&log_root_tree->log_commit[index2], 1);
+ 
+ 	if (atomic_read(&log_root_tree->log_commit[(index2 + 1) % 2])) {
+-		wait_log_commit(trans, log_root_tree,
++		wait_log_commit(log_root_tree,
+ 				root_log_ctx.log_transid - 1);
+ 	}
+ 
+-	wait_for_writer(trans, log_root_tree);
++	wait_for_writer(log_root_tree);
+ 
+ 	/*
+ 	 * now that we've moved on to the tree of log tree roots,
+-- 
+1.8.5.1

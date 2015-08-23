@@ -1,0 +1,44 @@
+From:	Zhao Lei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH] btrfs: abort transaction on btrfs_reloc_cow_block()
+Date:	Thu, 6 Aug 2015 21:56:58 +0800
+
+When btrfs_reloc_cow_block() failed in __btrfs_cow_block(), current
+code just return a err-value to caller, but leave new_created extent
+buffer exist and locked.
+
+Then subsequent code (in relocate) try to lock above eb again,
+and caused deadlock without any dmesg.
+(eb lock use wait_event(), so no lockdep message)
+
+It is hard to do recover work in __btrfs_cow_block() at this error
+point, but we can abort transaction to avoid deadlock and operate on
+unstable state.a
+
+It also helps developer to find wrong place quickly.
+(better than a frozen fs without any dmesg before patch)
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/ctree.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 54114b4..5f745ea 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -1159,8 +1159,10 @@ static noinline int __btrfs_cow_block(struct btrfs_trans_handle *trans,
+ 
+ 	if (test_bit(BTRFS_ROOT_REF_COWS, &root->state)) {
+ 		ret = btrfs_reloc_cow_block(trans, root, buf, cow);
+-		if (ret)
++		if (ret) {
++			btrfs_abort_transaction(trans, root, ret);
+ 			return ret;
++		}
+ 	}
+ 
+ 	if (buf == root->node) {
+-- 
+1.8.5.1
