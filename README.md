@@ -11,7 +11,7 @@ additional features and performance/scalability improvements to the entire kerne
 To apply over a -stable release:
 
 - check out the branch you want, or use master for the current stable version
-- run `patch -s -p1 < ../kernel-patches/version/*.patch` when in the kernel directory
+- run the `../kernel-patches/apply.sh` script when in the kernel directory
 - build as usual
 
 All patches of a series must be applied, as some have interdependencies
@@ -21,7 +21,10 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS series: >=3.14.49**
+**NOTE:** This branch will no longer receive updates!
+-----------------------------------------------------
+
+**LTS series: 3.14**
 
 - bfs: [BFS v454](http://ck-hack.blogspot.de/2014/08/bfs-453454455456-and-316-ck2.html) + [SMT-nice patches](http://ck-hack.blogspot.de/2014/08/smthyperthreading-nice-and-scheduling.html)
 - bfq: [BFQ v7r8](http://algogroup.unimore.it/people/paolo/disk_sched/)
