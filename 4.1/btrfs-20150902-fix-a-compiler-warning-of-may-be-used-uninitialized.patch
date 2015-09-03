@@ -1,0 +1,31 @@
+From:	Zhao Lei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH] btrfs: fix a compiler warning of may be used uninitialized
+Date:	Wed, 2 Sep 2015 15:19:59 +0800
+
+Not real problem, just avoid warning of:
+ fs/btrfs/inode-map.c: In function 'btrfs_unpin_free_ino':
+ fs/btrfs/inode-map.c:252: warning: 'count' may be used uninitialized in this function
+In gcc 4.8.3
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/inode-map.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/inode-map.c b/fs/btrfs/inode-map.c
+index d4a582a..e094e3b 100644
+--- a/fs/btrfs/inode-map.c
++++ b/fs/btrfs/inode-map.c
+@@ -249,7 +249,7 @@ void btrfs_unpin_free_ino(struct btrfs_root *root)
+ 	spinlock_t *rbroot_lock = &root->free_ino_pinned->tree_lock;
+ 	struct btrfs_free_space *info;
+ 	struct rb_node *n;
+-	u64 count;
++	u64 count = 0;
+ 
+ 	if (!btrfs_test_opt(root, INODE_MAP_CACHE))
+ 		return;
+-- 
+1.8.5.1
