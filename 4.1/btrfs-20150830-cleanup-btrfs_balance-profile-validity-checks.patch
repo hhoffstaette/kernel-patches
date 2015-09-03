@@ -1,0 +1,69 @@
+Date:	Sun, 30 Aug 2015 21:45:49 +0000
+From:	Alexandru Moise <00moses.alexander00@gmail.com>
+To:	clm@fb.com
+Cc:	jbacik@fb.com, dsterba@suse.com, linux-btrfs@vger.kernel.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH] btrfs: cleanup btrfs_balance profile validity checks
+
+Improve readability by generalizing the profile validity checks,
+I had to read through those if statements half a dozen times on my
+first try just to get an idea of what's happening there.
+
+Signed-off-by: Alexandru Moise <00moses.alexander00@gmail.com>
+---
+ fs/btrfs/volumes.c | 21 ++++++++++++---------
+ 1 file changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index fbe7c10..d23bc26 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -3454,6 +3454,15 @@ static void __cancel_balance(struct btrfs_fs_info *fs_info)
+ 	atomic_set(&fs_info->mutually_exclusive_operation_running, 0);
+ }
+ 
++/* Non-zero return value signifies invalidity */
++static inline int balance_relocate_invalid(struct btrfs_balance_args *bctl_arg,
++		u64 allowed)
++{
++	return ((bctl_arg->flags & BTRFS_BALANCE_ARGS_CONVERT) &&
++		(!alloc_profile_is_valid(bctl_arg->target, 1) ||
++		 (bctl_arg->target & ~allowed)));
++}
++
+ /*
+  * Should be called with both balance and volume mutexes held
+  */
+@@ -3511,27 +3520,21 @@ int btrfs_balance(struct btrfs_balance_control *bctl,
+ 	if (num_devices > 3)
+ 		allowed |= (BTRFS_BLOCK_GROUP_RAID10 |
+ 			    BTRFS_BLOCK_GROUP_RAID6);
+-	if ((bctl->data.flags & BTRFS_BALANCE_ARGS_CONVERT) &&
+-	    (!alloc_profile_is_valid(bctl->data.target, 1) ||
+-	     (bctl->data.target & ~allowed))) {
++	if (balance_relocate_invalid(&bctl->data, allowed)) {
+ 		btrfs_err(fs_info, "unable to start balance with target "
+ 			   "data profile %llu",
+ 		       bctl->data.target);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+-	if ((bctl->meta.flags & BTRFS_BALANCE_ARGS_CONVERT) &&
+-	    (!alloc_profile_is_valid(bctl->meta.target, 1) ||
+-	     (bctl->meta.target & ~allowed))) {
++	if (balance_relocate_invalid(&bctl->meta, allowed)) {
+ 		btrfs_err(fs_info,
+ 			   "unable to start balance with target metadata profile %llu",
+ 		       bctl->meta.target);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+-	if ((bctl->sys.flags & BTRFS_BALANCE_ARGS_CONVERT) &&
+-	    (!alloc_profile_is_valid(bctl->sys.target, 1) ||
+-	     (bctl->sys.target & ~allowed))) {
++	if (balance_relocate_invalid(&bctl->sys, allowed)) {
+ 		btrfs_err(fs_info,
+ 			   "unable to start balance with target system profile %llu",
+ 		       bctl->sys.target);
+-- 
+2.5.0
