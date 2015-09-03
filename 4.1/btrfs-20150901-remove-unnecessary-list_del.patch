@@ -1,0 +1,27 @@
+From:	Byongho Lee <bhlee.kernel@gmail.com>
+To:	linux-btrfs@vger.kernel.org
+Subject: [PATCH] btrfs: remove unnecessary list_del
+Date:	Tue,  1 Sep 2015 23:36:28 +0900
+
+We can safely iterate whole list items, without using list_del macro.
+So remove the list_del call.
+
+Signed-off-by: Byongho Lee <bhlee.kernel@gmail.com>
+---
+ fs/btrfs/inode.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index bda3c41dc9d5..fe42e339efec 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -2595,7 +2595,6 @@ static void free_sa_defrag_extent(struct new_sa_defrag_extent *new)
+ 		return;
+ 
+ 	list_for_each_entry_safe(old, tmp, &new->head, list) {
+-		list_del(&old->list);
+ 		kfree(old);
+ 	}
+ 	kfree(new);
+-- 
+2.5.1
