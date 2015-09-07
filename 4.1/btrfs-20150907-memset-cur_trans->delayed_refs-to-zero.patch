@@ -1,0 +1,45 @@
+Date:	Mon, 7 Sep 2015 17:24:37 +0300
+From:	Alexandru Moise <00moses.alexander00@gmail.com>
+To:	clm@fb.com
+Cc:	jbacik@fb.com, dsterba@suse.com, linux-btrfs@vger.kernel.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH] btrfs: memset cur_trans->delayed_refs to zero
+
+Use memset() to null out the btrfs_delayed_ref_root of
+btrfs_transaction instead of setting all the members to 0 by hand.
+
+Signed-off-by: Alexandru Moise <00moses.alexander00@gmail.com>
+---
+Rather than setting each member of ->delayed_refs by hand we should
+adhere to the practice of using memset() calls to fill those memory
+locations with zeroes. We make an exception however for the rb_root
+and atomic_t variable to make room for change in future delayed_refs
+implementations.
+
+ fs/btrfs/transaction.c | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 8f259b3..e4f7dcb 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -224,15 +224,11 @@ loop:
+ 	cur_trans->start_time = get_seconds();
+ 	cur_trans->dirty_bg_run = 0;
+ 
++	memset(&cur_trans->delayed_refs, 0, sizeof(cur_trans->delayed_refs));
++
+ 	cur_trans->delayed_refs.href_root = RB_ROOT;
+ 	cur_trans->delayed_refs.dirty_extent_root = RB_ROOT;
+ 	atomic_set(&cur_trans->delayed_refs.num_entries, 0);
+-	cur_trans->delayed_refs.num_heads_ready = 0;
+-	cur_trans->delayed_refs.pending_csums = 0;
+-	cur_trans->delayed_refs.num_heads = 0;
+-	cur_trans->delayed_refs.flushing = 0;
+-	cur_trans->delayed_refs.run_delayed_start = 0;
+-	cur_trans->delayed_refs.qgroup_to_skip = 0;
+ 
+ 	/*
+ 	 * although the tree mod log is per file system and not per transaction,
+-- 
+1.9.1
