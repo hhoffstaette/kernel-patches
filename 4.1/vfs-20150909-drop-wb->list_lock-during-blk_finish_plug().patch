@@ -1,0 +1,60 @@
+From: Chris Mason <clm@fb.com>
+Newsgroups: gmane.linux.file-systems
+Subject: [PATCH] fs-writeback: drop wb->list_lock during blk_finish_plug()
+Date: Wed, 9 Sep 2015 11:23:23 -0400
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/99545>
+
+Commit d353d7587 added a plug/finish_plug pair to writeback_sb_inodes,
+but writeback_sb_inodes has a horrible secret...it's called with the
+wb->list_lock held.
+
+Btrfs raid5/6 and MD raid10 have horrible secrets of their own...they
+both do allocations in their unplug callbacks.
+
+None of the options to fix it are very pretty.  We don't want to kick
+off workers for all of these unplugs, and the lock doesn't look hot
+enough to justify bigger restructuring.
+
+[ 2854.025042] BUG: sleeping function called from invalid context at mm/page_alloc.c:3189
+[ 2854.041366] in_atomic(): 1, irqs_disabled(): 0, pid: 145562, name: kworker/u66:15
+[ 2854.056813] INFO: lockdep is turned off.
+[ 2854.064870] CPU: 13 PID: 145562 Comm: kworker/u66:15 Not tainted 4.2.0-mason+ #1
+[ 2854.080082] Hardware name: ZTSYSTEMS Echo Ridge T4  /A9DRPF-10D, BIOS 1.07 05/10/2012
+[ 2854.096211] Workqueue: writeback wb_workfn (flush-btrfs-244)
+[ 2854.107821]  ffffffff81a2bbee ffff880ee09a7598 ffffffff813307bb ffff880ee09a7598
+[ 2854.123162]  ffff881010d1ca00 ffff880ee09a75c8 ffffffff81086615 0000000000000000
+[ 2854.138556]  0000000000000000 0000000000000c75 ffffffff81a2bbee ffff880ee09a75f8
+[ 2854.153936] Call Trace:
+[ 2854.181101]  [<ffffffff81086722>] __might_sleep+0x52/0x90
+[ 2854.192136]  [<ffffffff8116d2b4>] __alloc_pages_nodemask+0x344/0xbe0
+[ 2854.229682]  [<ffffffff811b54aa>] alloc_pages_current+0x10a/0x1e0
+[ 2854.255508]  [<ffffffffa0663f19>] full_stripe_write+0x59/0xc0 [btrfs]
+[ 2854.268600]  [<ffffffffa0663fb9>] __raid56_parity_write+0x39/0x60 [btrfs]
+[ 2854.282385]  [<ffffffffa06640fb>] run_plug+0x11b/0x140 [btrfs]
+[ 2854.294259]  [<ffffffffa0664143>] btrfs_raid_unplug+0x23/0x70 [btrfs]
+[ 2854.307334]  [<ffffffff81307622>] blk_flush_plug_list+0x82/0x1f0
+[ 2854.319542]  [<ffffffff813077c4>] blk_finish_plug+0x34/0x50
+[ 2854.330878]  [<ffffffff812079c2>] writeback_sb_inodes+0x122/0x580
+[ 2854.343256]  [<ffffffff81208016>] wb_writeback+0x136/0x4e0
+
+Signed-off-by: Chris Mason <clm@fb.com>
+---
+ fs/fs-writeback.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
+index ae0f438..07c9c50 100644
+--- a/fs/fs-writeback.c
++++ b/fs/fs-writeback.c
+@@ -1539,7 +1539,9 @@ static long writeback_sb_inodes(struct super_block *sb,
+ 				break;
+ 		}
+ 	}
++	spin_unlock(&wb->list_lock);
+ 	blk_finish_plug(&plug);
++	spin_lock(&wb->list_lock);
+ 	return wrote;
+ }
+ 
+-- 
+1.8.1
