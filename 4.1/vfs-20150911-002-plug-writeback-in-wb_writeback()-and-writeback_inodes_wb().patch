@@ -1,0 +1,72 @@
+From 505a666ee3fc611518e85df203eb8c707995ceaa Mon Sep 17 00:00:00 2001
+From: Linus Torvalds <torvalds@linux-foundation.org>
+Date: Fri, 11 Sep 2015 13:37:19 -0700
+Subject: writeback: plug writeback in wb_writeback() and writeback_inodes_wb()
+
+We had to revert the pluggin in writeback_sb_inodes() because the
+wb->list_lock is held, but we could easily plug at a higher level before
+taking that lock, and unplug after releasing it.  This does that.
+
+Chris will run performance numbers, just to verify that this approach is
+comparable to the alternative (we could just drop and re-take the lock
+around the blk_finish_plug() rather than these two commits.
+
+I'd have preferred waiting for actual performance numbers before picking
+one approach over the other, but I don't want to release rc1 with the
+known "sleeping function called from invalid context" issue, so I'll
+pick this cleanup version for now.  But if the numbers show that we
+really want to plug just at the writeback_sb_inodes() level, and we
+should just play ugly games with the spinlock, we'll switch to that.
+
+Cc: Chris Mason <clm@fb.com>
+Cc: Josef Bacik <jbacik@fb.com>
+Cc: Dave Chinner <david@fromorbit.com>
+Cc: Neil Brown <neilb@suse.de>
+Cc: Jan Kara <jack@suse.cz>
+Cc: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
+index d8ea7ed..587ac08 100644
+--- a/fs/fs-writeback.c
++++ b/fs/fs-writeback.c
+@@ -1546,12 +1546,15 @@ static long writeback_inodes_wb(struct bdi_writeback *wb, long nr_pages,
+ 		.range_cyclic	= 1,
+ 		.reason		= reason,
+ 	};
++	struct blk_plug plug;
+ 
++	blk_start_plug(&plug);
+ 	spin_lock(&wb->list_lock);
+ 	if (list_empty(&wb->b_io))
+ 		queue_io(wb, &work);
+ 	__writeback_inodes_wb(wb, &work);
+ 	spin_unlock(&wb->list_lock);
++	blk_finish_plug(&plug);
+ 
+ 	return nr_pages - work.nr_pages;
+ }
+@@ -1579,10 +1582,12 @@ static long wb_writeback(struct bdi_writeback *wb,
+ 	unsigned long oldest_jif;
+ 	struct inode *inode;
+ 	long progress;
++	struct blk_plug plug;
+ 
+ 	oldest_jif = jiffies;
+ 	work->older_than_this = &oldest_jif;
+ 
++	blk_start_plug(&plug);
+ 	spin_lock(&wb->list_lock);
+ 	for (;;) {
+ 		/*
+@@ -1662,6 +1667,7 @@ static long wb_writeback(struct bdi_writeback *wb,
+ 		}
+ 	}
+ 	spin_unlock(&wb->list_lock);
++	blk_finish_plug(&plug);
+ 
+ 	return nr_pages - work->nr_pages;
+ }
+-- 
+cgit v0.10.2
+
