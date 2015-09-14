@@ -1,0 +1,44 @@
+Date: Sun, 13 Sep 2015 18:47:20 +0000
+From: Alexandru Moise <00moses.alexander00@gmail.com>
+To: clm@fb.com
+Cc: jbacik@fb.com, dsterba@suse.com, linux-btrfs@vger.kernel.org,
+	linux-kernel@vger.kernel.org, holger.hoffstaette@googlemail.com
+Subject: [PATCH 1/2] btrfs: avoid passing int param to start_transaction which takes u64
+
+Signed-off-by: Alexandru Moise <00moses.alexander00@gmail.com>
+---
+v2: Forgot to add transaction.h when I made the commit, many thanks
+Holger for pointing it out.
+
+ fs/btrfs/transaction.c | 2 +-
+ fs/btrfs/transaction.h | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 8f259b3..8a83acd 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -570,7 +570,7 @@ reserve_fail:
+ }
+ 
+ struct btrfs_trans_handle *btrfs_start_transaction(struct btrfs_root *root,
+-						   int num_items)
++						   u64 num_items)
+ {
+ 	return start_transaction(root, num_items, TRANS_START,
+ 				 BTRFS_RESERVE_FLUSH_ALL);
+diff --git a/fs/btrfs/transaction.h b/fs/btrfs/transaction.h
+index edc2fbc..51ba39f 100644
+--- a/fs/btrfs/transaction.h
++++ b/fs/btrfs/transaction.h
+@@ -182,7 +182,7 @@ static inline void btrfs_clear_skip_qgroup(struct btrfs_trans_handle *trans)
+ int btrfs_end_transaction(struct btrfs_trans_handle *trans,
+ 			  struct btrfs_root *root);
+ struct btrfs_trans_handle *btrfs_start_transaction(struct btrfs_root *root,
+-						   int num_items);
++						   u64 num_items);
+ struct btrfs_trans_handle *btrfs_start_transaction_lflush(
+ 					struct btrfs_root *root, int num_items);
+ struct btrfs_trans_handle *btrfs_join_transaction(struct btrfs_root *root);
+-- 
+2.5.1
