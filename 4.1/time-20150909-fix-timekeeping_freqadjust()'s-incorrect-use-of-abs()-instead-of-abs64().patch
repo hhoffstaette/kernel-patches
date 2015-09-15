@@ -1,0 +1,62 @@
+From 2619d7e9c92d524cb155ec89fd72875321512e5b Mon Sep 17 00:00:00 2001
+From: John Stultz <john.stultz@linaro.org>
+Date: Wed, 9 Sep 2015 16:07:30 -0700
+Subject: time: Fix timekeeping_freqadjust()'s incorrect use of abs() instead of abs64()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The internal clocksteering done for fine-grained error
+correction uses a logarithmic approximation, so any time
+adjtimex() adjusts the clock steering, timekeeping_freqadjust()
+quickly approximates the correct clock frequency over a series
+of ticks.
+
+Unfortunately, the logic in timekeeping_freqadjust(), introduced
+in commit:
+
+  dc491596f639 ("timekeeping: Rework frequency adjustments to work better w/ nohz")
+
+used the abs() function with a s64 error value to calculate the
+size of the approximated adjustment to be made.
+
+Per include/linux/kernel.h:
+
+  "abs() should not be used for 64-bit types (s64, u64, long long) - use abs64()".
+
+Thus on 32-bit platforms, this resulted in the clocksteering to
+take a quite dampended random walk trying to converge on the
+proper frequency, which caused the adjustments to be made much
+slower then intended (most easily observed when large
+adjustments are made).
+
+This patch fixes the issue by using abs64() instead.
+
+Reported-by: Nuno Gonçalves <nunojpg@gmail.com>
+Tested-by: Nuno Goncalves <nunojpg@gmail.com>
+Signed-off-by: John Stultz <john.stultz@linaro.org>
+Cc: <stable@vger.kernel.org> # v3.17+
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Miroslav Lichvar <mlichvar@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Prarit Bhargava <prarit@redhat.com>
+Cc: Richard Cochran <richardcochran@gmail.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Link: http://lkml.kernel.org/r/1441840051-20244-1-git-send-email-john.stultz@linaro.org
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+
+diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
+index f6ee2e6..3739ac6 100644
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -1614,7 +1614,7 @@ static __always_inline void timekeeping_freqadjust(struct timekeeper *tk,
+ 	negative = (tick_error < 0);
+ 
+ 	/* Sort out the magnitude of the correction */
+-	tick_error = abs(tick_error);
++	tick_error = abs64(tick_error);
+ 	for (adj = 0; tick_error > interval; adj++)
+ 		tick_error >>= 1;
+ 
+-- 
+cgit v0.10.2
