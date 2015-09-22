@@ -1,0 +1,74 @@
+Date:	Tue, 22 Sep 2015 20:59:15 +0000
+From:	Alexandru Moise <00moses.alexander00@gmail.com>
+To:	clm@fb.com
+Cc:	jbacik@fb.com, dsterba@suse.com, linux-btrfs@vger.kernel.org,
+	linux-kernel@vger.kernel.org, 00moses.alexander00@gmail.com
+Subject: [PATCH v2 1/2] btrfs: change num_items type from u64 to unsigned int
+
+The value of num_items that start_transaction() ultimately
+always takes is a small one, so a 64 bit integer is overkill.
+
+Also change num_items for btrfs_start_transaction() and
+btrfs_start_transaction_lflush() as well.
+
+Signed-off-by: Alexandru Moise <00moses.alexander00@gmail.com>
+---
+v2: followed dave's suggestion of all num_items equivalents to be
+unsigned ints.
+
+ fs/btrfs/transaction.c | 9 +++++----
+ fs/btrfs/transaction.h | 5 +++--
+ 2 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 8f259b3..cb8adaf 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -415,8 +415,8 @@ static inline bool need_reserve_reloc_root(struct btrfs_root *root)
+ }
+ 
+ static struct btrfs_trans_handle *
+-start_transaction(struct btrfs_root *root, u64 num_items, unsigned int type,
+-		  enum btrfs_reserve_flush_enum flush)
++start_transaction(struct btrfs_root *root, unsigned int num_items,
++		  unsigned int type, enum btrfs_reserve_flush_enum flush)
+ {
+ 	struct btrfs_trans_handle *h;
+ 	struct btrfs_transaction *cur_trans;
+@@ -570,14 +570,15 @@ reserve_fail:
+ }
+ 
+ struct btrfs_trans_handle *btrfs_start_transaction(struct btrfs_root *root,
+-						   int num_items)
++						   unsigned int num_items)
+ {
+ 	return start_transaction(root, num_items, TRANS_START,
+ 				 BTRFS_RESERVE_FLUSH_ALL);
+ }
+ 
+ struct btrfs_trans_handle *btrfs_start_transaction_lflush(
+-					struct btrfs_root *root, int num_items)
++					struct btrfs_root *root,
++					unsigned int num_items)
+ {
+ 	return start_transaction(root, num_items, TRANS_START,
+ 				 BTRFS_RESERVE_FLUSH_LIMIT);
+diff --git a/fs/btrfs/transaction.h b/fs/btrfs/transaction.h
+index edc2fbc..0849e3a 100644
+--- a/fs/btrfs/transaction.h
++++ b/fs/btrfs/transaction.h
+@@ -182,9 +182,10 @@ static inline void btrfs_clear_skip_qgroup(struct btrfs_trans_handle *trans)
+ int btrfs_end_transaction(struct btrfs_trans_handle *trans,
+ 			  struct btrfs_root *root);
+ struct btrfs_trans_handle *btrfs_start_transaction(struct btrfs_root *root,
+-						   int num_items);
++						   unsigned int num_items);
+ struct btrfs_trans_handle *btrfs_start_transaction_lflush(
+-					struct btrfs_root *root, int num_items);
++					struct btrfs_root *root,
++					unsigned int num_items);
+ struct btrfs_trans_handle *btrfs_join_transaction(struct btrfs_root *root);
+ struct btrfs_trans_handle *btrfs_join_transaction_nolock(struct btrfs_root *root);
+ struct btrfs_trans_handle *btrfs_attach_transaction(struct btrfs_root *root);
+-- 
+2.5.3
