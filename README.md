@@ -21,12 +21,12 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Current stable series: >=4.1.4**
+**LTS series: >=4.1.8**
 
 - bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html)
 - bfq: [BFQ v7r8](http://algogroup.unimore.it/people/paolo/disk_sched/)
 - block: improved CFQ SSD awareness, misc. others
-- btrfs: fixes up to 4.3+ (cleanups, data loss, performance, RAID 5/6, subvolumes, sysfs, TRIM)
+- btrfs: fixes up to 4.3+ (cleanups, data loss, performance, qgroups, RAID 5/6, subvolumes, sysfs, TRIM)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
 - vfs: scalability fixes
