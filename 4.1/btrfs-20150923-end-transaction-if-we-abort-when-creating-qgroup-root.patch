@@ -1,0 +1,29 @@
+From:	Josef Bacik <jbacik@fb.com>
+To:	<linux-btrfs@vger.kernel.org>, <kernel-team@fb.com>
+Subject: [PATCH V2] Btrfs: end transaction if we abort when creating qgroup root
+Date:	Wed, 23 Sep 2015 15:00:37 -0400
+
+We still need to call btrfs_end_transaction if we call btrfs_abort_transaction,
+otherwise we hang and make me super grumpy.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+---
+V1->V2: should have compiled before I hit send.
+
+ fs/btrfs/volumes.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index fbe7c10..ff64689 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -4028,6 +4028,7 @@ int btrfs_create_uuid_tree(struct btrfs_fs_info *fs_info)
+ 	if (IS_ERR(uuid_root)) {
+ 		ret = PTR_ERR(uuid_root);
+ 		btrfs_abort_transaction(trans, tree_root, ret);
++		btrfs_end_transaction(trans, tree_root);
+ 		return ret;
+ 	}
+ 
+-- 
+1.8.3.1
