@@ -1,0 +1,313 @@
+From:	Josef Bacik <jbacik@fb.com>
+To:	<linux-btrfs@vger.kernel.org>, <kernel-team@fb.com>
+Subject: [PATCH] Btrfs: change how we wait for pending ordered extents
+Date:	Thu, 24 Sep 2015 16:56:01 -0400
+
+We have a mechanism to make sure we don't lose updates for ordered extents that
+were logged in the transaction that is currently running.  We add the ordered
+extent to a transaction list and then the transaction waits on all the ordered
+extents in that list.  However are substantially large file systems this list
+can be extremely large, and can give us soft lockups, since the ordered extents
+don't remove themselves from the list when they do complete.
+
+To fix this we simply add a counter to the transaction that is incremented any
+time we have a logged extent that needs to be completed in the current
+transaction.  Then when the ordered extent finally completes it decrements the
+per transaction counter and wakes up the transaction if we are the last ones.
+This will eliminate the softlockup.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+---
+ fs/btrfs/disk-io.c      | 20 ----------------
+ fs/btrfs/ordered-data.c | 64 ++++++++++++++++++++++++++++++++++++++-----------
+ fs/btrfs/ordered-data.h |  2 ++
+ fs/btrfs/transaction.c  | 34 +++++---------------------
+ fs/btrfs/transaction.h  |  4 ++--
+ 5 files changed, 60 insertions(+), 64 deletions(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index f556c37..ae61c1f 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -4279,25 +4279,6 @@ again:
+ 	return 0;
+ }
+ 
+-static void btrfs_free_pending_ordered(struct btrfs_transaction *cur_trans,
+-				       struct btrfs_fs_info *fs_info)
+-{
+-	struct btrfs_ordered_extent *ordered;
+-
+-	spin_lock(&fs_info->trans_lock);
+-	while (!list_empty(&cur_trans->pending_ordered)) {
+-		ordered = list_first_entry(&cur_trans->pending_ordered,
+-					   struct btrfs_ordered_extent,
+-					   trans_list);
+-		list_del_init(&ordered->trans_list);
+-		spin_unlock(&fs_info->trans_lock);
+-
+-		btrfs_put_ordered_extent(ordered);
+-		spin_lock(&fs_info->trans_lock);
+-	}
+-	spin_unlock(&fs_info->trans_lock);
+-}
+-
+ void btrfs_cleanup_one_transaction(struct btrfs_transaction *cur_trans,
+ 				   struct btrfs_root *root)
+ {
+@@ -4309,7 +4290,6 @@ void btrfs_cleanup_one_transaction(struct btrfs_transaction *cur_trans,
+ 	cur_trans->state = TRANS_STATE_UNBLOCKED;
+ 	wake_up(&root->fs_info->transaction_wait);
+ 
+-	btrfs_free_pending_ordered(cur_trans, root->fs_info);
+ 	btrfs_destroy_delayed_inodes(root);
+ 	btrfs_assert_delayed_root_empty(root);
+ 
+diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
+index 52170cf..69c0320 100644
+--- a/fs/btrfs/ordered-data.c
++++ b/fs/btrfs/ordered-data.c
+@@ -484,15 +484,16 @@ void btrfs_wait_logged_extents(struct btrfs_trans_handle *trans,
+ 
+ 	spin_lock_irq(&log->log_extents_lock[index]);
+ 	while (!list_empty(&log->logged_list[index])) {
++		struct inode *inode;
+ 		ordered = list_first_entry(&log->logged_list[index],
+ 					   struct btrfs_ordered_extent,
+ 					   log_list);
+ 		list_del_init(&ordered->log_list);
++		inode = ordered->inode;
+ 		spin_unlock_irq(&log->log_extents_lock[index]);
+ 
+ 		if (!test_bit(BTRFS_ORDERED_IO_DONE, &ordered->flags) &&
+ 		    !test_bit(BTRFS_ORDERED_DIRECT, &ordered->flags)) {
+-			struct inode *inode = ordered->inode;
+ 			u64 start = ordered->file_offset;
+ 			u64 end = ordered->file_offset + ordered->len - 1;
+ 
+@@ -503,20 +504,25 @@ void btrfs_wait_logged_extents(struct btrfs_trans_handle *trans,
+ 						   &ordered->flags));
+ 
+ 		/*
+-		 * If our ordered extent completed it means it updated the
+-		 * fs/subvol and csum trees already, so no need to make the
+-		 * current transaction's commit wait for it, as we end up
+-		 * holding memory unnecessarily and delaying the inode's iput
+-		 * until the transaction commit (we schedule an iput for the
+-		 * inode when the ordered extent's refcount drops to 0), which
+-		 * prevents it from being evictable until the transaction
+-		 * commits.
++		 * In order to keep us from losing our ordered extent
++		 * information when committing the transaction we have to make
++		 * sure that any logged extents are completed when we go to
++		 * commit the transaction.  To do this we simply increase the
++		 * current transactions pending_ordered counter and decrement it
++		 * when the ordered extent completes.
+ 		 */
+-		if (test_bit(BTRFS_ORDERED_COMPLETE, &ordered->flags))
+-			btrfs_put_ordered_extent(ordered);
+-		else
+-			list_add_tail(&ordered->trans_list, &trans->ordered);
+-
++		if (!test_bit(BTRFS_ORDERED_COMPLETE, &ordered->flags)) {
++			struct btrfs_ordered_inode_tree *tree;
++
++			tree = &BTRFS_I(inode)->ordered_tree;
++			spin_lock_irq(&tree->lock);
++			if (!test_bit(BTRFS_ORDERED_COMPLETE, &ordered->flags)) {
++				set_bit(BTRFS_ORDERED_PENDING, &ordered->flags);
++				atomic_inc(&trans->transaction->pending_ordered);
++			}
++			spin_unlock_irq(&tree->lock);
++		}
++		btrfs_put_ordered_extent(ordered);
+ 		spin_lock_irq(&log->log_extents_lock[index]);
+ 	}
+ 	spin_unlock_irq(&log->log_extents_lock[index]);
+@@ -578,6 +584,7 @@ void btrfs_remove_ordered_extent(struct inode *inode,
+ 	struct btrfs_ordered_inode_tree *tree;
+ 	struct btrfs_root *root = BTRFS_I(inode)->root;
+ 	struct rb_node *node;
++	bool dec_pending_ordered = false;
+ 
+ 	tree = &BTRFS_I(inode)->ordered_tree;
+ 	spin_lock_irq(&tree->lock);
+@@ -587,8 +594,37 @@ void btrfs_remove_ordered_extent(struct inode *inode,
+ 	if (tree->last == node)
+ 		tree->last = NULL;
+ 	set_bit(BTRFS_ORDERED_COMPLETE, &entry->flags);
++	if (test_and_clear_bit(BTRFS_ORDERED_PENDING, &entry->flags))
++		dec_pending_ordered = true;
+ 	spin_unlock_irq(&tree->lock);
+ 
++	/*
++	 * The current running transaction is waiting on us, we need to let it
++	 * know that we're complete and wake it up.
++	 */
++	if (dec_pending_ordered) {
++		struct btrfs_transaction *trans;
++
++		/*
++		 * The checks for trans are just a formality, it should be set,
++		 * but if it isn't we don't want to deref/assert under the spin
++		 * lock, so be nice and check if trans is set, but ASSERT() so
++		 * if it isn't set a developer will notice.
++		 */
++		spin_lock(&root->fs_info->trans_lock);
++		trans = root->fs_info->running_transaction;
++		if (trans)
++			atomic_inc(&trans->use_count);
++		spin_unlock(&root->fs_info->trans_lock);
++
++		ASSERT(trans);
++		if (trans) {
++			if (atomic_dec_and_test(&trans->pending_ordered))
++				wake_up(&trans->pending_wait);
++			btrfs_put_transaction(trans);
++		}
++	}
++
+ 	spin_lock(&root->ordered_extent_lock);
+ 	list_del_init(&entry->root_extent_list);
+ 	root->nr_ordered_extents--;
+diff --git a/fs/btrfs/ordered-data.h b/fs/btrfs/ordered-data.h
+index 7176cc0..23c9605 100644
+--- a/fs/btrfs/ordered-data.h
++++ b/fs/btrfs/ordered-data.h
+@@ -73,6 +73,8 @@ struct btrfs_ordered_sum {
+ 
+ #define BTRFS_ORDERED_LOGGED 10 /* Set when we've waited on this ordered extent
+ 				 * in the logging code. */
++#define BTRFS_ORDERED_PENDING 11 /* We are waiting for this ordered extent to
++				  * complete in the current transaction. */
+ struct btrfs_ordered_extent {
+ 	/* logical offset in the file */
+ 	u64 file_offset;
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index df1e61e..bba58ba 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -224,6 +224,7 @@ loop:
+ 	extwriter_counter_init(cur_trans, type);
+ 	init_waitqueue_head(&cur_trans->writer_wait);
+ 	init_waitqueue_head(&cur_trans->commit_wait);
++	init_waitqueue_head(&cur_trans->pending_wait);
+ 	cur_trans->state = TRANS_STATE_RUNNING;
+ 	/*
+ 	 * One for this trans handle, one so it will live on until we
+@@ -231,6 +232,7 @@ loop:
+ 	 */
+ 	atomic_set(&cur_trans->use_count, 2);
+ 	cur_trans->flags = 0;
++	atomic_set(&cur_trans->pending_ordered, 0);
+ 	cur_trans->start_time = get_seconds();
+ 	cur_trans->dirty_bg_run = 0;
+ 
+@@ -262,7 +264,6 @@ loop:
+ 	INIT_LIST_HEAD(&cur_trans->pending_snapshots);
+ 	INIT_LIST_HEAD(&cur_trans->pending_chunks);
+ 	INIT_LIST_HEAD(&cur_trans->switch_commits);
+-	INIT_LIST_HEAD(&cur_trans->pending_ordered);
+ 	INIT_LIST_HEAD(&cur_trans->dirty_bgs);
+ 	INIT_LIST_HEAD(&cur_trans->io_bgs);
+ 	INIT_LIST_HEAD(&cur_trans->dropped_roots);
+@@ -539,7 +540,6 @@ again:
+ 	h->sync = false;
+ 	INIT_LIST_HEAD(&h->qgroup_ref_list);
+ 	INIT_LIST_HEAD(&h->new_bgs);
+-	INIT_LIST_HEAD(&h->ordered);
+ 
+ 	smp_mb();
+ 	if (cur_trans->state >= TRANS_STATE_BLOCKED &&
+@@ -771,12 +771,6 @@ static int __btrfs_end_transaction(struct btrfs_trans_handle *trans,
+ 	if (!list_empty(&trans->new_bgs))
+ 		btrfs_create_pending_block_groups(trans, root);
+ 
+-	if (!list_empty(&trans->ordered)) {
+-		spin_lock(&info->trans_lock);
+-		list_splice_init(&trans->ordered, &cur_trans->pending_ordered);
+-		spin_unlock(&info->trans_lock);
+-	}
+-
+ 	trans->delayed_ref_updates = 0;
+ 	if (!trans->sync) {
+ 		must_run_delayed_refs =
+@@ -1776,25 +1770,10 @@ static inline void btrfs_wait_delalloc_flush(struct btrfs_fs_info *fs_info)
+ }
+ 
+ static inline void
+-btrfs_wait_pending_ordered(struct btrfs_transaction *cur_trans,
+-			   struct btrfs_fs_info *fs_info)
++btrfs_wait_pending_ordered(struct btrfs_transaction *cur_trans)
+ {
+-	struct btrfs_ordered_extent *ordered;
+-
+-	spin_lock(&fs_info->trans_lock);
+-	while (!list_empty(&cur_trans->pending_ordered)) {
+-		ordered = list_first_entry(&cur_trans->pending_ordered,
+-					   struct btrfs_ordered_extent,
+-					   trans_list);
+-		list_del_init(&ordered->trans_list);
+-		spin_unlock(&fs_info->trans_lock);
+-
+-		wait_event(ordered->wait, test_bit(BTRFS_ORDERED_COMPLETE,
+-						   &ordered->flags));
+-		btrfs_put_ordered_extent(ordered);
+-		spin_lock(&fs_info->trans_lock);
+-	}
+-	spin_unlock(&fs_info->trans_lock);
++	wait_event(cur_trans->pending_wait,
++		   atomic_read(&cur_trans->pending_ordered) == 0);
+ }
+ 
+ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
+@@ -1878,7 +1857,6 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
+ 	}
+ 
+ 	spin_lock(&root->fs_info->trans_lock);
+-	list_splice_init(&trans->ordered, &cur_trans->pending_ordered);
+ 	if (cur_trans->state >= TRANS_STATE_COMMIT_START) {
+ 		spin_unlock(&root->fs_info->trans_lock);
+ 		atomic_inc(&cur_trans->use_count);
+@@ -1934,7 +1912,7 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
+ 
+ 	btrfs_wait_delalloc_flush(root->fs_info);
+ 
+-	btrfs_wait_pending_ordered(cur_trans, root->fs_info);
++	btrfs_wait_pending_ordered(cur_trans);
+ 
+ 	btrfs_scrub_pause(root);
+ 	/*
+diff --git a/fs/btrfs/transaction.h b/fs/btrfs/transaction.h
+index f158ab4..33ee1fe 100644
+--- a/fs/btrfs/transaction.h
++++ b/fs/btrfs/transaction.h
+@@ -46,6 +46,7 @@ struct btrfs_transaction {
+ 	 */
+ 	atomic_t num_writers;
+ 	atomic_t use_count;
++	atomic_t pending_ordered;
+ 
+ 	/*
+ 	 * true if there is free bgs operations in this transaction
+@@ -59,9 +60,9 @@ struct btrfs_transaction {
+ 	unsigned long start_time;
+ 	wait_queue_head_t writer_wait;
+ 	wait_queue_head_t commit_wait;
++	wait_queue_head_t pending_wait;
+ 	struct list_head pending_snapshots;
+ 	struct list_head pending_chunks;
+-	struct list_head pending_ordered;
+ 	struct list_head switch_commits;
+ 	struct list_head dirty_bgs;
+ 	struct list_head io_bgs;
+@@ -126,7 +127,6 @@ struct btrfs_trans_handle {
+ 	 */
+ 	struct btrfs_root *root;
+ 	struct seq_list delayed_ref_elem;
+-	struct list_head ordered;
+ 	struct list_head qgroup_ref_list;
+ 	struct list_head new_bgs;
+ };
+-- 
+1.8.3.1
