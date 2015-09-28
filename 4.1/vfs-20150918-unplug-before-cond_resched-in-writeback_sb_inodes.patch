@@ -1,0 +1,64 @@
+From 590dca3a71875461e8fea3013af74386945191b2 Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Fri, 18 Sep 2015 13:35:08 -0400
+Subject: fs-writeback: unplug before cond_resched in writeback_sb_inodes
+
+Commit 505a666ee3fc ("writeback: plug writeback in wb_writeback() and
+writeback_inodes_wb()") has us holding a plug during writeback_sb_inodes,
+which increases the merge rate when relatively contiguous small files
+are written by the filesystem.  It helps both on flash and spindles.
+
+For an fs_mark workload creating 4K files in parallel across 8 drives,
+this commit improves performance ~9% more by unplugging before calling
+cond_resched().  cond_resched() doesn't trigger an implicit unplug, so
+explicitly getting the IO down to the device before scheduling reduces
+latencies for anyone waiting on clean pages.
+
+It also cuts down on how often we use kblockd to unplug, which means
+less work bouncing from one workqueue to another.
+
+Many more details about how we got here:
+
+  https://lkml.org/lkml/2015/9/11/570
+
+Signed-off-by: Chris Mason <clm@fb.com>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
+index 587ac08..091a364 100644
+--- a/fs/fs-writeback.c
++++ b/fs/fs-writeback.c
+@@ -1481,6 +1481,21 @@ static long writeback_sb_inodes(struct super_block *sb,
+ 		wbc_detach_inode(&wbc);
+ 		work->nr_pages -= write_chunk - wbc.nr_to_write;
+ 		wrote += write_chunk - wbc.nr_to_write;
++
++		if (need_resched()) {
++			/*
++			 * We're trying to balance between building up a nice
++			 * long list of IOs to improve our merge rate, and
++			 * getting those IOs out quickly for anyone throttling
++			 * in balance_dirty_pages().  cond_resched() doesn't
++			 * unplug, so get our IOs out the door before we
++			 * give up the CPU.
++			 */
++			blk_flush_plug(current);
++			cond_resched();
++		}
++
++
+ 		spin_lock(&wb->list_lock);
+ 		spin_lock(&inode->i_lock);
+ 		if (!(inode->i_state & I_DIRTY_ALL))
+@@ -1488,7 +1503,7 @@ static long writeback_sb_inodes(struct super_block *sb,
+ 		requeue_inode(inode, wb, &wbc);
+ 		inode_sync_complete(inode);
+ 		spin_unlock(&inode->i_lock);
+-		cond_resched_lock(&wb->list_lock);
++
+ 		/*
+ 		 * bail out to wb_writeback() often enough to check
+ 		 * background threshold and other termination conditions.
+-- 
+cgit v0.10.2
+
