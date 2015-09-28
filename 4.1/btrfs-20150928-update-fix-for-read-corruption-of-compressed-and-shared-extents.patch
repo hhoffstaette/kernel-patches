@@ -1,0 +1,179 @@
+From:	fdmanana@kernel.org
+To:	linux-btrfs@vger.kernel.org
+Cc:	Filipe Manana <fdmanana@suse.com>, stable@vger.kernel.org
+Subject: [PATCH] Btrfs: update fix for read corruption of compressed and shared extents
+Date:	Mon, 28 Sep 2015 09:56:26 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+My previous fix in commit 005efedf2c7d ("Btrfs: fix read corruption of
+compressed and shared extents") was effective only if the compressed
+extents cover a file range with a length that is not a multiple of 16
+pages. That's because the detection of when we reached a different range
+of the file that shares the same compressed extent as the previously
+processed range was done at extent_io.c:__do_contiguous_readpages(),
+which covers subranges with a length up to 16 pages, because
+extent_readpages() groups the pages in clusters no larger than 16 pages.
+So fix this by tracking the start of the previously processed file
+range's extent map at extent_readpages().
+
+The following test case for fstests reproduces the issue:
+
+  seq=`basename $0`
+  seqres=$RESULT_DIR/$seq
+  echo "QA output created by $seq"
+  tmp=/tmp/$$
+  status=1	# failure is the default!
+  trap "_cleanup; exit \$status" 0 1 2 3 15
+
+  _cleanup()
+  {
+      rm -f $tmp.*
+  }
+
+  # get standard environment, filters and checks
+  . ./common/rc
+  . ./common/filter
+
+  # real QA test starts here
+  _need_to_be_root
+  _supported_fs btrfs
+  _supported_os Linux
+  _require_scratch
+  _require_cloner
+
+  rm -f $seqres.full
+
+  test_clone_and_read_compressed_extent()
+  {
+      local mount_opts=$1
+
+      _scratch_mkfs >>$seqres.full 2>&1
+      _scratch_mount $mount_opts
+
+      # Create our test file with a single extent of 64Kb that is going to
+      # be compressed no matter which compression algo is used (zlib/lzo).
+      $XFS_IO_PROG -f -c "pwrite -S 0xaa 0K 64K" \
+          $SCRATCH_MNT/foo | _filter_xfs_io
+
+      # Now clone the compressed extent into an adjacent file offset.
+      $CLONER_PROG -s 0 -d $((64 * 1024)) -l $((64 * 1024)) \
+          $SCRATCH_MNT/foo $SCRATCH_MNT/foo
+
+      echo "File digest before unmount:"
+      md5sum $SCRATCH_MNT/foo | _filter_scratch
+
+      # Remount the fs or clear the page cache to trigger the bug in
+      # btrfs. Because the extent has an uncompressed length that is a
+      # multiple of 16 pages, all the pages belonging to the second range
+      # of the file (64K to 128K), which points to the same extent as the
+      # first range (0K to 64K), had their contents full of zeroes instead
+      # of the byte 0xaa. This was a bug exclusively in the read path of
+      # compressed extents, the correct data was stored on disk, btrfs
+      # just failed to fill in the pages correctly.
+      _scratch_remount
+
+      echo "File digest after remount:"
+      # Must match the digest we got before.
+      md5sum $SCRATCH_MNT/foo | _filter_scratch
+  }
+
+  echo -e "\nTesting with zlib compression..."
+  test_clone_and_read_compressed_extent "-o compress=zlib"
+
+  _scratch_unmount
+
+  echo -e "\nTesting with lzo compression..."
+  test_clone_and_read_compressed_extent "-o compress=lzo"
+
+  status=0
+  exit
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/extent_io.c | 19 +++++++++++--------
+ 1 file changed, 11 insertions(+), 8 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 11aa8f7..363726b 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -3144,12 +3144,12 @@ static inline void __do_contiguous_readpages(struct extent_io_tree *tree,
+ 					     get_extent_t *get_extent,
+ 					     struct extent_map **em_cached,
+ 					     struct bio **bio, int mirror_num,
+-					     unsigned long *bio_flags, int rw)
++					     unsigned long *bio_flags, int rw,
++					     u64 *prev_em_start)
+ {
+ 	struct inode *inode;
+ 	struct btrfs_ordered_extent *ordered;
+ 	int index;
+-	u64 prev_em_start = (u64)-1;
+ 
+ 	inode = pages[0]->mapping->host;
+ 	while (1) {
+@@ -3165,7 +3165,7 @@ static inline void __do_contiguous_readpages(struct extent_io_tree *tree,
+ 
+ 	for (index = 0; index < nr_pages; index++) {
+ 		__do_readpage(tree, pages[index], get_extent, em_cached, bio,
+-			      mirror_num, bio_flags, rw, &prev_em_start);
++			      mirror_num, bio_flags, rw, prev_em_start);
+ 		page_cache_release(pages[index]);
+ 	}
+ }
+@@ -3175,7 +3175,8 @@ static void __extent_readpages(struct extent_io_tree *tree,
+ 			       int nr_pages, get_extent_t *get_extent,
+ 			       struct extent_map **em_cached,
+ 			       struct bio **bio, int mirror_num,
+-			       unsigned long *bio_flags, int rw)
++			       unsigned long *bio_flags, int rw,
++			       u64 *prev_em_start)
+ {
+ 	u64 start = 0;
+ 	u64 end = 0;
+@@ -3196,7 +3197,7 @@ static void __extent_readpages(struct extent_io_tree *tree,
+ 						  index - first_index, start,
+ 						  end, get_extent, em_cached,
+ 						  bio, mirror_num, bio_flags,
+-						  rw);
++						  rw, prev_em_start);
+ 			start = page_start;
+ 			end = start + PAGE_CACHE_SIZE - 1;
+ 			first_index = index;
+@@ -3207,7 +3208,8 @@ static void __extent_readpages(struct extent_io_tree *tree,
+ 		__do_contiguous_readpages(tree, &pages[first_index],
+ 					  index - first_index, start,
+ 					  end, get_extent, em_cached, bio,
+-					  mirror_num, bio_flags, rw);
++					  mirror_num, bio_flags, rw,
++					  prev_em_start);
+ }
+ 
+ static int __extent_read_full_page(struct extent_io_tree *tree,
+@@ -4218,6 +4220,7 @@ int extent_readpages(struct extent_io_tree *tree,
+ 	struct page *page;
+ 	struct extent_map *em_cached = NULL;
+ 	int nr = 0;
++	u64 prev_em_start = (u64)-1;
+ 
+ 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
+ 		page = list_entry(pages->prev, struct page, lru);
+@@ -4234,12 +4237,12 @@ int extent_readpages(struct extent_io_tree *tree,
+ 		if (nr < ARRAY_SIZE(pagepool))
+ 			continue;
+ 		__extent_readpages(tree, pagepool, nr, get_extent, &em_cached,
+-				   &bio, 0, &bio_flags, READ);
++				   &bio, 0, &bio_flags, READ, &prev_em_start);
+ 		nr = 0;
+ 	}
+ 	if (nr)
+ 		__extent_readpages(tree, pagepool, nr, get_extent, &em_cached,
+-				   &bio, 0, &bio_flags, READ);
++				   &bio, 0, &bio_flags, READ, &prev_em_start);
+ 
+ 	if (em_cached)
+ 		free_extent_map(em_cached);
+-- 
+2.1.3
