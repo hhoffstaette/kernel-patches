@@ -1,0 +1,39 @@
+From:	Chandan Rajendra <chandan@linux.vnet.ibm.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	Chandan Rajendra <chandan@linux.vnet.ibm.com>, chandan@mykolab.com
+Subject: [PATCH] Btrfs: open_ctree: Fix possible memory leak
+Date:	Mon,  5 Oct 2015 22:14:25 +0530
+
+After reading one of chunk or tree root tree's root node from disk, if the
+root node does not have EXTENT_BUFFER_UPTODATE flag set, we fail to release
+the memory used by the root node. Fix this.
+
+Signed-off-by: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+---
+ fs/btrfs/disk-io.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index aa59871..807f685 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -2842,6 +2842,8 @@ int open_ctree(struct super_block *sb,
+ 	    !extent_buffer_uptodate(chunk_root->node)) {
+ 		printk(KERN_ERR "BTRFS: failed to read chunk root on %s\n",
+ 		       sb->s_id);
++		if (!IS_ERR(chunk_root->node))
++			free_extent_buffer(chunk_root->node);
+ 		chunk_root->node = NULL;
+ 		goto fail_tree_roots;
+ 	}
+@@ -2880,6 +2882,8 @@ retry_root_backup:
+ 	    !extent_buffer_uptodate(tree_root->node)) {
+ 		printk(KERN_WARNING "BTRFS: failed to read tree root on %s\n",
+ 		       sb->s_id);
++		if (!IS_ERR(tree_root->node))
++			free_extent_buffer(tree_root->node);
+ 		tree_root->node = NULL;
+ 		goto recovery_tree_root;
+ 	}
+-- 
+2.1.0
