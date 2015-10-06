@@ -1,7 +1,7 @@
 From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>, <stephane_btrfs@lesimple.fr>
-Subject: [PATCH 2/2] btrfs: qgroup: Don't copy extent buffer to do qgroup rescan
-Date:	Fri, 25 Sep 2015 10:38:01 +0800
+To:	<linux-btrfs@vger.kernel.org>
+Subject: [PATCH v3 2/2] btrfs: qgroup: Don't copy extent buffer to do qgroup rescan
+Date:	Wed, 7 Oct 2015 09:09:00 +0800
 
 Ancient qgroup code call memcpy() on a extent buffer and use it for leaf
 iteration.
@@ -12,12 +12,17 @@ such copy.
 The following bug may be caused by this insane operation:
 [92098.841309] general protection fault: 0000 [#1] SMP
 [92098.841338] Modules linked in: ...
-[92098.841814] CPU: 1 PID: 24655 Comm: kworker/u4:12 Not tainted 4.3.0-rc1 #1
-[92098.841868] Workqueue: btrfs-qgroup-rescan btrfs_qgroup_rescan_helper [btrfs]
+[92098.841814] CPU: 1 PID: 24655 Comm: kworker/u4:12 Not tainted
+4.3.0-rc1 #1
+[92098.841868] Workqueue: btrfs-qgroup-rescan btrfs_qgroup_rescan_helper
+[btrfs]
 [92098.842261] Call Trace:
-[92098.842277]  [<ffffffffc035a5d8>] ? read_extent_buffer+0xb8/0x110 [btrfs]
-[92098.842304]  [<ffffffffc0396d00>] ? btrfs_find_all_roots+0x60/0x70 [btrfs]
-[92098.842329]  [<ffffffffc039af3d>] btrfs_qgroup_rescan_worker+0x28d/0x5a0 [btrfs]
+[92098.842277]  [<ffffffffc035a5d8>] ? read_extent_buffer+0xb8/0x110
+[btrfs]
+[92098.842304]  [<ffffffffc0396d00>] ? btrfs_find_all_roots+0x60/0x70
+[btrfs]
+[92098.842329]  [<ffffffffc039af3d>]
+btrfs_qgroup_rescan_worker+0x28d/0x5a0 [btrfs]
 
 Where btrfs_qgroup_rescan_worker+0x28d is btrfs_disk_key_to_cpu(),
 called in reading key from the memcpied extent_buffer.
@@ -28,11 +33,16 @@ introduced stack function to do qgroup rescan.
 Reported-by: Stephane Lesimple <stephane_btrfs@lesimple.fr>
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
 ---
+v2:
+  Follow the parameter change in previous patch.
+v3:
+  None
+---
  fs/btrfs/qgroup.c | 22 ++++++++++++----------
  1 file changed, 12 insertions(+), 10 deletions(-)
 
 diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
-index e9ace09..3b9221f 100644
+index e9ace09..6a83a40 100644
 --- a/fs/btrfs/qgroup.c
 +++ b/fs/btrfs/qgroup.c
 @@ -2183,11 +2183,11 @@ void assert_qgroups_uptodate(struct btrfs_trans_handle *trans)
@@ -64,7 +74,7 @@ index e9ace09..3b9221f 100644
 -	for (; slot < btrfs_header_nritems(scratch_leaf); ++slot) {
 -		btrfs_item_key_to_cpu(scratch_leaf, &found, slot);
 +	for (; slot < btrfs_stack_header_nritems(header); ++slot) {
-+		btrfs_stack_item_key_to_cpu(stack_leaf, &found, slot);
++		btrfs_stack_item_key_to_cpu(header, &found, slot);
  		if (found.type != BTRFS_EXTENT_ITEM_KEY &&
  		    found.type != BTRFS_METADATA_ITEM_KEY)
  			continue;
