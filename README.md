@@ -24,7 +24,6 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **LTS series: >=4.1.9**
 
 - bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html)
-- bfq: [BFQ v7r8](http://algogroup.unimore.it/people/paolo/disk_sched/)
 - block: improved CFQ SSD awareness, misc. others
 - btrfs: fixes up to 4.3+ (cleanups, data loss, performance, qgroups, RAID 5/6, subvolumes, sysfs, TRIM)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
