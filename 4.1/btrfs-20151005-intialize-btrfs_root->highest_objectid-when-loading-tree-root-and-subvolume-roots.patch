@@ -1,0 +1,180 @@
+From:	Chandan Rajendra <chandan@linux.vnet.ibm.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	Chandan Rajendra <chandan@linux.vnet.ibm.com>, dsterba@suse.cz,
+	fdmanana@gmail.com, chandan@mykolab.com
+Subject: [PATCH] Btrfs: Intialize btrfs_root->highest_objectid when loading tree root and subvolume roots
+Date:	Mon,  5 Oct 2015 22:14:24 +0530
+
+The following call trace is seen when btrfs/031 test is executed in a loop,
+
+[  120.577208] WARNING: CPU: 3 PID: 6202 at /home/chandan/repos/linux/fs/btrfs/ioctl.c:558 create_subvol+0x3e6/0x729()
+[  120.581521] BTRFS: Transaction aborted (error -2)
+[  120.585410] Modules linked in:
+[  120.587460] CPU: 3 PID: 6202 Comm: btrfs Not tainted 4.2.0-rc5+ #27
+[  120.591232] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS Bochs 01/01/2011
+[  120.596134]  ffffffff81c009d0 ffff880c846ff918 ffffffff81988f34 0000000000000001
+[  120.600754]  ffff880c846ff968 ffff880c846ff958 ffffffff81050315 ffff880c846ff938
+[  120.605166]  ffff880c85ae6000 ffff8809b944e000 ffff880a96c5a448 0000000000000000
+[  120.609589] Call Trace:
+[  120.610936]  [<ffffffff81988f34>] dump_stack+0x45/0x57
+[  120.613868]  [<ffffffff81050315>] warn_slowpath_common+0x85/0xc0
+[  120.616812]  [<ffffffff81050391>] warn_slowpath_fmt+0x41/0x50
+[  120.619681]  [<ffffffff81985a84>] create_subvol+0x3e6/0x729
+[  120.622390]  [<ffffffff8112d977>] ? zone_statistics+0x77/0x90
+[  120.625111]  [<ffffffff8136577e>] btrfs_mksubvol.isra.30+0x37e/0x530
+[  120.628091]  [<ffffffff8111a248>] ? __alloc_pages_nodemask+0x1b8/0x950
+[  120.631091]  [<ffffffff81180f6a>] ? __mnt_want_write_file+0x1a/0x30
+[  120.635156]  [<ffffffff81365a31>] btrfs_ioctl_snap_create_transid+0x101/0x180
+[  120.639936]  [<ffffffff81365b02>] btrfs_ioctl_snap_create+0x52/0x70
+[  120.643942]  [<ffffffff813684ae>] btrfs_ioctl+0x46e/0x2450
+[  120.647204]  [<ffffffff8111f926>] ? lru_cache_add_active_or_unevictable+0x26/0x80
+[  120.651647]  [<ffffffff81174dd1>] do_vfs_ioctl+0x2c1/0x4a0
+[  120.655111]  [<ffffffff813be198>] ? selinux_file_ioctl+0x48/0xd0
+[  120.658500]  [<ffffffff813b875e>] ? security_file_ioctl+0x3e/0x60
+[  120.661680]  [<ffffffff81175024>] SyS_ioctl+0x74/0x80
+[  120.664464]  [<ffffffff819932d7>] entry_SYSCALL_64_fastpath+0x12/0x6a
+[  120.667824] ---[ end trace 13f2ab1e5917a256 ]---
+[  120.670159] BTRFS: error (device loop0) in create_subvol:558: errno=-2 No such entry
+[  120.673872] BTRFS info (device loop0): forced readonly
+[  120.701265] BTRFS info (device loop0): disk space caching is enabled
+[  120.704934] BTRFS error (device loop0): Remounting read-write after error is not allowed
+[  120.904385] BTRFS error (device loop0): cleaner transaction attach returned -30
+
+This occurs because,
+
+Mount filesystem
+Create subvol with ID 257
+Unmount filesystem
+Mount filesystem
+Delete subvol with ID 257
+  btrfs_drop_snapshot()
+    Add root corresponding to subvol 257 into
+    btrfs_transaction->dropped_roots list
+Create new subvol (i.e. create_subvol())
+  257 is returned as the next free objectid
+  btrfs_read_fs_root_no_name()
+    Finds the btrfs_root instance corresponding to the old subvol with ID 257
+    in btrfs_fs_info->fs_roots_radix.
+    Returns error since btrfs_root_item->refs has the value of 0.
+
+To fix the issue the commit initializes tree root's and subvolume root's
+highest_objectid when loading the roots from disk.
+
+Signed-off-by: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+---
+ fs/btrfs/disk-io.c   | 35 +++++++++++++++++++++++++++++++++++
+ fs/btrfs/inode-map.c |  9 +--------
+ fs/btrfs/inode-map.h |  1 +
+ fs/btrfs/ioctl.c     |  4 ++++
+ 4 files changed, 41 insertions(+), 8 deletions(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 807f685..3b1abe7 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1573,8 +1573,27 @@ int btrfs_init_fs_root(struct btrfs_root *root)
+ 	ret = get_anon_bdev(&root->anon_dev);
+ 	if (ret)
+ 		goto free_writers;
++
++	mutex_lock(&root->objectid_mutex);
++	ret = btrfs_find_highest_objectid(root,
++					&root->highest_objectid);
++	if (ret) {
++		mutex_unlock(&root->objectid_mutex);
++		goto free_root_dev;
++	}
++
++	if (unlikely(root->highest_objectid >= BTRFS_LAST_FREE_OBJECTID)) {
++		mutex_unlock(&root->objectid_mutex);
++		ret = -ENOSPC;
++		goto free_root_dev;
++	}
++
++	mutex_unlock(&root->objectid_mutex);
++
+ 	return 0;
+ 
++free_root_dev:
++	free_anon_bdev(root->anon_dev);
+ free_writers:
+ 	btrfs_free_subvolume_writers(root->subv_writers);
+ fail:
+@@ -2892,6 +2911,22 @@ retry_root_backup:
+ 	tree_root->commit_root = btrfs_root_node(tree_root);
+ 	btrfs_set_root_refs(&tree_root->root_item, 1);
+ 
++	mutex_lock(&tree_root->objectid_mutex);
++	ret = btrfs_find_highest_objectid(tree_root,
++					&tree_root->highest_objectid);
++	if (ret) {
++		mutex_unlock(&tree_root->objectid_mutex);
++		goto recovery_tree_root;
++	}
++
++	if (unlikely(tree_root->highest_objectid >= BTRFS_LAST_FREE_OBJECTID)) {
++		mutex_unlock(&tree_root->objectid_mutex);
++		ret = -ENOSPC;
++		goto recovery_tree_root;
++	}
++
++	mutex_unlock(&tree_root->objectid_mutex);
++
+ 	ret = btrfs_read_roots(fs_info, tree_root);
+ 	if (ret)
+ 		goto recovery_tree_root;
+diff --git a/fs/btrfs/inode-map.c b/fs/btrfs/inode-map.c
+index d4a582a..9f06e8b 100644
+--- a/fs/btrfs/inode-map.c
++++ b/fs/btrfs/inode-map.c
+@@ -515,7 +515,7 @@ out:
+ 	return ret;
+ }
+ 
+-static int btrfs_find_highest_objectid(struct btrfs_root *root, u64 *objectid)
++int btrfs_find_highest_objectid(struct btrfs_root *root, u64 *objectid)
+ {
+ 	struct btrfs_path *path;
+ 	int ret;
+@@ -555,13 +555,6 @@ int btrfs_find_free_objectid(struct btrfs_root *root, u64 *objectid)
+ 	int ret;
+ 	mutex_lock(&root->objectid_mutex);
+ 
+-	if (unlikely(root->highest_objectid < BTRFS_FIRST_FREE_OBJECTID)) {
+-		ret = btrfs_find_highest_objectid(root,
+-						  &root->highest_objectid);
+-		if (ret)
+-			goto out;
+-	}
+-
+ 	if (unlikely(root->highest_objectid >= BTRFS_LAST_FREE_OBJECTID)) {
+ 		ret = -ENOSPC;
+ 		goto out;
+diff --git a/fs/btrfs/inode-map.h b/fs/btrfs/inode-map.h
+index ddb347b..c8e864b 100644
+--- a/fs/btrfs/inode-map.h
++++ b/fs/btrfs/inode-map.h
+@@ -9,5 +9,6 @@ int btrfs_save_ino_cache(struct btrfs_root *root,
+ 			 struct btrfs_trans_handle *trans);
+ 
+ int btrfs_find_free_objectid(struct btrfs_root *root, u64 *objectid);
++int btrfs_find_highest_objectid(struct btrfs_root *root, u64 *objectid);
+ 
+ #endif
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 0adf542..ad7422b 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -568,6 +568,10 @@ static noinline int create_subvol(struct inode *dir,
+ 		goto fail;
+ 	}
+ 
++	mutex_lock(&new_root->objectid_mutex);
++	new_root->highest_objectid = new_dirid;
++	mutex_unlock(&new_root->objectid_mutex);
++
+ 	/*
+ 	 * insert the directory item
+ 	 */
+-- 
+2.1.0
