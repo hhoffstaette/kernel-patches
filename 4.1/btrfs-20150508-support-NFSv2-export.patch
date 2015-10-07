@@ -1,0 +1,53 @@
+From 7d35199e15b82a4d1a20049153b03e6258ce79f7 Mon Sep 17 00:00:00 2001
+From: NeilBrown <neilb@suse.de>
+Date: Fri, 8 May 2015 10:16:23 +1000
+Subject: BTRFS: support NFSv2 export
+
+The "fh_len" passed to ->fh_to_* is not guaranteed to be that same as
+that returned by encode_fh - it may be larger.
+
+With NFSv2, the filehandle is fixed length, so it may appear longer
+than expected and be zero-padded.
+
+So we must test that fh_len is at least some value, not exactly equal
+to it.
+
+Signed-off-by: NeilBrown <neilb@suse.de>
+Acked-by: David Sterba <dsterba@suse.cz>
+
+diff --git a/fs/btrfs/export.c b/fs/btrfs/export.c
+index 8d05220..2513a7f 100644
+--- a/fs/btrfs/export.c
++++ b/fs/btrfs/export.c
+@@ -112,11 +112,11 @@ static struct dentry *btrfs_fh_to_parent(struct super_block *sb, struct fid *fh,
+ 	u32 generation;
+ 
+ 	if (fh_type == FILEID_BTRFS_WITH_PARENT) {
+-		if (fh_len !=  BTRFS_FID_SIZE_CONNECTABLE)
++		if (fh_len <  BTRFS_FID_SIZE_CONNECTABLE)
+ 			return NULL;
+ 		root_objectid = fid->root_objectid;
+ 	} else if (fh_type == FILEID_BTRFS_WITH_PARENT_ROOT) {
+-		if (fh_len != BTRFS_FID_SIZE_CONNECTABLE_ROOT)
++		if (fh_len < BTRFS_FID_SIZE_CONNECTABLE_ROOT)
+ 			return NULL;
+ 		root_objectid = fid->parent_root_objectid;
+ 	} else
+@@ -136,11 +136,11 @@ static struct dentry *btrfs_fh_to_dentry(struct super_block *sb, struct fid *fh,
+ 	u32 generation;
+ 
+ 	if ((fh_type != FILEID_BTRFS_WITH_PARENT ||
+-	     fh_len != BTRFS_FID_SIZE_CONNECTABLE) &&
++	     fh_len < BTRFS_FID_SIZE_CONNECTABLE) &&
+ 	    (fh_type != FILEID_BTRFS_WITH_PARENT_ROOT ||
+-	     fh_len != BTRFS_FID_SIZE_CONNECTABLE_ROOT) &&
++	     fh_len < BTRFS_FID_SIZE_CONNECTABLE_ROOT) &&
+ 	    (fh_type != FILEID_BTRFS_WITHOUT_PARENT ||
+-	     fh_len != BTRFS_FID_SIZE_NON_CONNECTABLE))
++	     fh_len < BTRFS_FID_SIZE_NON_CONNECTABLE))
+ 		return NULL;
+ 
+ 	objectid = fid->objectid;
+-- 
+cgit v0.10.2
+
