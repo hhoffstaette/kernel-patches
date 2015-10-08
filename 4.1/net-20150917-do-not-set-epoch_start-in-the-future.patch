@@ -1,0 +1,56 @@
+From c2e7204d180f8efc80f27959ca9cf16fa17f67db Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Thu, 17 Sep 2015 08:38:00 -0700
+Subject: tcp_cubic: do not set epoch_start in the future
+
+Tracking idle time in bictcp_cwnd_event() is imprecise, as epoch_start
+is normally set at ACK processing time, not at send time.
+
+Doing a proper fix would need to add an additional state variable,
+and does not seem worth the trouble, given CUBIC bug has been there
+forever before Jana noticed it.
+
+Let's simply not set epoch_start in the future, otherwise
+bictcp_update() could overflow and CUBIC would again
+grow cwnd too fast.
+
+This was detected thanks to a packetdrill test Neal wrote that was flaky
+before applying this fix.
+
+Fixes: 30927520dbae ("tcp_cubic: better follow cubic curve after idle period")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Cc: Jana Iyengar <jri@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/net/ipv4/tcp_cubic.c b/net/ipv4/tcp_cubic.c
+index c6ded6b..448c261 100644
+--- a/net/ipv4/tcp_cubic.c
++++ b/net/ipv4/tcp_cubic.c
+@@ -154,14 +154,20 @@ static void bictcp_init(struct sock *sk)
+ static void bictcp_cwnd_event(struct sock *sk, enum tcp_ca_event event)
+ {
+ 	if (event == CA_EVENT_TX_START) {
+-		s32 delta = tcp_time_stamp - tcp_sk(sk)->lsndtime;
+ 		struct bictcp *ca = inet_csk_ca(sk);
++		u32 now = tcp_time_stamp;
++		s32 delta;
++
++		delta = now - tcp_sk(sk)->lsndtime;
+ 
+ 		/* We were application limited (idle) for a while.
+ 		 * Shift epoch_start to keep cwnd growth to cubic curve.
+ 		 */
+-		if (ca->epoch_start && delta > 0)
++		if (ca->epoch_start && delta > 0) {
+ 			ca->epoch_start += delta;
++			if (after(ca->epoch_start, now))
++				ca->epoch_start = now;
++		}
+ 		return;
+ 	}
+ }
+-- 
+cgit v0.10.2
+
