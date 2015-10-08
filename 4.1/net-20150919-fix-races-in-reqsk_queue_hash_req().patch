@@ -1,0 +1,49 @@
+From 29c6852602e259d2c1882f320b29d5c3fec0de04 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Sat, 19 Sep 2015 09:48:04 -0700
+Subject: inet: fix races in reqsk_queue_hash_req()
+
+Before allowing lockless LISTEN processing, we need to make
+sure to arm the SYN_RECV timer before the req socket is visible
+in hash tables.
+
+Also, req->rsk_hash should be written before we set rsk_refcnt
+to a non zero value.
+
+Fixes: fa76ce7328b2 ("inet: get rid of central tcp/dccp listener timer")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Cc: Ying Cai <ycai@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/net/ipv4/inet_connection_sock.c b/net/ipv4/inet_connection_sock.c
+index 1349571..7bb9c39 100644
+--- a/net/ipv4/inet_connection_sock.c
++++ b/net/ipv4/inet_connection_sock.c
+@@ -685,20 +685,20 @@ void reqsk_queue_hash_req(struct request_sock_queue *queue,
+ 	req->num_timeout = 0;
+ 	req->sk = NULL;
+ 
++	setup_timer(&req->rsk_timer, reqsk_timer_handler, (unsigned long)req);
++	mod_timer_pinned(&req->rsk_timer, jiffies + timeout);
++	req->rsk_hash = hash;
++
+ 	/* before letting lookups find us, make sure all req fields
+ 	 * are committed to memory and refcnt initialized.
+ 	 */
+ 	smp_wmb();
+ 	atomic_set(&req->rsk_refcnt, 2);
+-	setup_timer(&req->rsk_timer, reqsk_timer_handler, (unsigned long)req);
+-	req->rsk_hash = hash;
+ 
+ 	spin_lock(&queue->syn_wait_lock);
+ 	req->dl_next = lopt->syn_table[hash];
+ 	lopt->syn_table[hash] = req;
+ 	spin_unlock(&queue->syn_wait_lock);
+-
+-	mod_timer_pinned(&req->rsk_timer, jiffies + timeout);
+ }
+ EXPORT_SYMBOL(reqsk_queue_hash_req);
+ 
+-- 
+cgit v0.10.2
+
