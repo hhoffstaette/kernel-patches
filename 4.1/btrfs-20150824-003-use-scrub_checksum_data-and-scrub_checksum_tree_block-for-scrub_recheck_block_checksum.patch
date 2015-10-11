@@ -211,11 +211,11 @@ index 4326e16..05dab4a 100644
  }
  
  static int scrub_checksum_super(struct scrub_block *sblock)
-@@ -2202,28 +2158,14 @@ static void scrub_missing_raid56_worker(struct btrfs_work *work)
+@@ -2202,28 +2158,15 @@ static void scrub_missing_raid56_worker(struct btrfs_work *work)
  {
  	struct scrub_block *sblock = container_of(work, struct scrub_block, work);
  	struct scrub_ctx *sctx = sblock->sctx;
--	struct btrfs_fs_info *fs_info = sctx->dev_root->fs_info;
+	struct btrfs_fs_info *fs_info = sctx->dev_root->fs_info;
 -	unsigned int is_metadata;
 -	unsigned int have_csum;
 -	u8 *csum;
