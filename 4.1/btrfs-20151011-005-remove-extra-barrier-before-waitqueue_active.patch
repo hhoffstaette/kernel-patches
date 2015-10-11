@@ -1,18 +1,22 @@
-From 72ec4dccea7db12b160220d1adbb08e3b7ce1fa3 Mon Sep 17 00:00:00 2001
-From: David Sterba <dsterba@suse.cz>
-Date: Mon, 16 Feb 2015 19:39:00 +0100
-Subject: btrfs: remove extra barrier before waitqueue_active
+From:	David Sterba <dsterba@suse.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	David Sterba <dsterba@suse.com>
+Subject: [PATCH 5/6] btrfs: remove extra barrier before waitqueue_active
+Date:	Sun, 11 Oct 2015 19:50:33 +0200
 
 Removing barriers is scary, but a call to atomic_dec_and_test implies
 a barrier, so we don't need to issue another one.
 
-Signed-off-by: David Sterba <dsterba@suse.cz>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/tree-log.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index 121df0f..07ed248 100644
+index d0deb4643502..63275594debd 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
-@@ -238,7 +238,9 @@ int btrfs_pin_log_trans(struct btrfs_root *root)
+@@ -229,7 +229,9 @@ int btrfs_pin_log_trans(struct btrfs_root *root)
  void btrfs_end_log_trans(struct btrfs_root *root)
  {
  	if (atomic_dec_and_test(&root->log_writers)) {
@@ -23,7 +27,7 @@ index 121df0f..07ed248 100644
  		if (waitqueue_active(&root->log_writer_wait))
  			wake_up(&root->log_writer_wait);
  	}
-@@ -2610,7 +2612,9 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+@@ -2820,7 +2822,9 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
  
  	mutex_lock(&log_root_tree->log_mutex);
  	if (atomic_dec_and_test(&log_root_tree->log_writers)) {
@@ -35,5 +39,4 @@ index 121df0f..07ed248 100644
  			wake_up(&log_root_tree->log_writer_wait);
  	}
 -- 
-cgit v0.10.2
-
+2.1.3
