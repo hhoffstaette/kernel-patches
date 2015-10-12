@@ -1,0 +1,64 @@
+From:	David Sterba <dsterba@suse.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	clm@fb.com, David Sterba <dsterba@suse.com>,
+	stable@vger.kernel.org, #@suse.cz, 3.16+@suse.cz
+Subject: [PATCH for 4.3] btrfs: check unsupported filters in balance arguments
+Date:	Mon, 12 Oct 2015 16:55:54 +0200
+
+We don't verify that all the balance filter arguments supplemented by
+the flags are actually known to the kernel. Thus we let it silently pass
+and do nothing.
+
+At the moment this means only the 'limit' filter, but we're going to add
+a few more soon so it's better to have that fixed. Also in older stable
+kernels so that it works with newer userspace tools.
+
+Cc: stable@vger.kernel.org # 3.16+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+
+Please try to get it into 4.3, before the new balance filters (stripes,
+enhanced 'limit') get merged. This would cause us headaches when we would not
+have the kernel checks and try to run updated btrfs-progs against that.
+
+ fs/btrfs/ioctl.c   | 5 +++++
+ fs/btrfs/volumes.h | 8 ++++++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 0adf5422fce9..3e3e6130637f 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -4639,6 +4639,11 @@ static long btrfs_ioctl_balance(struct file *file, void __user *arg)
+ 		bctl->flags |= BTRFS_BALANCE_TYPE_MASK;
+ 	}
+ 
++	if (bctl->flags & ~(BTRFS_BALANCE_ARGS_MASK | BTRFS_BALANCE_TYPE_MASK)) {
++		ret = -EINVAL;
++		goto out_bargs;
++	}
++
+ do_balance:
+ 	/*
+ 	 * Ownership of bctl and mutually_exclusive_operation_running
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 2ca784a14e84..595279a8b99f 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -376,6 +376,14 @@ struct map_lookup {
+ #define BTRFS_BALANCE_ARGS_VRANGE	(1ULL << 4)
+ #define BTRFS_BALANCE_ARGS_LIMIT	(1ULL << 5)
+ 
++#define BTRFS_BALANCE_ARGS_MASK			\
++	(BTRFS_BALANCE_ARGS_PROFILES |		\
++	 BTRFS_BALANCE_ARGS_USAGE |		\
++	 BTRFS_BALANCE_ARGS_DEVID | 		\
++	 BTRFS_BALANCE_ARGS_DRANGE |		\
++	 BTRFS_BALANCE_ARGS_VRANGE |		\
++	 BTRFS_BALANCE_ARGS_LIMIT)
++
+ /*
+  * Profile changing flags.  When SOFT is set we won't relocate chunk if
+  * it already has the target profile (even though it may be
+-- 
+2.1.3
