@@ -744,7 +744,7 @@ Index: linux-4.1-ck2/init/Kconfig
 +          TEST so these options are disabled.
 +
 +          Say Y here.
-+	default y
++	default n
 +
 +
  config BROKEN

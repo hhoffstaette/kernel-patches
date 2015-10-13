@@ -23,7 +23,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **LTS series: >=4.1.10**
 
-- bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html)
+- bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html) (**not** default-enabled)
 - block: improved TRIM, improved CFQ SSD awareness, misc. others
 - btrfs: fixes up to 4.4+ (cleanups, data loss, performance, qgroups, RAID 5/6, subvolumes, sysfs, TRIM etc.)
 - intel_pstate: fix for DBZ on timer overflow
