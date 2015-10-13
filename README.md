@@ -24,8 +24,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **LTS series: >=4.1.10**
 
 - bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html)
-- block: improved CFQ SSD awareness, improved TRIM, misc. others
+- block: improved TRIM, improved CFQ SSD awareness, misc. others
 - btrfs: fixes up to 4.4+ (cleanups, data loss, performance, qgroups, RAID 5/6, subvolumes, sysfs, TRIM etc.)
+- intel_pstate: fix for DBZ on timer overflow
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: **deadlock fixes for 4.1.9/.10**, TCP scalability/performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
 - vfs: scalability fixes
