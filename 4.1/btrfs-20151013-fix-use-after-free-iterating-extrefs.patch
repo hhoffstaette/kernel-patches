@@ -1,0 +1,59 @@
+Date:	Tue, 13 Oct 2015 14:06:48 -0400
+From:	Chris Mason <clm@fb.com>
+To:	<linux-btrfs@vger.kernel.org>, Mark Fasheh <mfasheh@suse.de>,
+	Filipe Manana <fdmanana@suse.com>
+Subject: [PATCH] btrfs: fix use after free iterating extrefs
+
+The code for btrfs inode-resolve has never worked properly for
+files with enough hard links to trigger extrefs.  It was trying to
+get the leaf out of a path after freeing the path:
+
+	btrfs_release_path(path);
+	leaf = path->nodes[0];
+	item_size = btrfs_item_size_nr(leaf, slot);
+
+The fix here is to use the extent buffer we cloned just a little higher
+up to avoid deadlocks caused by using the leaf in the path.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+cc: stable@vger.kernel.org # v3.7+
+cc: Mark Fasheh <mfasheh@suse.de>
+---
+ fs/btrfs/backref.c | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/fs/btrfs/backref.c b/fs/btrfs/backref.c
+index ecbc63d..9a2ec79 100644
+--- a/fs/btrfs/backref.c
++++ b/fs/btrfs/backref.c
+@@ -1828,7 +1828,6 @@ static int iterate_inode_extrefs(u64 inum, struct btrfs_root *fs_root,
+ 	int found = 0;
+ 	struct extent_buffer *eb;
+ 	struct btrfs_inode_extref *extref;
+-	struct extent_buffer *leaf;
+ 	u32 item_size;
+ 	u32 cur_offset;
+ 	unsigned long ptr;
+@@ -1856,9 +1855,8 @@ static int iterate_inode_extrefs(u64 inum, struct btrfs_root *fs_root,
+ 		btrfs_set_lock_blocking_rw(eb, BTRFS_READ_LOCK);
+ 		btrfs_release_path(path);
+ 
+-		leaf = path->nodes[0];
+-		item_size = btrfs_item_size_nr(leaf, slot);
+-		ptr = btrfs_item_ptr_offset(leaf, slot);
++		item_size = btrfs_item_size_nr(eb, slot);
++		ptr = btrfs_item_ptr_offset(eb, slot);
+ 		cur_offset = 0;
+ 
+ 		while (cur_offset < item_size) {
+@@ -1872,7 +1870,7 @@ static int iterate_inode_extrefs(u64 inum, struct btrfs_root *fs_root,
+ 			if (ret)
+ 				break;
+ 
+-			cur_offset += btrfs_inode_extref_name_len(leaf, extref);
++			cur_offset += btrfs_inode_extref_name_len(eb, extref);
+ 			cur_offset += sizeof(*extref);
+ 		}
+ 		btrfs_tree_read_unlock_blocking(eb);
+-- 
+2.4.6
