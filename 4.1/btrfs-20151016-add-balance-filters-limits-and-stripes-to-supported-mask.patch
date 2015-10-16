@@ -1,0 +1,40 @@
+From:	David Sterba <dsterba@suse.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	David Sterba <dsterba@suse.com>
+Subject: [PATCH] btrfs: add balance filters limits and stripes to supported mask
+Date:	Fri, 16 Oct 2015 19:34:38 +0200
+
+Enable the extended 'limit' syntax (a range) and the new 'stripes'
+filter in the filters mask. The patch comes separate and not within the
+series that introduced the new filters because the patch adding the mask
+was merged in a late rc. The integration branch was based on an older rc
+and could not merge the patch due to the missing changes.
+
+Prerequisities:
+* btrfs: add balance filter for stripes
+* btrfs: extend balance filter limit to take minimum and maximum
+* btrfs: check unsupported filters in balance arguments
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+
+ fs/btrfs/volumes.h | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index cab89234842d..7773af56dfa9 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -384,7 +384,9 @@ struct map_lookup {
+ 	 BTRFS_BALANCE_ARGS_DEVID | 		\
+ 	 BTRFS_BALANCE_ARGS_DRANGE |		\
+ 	 BTRFS_BALANCE_ARGS_VRANGE |		\
+-	 BTRFS_BALANCE_ARGS_LIMIT)
++	 BTRFS_BALANCE_ARGS_LIMIT |		\
++	 BTRFS_BALANCE_ARGS_LIMITS |		\
++	 BTRFS_BALANCE_ARGS_STRIPES)
+ 
+ /*
+  * Profile changing flags.  When SOFT is set we won't relocate chunk if
+-- 
+2.6.1
