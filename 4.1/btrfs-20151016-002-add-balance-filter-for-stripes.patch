@@ -3,7 +3,8 @@ To:	linux-btrfs@vger.kernel.org
 Cc:	=?UTF-8?q?Gabr=C3=ADel=20Arth=C3=BAr=20P=C3=A9tursson?= 
 	<gabriel@system.is>, David Sterba <dsterba@suse.com>
 Subject: [PATCH 2/2] btrfs: add balance filter for stripes
-Date:	Tue, 13 Oct 2015 11:07:19 +0200
+Date:	Fri, 16 Oct 2015 18:50:12 +0200
+Message-Id: <9811b51815f9b5874832bbfa56a5171bac6aae7d.1445013000.git.dsterba@suse.com>
 
 From: Gabríel Arthúr Pétursson <gabriel@system.is>
 
@@ -42,7 +43,7 @@ index 7d2e1b6d0ac1..e2eefa222999 100644
  
  /*
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 0693e974f1c0..51c0e5b219a3 100644
+index 0fbe6855ea05..c0043310e5dc 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
 @@ -3170,6 +3170,19 @@ static int chunk_vrange_filter(struct extent_buffer *leaf,

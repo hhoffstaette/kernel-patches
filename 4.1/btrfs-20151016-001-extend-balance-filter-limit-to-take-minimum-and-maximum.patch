@@ -2,7 +2,7 @@ From:	David Sterba <dsterba@suse.com>
 To:	linux-btrfs@vger.kernel.org
 Cc:	David Sterba <dsterba@suse.com>
 Subject: [PATCH 1/2] btrfs: extend balance filter limit to take minimum and maximum
-Date:	Tue, 13 Oct 2015 11:07:16 +0200
+Date:	Fri, 16 Oct 2015 18:50:08 +0200
 
 The 'limit' filter is underdesigned, it should have been a range for
 [min,max], with some relaxed semantics when one of the bounds is
@@ -17,10 +17,10 @@ interpreted only if the appropriate flag is set
 Signed-off-by: David Sterba <dsterba@suse.com>
 ---
  fs/btrfs/ctree.h           | 14 ++++++++++++--
- fs/btrfs/volumes.c         | 14 ++++++++++++++
+ fs/btrfs/volumes.c         | 42 ++++++++++++++++++++++++++++++++++++++++++
  fs/btrfs/volumes.h         |  1 +
  include/uapi/linux/btrfs.h | 13 ++++++++++++-
- 4 files changed, 39 insertions(+), 3 deletions(-)
+ 4 files changed, 67 insertions(+), 3 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
 index 938efe33be80..7d2e1b6d0ac1 100644
@@ -48,26 +48,35 @@ index 938efe33be80..7d2e1b6d0ac1 100644
  	__le64 unused[7];
  } __attribute__ ((__packed__));
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 6fc735869c18..0693e974f1c0 100644
+index 6fc735869c18..0fbe6855ea05 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
-@@ -3250,6 +3250,15 @@ static int should_balance_chunk(struct btrfs_root *root,
+@@ -3250,6 +3250,16 @@ static int should_balance_chunk(struct btrfs_root *root,
  			return 0;
  		else
  			bargs->limit--;
 +	} else if ((bargs->flags & BTRFS_BALANCE_ARGS_LIMITS)) {
-+		if (bargs->limit_min < bargs->limit_max) {
-+			bargs->limit_max--;
-+		} else if (bargs->limit_min == bargs->limit_max) {
-+			bargs->limit_min = UINT_MAX;
-+			bargs->limit_max = 0;
-+		} else {
++		/*
++		 * Same logic as the 'limit' filter; the minimum cannot be
++		 * determined here because we do not have the global informatoin
++		 * about the count of all chunks that satisfy the filters.
++		 */
++		if (bargs->limit_max == 0)
 +			return 0;
-+		}
++		else
++			bargs->limit_max--;
  	}
  
  	return 1;
-@@ -3274,6 +3283,7 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
+@@ -3264,6 +3274,7 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
+ 	struct btrfs_device *device;
+ 	u64 old_size;
+ 	u64 size_to_free;
++	u64 chunk_type;
+ 	struct btrfs_chunk *chunk;
+ 	struct btrfs_path *path;
+ 	struct btrfs_key key;
+@@ -3274,10 +3285,14 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
  	int ret;
  	int enospc_errors = 0;
  	bool counting = true;
@@ -75,7 +84,14 @@ index 6fc735869c18..0693e974f1c0 100644
  	u64 limit_data = bctl->data.limit;
  	u64 limit_meta = bctl->meta.limit;
  	u64 limit_sys = bctl->sys.limit;
-@@ -3317,6 +3327,10 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
+	int chunk_reserved = 0;
++	u32 count_data = 0;
++	u32 count_meta = 0;
++	u32 count_sys = 0;
+ 
+ 	/* step one make some room on all the devices */
+ 	devices = &fs_info->fs_devices->devices;
+@@ -3317,6 +3332,10 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
  	spin_unlock(&fs_info->balance_lock);
  again:
  	if (!counting) {
@@ -86,6 +102,43 @@ index 6fc735869c18..0693e974f1c0 100644
  		bctl->data.limit = limit_data;
  		bctl->meta.limit = limit_meta;
  		bctl->sys.limit = limit_sys;
+@@ -3364,6 +3383,7 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
+ 		}
+ 
+ 		chunk = btrfs_item_ptr(leaf, slot, struct btrfs_chunk);
++		chunk_type = btrfs_chunk_type(leaf, chunk);
+ 
+ 		if (!counting) {
+ 			spin_lock(&fs_info->balance_lock);
+@@ -3384,6 +3404,28 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
+ 			spin_lock(&fs_info->balance_lock);
+ 			bctl->stat.expected++;
+ 			spin_unlock(&fs_info->balance_lock);
++
++			if (chunk_type & BTRFS_BLOCK_GROUP_DATA)
++				count_data++;
++			else if (chunk_type & BTRFS_BLOCK_GROUP_SYSTEM)
++				count_sys++;
++			else if (chunk_type & BTRFS_BLOCK_GROUP_METADATA)
++				count_meta++;
++
++			goto loop;
++		}
++
++		/*
++		 * Apply limit_min filter, no need to check if the LIMITS
++		 * filter is used, limit_min is 0 by default
++		 */
++		if (((chunk_type & BTRFS_BLOCK_GROUP_DATA) &&
++					count_data < bctl->data.limit_min)
++				|| ((chunk_type & BTRFS_BLOCK_GROUP_METADATA) &&
++					count_meta < bctl->meta.limit_min)
++				|| ((chunk_type & BTRFS_BLOCK_GROUP_SYSTEM) &&
++					count_sys < bctl->sys.limit_min)) {
++			mutex_unlock(&fs_info->delete_unused_bgs_mutex);
+ 			goto loop;
+ 		}
+ 
 diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
 index 2ca784a14e84..1c9d8edd7d57 100644
 --- a/fs/btrfs/volumes.h
