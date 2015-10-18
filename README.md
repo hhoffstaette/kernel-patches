@@ -21,13 +21,12 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS series: >=4.1.10**
+**LTS series: >=4.1.11**
 
-- bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html) (**not** default-enabled)
+- bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html) (_not_ default-enabled)
 - block: improved TRIM, improved CFQ SSD awareness, misc. others
 - btrfs: fixes up to 4.4+ (cleanups, data loss, performance, qgroups, RAID 5/6, subvolumes, sysfs, TRIM etc.)
-- intel_pstate: fix for DBZ on timer overflow
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
-- net: **deadlock fixes for 4.1.9/.10**, TCP scalability/performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
-- vfs: scalability fixes
+- net: TCP scalability/performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
+- vfs: scalability fixes from 4.2+
 
