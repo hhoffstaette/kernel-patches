@@ -1,0 +1,30 @@
+Date:	Sun, 18 Oct 2015 21:35:41 +0000
+From:	Alexandru Moise <00moses.alexander00@gmail.com>
+To:	clm@fb.com
+Cc:	jbacik@fb.com, dsterba@suse.com, linux-btrfs@vger.kernel.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH] btrfs: switch __btrfs_fs_incompat return type from int to bool
+
+Conform to __btrfs_fs_incompat() cast-to-bool (!!) by explicitly
+returning boolean not int.
+
+Signed-off-by: Alexandru Moise <00moses.alexander00@gmail.com>
+---
+ fs/btrfs/ctree.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 938efe3..f387e2d 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -4103,7 +4103,7 @@ static inline void __btrfs_set_fs_incompat(struct btrfs_fs_info *fs_info,
+ #define btrfs_fs_incompat(fs_info, opt) \
+ 	__btrfs_fs_incompat((fs_info), BTRFS_FEATURE_INCOMPAT_##opt)
+ 
+-static inline int __btrfs_fs_incompat(struct btrfs_fs_info *fs_info, u64 flag)
++static inline bool __btrfs_fs_incompat(struct btrfs_fs_info *fs_info, u64 flag)
+ {
+ 	struct btrfs_super_block *disk_super;
+ 	disk_super = fs_info->super_copy;
+-- 
+2.6.1
