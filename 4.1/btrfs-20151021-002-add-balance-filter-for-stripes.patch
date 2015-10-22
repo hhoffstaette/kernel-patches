@@ -2,9 +2,8 @@ From:	David Sterba <dsterba@suse.com>
 To:	linux-btrfs@vger.kernel.org
 Cc:	=?UTF-8?q?Gabr=C3=ADel=20Arth=C3=BAr=20P=C3=A9tursson?= 
 	<gabriel@system.is>, David Sterba <dsterba@suse.com>
-Subject: [PATCH 2/2] btrfs: add balance filter for stripes
-Date:	Fri, 16 Oct 2015 18:50:12 +0200
-Message-Id: <9811b51815f9b5874832bbfa56a5171bac6aae7d.1445013000.git.dsterba@suse.com>
+Subject: [PATCH 2/3] btrfs: add balance filter for stripes
+Date:	Tue, 20 Oct 2015 19:13:49 +0200
 
 From: Gabríel Arthúr Pétursson <gabriel@system.is>
 
@@ -23,7 +22,7 @@ Signed-off-by: David Sterba <dsterba@suse.com>
  4 files changed, 37 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index 7d2e1b6d0ac1..e2eefa222999 100644
+index 852c738d6954..76055a8317e9 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
 @@ -859,7 +859,14 @@ struct btrfs_disk_balance_args {
@@ -33,7 +32,7 @@ index 7d2e1b6d0ac1..e2eefa222999 100644
 -	__le64 unused[7];
 +	/*
 +	 * Process chunks that cross stripes_min..stripes_max devices,
-+	 * BTRFS_BALANCE_ARGS_STRIPES
++	 * BTRFS_BALANCE_ARGS_STRIPES_RANGE
 +	 */
 +	__le32 stripes_min;
 +	__le32 stripes_max;
@@ -43,14 +42,14 @@ index 7d2e1b6d0ac1..e2eefa222999 100644
  
  /*
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 0fbe6855ea05..c0043310e5dc 100644
+index b90a79c2bcf9..8d88a8737c79 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
 @@ -3170,6 +3170,19 @@ static int chunk_vrange_filter(struct extent_buffer *leaf,
  	return 1;
  }
  
-+static int chunk_stripes_filter(struct extent_buffer *leaf,
++static int chunk_stripes_range_filter(struct extent_buffer *leaf,
 +			       struct btrfs_chunk *chunk,
 +			       struct btrfs_balance_args *bargs)
 +{
@@ -71,8 +70,8 @@ index 0fbe6855ea05..c0043310e5dc 100644
  	}
  
 +	/* stripes filter */
-+	if ((bargs->flags & BTRFS_BALANCE_ARGS_STRIPES) &&
-+	    chunk_stripes_filter(leaf, chunk, bargs)) {
++	if ((bargs->flags & BTRFS_BALANCE_ARGS_STRIPES_RANGE) &&
++	    chunk_stripes_range_filter(leaf, chunk, bargs)) {
 +		return 0;
 +	}
 +
@@ -80,19 +79,19 @@ index 0fbe6855ea05..c0043310e5dc 100644
  	if ((bargs->flags & BTRFS_BALANCE_ARGS_SOFT) &&
  	    chunk_soft_convert_filter(chunk_type, bargs)) {
 diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
-index 1c9d8edd7d57..a87d96d75d07 100644
+index c34578ee49f9..1d823ad3b914 100644
 --- a/fs/btrfs/volumes.h
 +++ b/fs/btrfs/volumes.h
 @@ -376,6 +376,7 @@ struct map_lookup {
  #define BTRFS_BALANCE_ARGS_VRANGE	(1ULL << 4)
  #define BTRFS_BALANCE_ARGS_LIMIT	(1ULL << 5)
- #define BTRFS_BALANCE_ARGS_LIMITS	(1ULL << 6)
-+#define BTRFS_BALANCE_ARGS_STRIPES	(1ULL << 7)
+ #define BTRFS_BALANCE_ARGS_LIMIT_RANGE	(1ULL << 6)
++#define BTRFS_BALANCE_ARGS_STRIPES_RANGE (1ULL << 7)
  
  /*
   * Profile changing flags.  When SOFT is set we won't relocate chunk if
 diff --git a/include/uapi/linux/btrfs.h b/include/uapi/linux/btrfs.h
-index 264ecea5ecfc..ab720200d0f7 100644
+index 11f13108b78b..17a94704b183 100644
 --- a/include/uapi/linux/btrfs.h
 +++ b/include/uapi/linux/btrfs.h
 @@ -229,7 +229,15 @@ struct btrfs_balance_args {
@@ -103,7 +102,7 @@ index 264ecea5ecfc..ab720200d0f7 100644
 +
 +	/*
 +	 * Process chunks that cross stripes_min..stripes_max devices,
-+	 * BTRFS_BALANCE_ARGS_STRIPES
++	 * BTRFS_BALANCE_ARGS_STRIPES_RANGE
 +	 */
 +	__le32 stripes_min;
 +	__le32 stripes_max;
@@ -113,4 +112,4 @@ index 264ecea5ecfc..ab720200d0f7 100644
  
  /* report balance progress to userspace */
 -- 
-2.6.1
+2.6.2

@@ -1,8 +1,8 @@
 From:	David Sterba <dsterba@suse.com>
 To:	linux-btrfs@vger.kernel.org
 Cc:	David Sterba <dsterba@suse.com>
-Subject: [PATCH 1/2] btrfs: extend balance filter limit to take minimum and maximum
-Date:	Fri, 16 Oct 2015 18:50:08 +0200
+Subject: [PATCH 1/3] btrfs: extend balance filter limit to take minimum and maximum
+Date:	Tue, 20 Oct 2015 19:13:46 +0200
 
 The 'limit' filter is underdesigned, it should have been a range for
 [min,max], with some relaxed semantics when one of the bounds is
@@ -12,7 +12,7 @@ bytes.
 Let's fix both by extending the use of the u64 bytes for the [min,max]
 range. This can be done in a backward compatible way, the range will be
 interpreted only if the appropriate flag is set
-(BTRFS_BALANCE_ARGS_LIMITS).
+(BTRFS_BALANCE_ARGS_LIMIT_RANGE).
 
 Signed-off-by: David Sterba <dsterba@suse.com>
 ---
@@ -23,7 +23,7 @@ Signed-off-by: David Sterba <dsterba@suse.com>
  4 files changed, 67 insertions(+), 3 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index 938efe33be80..7d2e1b6d0ac1 100644
+index 938efe33be80..852c738d6954 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
 @@ -846,8 +846,18 @@ struct btrfs_disk_balance_args {
@@ -34,8 +34,8 @@ index 938efe33be80..7d2e1b6d0ac1 100644
 -	__le64 limit;
 +	/*
 +	 * BTRFS_BALANCE_ARGS_LIMIT with value 'limit'
-+	 * BTRFS_BALANCE_ARGS_LIMITS - the extend version can use minimum and
-+	 * maximum
++	 * BTRFS_BALANCE_ARGS_LIMIT_RANGE - the extend version can use minimum
++	 * and maximum
 +	 */
 +	union {
 +		__le64 limit;
@@ -48,14 +48,14 @@ index 938efe33be80..7d2e1b6d0ac1 100644
  	__le64 unused[7];
  } __attribute__ ((__packed__));
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 6fc735869c18..0fbe6855ea05 100644
+index 6fc735869c18..b90a79c2bcf9 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
 @@ -3250,6 +3250,16 @@ static int should_balance_chunk(struct btrfs_root *root,
  			return 0;
  		else
  			bargs->limit--;
-+	} else if ((bargs->flags & BTRFS_BALANCE_ARGS_LIMITS)) {
++	} else if ((bargs->flags & BTRFS_BALANCE_ARGS_LIMIT_RANGE)) {
 +		/*
 +		 * Same logic as the 'limit' filter; the minimum cannot be
 +		 * determined here because we do not have the global informatoin
@@ -140,19 +140,19 @@ index 6fc735869c18..0fbe6855ea05 100644
  		}
  
 diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
-index 2ca784a14e84..1c9d8edd7d57 100644
+index 2ca784a14e84..c34578ee49f9 100644
 --- a/fs/btrfs/volumes.h
 +++ b/fs/btrfs/volumes.h
 @@ -375,6 +375,7 @@ struct map_lookup {
  #define BTRFS_BALANCE_ARGS_DRANGE	(1ULL << 3)
  #define BTRFS_BALANCE_ARGS_VRANGE	(1ULL << 4)
  #define BTRFS_BALANCE_ARGS_LIMIT	(1ULL << 5)
-+#define BTRFS_BALANCE_ARGS_LIMITS	(1ULL << 6)
++#define BTRFS_BALANCE_ARGS_LIMIT_RANGE	(1ULL << 6)
  
  /*
   * Profile changing flags.  When SOFT is set we won't relocate chunk if
 diff --git a/include/uapi/linux/btrfs.h b/include/uapi/linux/btrfs.h
-index b6dec05c7196..264ecea5ecfc 100644
+index b6dec05c7196..11f13108b78b 100644
 --- a/include/uapi/linux/btrfs.h
 +++ b/include/uapi/linux/btrfs.h
 @@ -217,7 +217,18 @@ struct btrfs_balance_args {
@@ -162,8 +162,8 @@ index b6dec05c7196..264ecea5ecfc 100644
 -	__u64 limit;		/* limit number of processed chunks */
 +	/*
 +	 * BTRFS_BALANCE_ARGS_LIMIT with value 'limit'
-+	 * BTRFS_BALANCE_ARGS_LIMITS - the extend version can use minimum and
-+	 * maximum
++	 * BTRFS_BALANCE_ARGS_LIMIT_RANGE - the extend version can use minimum
++	 * and maximum
 +	 */
 +	union {
 +		__u64 limit;		/* limit number of processed chunks */
@@ -176,4 +176,4 @@ index b6dec05c7196..264ecea5ecfc 100644
  } __attribute__ ((__packed__));
  
 -- 
-2.6.1
+2.6.2
