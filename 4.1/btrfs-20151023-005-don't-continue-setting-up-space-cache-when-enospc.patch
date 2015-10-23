@@ -1,0 +1,70 @@
+From 2968b1f48bd7366dd7310acde1ee6d1bf7791142 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Thu, 1 Oct 2015 12:55:18 -0400
+Subject: Btrfs: don't continue setting up space cache when enospc
+
+If we hit ENOSPC when setting up a space cache don't bother setting up any of
+the other space cache's in this transaction, it'll just induce unnecessary
+latency.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+---
+ fs/btrfs/extent-tree.c | 19 +++++++++++++++++++
+ fs/btrfs/transaction.h |  1 +
+ 2 files changed, 20 insertions(+)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index febb5bc..3185c45 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3403,6 +3403,15 @@ again:
+ 	spin_unlock(&block_group->lock);
+ 
+ 	/*
++	 * We hit an ENOSPC when setting up the cache in this transaction, just
++	 * skip doing the setup, we've already cleared the cache so we're safe.
++	 */
++	if (test_bit(BTRFS_TRANS_CACHE_ENOSPC, &trans->transaction->flags)) {
++		ret = -ENOSPC;
++		goto out_put;
++	}
++
++	/*
+ 	 * Try to preallocate enough space based on how big the block group is.
+ 	 * Keep in mind this has to include any pinned space which could end up
+ 	 * taking up quite a bit since it's not folded into the other space
+@@ -3422,8 +3431,18 @@ again:
+ 	ret = btrfs_prealloc_file_range_trans(inode, trans, 0, 0, num_pages,
+ 					      num_pages, num_pages,
+ 					      &alloc_hint);
++	/*
++	 * Our cache requires contiguous chunks so that we don't modify a bunch
++	 * of metadata or split extents when writing the cache out, which means
++	 * we can enospc if we are heavily fragmented in addition to just normal
++	 * out of space conditions.  So if we hit this just skip setting up any
++	 * other block groups for this transaction, maybe we'll unpin enough
++	 * space the next time around.
++	 */
+ 	if (!ret)
+ 		dcs = BTRFS_DC_SETUP;
++	else if (ret == -ENOSPC)
++		set_bit(BTRFS_TRANS_CACHE_ENOSPC, &trans->transaction->flags);
+ 	btrfs_free_reserved_data_space(inode, 0, num_pages);
+ 
+ out_put:
+diff --git a/fs/btrfs/transaction.h b/fs/btrfs/transaction.h
+index 109b8b7..30ae750 100644
+--- a/fs/btrfs/transaction.h
++++ b/fs/btrfs/transaction.h
+@@ -34,6 +34,7 @@ enum btrfs_trans_state {
+ 
+ #define BTRFS_TRANS_HAVE_FREE_BGS	0
+ #define BTRFS_TRANS_DIRTY_BG_RUN	1
++#define BTRFS_TRANS_CACHE_ENOSPC	2
+ 
+ struct btrfs_transaction {
+ 	u64 transid;
+-- 
+cgit v0.11.2
+
