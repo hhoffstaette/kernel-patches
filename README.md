@@ -21,7 +21,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS series: >=4.1.11**
+**LTS series: >=4.1.12**
 
 - bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html) (_not_ default-enabled)
 - block: improved TRIM, improved CFQ SSD awareness, misc. others
