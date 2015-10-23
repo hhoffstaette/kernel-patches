@@ -1,0 +1,82 @@
+From patchwork Tue Oct 13 02:20:22 2015
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [v3,16/21] btrfs: Add handler for invalidate page
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+X-Patchwork-Id: 7381121
+Message-Id: <1444702827-18169-17-git-send-email-quwenruo@cn.fujitsu.com>
+To: linux-btrfs@vger.kernel.org
+Date: Tue, 13 Oct 2015 10:20:22 +0800
+
+For btrfs_invalidatepage() and its variant evict_inode_truncate_page(),
+there will be pages don't reach disk.
+In that case, their reserved space won't be release nor freed by
+finish_ordered_io() nor delayed_ref handler.
+
+So we must free their qgroup reserved space, or we will leaking reserved
+space again.
+
+So this will patch will call btrfs_qgroup_free_data() for
+invalidatepage() and its variant evict_inode_truncate_page().
+
+And due to the nature of new btrfs_qgroup_reserve/free_data() reserved
+space will only be reserved or freed once, so for pages which are
+already flushed to disk, their reserved space will be released and freed
+by delayed_ref handler.
+
+Double free won't be a problem.
+
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+
+---
+v2:
+  Newly introduced
+v3:
+  None
+---
+ fs/btrfs/inode.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 2fe95f0..fee54b6 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -5075,6 +5075,18 @@ static void evict_inode_truncate_pages(struct inode *inode)
+ 		spin_unlock(&io_tree->lock);
+ 
+ 		lock_extent_bits(io_tree, start, end, 0, &cached_state);
++
++		/*
++		 * If still has DELALLOC flag, the extent didn't reach disk,
++		 * and its reserved space won't be freed by delayed_ref.
++		 * So we need to free its reserved space here.
++		 * (Refer to comment in btrfs_invalidatepage, case 2)
++		 *
++		 * Note, end is the bytenr of last byte, so we need + 1 here.
++		 */
++		if (state->state & EXTENT_DELALLOC)
++			btrfs_qgroup_free_data(inode, start, end - start + 1);
++
+ 		clear_extent_bit(io_tree, start, end,
+ 				 EXTENT_LOCKED | EXTENT_DIRTY |
+ 				 EXTENT_DELALLOC | EXTENT_DO_ACCOUNTING |
+@@ -8592,6 +8604,18 @@ static void btrfs_invalidatepage(struct page *page, unsigned int offset,
+ 		}
+ 	}
+ 
++	/*
++	 * Qgroup reserved space handler
++	 * Page here will be either
++	 * 1) Already written to disk
++	 *    In this case, its reserved space is released from data rsv map
++	 *    and will be freed by delayed_ref handler finally.
++	 *    So even we call qgroup_free_data(), it won't decrease reserved
++	 *    space.
++	 * 2) Not written to disk
++	 *    This means the reserved space should be freed here.
++	 */
++	btrfs_qgroup_free_data(inode, page_start, PAGE_CACHE_SIZE);
+ 	if (!inode_evicting) {
+ 		clear_extent_bit(tree, page_start, page_end,
+ 				 EXTENT_LOCKED | EXTENT_DIRTY |

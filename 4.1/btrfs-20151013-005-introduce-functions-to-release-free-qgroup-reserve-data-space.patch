@@ -1,0 +1,122 @@
+From patchwork Tue Oct 13 02:20:11 2015
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [v3, 05/21] btrfs: qgroup: Introduce functions to release/free qgroup
+	reserve data space
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+X-Patchwork-Id: 7381011
+Message-Id: <1444702827-18169-6-git-send-email-quwenruo@cn.fujitsu.com>
+To: linux-btrfs@vger.kernel.org
+Date: Tue, 13 Oct 2015 10:20:11 +0800
+
+Introduce functions btrfs_qgroup_release/free_data() to release/free
+reserved data range.
+
+Release means, just remove the data range from io_tree, but doesn't
+free the reserved space.
+This is for normal buffered write case, when data is written into disc
+and its metadata is added into tree, its reserved space should still be
+kept until commit_trans().
+So in that case, we only release dirty range, but keep the reserved
+space recorded some other place until commit_tran().
+
+Free means not only remove data range, but also free reserved space.
+This is used for case for cleanup and invalidate page.
+
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+
+---
+v2:
+  Fix comment typo
+  Update comment, to make it clear that the reserved space for any page
+  cache will either be released(it goes to disk) or freed directly
+  (truncated before reaching disk)
+v3:
+  Change to use io_tree facilities.
+
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+---
+ fs/btrfs/qgroup.c | 60 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ fs/btrfs/qgroup.h |  2 ++
+ 2 files changed, 62 insertions(+)
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 9ef8d73..a86d9c6 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -2530,3 +2530,63 @@ cleanup:
+ 	ulist_free(changeset.range_changed);
+ 	return ret;
+ }
++
++static int __btrfs_qgroup_release_data(struct inode *inode, u64 start, u64 len,
++				       int free)
++{
++	struct extent_changeset changeset;
++	int ret;
++
++	changeset.bytes_changed = 0;
++	changeset.range_changed = ulist_alloc(GFP_NOFS);
++	if (!changeset.range_changed)
++		return -ENOMEM;
++
++	ret = clear_record_extent_bits(&BTRFS_I(inode)->io_tree, start, 
++			start + len -1, EXTENT_QGROUP_RESERVED, GFP_NOFS,
++			&changeset);
++	if (ret < 0)
++		goto out;
++
++	if (free)
++		btrfs_qgroup_free(BTRFS_I(inode)->root,
++				  changeset.bytes_changed);
++out:
++	ulist_free(changeset.range_changed);
++	return ret;
++}
++
++/*
++ * Free a reserved space range from io_tree and related qgroups
++ *
++ * Should be called when a range of pages get invalidated before reaching disk.
++ * Or for error cleanup case.
++ *
++ * For data written to disk, use btrfs_qgroup_release_data().
++ *
++ * NOTE: This function may sleep for memory allocation.
++ */
++int btrfs_qgroup_free_data(struct inode *inode, u64 start, u64 len)
++{
++	return __btrfs_qgroup_release_data(inode, start, len, 1);
++}
++
++/*
++ * Release a reserved space range from io_tree only.
++ *
++ * Should be called when a range of pages get written to disk and corresponding
++ * FILE_EXTENT is inserted into corresponding root.
++ *
++ * Since new qgroup accounting framework will only update qgroup numbers at
++ * commit_transaction() time, its reserved space shouldn't be freed from
++ * related qgroups.
++ *
++ * But we should release the range from io_tree, to allow further write to be
++ * COWed.
++ *
++ * NOTE: This function may sleep for memory allocation.
++ */
++int btrfs_qgroup_release_data(struct inode *inode, u64 start, u64 len)
++{
++	return __btrfs_qgroup_release_data(inode, start, len, 0);
++}
+diff --git a/fs/btrfs/qgroup.h b/fs/btrfs/qgroup.h
+index bd17cc2..564eb21 100644
+--- a/fs/btrfs/qgroup.h
++++ b/fs/btrfs/qgroup.h
+@@ -83,4 +83,6 @@ int btrfs_verify_qgroup_counts(struct btrfs_fs_info *fs_info, u64 qgroupid,
+ 
+ /* New io_tree based accurate qgroup reserve API */
+ int btrfs_qgroup_reserve_data(struct inode *inode, u64 start, u64 len);
++int btrfs_qgroup_release_data(struct inode *inode, u64 start, u64 len);
++int btrfs_qgroup_free_data(struct inode *inode, u64 start, u64 len);
+ #endif /* __BTRFS_QGROUP__ */
