@@ -1,0 +1,41 @@
+From 2a7d44f47f53fa1be677f44c73d78b1bcf9c05d9 Mon Sep 17 00:00:00 2001
+From: Alex Deucher <alexander.deucher@amd.com>
+Date: Mon, 19 Oct 2015 09:30:42 -0400
+Subject: drm/radeon/dpm: don't add pwm attributes if DPM is disabled
+
+PWM fan control is only available with DPM.  If DPM disabled,
+don't expose the PWM fan controls to avoid a crash.
+
+Bug:
+https://bugs.freedesktop.org/show_bug.cgi?id=92524
+
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org
+---
+ drivers/gpu/drm/radeon/radeon_pm.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/radeon/radeon_pm.c b/drivers/gpu/drm/radeon/radeon_pm.c
+index 44489cc..6a0a176 100644
+--- a/drivers/gpu/drm/radeon/radeon_pm.c
++++ b/drivers/gpu/drm/radeon/radeon_pm.c
+@@ -717,10 +717,14 @@ static umode_t hwmon_attributes_visible(struct kobject *kobj,
+ 	struct radeon_device *rdev = dev_get_drvdata(dev);
+ 	umode_t effective_mode = attr->mode;
+ 
+-	/* Skip limit attributes if DPM is not enabled */
++	/* Skip attributes if DPM is not enabled */
+ 	if (rdev->pm.pm_method != PM_METHOD_DPM &&
+ 	    (attr == &sensor_dev_attr_temp1_crit.dev_attr.attr ||
+-	     attr == &sensor_dev_attr_temp1_crit_hyst.dev_attr.attr))
++	     attr == &sensor_dev_attr_temp1_crit_hyst.dev_attr.attr ||
++	     attr == &sensor_dev_attr_pwm1.dev_attr.attr ||
++	     attr == &sensor_dev_attr_pwm1_enable.dev_attr.attr ||
++	     attr == &sensor_dev_attr_pwm1_max.dev_attr.attr ||
++	     attr == &sensor_dev_attr_pwm1_min.dev_attr.attr))
+ 		return 0;
+ 
+ 	/* Skip fan attributes if fan is not present */
+-- 
+cgit v0.11.2
+

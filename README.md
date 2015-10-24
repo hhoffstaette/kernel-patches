@@ -28,5 +28,6 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - btrfs: fixes up to 4.4+ (block allocator, cleanups, data loss, performance, qgroups, RAID 5/6, subvolumes, sysfs, TRIM etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - net: TCP scalability/performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
+- radeon: DPM, misc.
 - vfs: scalability fixes from 4.2+
 
