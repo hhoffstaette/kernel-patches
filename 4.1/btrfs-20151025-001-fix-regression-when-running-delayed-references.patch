@@ -1,10 +1,10 @@
-From:	fdmanana@kernel.org
-To:	linux-btrfs@vger.kernel.org
-Cc:	Filipe Manana <fdmanana@suse.com>
-Subject: [PATCH] Btrfs: fix regression when running delayed references
-Date:	Thu, 22 Oct 2015 09:47:34 +0100
-
+From 2c3cf7d5f6105bb957df125dfce61d4483b8742d Mon Sep 17 00:00:00 2001
 From: Filipe Manana <fdmanana@suse.com>
+Date: Thu, 22 Oct 2015 09:47:34 +0100
+Subject: Btrfs: fix regression when running delayed references
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 In the kernel 4.2 merge window we had a refactoring/rework of the delayed
 references implementation in order to fix certain problems with qgroups.
@@ -87,7 +87,7 @@ steps are an example sequence leading to this issue:
    and running low on metadata space the clustered allocation fails
    and we fall back to unclustered allocation, which finds the
    extent at offset A, so a new extent buffer at offset A is allocated.
-   This creates delayed reference Ref3 for bytenr A, with a value of -1
+   This creates delayed reference Ref3 for bytenr A, with a value of 1
    and a seq value of 2;
 
 8) Ref3 is not merged neither with Ref2 nor Ref1, again because they
@@ -135,21 +135,27 @@ proper adaptations so that it operates against the new data structure
 This issue was hit running fstest btrfs/063 in a loop. Several people have
 reported this issue in the mailing list when running on kernels 4.2+.
 
+Very special thanks to Stéphane Lesimple for helping debugging this issue
+and testing this fix on his multi terabyte filesystem (which took more
+than one day to balance alone, plus fsck, etc).
+
 Fixes: c6fc24549960 ("btrfs: delayed-ref: Use list to replace the ref_root in ref_head.")
 Reported-by: Peter Becker <floyd.net@gmail.com>
 Reported-by: Stéphane Lesimple <stephane_btrfs@lesimple.fr>
+Tested-by: Stéphane Lesimple <stephane_btrfs@lesimple.fr>
 Reported-by: Malte Schröder <malte@tnxip.de>
 Reported-by: Derek Dongray <derek@valedon.co.uk>
 Reported-by: Erkki Seppala <flux-btrfs@inside.org>
 Cc: stable@vger.kernel.org  # 4.2+
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Reviewed-by: Liu Bo <bo.li.liu@oracle.com>
 ---
  fs/btrfs/delayed-ref.c | 113 +++++++++++++++++++++++++++++++++++++++++++++++++
  fs/btrfs/extent-tree.c |  14 ++++++
  2 files changed, 127 insertions(+)
 
 diff --git a/fs/btrfs/delayed-ref.c b/fs/btrfs/delayed-ref.c
-index ac3e81d..4832943 100644
+index bd9b63b..2f41580 100644
 --- a/fs/btrfs/delayed-ref.c
 +++ b/fs/btrfs/delayed-ref.c
 @@ -197,6 +197,119 @@ static inline void drop_delayed_ref(struct btrfs_trans_handle *trans,
@@ -273,10 +279,10 @@ index ac3e81d..4832943 100644
  			    struct btrfs_delayed_ref_root *delayed_refs,
  			    u64 seq)
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 522fb45..42d9310 100644
+index 92fdbc6..c0f30f5 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -2433,7 +2433,21 @@ static noinline int __btrfs_run_delayed_refs(struct btrfs_trans_handle *trans,
+@@ -2502,7 +2502,21 @@ static noinline int __btrfs_run_delayed_refs(struct btrfs_trans_handle *trans,
  			}
  		}
  
@@ -299,4 +305,5 @@ index 522fb45..42d9310 100644
  		/*
  		 * locked_ref is the head node, so we have to go one
 -- 
-2.1.3
+cgit v0.11.2
+
