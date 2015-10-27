@@ -1,0 +1,62 @@
+Date:	Sun, 25 Oct 2015 19:35:44 +0000
+From:	Alexandru Moise <00moses.alexander00@gmail.com>
+To:	clm@fb.com
+Cc:	jbacik@fb.com, dsterba@suse.com, linux-btrfs@vger.kernel.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH] btrfs: pass proper enum type to start_transaction()
+
+Signed-off-by: Alexandru Moise <00moses.alexander00@gmail.com>
+---
+ fs/btrfs/transaction.c | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index a5b0644..cb50f53 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -618,17 +618,20 @@ struct btrfs_trans_handle *btrfs_start_transaction_lflush(
+ 
+ struct btrfs_trans_handle *btrfs_join_transaction(struct btrfs_root *root)
+ {
+-	return start_transaction(root, 0, TRANS_JOIN, 0);
++	return start_transaction(root, 0, TRANS_JOIN,
++				 BTRFS_RESERVE_NO_FLUSH);
+ }
+ 
+ struct btrfs_trans_handle *btrfs_join_transaction_nolock(struct btrfs_root *root)
+ {
+-	return start_transaction(root, 0, TRANS_JOIN_NOLOCK, 0);
++	return start_transaction(root, 0, TRANS_JOIN_NOLOCK,
++				 BTRFS_RESERVE_NO_FLUSH);
+ }
+ 
+ struct btrfs_trans_handle *btrfs_start_ioctl_transaction(struct btrfs_root *root)
+ {
+-	return start_transaction(root, 0, TRANS_USERSPACE, 0);
++	return start_transaction(root, 0, TRANS_USERSPACE,
++				 BTRFS_RESERVE_NO_FLUSH);
+ }
+ 
+ /*
+@@ -646,7 +649,8 @@ struct btrfs_trans_handle *btrfs_start_ioctl_transaction(struct btrfs_root *root
+  */
+ struct btrfs_trans_handle *btrfs_attach_transaction(struct btrfs_root *root)
+ {
+-	return start_transaction(root, 0, TRANS_ATTACH, 0);
++	return start_transaction(root, 0, TRANS_ATTACH,
++				 BTRFS_RESERVE_NO_FLUSH);
+ }
+ 
+ /*
+@@ -661,7 +665,8 @@ btrfs_attach_transaction_barrier(struct btrfs_root *root)
+ {
+ 	struct btrfs_trans_handle *trans;
+ 
+-	trans = start_transaction(root, 0, TRANS_ATTACH, 0);
++	trans = start_transaction(root, 0, TRANS_ATTACH,
++				  BTRFS_RESERVE_NO_FLUSH);
+ 	if (IS_ERR(trans) && PTR_ERR(trans) == -ENOENT)
+ 		btrfs_wait_for_commit(root, 0);
+ 
+-- 
+2.6.2
