@@ -1,0 +1,84 @@
+From 3d0e0af40672a0bf16ca0f0591165535138c1f30 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <eric.dumazet@gmail.com>
+Date: Fri, 31 Jul 2015 17:53:39 -0700
+Subject: fq_codel: explicitly reset flows in ->reset()
+
+Alex reported the following crash when using fq_codel
+with htb:
+
+  crash> bt
+  PID: 630839  TASK: ffff8823c990d280  CPU: 14  COMMAND: "tc"
+   [... snip ...]
+   #8 [ffff8820ceec17a0] page_fault at ffffffff8160a8c2
+      [exception RIP: htb_qlen_notify+24]
+      RIP: ffffffffa0841718  RSP: ffff8820ceec1858  RFLAGS: 00010282
+      RAX: 0000000000000000  RBX: 0000000000000000  RCX: ffff88241747b400
+      RDX: ffff88241747b408  RSI: 0000000000000000  RDI: ffff8811fb27d000
+      RBP: ffff8820ceec1868   R8: ffff88120cdeff24   R9: ffff88120cdeff30
+      R10: 0000000000000bd4  R11: ffffffffa0840919  R12: ffffffffa0843340
+      R13: 0000000000000000  R14: 0000000000000001  R15: ffff8808dae5c2e8
+      ORIG_RAX: ffffffffffffffff  CS: 0010  SS: 0018
+   #9 [...] qdisc_tree_decrease_qlen at ffffffff81565375
+  #10 [...] fq_codel_dequeue at ffffffffa084e0a0 [sch_fq_codel]
+  #11 [...] fq_codel_reset at ffffffffa084e2f8 [sch_fq_codel]
+  #12 [...] qdisc_destroy at ffffffff81560d2d
+  #13 [...] htb_destroy_class at ffffffffa08408f8 [sch_htb]
+  #14 [...] htb_put at ffffffffa084095c [sch_htb]
+  #15 [...] tc_ctl_tclass at ffffffff815645a3
+  #16 [...] rtnetlink_rcv_msg at ffffffff81552cb0
+  [... snip ...]
+
+As Jamal pointed out, there is actually no need to call dequeue
+to purge the queued skb's in reset, data structures can be just
+reset explicitly. Therefore, we reset everything except config's
+and stats, so that we would have a fresh start after device flipping.
+
+Fixes: 4b549a2ef4be ("fq_codel: Fair Queue Codel AQM")
+Reported-by: Alex Gartrell <agartrell@fb.com>
+Cc: Alex Gartrell <agartrell@fb.com>
+Cc: Jamal Hadi Salim <jhs@mojatatu.com>
+Signed-off-by: Eric Dumazet <eric.dumazet@gmail.com>
+[xiyou.wangcong@gmail.com: added codel_vars_init() and qdisc_qstats_backlog_dec()]
+Signed-off-by: Cong Wang <xiyou.wangcong@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/sched/sch_fq_codel.c | 22 +++++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/net/sched/sch_fq_codel.c b/net/sched/sch_fq_codel.c
+index 21ca33c..a9ba030 100644
+--- a/net/sched/sch_fq_codel.c
++++ b/net/sched/sch_fq_codel.c
+@@ -288,10 +288,26 @@ begin:
+ 
+ static void fq_codel_reset(struct Qdisc *sch)
+ {
+-	struct sk_buff *skb;
++	struct fq_codel_sched_data *q = qdisc_priv(sch);
++	int i;
+ 
+-	while ((skb = fq_codel_dequeue(sch)) != NULL)
+-		kfree_skb(skb);
++	INIT_LIST_HEAD(&q->new_flows);
++	INIT_LIST_HEAD(&q->old_flows);
++	for (i = 0; i < q->flows_cnt; i++) {
++		struct fq_codel_flow *flow = q->flows + i;
++
++		while (flow->head) {
++			struct sk_buff *skb = dequeue_head(flow);
++
++			qdisc_qstats_backlog_dec(sch, skb);
++			kfree_skb(skb);
++		}
++
++		INIT_LIST_HEAD(&flow->flowchain);
++		codel_vars_init(&flow->cvars);
++	}
++	memset(q->backlogs, 0, q->flows_cnt * sizeof(u32));
++	sch->q.qlen = 0;
+ }
+ 
+ static const struct nla_policy fq_codel_policy[TCA_FQ_CODEL_MAX + 1] = {
+-- 
+cgit v0.11.2
+
