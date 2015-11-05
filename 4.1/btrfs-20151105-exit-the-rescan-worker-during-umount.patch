@@ -1,11 +1,8 @@
 From:	Justin Maggard <jmaggard10@gmail.com>
-X-Google-Original-From:	Justin Maggard <jmaggard@netgear.com>
 To:	linux-btrfs@vger.kernel.org
-Cc:	Justin Maggard <jmaggard@netgear.com>
-Subject: [PATCH v2] btrfs: qgroup: exit the rescan worker during umount
-Date:	Wed,  2 Sep 2015 18:05:17 -0700
-
-v2: Fix stupid error while making formatting changes...
+Cc:	fdmanana@gmail.com, Justin Maggard <jmaggard@netgear.com>
+Subject: [PATCH v3] btrfs: qgroup: exit the rescan worker during umount
+Date:	Wed,  4 Nov 2015 15:56:16 -0800
 
 I was hitting a consistent NULL pointer dereference during shutdown that
 showed the trace running through end_workqueue_bio().  I traced it back to
@@ -21,16 +18,33 @@ probably be doing the same for qgroup rescan, but that's a much larger
 change.  This small change is good enough to allow me to unmount without
 crashing.
 
+v3: avoid more races by calling btrfs_qgroup_wait_for_completion()
+
 Signed-off-by: Justin Maggard <jmaggard@netgear.com>
 ---
- fs/btrfs/qgroup.c | 9 ++++++---
- 1 file changed, 6 insertions(+), 3 deletions(-)
+ fs/btrfs/disk-io.c | 3 +++
+ fs/btrfs/qgroup.c  | 9 ++++++---
+ 2 files changed, 9 insertions(+), 3 deletions(-)
 
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 2d46675..1eb0839 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -3780,6 +3780,9 @@ void close_ctree(struct btrfs_root *root)
+ 	fs_info->closing = 1;
+ 	smp_mb();
+ 
++	/* wait for the qgroup rescan worker to stop */
++	btrfs_qgroup_wait_for_completion(fs_info);
++
+ 	/* wait for the uuid_scan task to finish */
+ 	down(&fs_info->uuid_tree_rescan_sem);
+ 	/* avoid complains from lockdep et al., set sem back to initial state */
 diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
-index d904ee1..5bfcee9 100644
+index 46476c2..75c0249 100644
 --- a/fs/btrfs/qgroup.c
 +++ b/fs/btrfs/qgroup.c
-@@ -2278,7 +2278,7 @@ static void btrfs_qgroup_rescan_worker(struct btrfs_work *work)
+@@ -2286,7 +2286,7 @@ static void btrfs_qgroup_rescan_worker(struct btrfs_work *work)
  		goto out;
  
  	err = 0;
@@ -39,7 +53,7 @@ index d904ee1..5bfcee9 100644
  		trans = btrfs_start_transaction(fs_info->fs_root, 0);
  		if (IS_ERR(trans)) {
  			err = PTR_ERR(trans);
-@@ -2301,7 +2301,8 @@ out:
+@@ -2307,7 +2307,8 @@ out:
  	btrfs_free_path(path);
  
  	mutex_lock(&fs_info->qgroup_rescan_lock);
@@ -49,7 +63,7 @@ index d904ee1..5bfcee9 100644
  
  	if (err > 0 &&
  	    fs_info->qgroup_flags & BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT) {
-@@ -2330,7 +2331,9 @@ out:
+@@ -2336,7 +2337,9 @@ out:
  	}
  	btrfs_end_transaction(trans, fs_info->quota_root);
  
@@ -61,4 +75,4 @@ index d904ee1..5bfcee9 100644
  			err > 0 ? " (inconsistency flag cleared)" : "");
  	} else {
 -- 
-2.5.1
+2.6.2
