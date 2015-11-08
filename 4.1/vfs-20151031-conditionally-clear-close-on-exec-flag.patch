@@ -1,0 +1,38 @@
+From fc90888d07b8e17eec49c04bdb26344fdea96c3b Mon Sep 17 00:00:00 2001
+From: Linus Torvalds <torvalds@linux-foundation.org>
+Date: Sat, 31 Oct 2015 16:06:40 -0700
+Subject: vfs: conditionally clear close-on-exec flag
+
+We clear the close-on-exec flag when opening and closing files, and the
+bit was almost always already clear before.  Avoid dirtying the
+cacheline if the clearning isn't necessary.  That avoids unnecessary
+cacheline dirtying and bouncing in multi-socket environments.
+
+Eric Dumazet has a file descriptor benchmark that goes 4% faster from
+this on his two-socket machine.  It's probably partly superlinear
+improvement due to getting slightly less spinlock contention on the
+file_lock spinlock due to less work in the critical section.
+
+Tested-by: Eric Dumazet <eric.dumazet@gmail.com>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ fs/file.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/file.c b/fs/file.c
+index 6f6eb2b..c6986dc 100644
+--- a/fs/file.c
++++ b/fs/file.c
+@@ -236,7 +236,8 @@ static inline void __set_close_on_exec(int fd, struct fdtable *fdt)
+ 
+ static inline void __clear_close_on_exec(int fd, struct fdtable *fdt)
+ {
+-	__clear_bit(fd, fdt->close_on_exec);
++	if (test_bit(fd, fdt->close_on_exec))
++		__clear_bit(fd, fdt->close_on_exec);
+ }
+ 
+ static inline void __set_open_fd(unsigned int fd, struct fdtable *fdt)
+-- 
+cgit v0.11.2
+
