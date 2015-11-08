@@ -1,0 +1,48 @@
+From 23d0127096cb91cb6d354bdc71bd88a7bae3a1d5 Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.com>
+Date: Fri, 6 Nov 2015 16:28:55 -0800
+Subject: fs/sync.c: make sync_file_range(2) use WB_SYNC_NONE writeback
+
+sync_file_range(2) is documented to issue writeback only for pages that
+are not currently being written.  After all the system call has been
+created for userspace to be able to issue background writeout and so
+waiting for in-flight IO is undesirable there.  However commit
+ee53a891f474 ("mm: do_sync_mapping_range integrity fix") switched
+do_sync_mapping_range() and thus sync_file_range() to issue writeback in
+WB_SYNC_ALL mode since do_sync_mapping_range() was used by other code
+relying on WB_SYNC_ALL semantics.
+
+These days do_sync_mapping_range() went away and we can switch
+sync_file_range(2) back to issuing WB_SYNC_NONE writeback.  That should
+help PostgreSQL avoid large latency spikes when flushing data in the
+background.
+
+Andres measured a 20% increase in transactions per second on an SSD disk.
+
+Signed-off-by: Jan Kara <jack@suse.com>
+Reported-by: Andres Freund <andres@anarazel.de>
+Tested-By: Andres Freund <andres@anarazel.de>
+Cc: Al Viro <viro@ZenIV.linux.org.uk>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ fs/sync.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/sync.c b/fs/sync.c
+index 4ec430a..dd5d171 100644
+--- a/fs/sync.c
++++ b/fs/sync.c
+@@ -348,7 +348,8 @@ SYSCALL_DEFINE4(sync_file_range, int, fd, loff_t, offset, loff_t, nbytes,
+ 	}
+ 
+ 	if (flags & SYNC_FILE_RANGE_WRITE) {
+-		ret = filemap_fdatawrite_range(mapping, offset, endbyte);
++		ret = __filemap_fdatawrite_range(mapping, offset, endbyte,
++						 WB_SYNC_NONE);
+ 		if (ret < 0)
+ 			goto out_put;
+ 	}
+-- 
+cgit v0.11.2
+
