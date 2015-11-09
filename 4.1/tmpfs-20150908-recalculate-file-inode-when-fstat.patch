@@ -1,0 +1,63 @@
+From 44a30220bc0a171c010e8df63d144655abdafe61 Mon Sep 17 00:00:00 2001
+From: Yu Zhao <yuzhao@google.com>
+Date: Tue, 8 Sep 2015 15:03:33 -0700
+Subject: shmem: recalculate file inode when fstat
+
+Shmem uses shmem_recalc_inode to update i_blocks when it allocates page,
+undoes range or swaps.  But mm can drop clean page without notifying
+shmem.  This makes fstat sometimes return out-of-date block size.
+
+The problem can be partially solved when we add
+inode_operations->getattr which calls shmem_recalc_inode to update
+i_blocks for fstat.
+
+shmem_recalc_inode also updates counter used by statfs and
+vm_committed_as.  For them the situation is not changed.  They still
+suffer from the discrepancy after dropping clean page and before the
+function is called by aforementioned triggers.
+
+Signed-off-by: Yu Zhao <yuzhao@google.com>
+Signed-off-by: Hugh Dickins <hughd@google.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/shmem.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/mm/shmem.c b/mm/shmem.c
+index dbe0c1e..48ce829 100644
+--- a/mm/shmem.c
++++ b/mm/shmem.c
+@@ -542,6 +542,21 @@ void shmem_truncate_range(struct inode *inode, loff_t lstart, loff_t lend)
+ }
+ EXPORT_SYMBOL_GPL(shmem_truncate_range);
+ 
++static int shmem_getattr(struct vfsmount *mnt, struct dentry *dentry,
++			 struct kstat *stat)
++{
++	struct inode *inode = dentry->d_inode;
++	struct shmem_inode_info *info = SHMEM_I(inode);
++
++	spin_lock(&info->lock);
++	shmem_recalc_inode(inode);
++	spin_unlock(&info->lock);
++
++	generic_fillattr(inode, stat);
++
++	return 0;
++}
++
+ static int shmem_setattr(struct dentry *dentry, struct iattr *attr)
+ {
+ 	struct inode *inode = d_inode(dentry);
+@@ -3122,6 +3137,7 @@ static const struct file_operations shmem_file_operations = {
+ };
+ 
+ static const struct inode_operations shmem_inode_operations = {
++	.getattr	= shmem_getattr,
+ 	.setattr	= shmem_setattr,
+ #ifdef CONFIG_TMPFS_XATTR
+ 	.setxattr	= shmem_setxattr,
+-- 
+cgit v0.11.2
+
