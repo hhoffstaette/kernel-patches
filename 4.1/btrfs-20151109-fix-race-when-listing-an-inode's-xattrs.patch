@@ -1,0 +1,95 @@
+From:	fdmanana@kernel.org
+To:	linux-btrfs@vger.kernel.org
+Cc:	clm@fb.com, Filipe Manana <fdmanana@suse.com>,
+	stable@vger.kernel.org
+Subject: [PATCH] Btrfs: fix race when listing an inode's xattrs
+Date:	Mon,  9 Nov 2015 18:39:48 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+When listing a inode's xattrs we have a time window where we race against
+a concurrent operation for adding a new hard link for our inode that makes
+us not return any xattr to user space. In order for this to happen, the
+first xattr of our inode needs to be at slot 0 of a leaf and the previous
+leaf must still have room for an inode ref (or extref) item, and this can
+happen because an inode's listxattrs callback does not lock the inode's
+i_mutex (nor does the VFS does it for us), but adding a hard link to an
+inode makes the VFS lock the inode's i_mutex before calling the inode's
+link callback.
+
+If we have the following leafs:
+
+               Leaf X (has N items)                    Leaf Y
+
+ [ ... (257 INODE_ITEM 0) (257 INODE_REF 256) ]  [ (257 XATTR_ITEM 12345), ... ]
+           slot N - 2         slot N - 1              slot 0
+
+The race illustrated by the following sequence diagram is possible:
+
+       CPU 1                                               CPU 2
+
+  btrfs_listxattr()
+
+    searches for key (257 XATTR_ITEM 0)
+
+    gets path with path->nodes[0] == leaf X
+    and path->slots[0] == N
+
+    because path->slots[0] is >=
+    btrfs_header_nritems(leaf X), it calls
+    btrfs_next_leaf()
+
+    btrfs_next_leaf()
+      releases the path
+
+                                                   adds key (257 INODE_REF 666)
+                                                   to the end of leaf X (slot N),
+                                                   and leaf X now has N + 1 items
+
+      searches for the key (257 INODE_REF 256),
+      with path->keep_locks == 1, because that
+      is the last key it saw in leaf X before
+      releasing the path
+
+      ends up at leaf X again and it verifies
+      that the key (257 INODE_REF 256) is no
+      longer the last key in leaf X, so it
+      returns with path->nodes[0] == leaf X
+      and path->slots[0] == N, pointing to
+      the new item with key (257 INODE_REF 666)
+
+    btrfs_listxattr's loop iteration sees that
+    the type of the key pointed by the path is
+    different from the type BTRFS_XATTR_ITEM_KEY
+    and so it breaks the loop and stops looking
+    for more xattr items
+      --> the application doesn't get any xattr
+          listed for our inode
+
+So fix this by breaking the loop only if the key's type is greater than
+BTRFS_XATTR_ITEM_KEY and skip the current key if its type is smaller.
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/xattr.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/xattr.c b/fs/btrfs/xattr.c
+index 6f518c9..1fcd7b6 100644
+--- a/fs/btrfs/xattr.c
++++ b/fs/btrfs/xattr.c
+@@ -313,8 +313,10 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
+ 		/* check to make sure this item is what we want */
+ 		if (found_key.objectid != key.objectid)
+ 			break;
+-		if (found_key.type != BTRFS_XATTR_ITEM_KEY)
++		if (found_key.type > BTRFS_XATTR_ITEM_KEY)
+ 			break;
++		if (found_key.type < BTRFS_XATTR_ITEM_KEY)
++			goto next;
+ 
+ 		di = btrfs_item_ptr(leaf, slot, struct btrfs_dir_item);
+ 		if (verify_dir_item(root, leaf, di))
+-- 
+2.1.3
