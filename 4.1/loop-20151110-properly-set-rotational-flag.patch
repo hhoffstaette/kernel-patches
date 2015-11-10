@@ -1,0 +1,51 @@
+
+The loop driver always declares the rotational flag of its device as
+rotational, even when the device of the mapped file is nonrotational,
+as is the case with SSDs or on tmpfs. This can confuse filesystem tools
+which are SSD-aware; in my case I frequently forget to tell mkfs.btrfs
+that my loop device on tmpfs is nonrotational, and that I really don't
+need any automatic metadata redundancy.
+
+The attached patch fixes this by introspecting the rotational flag of the
+mapped file's underlying block device, if it exists. If the mapped file's
+filesystem has no associated block device - as is the case on e.g. tmpfs -
+we assume nonrotational storage. If there is a better way to identify such
+non-devices I'd love to hear them.
+
+Signed-off-by: Holger Hoffstätte <holger.hoffstaette@googlemail.com>
+
+--- linux-4.1.13/drivers/block/loop.c	2015-11-10 22:24:34.811842744 +0100
++++ linux-4.1.13-loopfix/drivers/block/loop.c	2015-11-10 22:16:52.393580717 +0100
+@@ -666,6 +666,24 @@
+ 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
+ }
+ 
++static void loop_update_rotational(struct loop_device *lo)
++{
++	struct file *file = lo->lo_backing_file;
++	struct inode *file_inode = file->f_mapping->host;
++	struct block_device *file_bdev = file_inode->i_sb->s_bdev;
++	struct request_queue *q = lo->lo_queue;
++	bool nonrot = true;
++
++	/* not all filesystems (e.g. tmpfs) have a sb->s_bdev */
++	if (file_bdev)
++		nonrot = blk_queue_nonrot(bdev_get_queue(file_bdev));
++
++	if (nonrot)
++		queue_flag_set_unlocked(QUEUE_FLAG_NONROT, q);
++	else
++		queue_flag_clear_unlocked(QUEUE_FLAG_NONROT, q);
++}
++
+ static int loop_set_fd(struct loop_device *lo, fmode_t mode,
+ 		       struct block_device *bdev, unsigned int arg)
+ {
+@@ -747,6 +765,7 @@
+ 	if (!(lo_flags & LO_FLAGS_READ_ONLY) && file->f_op->fsync)
+ 		blk_queue_flush(lo->lo_queue, REQ_FLUSH);
+ 
++	loop_update_rotational(lo);
+ 	set_capacity(lo->lo_disk, size);
+ 	bd_set_size(bdev, size << 9);
+ 	loop_sysfs_init(lo);

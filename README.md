@@ -28,6 +28,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - block: improved TRIM, improved CFQ SSD awareness, misc. others
 - btrfs: fixes up to 4.4+ (block allocator, cleanups, data loss, performance, qgroups, RAID 5/6, subvolumes, sysfs, TRIM etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
+- loop: observe rotational property of underlying device
 - net: TCP scalability/performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
 - radeon: DPM, misc.
 - tmpfs: space accounting, inode consistency
