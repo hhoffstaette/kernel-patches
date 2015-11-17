@@ -1,0 +1,29 @@
+From: Holger Hoffstätte <holger.hoffstaette@googlemail.com>
+
+Both of these patches:
+
+  btrfs-20151008-fix-lost-data-profile-caused-by-balance-bg.patch
+  btrfs-20151021-001-extend-balance-filter-limit-to-take-minimum-and-maximum.patch
+
+each introduce a variable chunk_type into __btrfs_balance, but in different
+block scopes. Remove the shadowed definition and a redundant assignment.
+
+--- a/fs/btrfs/volumes.c	2015-10-18 21:55:21.000000000 +0200
++++ b/fs/btrfs/volumes.c	2015-10-18 22:00:09.715896035 +0200
+@@ -3480,8 +3480,6 @@
+ 	key.type = BTRFS_CHUNK_ITEM_KEY;
+ 
+ 	while (1) {
+-		u64 chunk_type;
+-
+ 		if ((!counting && atomic_read(&fs_info->balance_pause_req)) ||
+ 		    atomic_read(&fs_info->balance_cancel_req)) {
+ 			ret = -ECANCELED;
+@@ -3528,7 +3526,6 @@
+ 			spin_unlock(&fs_info->balance_lock);
+ 		}
+ 
+-		chunk_type = btrfs_chunk_type(leaf, chunk);
+ 		ret = should_balance_chunk(chunk_root, leaf, chunk,
+ 					   found_key.offset);
+ 

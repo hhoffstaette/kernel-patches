@@ -1,0 +1,43 @@
+From b66d62ba1e0d7ada5b89afffe19d12662b5c92c9 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Fri, 16 Oct 2015 19:15:50 +0200
+Subject: btrfs: add balance filters limits, stripes and usage to supported mask
+
+Enable the extended 'limit' syntax (a range), the new 'stripes' and
+extended 'usage' syntax (a range) filters in the filters mask. The patch
+comes separate and not within the series that introduced the new filters
+because the patch adding the mask was merged in a late rc. The
+integration branch was based on an older rc and could not merge the
+patch due to the missing changes.
+
+Prerequisities:
+* btrfs: check unsupported filters in balance arguments
+* btrfs: extend balance filter limit to take minimum and maximum
+* btrfs: add balance filter for stripes
+* btrfs: extend balance filter usage to take minimum and maximum
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+---
+ fs/btrfs/volumes.h | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 2a396cb..ec57123 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -390,7 +390,10 @@ struct map_lookup {
+ 	 BTRFS_BALANCE_ARGS_DEVID | 		\
+ 	 BTRFS_BALANCE_ARGS_DRANGE |		\
+ 	 BTRFS_BALANCE_ARGS_VRANGE |		\
+-	 BTRFS_BALANCE_ARGS_LIMIT)
++	 BTRFS_BALANCE_ARGS_LIMIT |		\
++	 BTRFS_BALANCE_ARGS_LIMIT_RANGE |	\
++	 BTRFS_BALANCE_ARGS_STRIPES_RANGE |	\
++	 BTRFS_BALANCE_ARGS_USAGE_RANGE)
+ 
+ /*
+  * Profile changing flags.  When SOFT is set we won't relocate chunk if
+-- 
+cgit v0.11.2
+
