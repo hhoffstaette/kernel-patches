@@ -1,0 +1,58 @@
+From: Jan Kara <jack@suse.cz>
+Newsgroups: gmane.linux.file-systems,gmane.linux.kernel.stable
+Subject: [PATCH] direct-io: Fix negative return from dio read beyond eof
+Date: Thu, 19 Nov 2015 21:25:34 +0100
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/102368>
+
+Assume a filesystem with 4KB blocks. When a file has size 1000 bytes and
+we issue direct IO read at offset 1024, blockdev_direct_IO() reads the
+tail of the last block and the logic for handling short DIO reads in
+dio_complete() results in a return value -24 (1000 - 1024) which
+obviously confuses userspace.
+
+Fix the problem by bailing out early once we sample i_size and can
+reliably check that direct IO read starts beyond i_size.
+
+Reported-by: Avi Kivity <avi@scylladb.com>
+Fixes: 9fe55eea7e4b444bafc42fa0000cc2d1d2847275
+CC: stable@vger.kernel.org
+CC: Steven Whitehouse <swhiteho@redhat.com>
+Signed-off-by: Jan Kara <jack@suse.cz>
+---
+ fs/direct-io.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+Avi, this patch fixes the issue for me.
+
+								Honza
+
+diff --git a/fs/direct-io.c b/fs/direct-io.c
+index 18e7554cf94c..08094c9d8172 100644
+--- a/fs/direct-io.c
++++ b/fs/direct-io.c
+@@ -1163,6 +1163,15 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
+ 		}
+ 	}
+ 
++	/* Once we sampled i_size check for reads beyond EOF */
++	dio->i_size = i_size_read(inode);
++	if (iov_iter_rw(iter) == READ && offset >= dio->i_size) {
++		if (dio->flags & DIO_LOCKING)
++			mutex_unlock(&inode->i_mutex);
++		kmem_cache_free(dio_cache, dio);
++		goto out;
++	}
++
+ 	/*
+ 	 * For file extending writes updating i_size before data writeouts
+ 	 * complete can expose uninitialized blocks in dumb filesystems.
+@@ -1216,7 +1225,6 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
+ 	sdio.next_block_for_io = -1;
+ 
+ 	dio->iocb = iocb;
+-	dio->i_size = i_size_read(inode);
+ 
+ 	spin_lock_init(&dio->bio_lock);
+ 	dio->refcount = 1;
+-- 
+2.1.4
