@@ -111,7 +111,7 @@ index f82d1f4..4f8560c 100644
 +			btrfs_endio_direct_write_update_ordered(inode,
 +						file_offset,
 +						dio_bio->bi_iter.bi_size,
-+						1);
++						0);
 +		else
  			unlock_extent(&BTRFS_I(inode)->io_tree, file_offset,
  			      file_offset + dio_bio->bi_iter.bi_size - 1);
