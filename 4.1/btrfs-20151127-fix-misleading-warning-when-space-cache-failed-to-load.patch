@@ -1,0 +1,31 @@
+From 21e4e0d84507c0338b781d88d39549c17bea3640 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Holger=20Hoffst=C3=A4tte?= <holger.hoffstaette@googlemail.com>
+Date: Fri, 27 Nov 2015 17:13:17 +0100
+Subject: [PATCH] btrfs: fix misleading warning when space cache failed to load
+
+When an inconsistent space cache is detected during loading we log a
+warning that users frequently mistake as instruction to invalidate the
+cache manually, even though this is not required. Fix the message to
+indicate that the cache will be rebuilt automatically.
+
+Signed-off-by: Holger Hoffstätte <holger.hoffstaette@googlemail.com>
+---
+ fs/btrfs/free-space-cache.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index 0948d34..7a91770 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -891,7 +891,7 @@ out:
+ 		spin_unlock(&block_group->lock);
+ 		ret = 0;
+ 
+-		btrfs_warn(fs_info, "failed to load free space cache for block group %llu, rebuild it now",
++		btrfs_warn(fs_info, "failed to load free space cache for block group %llu, rebuilding it now",
+ 			block_group->key.objectid);
+ 	}
+ 
+-- 
+2.6.3
+
