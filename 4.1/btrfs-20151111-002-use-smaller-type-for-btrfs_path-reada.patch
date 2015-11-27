@@ -1,0 +1,29 @@
+From 8522e3cac7fe9aafcc913440dbb674876a013937 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Wed, 11 Nov 2015 18:36:45 +0100
+Subject: btrfs: use smaller type for btrfs_path reada
+
+The possible values for reada are all positive and bounded, we can later
+save some bytes by storing it in u8.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 20579f6..64c1d96 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -596,7 +596,7 @@ struct btrfs_path {
+ 	int slots[BTRFS_MAX_LEVEL];
+ 	/* if there is real range locking, this locks field will change */
+ 	int locks[BTRFS_MAX_LEVEL];
+-	int reada;
++	u8 reada;
+ 	/* keep some upper locks as we walk down */
+ 	int lowest_level;
+ 
+-- 
+cgit v0.11.2
+
