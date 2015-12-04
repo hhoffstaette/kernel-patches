@@ -1,0 +1,37 @@
+From:	Alex Lyakas <alex@zadarastorage.com>
+To:	linux-btrfs <linux-btrfs@vger.kernel.org>
+Subject: [RFC PATCH] btrfs: flush_space: treat return value of do_chunk_alloc properly
+Date:	Thu, 3 Dec 2015 18:51:03 +0200
+
+do_chunk_alloc returns 1 when it succeeds to allocate a new chunk.
+But flush_space will not convert this to 0, and will also return 1.
+As a result, reserve_metadata_bytes will think that flush_space failed,
+and may potentially return this value "1" to the caller (depends how
+reserve_metadata_bytes was called). The caller will also treat this as an error.
+For example, btrfs_block_rsv_refill does:
+
+int ret = -ENOSPC;
+...
+ret = reserve_metadata_bytes(root, block_rsv, num_bytes, flush);
+if (!ret) {
+        block_rsv_add_bytes(block_rsv, num_bytes, 0);
+        return 0;
+}
+
+return ret;
+
+So it will return -ENOSPC.
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 4b89680..1ba3f0d 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -4727,7 +4727,7 @@ static int flush_space(struct btrfs_root *root,
+				     btrfs_get_alloc_profile(root, 0),
+				     CHUNK_ALLOC_NO_FORCE);
+		btrfs_end_transaction(trans, root);
+-		if (ret == -ENOSPC)
++		if (ret > 0 || ret == -ENOSPC)
+			ret = 0;
+		break;
+	case COMMIT_TRANS:
