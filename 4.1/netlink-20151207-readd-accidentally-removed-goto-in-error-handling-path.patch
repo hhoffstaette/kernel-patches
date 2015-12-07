@@ -1,0 +1,18 @@
+
+Backporting of mainline commit 1f770c0a09da855a2b51af6d19de97fb955eca85
+"netlink: Fix autobind race condition that leads to zero port ID" accidentally
+removed a goto in the error handling path. Add it back.
+
+See: http://www.spinics.net/lists/kernel/msg2137280.html
+
+diff -u -r linux-4.1.13/net/netlink/af_netlink.c linux-4.1.13-fix/net/netlink/af_netlink.c
+--- linux-4.1.13/net/netlink/af_netlink.c	2015-10-27 01:52:28.000000000 +0100
++++ linux-4.1.13-fix/net/netlink/af_netlink.c	2015-12-07 12:53:49.333579777 +0100
+@@ -1118,6 +1118,7 @@
+ 		if (err == -EEXIST)
+ 			err = -EADDRINUSE;
+ 		sock_put(sk);
++		goto err;
+ 	}
+ 
+ 	/* We need to ensure that the socket is hashed and visible. */
