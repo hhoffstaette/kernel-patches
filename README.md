@@ -21,7 +21,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS series: >=4.1.13**
+**LTS series: >=4.1.14**
 
 - bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html) (_not_ default-enabled)
 - bfq: [BFQ v7r8](http://algogroup.unimore.it/people/paolo/disk_sched/)
@@ -30,8 +30,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - net: TCP scalability/performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
-- netlink: backport regression fix
 - radeon: misc.
 - tmpfs: space accounting, inode consistency
-- vfs: scalability fixes from 4.2+
+- vfs: scalability & misc. other fixes from 4.2+
 
