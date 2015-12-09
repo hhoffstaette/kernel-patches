@@ -1,0 +1,30 @@
+From 2d4594acbf6d8f75a27f3578476b6a27d8b13ebb Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Tue, 8 Dec 2015 12:22:47 -0500
+Subject: fix the regression from "direct-io: Fix negative return from dio read beyond eof"
+
+Sure, it's better to bail out of past-the-eof read and return 0 than return
+a bogus negative value on such.  Only we'd better make sure we are bailing out
+with 0 and not -ENOMEM...
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+---
+ fs/direct-io.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/direct-io.c b/fs/direct-io.c
+index 1c75a3a..602e844 100644
+--- a/fs/direct-io.c
++++ b/fs/direct-io.c
+@@ -1175,6 +1175,7 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
+ 		if (dio->flags & DIO_LOCKING)
+ 			mutex_unlock(&inode->i_mutex);
+ 		kmem_cache_free(dio_cache, dio);
++		retval = 0;
+ 		goto out;
+ 	}
+ 
+-- 
+cgit v0.11.2
+
