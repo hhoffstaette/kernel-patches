@@ -1,0 +1,109 @@
+From b4b39eeeb7ff5135add106748353897201e61a81 Mon Sep 17 00:00:00 2001
+From: John Stultz <john.stultz@linaro.org>
+Date: Thu, 3 Dec 2015 10:23:30 -0800
+Subject: [PATCH] timekeeping: Cap adjustments so they don't exceed the maxadj value
+
+Thus its been occasionally noted that users have seen
+confusing warnings like:
+
+    Adjusting tsc more than 11% (5941981 vs 7759439)
+
+We try to limit the maximum total adjustment to 11% (10% tick
+adjustment + 0.5% frequency adjustment). But this is done by
+bounding the requested adjustment values, and the internal
+steering that is done by tracking the error from what was
+requested and what was applied, does not have any such limits.
+
+This is usually not problematic, but in some cases has a risk
+that an adjustment could cause the clocksource mult value to
+overflow, so its an indication things are outside of what is
+expected.
+
+It ends up most of the reports of this 11% warning are on systems
+using chrony, which utilizes the adjtimex() ADJ_TICK interface
+(which allows a +-10% adjustment). The original rational for
+ADJ_TICK unclear to me but my assumption it was originally added
+to allow broken systems to get a big constant correction at boot
+(see adjtimex userspace package for an example) which would allow
+the system to work w/ ntpd's 0.5% adjustment limit.
+
+Chrony uses ADJ_TICK to make very aggressive short term corrections
+(usually right at startup). Which push us close enough to the max
+bound that a few late ticks can cause the internal steering to push
+past the max adjust value (tripping the warning).
+
+Thus this patch adds some extra logic to enforce the max adjustment
+cap in the internal steering.
+
+Note: This has the potential to slow corrections when the ADJ_TICK
+value is furthest away from the default value. So it would be good to
+get some testing from folks using chrony, to make sure we don't
+cause any troubles there.
+
+Cc: Miroslav Lichvar <mlichvar@redhat.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Richard Cochran <richardcochran@gmail.com>
+Cc: Prarit Bhargava <prarit@redhat.com>
+Cc: Andy Lutomirski <luto@kernel.org>
+Reported-by: Andy Lutomirski <luto@kernel.org>
+Signed-off-by: John Stultz <john.stultz@linaro.org>
+---
+ kernel/time/timekeeping.c | 30 ++++++++++++++++++++++++++----
+ 1 file changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
+index d9249da..819e069 100644
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -1591,9 +1591,12 @@ static __always_inline void timekeeping_freqadjust(struct timekeeper *tk,
+ {
+ 	s64 interval = tk->cycle_interval;
+ 	s64 xinterval = tk->xtime_interval;
++	u32 base = tk->tkr_mono.clock->mult;
++	u32 max = tk->tkr_mono.clock->maxadj;
++	u32 cur_adj = tk->tkr_mono.mult;
+ 	s64 tick_error;
+ 	bool negative;
+-	u32 adj;
++	u32 adj_scale;
+ 
+ 	/* Remove any current error adj from freq calculation */
+ 	if (tk->ntp_err_mult)
+@@ -1612,13 +1615,32 @@ static __always_inline void timekeeping_freqadjust(struct timekeeper *tk,
+ 	/* preserve the direction of correction */
+ 	negative = (tick_error < 0);
+ 
+-	/* Sort out the magnitude of the correction */
++	/* If any adjustment would pass the max, just return */
++	if (negative && (cur_adj - 1) < (base - max))
++		return;
++	if (!negative && (cur_adj + 1) > (base + max))
++		return;
++	/*
++	 * Sort out the magnitude of the correction, but
++	 * avoid making so large a correction that we go
++	 * over the max adjustment.
++	 */
++	adj_scale = 0;
+ 	tick_error = abs64(tick_error);
+-	for (adj = 0; tick_error > interval; adj++)
++	while (tick_error > interval) {
++		u32 adj = 1 << (adj_scale + 1);
++
++		if (negative && (cur_adj - adj) < (base - max))
++			break;
++		if (!negative && (cur_adj + adj) > (base + max))
++			break;
++
++		adj_scale++;
+ 		tick_error >>= 1;
++	}
+ 
+ 	/* scale the corrections */
+-	timekeeping_apply_adjustment(tk, offset, negative, adj);
++	timekeeping_apply_adjustment(tk, offset, negative, adj_scale);
+ }
+ 
+ /*
+-- 
+2.6.3

@@ -31,6 +31,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - loop: observe rotational property of underlying device
 - net: TCP scalability/performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
 - radeon: misc.
+- time: misc. ntp & timekeeping fixes
 - tmpfs: space accounting, inode consistency
 - vfs: scalability & misc. other fixes from 4.2+
 
