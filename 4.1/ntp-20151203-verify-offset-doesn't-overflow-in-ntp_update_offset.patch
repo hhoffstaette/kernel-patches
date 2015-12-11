@@ -1,32 +1,37 @@
+From 6935f895bb49740c3ffb5fe18c9ad562f842eefd Mon Sep 17 00:00:00 2001
 From: Sasha Levin <sasha.levin@oracle.com>
-Newsgroups: gmane.linux.kernel
-Subject: [PATCH] ntp: verify offset doesn't overflow in ntp_update_offset
-Date: Thu,  3 Dec 2015 15:46:48 -0500
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2099782>
+Date: Thu, 3 Dec 2015 15:46:48 -0500
+Subject: [PATCH] ntp: Verify offset doesn't overflow in ntp_update_offset
 
 We need to make sure that the offset is valid before manipulating it,
 otherwise it might overflow on the multiplication.
 
+Cc: Sasha Levin <sasha.levin@oracle.com>
+Cc: Richard Cochran <richardcochran@gmail.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
 Signed-off-by: Sasha Levin <sasha.levin@oracle.com>
+[jstultz: Reworked one of the checks so it makes more sense]
+Signed-off-by: John Stultz <john.stultz@linaro.org>
 ---
- kernel/time/ntp.c |    6 ++++--
- 1 file changed, 4 insertions(+), 2 deletions(-)
+ kernel/time/ntp.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
 
 diff --git a/kernel/time/ntp.c b/kernel/time/ntp.c
-index 149cc80..36616c3 100644
+index 149cc80..125fc03 100644
 --- a/kernel/time/ntp.c
 +++ b/kernel/time/ntp.c
-@@ -297,6 +297,9 @@ static void ntp_update_offset(long offset)
+@@ -297,15 +297,17 @@ static void ntp_update_offset(long offset)
  	if (!(time_status & STA_PLL))
  		return;
  
-+	/* Make sure the multiplication below won't overflow */
-+	offset = clamp(offset, -MAXPHASE, MAXPHASE);
-+
- 	if (!(time_status & STA_NANO))
+-	if (!(time_status & STA_NANO))
++	if (!(time_status & STA_NANO)) {
++		/* Make sure the multiplication below won't overflow */
++		offset = clamp(offset, -USEC_PER_SEC, USEC_PER_SEC);
  		offset *= NSEC_PER_USEC;
++	}
  
-@@ -304,8 +307,7 @@ static void ntp_update_offset(long offset)
+ 	/*
  	 * Scale the phase adjustment and
  	 * clamp to the operating range.
  	 */
@@ -37,4 +42,4 @@ index 149cc80..36616c3 100644
  	/*
  	 * Select how the frequency is to be controlled
 -- 
-1.7.10.4
+2.6.3
