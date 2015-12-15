@@ -1,0 +1,78 @@
+From f0be89af049857bcc537a53fe2a2fae080e7a5bd Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Mon, 14 Dec 2015 15:40:44 -0800
+Subject: [PATCH] Btrfs: check prepare_uptodate_page() error code earlier
+
+prepare_pages() may end up calling prepare_uptodate_page() twice if our
+write only spans a single page.  But if the first call returns an error,
+our page will be unlocked and its not safe to call it again.
+
+This bug goes all the way back to 2011, and it's not something commonly
+hit.
+
+While we're here, add a more explicit check for the page being truncated
+away.  The bare lock_page() alone is protected only by good thoughts and
+i_mutex, which we're sure to regret eventually.
+
+Reported-by: Dave Jones <dsj@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+---
+ fs/btrfs/file.c | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 72e7346..0f09526 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1291,7 +1291,8 @@ out:
+  * on error we return an unlocked page and the error value
+  * on success we return a locked page and 0
+  */
+-static int prepare_uptodate_page(struct page *page, u64 pos,
++static int prepare_uptodate_page(struct inode *inode,
++				 struct page *page, u64 pos,
+ 				 bool force_uptodate)
+ {
+ 	int ret = 0;
+@@ -1306,6 +1307,10 @@ static int prepare_uptodate_page(struct page *page, u64 pos,
+ 			unlock_page(page);
+ 			return -EIO;
+ 		}
++		if (page->mapping != inode->i_mapping) {
++			unlock_page(page);
++			return -EAGAIN;
++		}
+ 	}
+ 	return 0;
+ }
+@@ -1324,6 +1329,7 @@ static noinline int prepare_pages(struct inode *inode, struct page **pages,
+ 	int faili;
+ 
+ 	for (i = 0; i < num_pages; i++) {
++again:
+ 		pages[i] = find_or_create_page(inode->i_mapping, index + i,
+ 					       mask | __GFP_WRITE);
+ 		if (!pages[i]) {
+@@ -1333,13 +1339,17 @@ static noinline int prepare_pages(struct inode *inode, struct page **pages,
+ 		}
+ 
+ 		if (i == 0)
+-			err = prepare_uptodate_page(pages[i], pos,
++			err = prepare_uptodate_page(inode, pages[i], pos,
+ 						    force_uptodate);
+-		if (i == num_pages - 1)
+-			err = prepare_uptodate_page(pages[i],
++		if (!err && i == num_pages - 1)
++			err = prepare_uptodate_page(inode, pages[i],
+ 						    pos + write_bytes, false);
+ 		if (err) {
+ 			page_cache_release(pages[i]);
++			if (err == -EAGAIN) {
++				err = 0;
++				goto again;
++			}
+ 			faili = i - 1;
+ 			goto fail;
+ 		}
+-- 
+2.4.6
