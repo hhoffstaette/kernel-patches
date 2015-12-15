@@ -1,7 +1,7 @@
 From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
-To:	linux-btrfs@vger.kernel.org
+To:	<linux-btrfs@vger.kernel.org>
 Subject: [PATCH v3 2/2] btrfs: Enhance chunk validation check
-Date:	Tue,  8 Dec 2015 16:40:42 +0800
+Date:	Tue, 15 Dec 2015 09:14:37 +0800
 
 Enhance chunk validation:
 1) Num_stripes
@@ -31,7 +31,7 @@ Reported-by: Vegard Nossum <vegard.nossum@oracle.com>
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
 
 ---
-v3:
+v2:
   Fix a typo which forgot to return -EIO after num_stripes check.
 ---
  fs/btrfs/volumes.c | 33 ++++++++++++++++++++++++++++++++-
