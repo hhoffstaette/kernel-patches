@@ -1,0 +1,41 @@
+From d3716f18a7d841565c930efde30737a3557eee69 Mon Sep 17 00:00:00 2001
+From: Herbert Xu <herbert@gondor.apana.org.au>
+Date: Fri, 4 Dec 2015 22:39:56 +0800
+Subject: rhashtable: Use __vmalloc with GFP_ATOMIC for table allocation
+
+When an rhashtable user pounds rhashtable hard with back-to-back
+insertions we may end up growing the table in GFP_ATOMIC context.
+Unfortunately when the table reaches a certain size this often
+fails because we don't have enough physically contiguous pages
+to hold the new table.
+
+Eric Dumazet suggested (and in fact wrote this patch) using
+__vmalloc instead which can be used in GFP_ATOMIC context.
+
+Reported-by: Phil Sutter <phil@nwl.cc>
+Suggested-by: Eric Dumazet <eric.dumazet@gmail.com>
+Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ lib/rhashtable.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/lib/rhashtable.c b/lib/rhashtable.c
+index 2ff7ed9..1c624db 100644
+--- a/lib/rhashtable.c
++++ b/lib/rhashtable.c
+@@ -120,8 +120,9 @@ static struct bucket_table *bucket_table_alloc(struct rhashtable *ht,
+ 	if (size <= (PAGE_SIZE << PAGE_ALLOC_COSTLY_ORDER) ||
+ 	    gfp != GFP_KERNEL)
+ 		tbl = kzalloc(size, gfp | __GFP_NOWARN | __GFP_NORETRY);
+-	if (tbl == NULL && gfp == GFP_KERNEL)
+-		tbl = vzalloc(size);
++	if (tbl == NULL)
++		tbl = __vmalloc(size, gfp | __GFP_HIGHMEM | __GFP_ZERO,
++				PAGE_KERNEL);
+ 	if (tbl == NULL)
+ 		return NULL;
+ 
+-- 
+cgit v0.11.2
+
