@@ -1,0 +1,31 @@
+From 130ed5d105dde141e7fe60d5440aa53e0a84f13b Mon Sep 17 00:00:00 2001
+From: "tadeusz.struk@intel.com" <tadeusz.struk@intel.com>
+Date: Tue, 15 Dec 2015 10:46:17 -0800
+Subject: net: fix uninitialized variable issue
+
+msg_iocb needs to be initialized on the recv/recvfrom path.
+Otherwise afalg will wrongly interpret it as an async call.
+
+Cc: stable@vger.kernel.org
+Reported-by: Harald Freudenberger <freude@linux.vnet.ibm.com>
+Signed-off-by: Tadeusz Struk <tadeusz.struk@intel.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/socket.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/net/socket.c b/net/socket.c
+index 456fadb..29822d6 100644
+--- a/net/socket.c
++++ b/net/socket.c
+@@ -1695,6 +1695,7 @@ SYSCALL_DEFINE6(recvfrom, int, fd, void __user *, ubuf, size_t, size,
+ 	msg.msg_name = addr ? (struct sockaddr *)&address : NULL;
+ 	/* We assume all kernel code knows the size of sockaddr_storage */
+ 	msg.msg_namelen = 0;
++	msg.msg_iocb = NULL;
+ 	if (sock->file->f_flags & O_NONBLOCK)
+ 		flags |= MSG_DONTWAIT;
+ 	err = sock_recvmsg(sock, &msg, iov_iter_count(&msg.msg_iter), flags);
+-- 
+cgit v0.11.2
+
