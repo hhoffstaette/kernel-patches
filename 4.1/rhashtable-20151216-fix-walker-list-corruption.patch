@@ -1,0 +1,77 @@
+From c6ff5268293ef98e48a99597e765ffc417e39fa5 Mon Sep 17 00:00:00 2001
+From: Herbert Xu <herbert@gondor.apana.org.au>
+Date: Wed, 16 Dec 2015 16:45:54 +0800
+Subject: rhashtable: Fix walker list corruption
+
+The commit ba7c95ea3870fe7b847466d39a049ab6f156aa2c ("rhashtable:
+Fix sleeping inside RCU critical section in walk_stop") introduced
+a new spinlock for the walker list.  However, it did not convert
+all existing users of the list over to the new spin lock.  Some
+continued to use the old mutext for this purpose.  This obviously
+led to corruption of the list.
+
+The fix is to use the spin lock everywhere where we touch the list.
+
+This also allows us to do rcu_rad_lock before we take the lock in
+rhashtable_walk_start.  With the old mutex this would've deadlocked
+but it's safe with the new spin lock.
+
+Fixes: ba7c95ea3870 ("rhashtable: Fix sleeping inside RCU...")
+Reported-by: Colin Ian King <colin.king@canonical.com>
+Signed-off-by: Herbert Xu <herbert@gondor.apana.org.au>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ lib/rhashtable.c | 16 +++++++---------
+ 1 file changed, 7 insertions(+), 9 deletions(-)
+
+diff --git a/lib/rhashtable.c b/lib/rhashtable.c
+index a98e71d..eb9240c 100644
+--- a/lib/rhashtable.c
++++ b/lib/rhashtable.c
+@@ -518,10 +518,10 @@ int rhashtable_walk_init(struct rhashtable *ht, struct rhashtable_iter *iter)
+ 	if (!iter->walker)
+ 		return -ENOMEM;
+ 
+-	mutex_lock(&ht->mutex);
++	spin_lock(&ht->lock);
+ 	iter->walker->tbl = rht_dereference(ht->tbl, ht);
+ 	list_add(&iter->walker->list, &iter->walker->tbl->walkers);
+-	mutex_unlock(&ht->mutex);
++	spin_unlock(&ht->lock);
+ 
+ 	return 0;
+ }
+@@ -535,10 +535,10 @@ EXPORT_SYMBOL_GPL(rhashtable_walk_init);
+  */
+ void rhashtable_walk_exit(struct rhashtable_iter *iter)
+ {
+-	mutex_lock(&iter->ht->mutex);
++	spin_lock(&iter->ht->lock);
+ 	if (iter->walker->tbl)
+ 		list_del(&iter->walker->list);
+-	mutex_unlock(&iter->ht->mutex);
++	spin_unlock(&iter->ht->lock);
+ 	kfree(iter->walker);
+ }
+ EXPORT_SYMBOL_GPL(rhashtable_walk_exit);
+@@ -562,14 +562,12 @@ int rhashtable_walk_start(struct rhashtable_iter *iter)
+ {
+ 	struct rhashtable *ht = iter->ht;
+ 
+-	mutex_lock(&ht->mutex);
++	rcu_read_lock();
+ 
++	spin_lock(&ht->lock);
+ 	if (iter->walker->tbl)
+ 		list_del(&iter->walker->list);
+-
+-	rcu_read_lock();
+-
+-	mutex_unlock(&ht->mutex);
++	spin_unlock(&ht->lock);
+ 
+ 	if (!iter->walker->tbl) {
+ 		iter->walker->tbl = rht_dereference_rcu(ht->tbl, ht);
+-- 
+cgit v0.11.2
+
