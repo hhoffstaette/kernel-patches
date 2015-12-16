@@ -1,0 +1,89 @@
+From 68985633bccb6066bf1803e316fbc6c1f5b796d6 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Tue, 1 Dec 2015 14:04:04 +0100
+Subject: sched/wait: Fix signal handling in bit wait helpers
+
+Vladimir reported getting RCU stall warnings and bisected it back to
+commit:
+
+  743162013d40 ("sched: Remove proliferation of wait_on_bit() action functions")
+
+That commit inadvertently reversed the calls to schedule() and signal_pending(),
+thereby not handling the case where the signal receives while we sleep.
+
+Reported-by: Vladimir Murzin <vladimir.murzin@arm.com>
+Tested-by: Vladimir Murzin <vladimir.murzin@arm.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: mark.rutland@arm.com
+Cc: neilb@suse.de
+Cc: oleg@redhat.com
+Fixes: 743162013d40 ("sched: Remove proliferation of wait_on_bit() action functions")
+Fixes: cbbce8220949 ("SCHED: add some "wait..on_bit...timeout()" interfaces.")
+Link: http://lkml.kernel.org/r/20151201130404.GL3816@twins.programming.kicks-ass.net
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/wait.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/sched/wait.c b/kernel/sched/wait.c
+index 052e026..f10bd87 100644
+--- a/kernel/sched/wait.c
++++ b/kernel/sched/wait.c
+@@ -583,18 +583,18 @@ EXPORT_SYMBOL(wake_up_atomic_t);
+ 
+ __sched int bit_wait(struct wait_bit_key *word)
+ {
+-	if (signal_pending_state(current->state, current))
+-		return 1;
+ 	schedule();
++	if (signal_pending(current))
++		return -EINTR;
+ 	return 0;
+ }
+ EXPORT_SYMBOL(bit_wait);
+ 
+ __sched int bit_wait_io(struct wait_bit_key *word)
+ {
+-	if (signal_pending_state(current->state, current))
+-		return 1;
+ 	io_schedule();
++	if (signal_pending(current))
++		return -EINTR;
+ 	return 0;
+ }
+ EXPORT_SYMBOL(bit_wait_io);
+@@ -602,11 +602,11 @@ EXPORT_SYMBOL(bit_wait_io);
+ __sched int bit_wait_timeout(struct wait_bit_key *word)
+ {
+ 	unsigned long now = ACCESS_ONCE(jiffies);
+-	if (signal_pending_state(current->state, current))
+-		return 1;
+ 	if (time_after_eq(now, word->timeout))
+ 		return -EAGAIN;
+ 	schedule_timeout(word->timeout - now);
++	if (signal_pending(current))
++		return -EINTR;
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(bit_wait_timeout);
+@@ -614,11 +614,11 @@ EXPORT_SYMBOL_GPL(bit_wait_timeout);
+ __sched int bit_wait_io_timeout(struct wait_bit_key *word)
+ {
+ 	unsigned long now = ACCESS_ONCE(jiffies);
+-	if (signal_pending_state(current->state, current))
+-		return 1;
+ 	if (time_after_eq(now, word->timeout))
+ 		return -EAGAIN;
+ 	io_schedule_timeout(word->timeout - now);
++	if (signal_pending(current))
++		return -EINTR;
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(bit_wait_io_timeout);
+-- 
+cgit v0.11.2
+
