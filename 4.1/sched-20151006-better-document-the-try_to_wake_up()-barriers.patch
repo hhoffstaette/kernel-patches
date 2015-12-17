@@ -1,0 +1,58 @@
+From b75a22531588e77aa8c2daf228c9723916ae2cd0 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Tue, 6 Oct 2015 14:36:17 +0200
+Subject: sched/core: Better document the try_to_wake_up() barriers
+
+Explain how the control dependency and smp_rmb() end up providing
+ACQUIRE semantics and pair with smp_store_release() in
+finish_lock_switch().
+
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Paul E. McKenney <paulmck@linux.vnet.ibm.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/core.c  | 8 +++++++-
+ kernel/sched/sched.h | 3 +++
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index eee4ee6..b64f163 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -1953,7 +1953,13 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
+ 	while (p->on_cpu)
+ 		cpu_relax();
+ 	/*
+-	 * Pairs with the smp_wmb() in finish_lock_switch().
++	 * Combined with the control dependency above, we have an effective
++	 * smp_load_acquire() without the need for full barriers.
++	 *
++	 * Pairs with the smp_store_release() in finish_lock_switch().
++	 *
++	 * This ensures that tasks getting woken will be fully ordered against
++	 * their previous state and preserve Program Order.
+ 	 */
+ 	smp_rmb();
+ 
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index efd3bfc..b242775 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1073,6 +1073,9 @@ static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
+ 	 * We must ensure this doesn't happen until the switch is completely
+ 	 * finished.
+ 	 *
++	 * In particular, the load of prev->state in finish_task_switch() must
++	 * happen before this.
++	 *
+ 	 * Pairs with the control dependency and rmb in try_to_wake_up().
+ 	 */
+ 	smp_store_release(&prev->on_cpu, 0);
+-- 
+cgit v0.11.2
+
