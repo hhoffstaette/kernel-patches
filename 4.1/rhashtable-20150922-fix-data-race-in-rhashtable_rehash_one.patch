@@ -1,0 +1,51 @@
+From 7def0f952eccdd0edb3c504f4dab35ee0d3aba1f Mon Sep 17 00:00:00 2001
+From: Dmitriy Vyukov <dvyukov@google.com>
+Date: Tue, 22 Sep 2015 10:51:52 +0200
+Subject: lib: fix data race in rhashtable_rehash_one
+
+rhashtable_rehash_one() uses complex logic to update entry->next field,
+after INIT_RHT_NULLS_HEAD and NULLS_MARKER expansion:
+
+entry->next = 1 | ((base + off) << 1)
+
+This can be compiled along the lines of:
+
+entry->next = base + off
+entry->next <<= 1
+entry->next |= 1
+
+Which will break concurrent readers.
+
+NULLS value recomputation is not needed here, so just remove
+the complex logic.
+
+The data race was found with KernelThreadSanitizer (KTSAN).
+
+Signed-off-by: Dmitry Vyukov <dvyukov@google.com>
+Acked-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Thomas Graf <tgraf@suug.ch>
+Acked-by: Herbert Xu <herbert@gondor.apana.org.au>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ lib/rhashtable.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/lib/rhashtable.c b/lib/rhashtable.c
+index cc0c697..a54ff89 100644
+--- a/lib/rhashtable.c
++++ b/lib/rhashtable.c
+@@ -187,10 +187,7 @@ static int rhashtable_rehash_one(struct rhashtable *ht, unsigned int old_hash)
+ 	head = rht_dereference_bucket(new_tbl->buckets[new_hash],
+ 				      new_tbl, new_hash);
+ 
+-	if (rht_is_a_nulls(head))
+-		INIT_RHT_NULLS_HEAD(entry->next, ht, new_hash);
+-	else
+-		RCU_INIT_POINTER(entry->next, head);
++	RCU_INIT_POINTER(entry->next, head);
+ 
+ 	rcu_assign_pointer(new_tbl->buckets[new_hash], entry);
+ 	spin_unlock(new_bucket_lock);
+-- 
+cgit v0.11.2
+
