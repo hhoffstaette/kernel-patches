@@ -1,0 +1,28 @@
+From 140e639f1a3ff052c3921818e2120fdfa4427681 Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Wed, 23 Dec 2015 13:30:51 -0800
+Subject: btrfs: fix warning on uninit variable in btrfs_finish_chunk_alloc
+
+map->num_stripes really can't be zero, but just in case.
+
+Signed-off-by: Chris Mason <clm@fb.com>
+---
+ fs/btrfs/volumes.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index a37cc04..a114b7b 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -4794,7 +4794,7 @@ int btrfs_finish_chunk_alloc(struct btrfs_trans_handle *trans,
+ 	u64 dev_offset;
+ 	u64 stripe_size;
+ 	int i = 0;
+-	int ret;
++	int ret = 0;
+ 
+ 	em_tree = &extent_root->fs_info->mapping_tree.map_tree;
+ 	read_lock(&em_tree->lock);
+-- 
+cgit v0.11.2
+
