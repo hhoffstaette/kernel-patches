@@ -1,0 +1,35 @@
+From 9269d12b2d57d9e3d13036bb750762d1110d425c Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Thu, 31 Dec 2015 18:16:29 +0000
+Subject: Btrfs: fix number of transaction units required to create symlink
+
+We weren't accounting for the insertion of an inline extent item for the
+symlink inode nor that we need to update the parent inode item (through
+the call to btrfs_add_nondir()). So fix this by including two more
+transaction units.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/inode.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 2ea2e0e..5dbc07a 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -9660,9 +9660,11 @@ static int btrfs_symlink(struct inode *dir, struct dentry *dentry,
+ 	/*
+ 	 * 2 items for inode item and ref
+ 	 * 2 items for dir items
++	 * 1 item for updating parent inode item
++	 * 1 item for the inline extent item
+ 	 * 1 item for xattr if selinux is on
+ 	 */
+-	trans = btrfs_start_transaction(root, 5);
++	trans = btrfs_start_transaction(root, 7);
+ 	if (IS_ERR(trans))
+ 		return PTR_ERR(trans);
+ 
+-- 
+cgit v0.11.2
+
