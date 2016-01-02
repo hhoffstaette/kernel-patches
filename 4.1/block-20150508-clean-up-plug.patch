@@ -1,0 +1,71 @@
+From dd6cf3e18decb4895503db1752bb5500c4dd588d Mon Sep 17 00:00:00 2001
+From: Shaohua Li <shli@fb.com>
+Date: Fri, 8 May 2015 10:51:28 -0700
+Subject: blk: clean up plug
+
+Current code looks like inner plug gets flushed with a
+blk_finish_plug(). Actually it's a nop. All requests/callbacks are added
+to current->plug, while only outmost plug is assigned to current->plug.
+So inner plug always has empty request/callback list, which makes
+blk_flush_plug_list() a nop. This tries to make the code more clear.
+
+Signed-off-by: Shaohua Li <shli@fb.com>
+Reviewed-by: Jeff Moyer <jmoyer@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/blk-core.c | 24 ++++++++++++------------
+ 1 file changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 2e5020f..9dcfb8e 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -3032,21 +3032,20 @@ void blk_start_plug(struct blk_plug *plug)
+ {
+ 	struct task_struct *tsk = current;
+ 
++	/*
++	 * If this is a nested plug, don't actually assign it.
++	 */
++	if (tsk->plug)
++		return;
++
+ 	INIT_LIST_HEAD(&plug->list);
+ 	INIT_LIST_HEAD(&plug->mq_list);
+ 	INIT_LIST_HEAD(&plug->cb_list);
+-
+ 	/*
+-	 * If this is a nested plug, don't actually assign it. It will be
+-	 * flushed on its own.
++	 * Store ordering should not be needed here, since a potential
++	 * preempt will imply a full memory barrier
+ 	 */
+-	if (!tsk->plug) {
+-		/*
+-		 * Store ordering should not be needed here, since a potential
+-		 * preempt will imply a full memory barrier
+-		 */
+-		tsk->plug = plug;
+-	}
++	tsk->plug = plug;
+ }
+ EXPORT_SYMBOL(blk_start_plug);
+ 
+@@ -3193,10 +3192,11 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
+ 
+ void blk_finish_plug(struct blk_plug *plug)
+ {
++	if (plug != current->plug)
++		return;
+ 	blk_flush_plug_list(plug, false);
+ 
+-	if (plug == current->plug)
+-		current->plug = NULL;
++	current->plug = NULL;
+ }
+ EXPORT_SYMBOL(blk_finish_plug);
+ 
+-- 
+cgit v0.11.2
+
