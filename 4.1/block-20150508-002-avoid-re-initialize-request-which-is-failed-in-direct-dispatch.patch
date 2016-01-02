@@ -1,0 +1,32 @@
+From 239ad215f0d8388cbe6c09a0fab8ad8ff5dba420 Mon Sep 17 00:00:00 2001
+From: Shaohua Li <shli@fb.com>
+Date: Fri, 8 May 2015 10:51:31 -0700
+Subject: blk-mq: avoid re-initialize request which is failed in direct dispatch
+
+If we directly issue a request and it fails, we use
+blk_mq_merge_queue_io(). But we already assigned bio to a request in
+blk_mq_bio_to_request. blk_mq_merge_queue_io shouldn't run
+blk_mq_bio_to_request again.
+
+Signed-off-by: Shaohua Li <shli@fb.com>
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/blk-mq.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index a65acff..f13d0de 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1284,6 +1284,8 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
+ 				blk_mq_end_request(rq, rq->errors);
+ 				goto done;
+ 			}
++			blk_mq_insert_request(rq, false, true, true);
++			return;
+ 		}
+ 	}
+ 
+-- 
+cgit v0.11.2
+
