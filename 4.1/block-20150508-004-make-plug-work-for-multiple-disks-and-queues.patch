@@ -1,0 +1,128 @@
+From 5b3f341f098d60da2970758db6a05bd851eb6b39 Mon Sep 17 00:00:00 2001
+From: Shaohua Li <shli@fb.com>
+Date: Fri, 8 May 2015 10:51:33 -0700
+Subject: blk-mq: make plug work for mutiple disks and queues
+
+Last patch makes plug work for multiple queue case. However it only
+works for single disk case, because it assumes only one request in the
+plug list. If a task is accessing multiple disks, eg MD/DM, the
+assumption is wrong. Let blk_attempt_plug_merge() record request from
+the same queue.
+
+V2: use NULL parameter in !mq case. Fix a bug. Add comments in
+blk_attempt_plug_merge to make it less (hopefully) confusion.
+
+Cc: Jens Axboe <axboe@fb.com>
+Cc: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Shaohua Li <shli@fb.com>
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/blk-core.c | 15 ++++++++++++---
+ block/blk-mq.c   | 14 +++++++++-----
+ block/blk.h      |  3 ++-
+ 3 files changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 9dcfb8e..f0be754 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -1522,7 +1522,8 @@ bool bio_attempt_front_merge(struct request_queue *q, struct request *req,
+  * Caller must ensure !blk_queue_nomerges(q) beforehand.
+  */
+ bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
+-			    unsigned int *request_count)
++			    unsigned int *request_count,
++			    struct request **same_queue_rq)
+ {
+ 	struct blk_plug *plug;
+ 	struct request *rq;
+@@ -1542,8 +1543,16 @@ bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
+ 	list_for_each_entry_reverse(rq, plug_list, queuelist) {
+ 		int el_ret;
+ 
+-		if (rq->q == q)
++		if (rq->q == q) {
+ 			(*request_count)++;
++			/*
++			 * Only blk-mq multiple hardware queues case checks the
++			 * rq in the same queue, there should be only one such
++			 * rq in a queue
++			 **/
++			if (same_queue_rq)
++				*same_queue_rq = rq;
++		}
+ 
+ 		if (rq->q != q || !blk_rq_merge_ok(rq, bio))
+ 			continue;
+@@ -1608,7 +1617,7 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
+ 	 * any locks.
+ 	 */
+ 	if (!blk_queue_nomerges(q) &&
+-	    blk_attempt_plug_merge(q, bio, &request_count))
++	    blk_attempt_plug_merge(q, bio, &request_count, NULL))
+ 		return;
+ 
+ 	spin_lock_irq(q->queue_lock);
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 902c2eb..31df4744 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1269,6 +1269,7 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
+ 	struct request *rq;
+ 	unsigned int request_count = 0;
+ 	struct blk_plug *plug;
++	struct request *same_queue_rq = NULL;
+ 
+ 	blk_queue_bounce(q, &bio);
+ 
+@@ -1278,7 +1279,7 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
+ 	}
+ 
+ 	if (!is_flush_fua && !blk_queue_nomerges(q) &&
+-	    blk_attempt_plug_merge(q, bio, &request_count))
++	    blk_attempt_plug_merge(q, bio, &request_count, &same_queue_rq))
+ 		return;
+ 
+ 	rq = blk_mq_map_request(q, bio, &data);
+@@ -1309,9 +1310,12 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
+ 		 * issued. So the plug list will have one request at most
+ 		 */
+ 		if (plug) {
+-			if (!list_empty(&plug->mq_list)) {
+-				old_rq = list_first_entry(&plug->mq_list,
+-					struct request, queuelist);
++			/*
++			 * The plug list might get flushed before this. If that
++			 * happens, same_queue_rq is invalid and plug list is empty
++			 **/
++			if (same_queue_rq && !list_empty(&plug->mq_list)) {
++				old_rq = same_queue_rq;
+ 				list_del_init(&old_rq->queuelist);
+ 			}
+ 			list_add_tail(&rq->queuelist, &plug->mq_list);
+@@ -1360,7 +1364,7 @@ static void blk_sq_make_request(struct request_queue *q, struct bio *bio)
+ 	}
+ 
+ 	if (!is_flush_fua && !blk_queue_nomerges(q) &&
+-	    blk_attempt_plug_merge(q, bio, &request_count))
++	    blk_attempt_plug_merge(q, bio, &request_count, NULL))
+ 		return;
+ 
+ 	rq = blk_mq_map_request(q, bio, &data);
+diff --git a/block/blk.h b/block/blk.h
+index 4b48d55..026d959 100644
+--- a/block/blk.h
++++ b/block/blk.h
+@@ -78,7 +78,8 @@ bool bio_attempt_front_merge(struct request_queue *q, struct request *req,
+ bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
+ 			    struct bio *bio);
+ bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
+-			    unsigned int *request_count);
++			    unsigned int *request_count,
++			    struct request **same_queue_rq);
+ 
+ void blk_account_io_start(struct request *req, bool new_io);
+ void blk_account_io_completion(struct request *req, unsigned int bytes);
+-- 
+cgit v0.11.2
+
