@@ -1,0 +1,127 @@
+From b3c180f6c0919f2ada70b63f7e26a7e89285f5eb Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Mon, 21 Sep 2015 16:26:04 -0400
+Subject: Btrfs: change delayed reservation fallback behavior
+
+We reserve space for the inode update when we first reserve space for writing to
+a file.  However there are lots of ways that we can use this reservation and not
+have it for subsequent ordered extents.  Previously we'd fall through and try to
+reserve metadata bytes for this, then we'd just steal the full reservation from
+the delalloc_block_rsv, and if that didn't have enough space we'd steal the full
+reservation from the global reserve.  The problem with this is we can easily
+just return ENOSPC and fallback to updating the inode item directly.  In the
+worst case (assuming 4k nodesize) we'd steal 64kib from the global reserve if we
+fall all the way through, however if we just fallback and update the inode
+directly we'd only steal 4k * BTRFS_PATH_MAX in the worst case which is 32kib.
+
+We would have also just added the extent item for the inode so we likely will
+have already cow'ed down most of the way to the leaf containing the inode item,
+so we are more often than not only need one or two nodesize's worth of
+reservations.  Given the reservation for the extent itself is also a worst case
+we will likely already have space to cover the inode update.
+
+This change will make us behave better in the theoretical worst case, and much
+better in the case that we don't have our reservation and cannot reserve more
+metadata.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+---
+ fs/btrfs/delayed-inode.c | 59 +++++++++++++++++++-----------------------------
+ 1 file changed, 23 insertions(+), 36 deletions(-)
+
+diff --git a/fs/btrfs/delayed-inode.c b/fs/btrfs/delayed-inode.c
+index cc768b2..65b0fcb 100644
+--- a/fs/btrfs/delayed-inode.c
++++ b/fs/btrfs/delayed-inode.c
+@@ -604,6 +604,29 @@ static int btrfs_delayed_inode_reserve_metadata(
+ 	num_bytes = btrfs_calc_trans_metadata_size(root, 1);
+ 
+ 	/*
++	 * If our block_rsv is the delalloc block reserve then check and see if
++	 * we have our extra reservation for updating the inode.  If not fall
++	 * through and try to reserve space quickly.
++	 *
++	 * We used to try and steal from the delalloc block rsv or the global
++	 * reserve, but we'd steal a full reservation, which isn't kind.  We are
++	 * here through delalloc which means we've likely just cowed down close
++	 * to the leaf that contains the inode, so we would steal less just
++	 * doing the fallback inode update, so if we do end up having to steal
++	 * from the global block rsv we hopefully only steal one or two blocks
++	 * worth which is less likely to hurt us.
++	 */
++	if (src_rsv && src_rsv->type == BTRFS_BLOCK_RSV_DELALLOC) {
++		spin_lock(&BTRFS_I(inode)->lock);
++		if (test_and_clear_bit(BTRFS_INODE_DELALLOC_META_RESERVED,
++				       &BTRFS_I(inode)->runtime_flags))
++			release = true;
++		else
++			src_rsv = NULL;
++		spin_unlock(&BTRFS_I(inode)->lock);
++	}
++
++	/*
+ 	 * btrfs_dirty_inode will update the inode under btrfs_join_transaction
+ 	 * which doesn't reserve space for speed.  This is a problem since we
+ 	 * still need to reserve space for this update, so try to reserve the
+@@ -632,50 +655,10 @@ static int btrfs_delayed_inode_reserve_metadata(
+ 						      num_bytes, 1);
+ 		}
+ 		return ret;
+-	} else if (src_rsv->type == BTRFS_BLOCK_RSV_DELALLOC) {
+-		spin_lock(&BTRFS_I(inode)->lock);
+-		if (test_and_clear_bit(BTRFS_INODE_DELALLOC_META_RESERVED,
+-				       &BTRFS_I(inode)->runtime_flags)) {
+-			spin_unlock(&BTRFS_I(inode)->lock);
+-			release = true;
+-			goto migrate;
+-		}
+-		spin_unlock(&BTRFS_I(inode)->lock);
+-
+-		/* Ok we didn't have space pre-reserved.  This shouldn't happen
+-		 * too often but it can happen if we do delalloc to an existing
+-		 * inode which gets dirtied because of the time update, and then
+-		 * isn't touched again until after the transaction commits and
+-		 * then we try to write out the data.  First try to be nice and
+-		 * reserve something strictly for us.  If not be a pain and try
+-		 * to steal from the delalloc block rsv.
+-		 */
+-		ret = btrfs_block_rsv_add(root, dst_rsv, num_bytes,
+-					  BTRFS_RESERVE_NO_FLUSH);
+-		if (!ret)
+-			goto out;
+-
+-		ret = btrfs_block_rsv_migrate(src_rsv, dst_rsv, num_bytes, 1);
+-		if (!ret)
+-			goto out;
+-
+-		if (btrfs_test_opt(root, ENOSPC_DEBUG))
+-			WARN(1, KERN_DEBUG
+-			     "btrfs: block rsv migrate returned %d\n", ret);
+-
+-		/*
+-		 * Ok this is a problem, let's just steal from the global rsv
+-		 * since this really shouldn't happen that often.
+-		 */
+-		ret = btrfs_block_rsv_migrate(&root->fs_info->global_block_rsv,
+-					      dst_rsv, num_bytes, 1);
+-		goto out;
+ 	}
+ 
+-migrate:
+ 	ret = btrfs_block_rsv_migrate(src_rsv, dst_rsv, num_bytes, 1);
+ 
+-out:
+ 	/*
+ 	 * Migrate only takes a reservation, it doesn't touch the size of the
+ 	 * block_rsv.  This is to simplify people who don't normally have things
+-- 
+cgit v0.11.2
+
+
+
+
+
+
+
+
+
