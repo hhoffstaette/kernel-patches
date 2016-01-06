@@ -1,0 +1,76 @@
+From:	Zhao Lei <zhaolei@cn.fujitsu.com>
+To:	<linux-btrfs@vger.kernel.org>
+CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
+Subject: [PATCH 09/10] btrfs: reada: Jump into cleanup in direct way for __readahead_hook()
+Date:	Thu, 31 Dec 2015 23:03:43 +0800
+
+Current code set nritems to 0 to make for_loop useless to bypass it,
+and set generation's value which is not necessary.
+Jump into cleanup directly is better choise.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/reada.c | 40 +++++++++++++++++++++-------------------
+ 1 file changed, 21 insertions(+), 19 deletions(-)
+
+diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
+index 869bb1c..902f899 100644
+--- a/fs/btrfs/reada.c
++++ b/fs/btrfs/reada.c
+@@ -130,26 +130,26 @@ static void __readahead_hook(struct btrfs_fs_info *fs_info,
+ 	re->scheduled_for = NULL;
+ 	spin_unlock(&re->lock);
+ 
+-	if (err == 0) {
+-		nritems = level ? btrfs_header_nritems(eb) : 0;
+-		generation = btrfs_header_generation(eb);
+-		/*
+-		 * FIXME: currently we just set nritems to 0 if this is a leaf,
+-		 * effectively ignoring the content. In a next step we could
+-		 * trigger more readahead depending from the content, e.g.
+-		 * fetch the checksums for the extents in the leaf.
+-		 */
+-	} else {
+-		/*
+-		 * this is the error case, the extent buffer has not been
+-		 * read correctly. We won't access anything from it and
+-		 * just cleanup our data structures. Effectively this will
+-		 * cut the branch below this node from read ahead.
+-		 */
+-		nritems = 0;
+-		generation = 0;
+-	}
++	/*
++	 * this is the error case, the extent buffer has not been
++	 * read correctly. We won't access anything from it and
++	 * just cleanup our data structures. Effectively this will
++	 * cut the branch below this node from read ahead.
++	 */
++	if (err)
++		goto cleanup;
+ 
++	/*
++	 * FIXME: currently we just set nritems to 0 if this is a leaf,
++	 * effectively ignoring the content. In a next step we could
++	 * trigger more readahead depending from the content, e.g.
++	 * fetch the checksums for the extents in the leaf.
++	 */
++	if (!level)
++		goto cleanup;
++
++	nritems = btrfs_header_nritems(eb);
++	generation = btrfs_header_generation(eb);
+ 	for (i = 0; i < nritems; i++) {
+ 		struct reada_extctl *rec;
+ 		u64 n_gen;
+@@ -188,6 +188,8 @@ static void __readahead_hook(struct btrfs_fs_info *fs_info,
+ 				reada_add_block(rc, bytenr, &next_key, n_gen);
+ 		}
+ 	}
++
++cleanup:
+ 	/*
+ 	 * free extctl records
+ 	 */
+-- 
+1.8.5.1
