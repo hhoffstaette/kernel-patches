@@ -1,37 +1,43 @@
+From cab572b82c4bc5f2854fdc1d42402100aa9c9683 Mon Sep 17 00:00:00 2001
 From: Sasha Levin <sasha.levin@oracle.com>
-Newsgroups: gmane.linux.kernel
-Subject: [PATCH v2] rtc: fix overflow and incorrect calculation in rtc_time64_to_tm
-Date: Thu,  3 Dec 2015 23:01:14 -0500
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2100046>
+Date: Thu, 3 Dec 2015 23:01:14 -0500
+Subject: rtc: fix overflow and incorrect calculation in rtc_time64_to_tm
 
 At some point after humans go extinct and robots cotrol the world, dividing
 he time64_t by 86400 to extract the days will overflow a 32bit integer,
 leading to incorrect conversion into rtc_time in rtc_time64_to_tm().
 
 Signed-off-by: Sasha Levin <sasha.levin@oracle.com>
+Signed-off-by: Alexandre Belloni <alexandre.belloni@free-electrons.com>
 ---
- drivers/rtc/rtc-lib.c |    7 +++----
- 1 file changed, 3 insertions(+), 4 deletions(-)
+ drivers/rtc/rtc-lib.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
 
 diff --git a/drivers/rtc/rtc-lib.c b/drivers/rtc/rtc-lib.c
-index e6bfb9c..cafae93 100644
+index e6bfb9c..cf2b23c 100644
 --- a/drivers/rtc/rtc-lib.c
 +++ b/drivers/rtc/rtc-lib.c
-@@ -53,12 +53,11 @@ EXPORT_SYMBOL(rtc_year_days);
+@@ -53,12 +53,14 @@ EXPORT_SYMBOL(rtc_year_days);
  void rtc_time64_to_tm(time64_t time, struct rtc_time *tm)
  {
  	unsigned int month, year;
 -	unsigned long secs;
 -	int days;
-+	int secs;
-+	time64_t days;
- 
- 	/* time must be positive */
+-
+-	/* time must be positive */
 -	days = div_s64(time, 86400);
 -	secs = time - (unsigned int) days * 86400;
++	int secs;
++	unsigned long days;
++
++	/*
++	 * time must be positive
++	 * This will fail for 32bit platforms on January 21st 11761191
++	 */
 +	days = div_s64_rem(time, 86400, &secs);
  
  	/* day of the week, 1970-01-01 was a Thursday */
  	tm->tm_wday = (days + 4) % 7;
 -- 
-1.7.10.4
+cgit v0.11.2
+
