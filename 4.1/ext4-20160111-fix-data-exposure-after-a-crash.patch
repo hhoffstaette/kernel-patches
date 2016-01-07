@@ -1,0 +1,84 @@
+From: Jan Kara <jack@suse.cz>
+Newsgroups: gmane.linux.kernel.stable,gmane.comp.file-systems.ext4
+Subject: [PATCH 1/2] ext4: Fix data exposure after a crash
+Date: Mon, 11 Jan 2016 11:23:49 +0100
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/159977>
+
+Huang has reported that in his powerfail testing he is seeing stale
+block contents in some of recently allocated blocks although he mounts
+ext4 in data=ordered mode. After some investigation I have found out
+that indeed when delayed allocation is used, we don't add inode to
+transaction's list of inodes needing flushing before commit. Originally
+we were doing that but commit f3b59291a69d removed the logic with a
+flawed argument that it is not needed.
+
+The problem is that although for delayed allocated blocks we write their
+contents immediately after allocating them, there is no guarantee that
+the IO scheduler or device doesn't reorder things and thus transaction
+allocating blocks and attaching them to inode can reach stable storage
+before actual block contents. Actually whenever we attach freshly
+allocated blocks to inode using a written extent, we should add inode to
+transaction's ordered inode list to make sure we properly wait for block
+contents to be written before committing the transaction. So that is
+what we do in this patch. This also handles other cases where stale data
+exposure was possible - like filling hole via mmap in
+data=ordered,nodelalloc mode.
+
+The only exception to the above rule are extending direct IO writes where
+blkdev_direct_IO() waits for IO to complete before increasing i_size and
+thus stale data exposure is not possible. For now we don't complicate
+the code with optimizing this special case since the overhead is pretty
+low. In case this is observed to be a performance problem we can always
+handle it using a special flag to ext4_map_blocks().
+
+CC: stable@vger.kernel.org
+Fixes: f3b59291a69d0b734be1fc8be489fef2dd846d3d
+Reported-by: "HUANG Weller (CM/ESW12-CN)" <Weller.Huang@cn.bosch.com>
+Tested-by: "HUANG Weller (CM/ESW12-CN)" <Weller.Huang@cn.bosch.com>
+Signed-off-by: Jan Kara <jack@suse.cz>
+---
+ fs/ext4/inode.c | 23 ++++++++++++++---------
+ 1 file changed, 14 insertions(+), 9 deletions(-)
+
+diff --git a/fs/ext4/inode.c b/fs/ext4/inode.c
+index ff2f3cd38522..b216a3eb41a8 100644
+--- a/fs/ext4/inode.c
++++ b/fs/ext4/inode.c
+@@ -682,6 +682,19 @@ out_sem:
+ 		ret = check_block_validity(inode, map);
+ 		if (ret != 0)
+ 			return ret;
++
++		/*
++		 * Inodes with freshly allocated blocks where contents will be
++		 * visible after transaction commit must be on transaction's
++		 * ordered data list.
++		 */
++		if (map->m_flags & EXT4_MAP_NEW &&
++		    !(map->m_flags & EXT4_MAP_UNWRITTEN) &&
++		    ext4_should_order_data(inode)) {
++			ret = ext4_jbd2_file_inode(handle, inode);
++			if (ret)
++				return ret;
++		}
+ 	}
+ 	return retval;
+ }
+@@ -1135,15 +1149,6 @@ static int ext4_write_end(struct file *file,
+ 	int i_size_changed = 0;
+ 
+ 	trace_ext4_write_end(inode, pos, len, copied);
+-	if (ext4_test_inode_state(inode, EXT4_STATE_ORDERED_MODE)) {
+-		ret = ext4_jbd2_file_inode(handle, inode);
+-		if (ret) {
+-			unlock_page(page);
+-			page_cache_release(page);
+-			goto errout;
+-		}
+-	}
+-
+ 	if (ext4_has_inline_data(inode)) {
+ 		ret = ext4_write_inline_data_end(inode, pos, len,
+ 						 copied, page);
+-- 
+2.6.2
