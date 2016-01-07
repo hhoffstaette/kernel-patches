@@ -1,44 +1,45 @@
 From:	Chandan Rajendra <chandan@linux.vnet.ibm.com>
 To:	linux-btrfs@vger.kernel.org
 Cc:	Chandan Rajendra <chandan@linux.vnet.ibm.com>, dsterba@suse.cz,
-	fdmanana@gmail.com, chandan@mykolab.com
-Subject: [PATCH] Btrfs: Intialize btrfs_root->highest_objectid when loading tree root and subvolume roots
-Date:	Mon,  5 Oct 2015 22:14:24 +0530
+	chandan@mykolab.com
+Subject: [PATCH V2] Btrfs: Initialize btrfs_root->highest_objectid when loading tree root and subvolume roots
+Date:	Thu,  7 Jan 2016 18:56:59 +0530
 
 The following call trace is seen when btrfs/031 test is executed in a loop,
 
-[  120.577208] WARNING: CPU: 3 PID: 6202 at /home/chandan/repos/linux/fs/btrfs/ioctl.c:558 create_subvol+0x3e6/0x729()
-[  120.581521] BTRFS: Transaction aborted (error -2)
-[  120.585410] Modules linked in:
-[  120.587460] CPU: 3 PID: 6202 Comm: btrfs Not tainted 4.2.0-rc5+ #27
-[  120.591232] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS Bochs 01/01/2011
-[  120.596134]  ffffffff81c009d0 ffff880c846ff918 ffffffff81988f34 0000000000000001
-[  120.600754]  ffff880c846ff968 ffff880c846ff958 ffffffff81050315 ffff880c846ff938
-[  120.605166]  ffff880c85ae6000 ffff8809b944e000 ffff880a96c5a448 0000000000000000
-[  120.609589] Call Trace:
-[  120.610936]  [<ffffffff81988f34>] dump_stack+0x45/0x57
-[  120.613868]  [<ffffffff81050315>] warn_slowpath_common+0x85/0xc0
-[  120.616812]  [<ffffffff81050391>] warn_slowpath_fmt+0x41/0x50
-[  120.619681]  [<ffffffff81985a84>] create_subvol+0x3e6/0x729
-[  120.622390]  [<ffffffff8112d977>] ? zone_statistics+0x77/0x90
-[  120.625111]  [<ffffffff8136577e>] btrfs_mksubvol.isra.30+0x37e/0x530
-[  120.628091]  [<ffffffff8111a248>] ? __alloc_pages_nodemask+0x1b8/0x950
-[  120.631091]  [<ffffffff81180f6a>] ? __mnt_want_write_file+0x1a/0x30
-[  120.635156]  [<ffffffff81365a31>] btrfs_ioctl_snap_create_transid+0x101/0x180
-[  120.639936]  [<ffffffff81365b02>] btrfs_ioctl_snap_create+0x52/0x70
-[  120.643942]  [<ffffffff813684ae>] btrfs_ioctl+0x46e/0x2450
-[  120.647204]  [<ffffffff8111f926>] ? lru_cache_add_active_or_unevictable+0x26/0x80
-[  120.651647]  [<ffffffff81174dd1>] do_vfs_ioctl+0x2c1/0x4a0
-[  120.655111]  [<ffffffff813be198>] ? selinux_file_ioctl+0x48/0xd0
-[  120.658500]  [<ffffffff813b875e>] ? security_file_ioctl+0x3e/0x60
-[  120.661680]  [<ffffffff81175024>] SyS_ioctl+0x74/0x80
-[  120.664464]  [<ffffffff819932d7>] entry_SYSCALL_64_fastpath+0x12/0x6a
-[  120.667824] ---[ end trace 13f2ab1e5917a256 ]---
-[  120.670159] BTRFS: error (device loop0) in create_subvol:558: errno=-2 No such entry
-[  120.673872] BTRFS info (device loop0): forced readonly
-[  120.701265] BTRFS info (device loop0): disk space caching is enabled
-[  120.704934] BTRFS error (device loop0): Remounting read-write after error is not allowed
-[  120.904385] BTRFS error (device loop0): cleaner transaction attach returned -30
+[  158.661848] ------------[ cut here ]------------
+[  158.662634] WARNING: CPU: 2 PID: 890 at /home/chandan/repos/linux/fs/btrfs/ioctl.c:558 create_subvol+0x3d1/0x6ea()
+[  158.664102] BTRFS: Transaction aborted (error -2)
+[  158.664774] Modules linked in:
+[  158.665266] CPU: 2 PID: 890 Comm: btrfs Not tainted 4.4.0-rc6-g511711a #2
+[  158.666251] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS Bochs 01/01/2011
+[  158.667392]  ffffffff81c0a6b0 ffff8806c7c4f8e8 ffffffff81431fc8 ffff8806c7c4f930
+[  158.668515]  ffff8806c7c4f920 ffffffff81051aa1 ffff880c85aff000 ffff8800bb44d000
+[  158.669647]  ffff8808863b5c98 0000000000000000 00000000fffffffe ffff8806c7c4f980
+[  158.670769] Call Trace:
+[  158.671153]  [<ffffffff81431fc8>] dump_stack+0x44/0x5c
+[  158.671884]  [<ffffffff81051aa1>] warn_slowpath_common+0x81/0xc0
+[  158.672769]  [<ffffffff81051b27>] warn_slowpath_fmt+0x47/0x50
+[  158.673620]  [<ffffffff813bc98d>] create_subvol+0x3d1/0x6ea
+[  158.674440]  [<ffffffff813777c9>] btrfs_mksubvol.isra.30+0x369/0x520
+[  158.675376]  [<ffffffff8108a4aa>] ? percpu_down_read+0x1a/0x50
+[  158.676235]  [<ffffffff81377a81>] btrfs_ioctl_snap_create_transid+0x101/0x180
+[  158.677268]  [<ffffffff81377b52>] btrfs_ioctl_snap_create+0x52/0x70
+[  158.678183]  [<ffffffff8137afb4>] btrfs_ioctl+0x474/0x2f90
+[  158.678975]  [<ffffffff81144b8e>] ? vma_merge+0xee/0x300
+[  158.679751]  [<ffffffff8115be31>] ? alloc_pages_vma+0x91/0x170
+[  158.680599]  [<ffffffff81123f62>] ? lru_cache_add_active_or_unevictable+0x22/0x70
+[  158.681686]  [<ffffffff813d99cf>] ? selinux_file_ioctl+0xff/0x1d0
+[  158.682581]  [<ffffffff8117b791>] do_vfs_ioctl+0x2c1/0x490
+[  158.683399]  [<ffffffff813d3cde>] ? security_file_ioctl+0x3e/0x60
+[  158.684297]  [<ffffffff8117b9d4>] SyS_ioctl+0x74/0x80
+[  158.685051]  [<ffffffff819b2bd7>] entry_SYSCALL_64_fastpath+0x12/0x6a
+[  158.685958] ---[ end trace 4b63312de5a2cb76 ]---
+[  158.686647] BTRFS: error (device loop0) in create_subvol:558: errno=-2 No such entry
+[  158.709508] BTRFS info (device loop0): forced readonly
+[  158.737113] BTRFS info (device loop0): disk space caching is enabled
+[  158.738096] BTRFS error (device loop0): Remounting read-write after error is not allowed
+[  158.851303] BTRFS error (device loop0): cleaner transaction attach returned -30
 
 This occurs because,
 
@@ -62,17 +63,26 @@ highest_objectid when loading the roots from disk.
 
 Signed-off-by: Chandan Rajendra <chandan@linux.vnet.ibm.com>
 ---
- fs/btrfs/disk-io.c   | 35 +++++++++++++++++++++++++++++++++++
+Changelog:
+
+v1->v2:
+A newly created subvolume cannot have an ID beyond
+BTRFS_LAST_FREE_OBJECTID.  Hence when loading tree root tree or any of
+the subvolume trees, We now use an assert statement to verify if
+root->highest_objectid has a value greater than
+BTRFS_LAST_FREE_OBJECTID.
+
+ fs/btrfs/disk-io.c   | 27 +++++++++++++++++++++++++++
  fs/btrfs/inode-map.c |  9 +--------
  fs/btrfs/inode-map.h |  1 +
  fs/btrfs/ioctl.c     |  4 ++++
- 4 files changed, 41 insertions(+), 8 deletions(-)
+ 4 files changed, 33 insertions(+), 8 deletions(-)
 
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index 807f685..3b1abe7 100644
+index dc6b73a..3679ad6 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
-@@ -1573,8 +1573,27 @@ int btrfs_init_fs_root(struct btrfs_root *root)
+@@ -1583,8 +1583,23 @@ int btrfs_init_fs_root(struct btrfs_root *root)
  	ret = get_anon_bdev(&root->anon_dev);
  	if (ret)
  		goto free_writers;
@@ -85,11 +95,7 @@ index 807f685..3b1abe7 100644
 +		goto free_root_dev;
 +	}
 +
-+	if (unlikely(root->highest_objectid >= BTRFS_LAST_FREE_OBJECTID)) {
-+		mutex_unlock(&root->objectid_mutex);
-+		ret = -ENOSPC;
-+		goto free_root_dev;
-+	}
++	ASSERT(root->highest_objectid <= BTRFS_LAST_FREE_OBJECTID);
 +
 +	mutex_unlock(&root->objectid_mutex);
 +
@@ -100,7 +106,7 @@ index 807f685..3b1abe7 100644
  free_writers:
  	btrfs_free_subvolume_writers(root->subv_writers);
  fail:
-@@ -2892,6 +2911,22 @@ retry_root_backup:
+@@ -2914,6 +2929,18 @@ retry_root_backup:
  	tree_root->commit_root = btrfs_root_node(tree_root);
  	btrfs_set_root_refs(&tree_root->root_item, 1);
  
@@ -112,11 +118,7 @@ index 807f685..3b1abe7 100644
 +		goto recovery_tree_root;
 +	}
 +
-+	if (unlikely(tree_root->highest_objectid >= BTRFS_LAST_FREE_OBJECTID)) {
-+		mutex_unlock(&tree_root->objectid_mutex);
-+		ret = -ENOSPC;
-+		goto recovery_tree_root;
-+	}
++	ASSERT(tree_root->highest_objectid <= BTRFS_LAST_FREE_OBJECTID);
 +
 +	mutex_unlock(&tree_root->objectid_mutex);
 +
@@ -124,7 +126,7 @@ index 807f685..3b1abe7 100644
  	if (ret)
  		goto recovery_tree_root;
 diff --git a/fs/btrfs/inode-map.c b/fs/btrfs/inode-map.c
-index d4a582a..9f06e8b 100644
+index 767a605..07573dc 100644
 --- a/fs/btrfs/inode-map.c
 +++ b/fs/btrfs/inode-map.c
 @@ -515,7 +515,7 @@ out:
@@ -162,7 +164,7 @@ index ddb347b..c8e864b 100644
  
  #endif
 diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
-index 0adf542..ad7422b 100644
+index 8bbecda..b96a3a8 100644
 --- a/fs/btrfs/ioctl.c
 +++ b/fs/btrfs/ioctl.c
 @@ -568,6 +568,10 @@ static noinline int create_subvol(struct inode *dir,
