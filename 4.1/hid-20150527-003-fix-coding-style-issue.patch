@@ -1,0 +1,30 @@
+From 323ddaa84f003a0c1d49f3ce5d106bc3cef070d5 Mon Sep 17 00:00:00 2001
+From: James C Boyd <jcboyd.dev@gmail.com>
+Date: Wed, 27 May 2015 17:09:08 -0500
+Subject: HID: hid-input: Fix coding style issue
+
+This line is too long; split it up.
+
+Signed-off-by: James C Boyd <jcboyd.dev@gmail.com>
+Signed-off-by: Jiri Kosina <jkosina@suse.cz>
+---
+ drivers/hid/hid-input.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/hid/hid-input.c b/drivers/hid/hid-input.c
+index abf4fc6..3511bbab 100644
+--- a/drivers/hid/hid-input.c
++++ b/drivers/hid/hid-input.c
+@@ -1157,7 +1157,8 @@ void hidinput_hid_event(struct hid_device *hid, struct hid_field *field, struct
+ 		return;
+ 
+ 	/* report the usage code as scancode if the key status has changed */
+-	if (usage->type == EV_KEY && (!test_bit(usage->code, input->key)) == value)
++	if (usage->type == EV_KEY &&
++	    (!test_bit(usage->code, input->key)) == value)
+ 		input_event(input, EV_MSC, MSC_SCAN, usage->hid);
+ 
+ 	input_event(input, usage->type, usage->code, value);
+-- 
+cgit v0.11.2
+
