@@ -1,0 +1,29 @@
+From cd808dd362c944dc61e23b1643b699c63dfea190 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Fri, 8 Jan 2016 12:41:00 -0500
+Subject: Btrfs: trace unpinned extents
+
+It would be nice to see when we've added space back to a space info.
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+---
+ fs/btrfs/extent-tree.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 1fd36c5..dbb704b 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -6491,6 +6491,9 @@ static int unpin_extent_range(struct btrfs_root *root, u64 start, u64 end,
+ 		spin_lock(&cache->lock);
+ 		cache->pinned -= len;
+ 		space_info->bytes_pinned -= len;
++
++		trace_btrfs_space_reservation(fs_info, "unpin",
++					      space_info->flags, len, 0);
+ 		space_info->max_extent_size = 0;
+ 		percpu_counter_add(&space_info->total_bytes_pinned, -len);
+ 		if (cache->ro) {
+-- 
+cgit v0.11.2
+

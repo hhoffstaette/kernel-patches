@@ -5,10 +5,6 @@ Subject: Btrfs: warn_on for unaccounted spaces
 
 These were hidden behind enospc_debug, which isn't helpful as they indicate
 actual bugs, unlike the rest of the enospc_debug stuff which is really debug
-information.  Thanks,Btrfs: warn_on for unaccounted spaces
-
-These were hidden behind enospc_debug, which isn't helpful as they indicate
-actual bugs, unlike the rest of the enospc_debug stuff which is really debug
 information.  Thanks,
 
 Signed-off-by: Josef Bacik <jbacik@fb.com>
