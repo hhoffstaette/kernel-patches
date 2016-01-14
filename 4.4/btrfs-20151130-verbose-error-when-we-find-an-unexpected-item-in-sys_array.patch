@@ -1,0 +1,27 @@
+From 93a3d46780b0f207f76608078eb965cf7b83902c Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Mon, 30 Nov 2015 17:27:09 +0100
+Subject: btrfs: verbose error when we find an unexpected item in sys_array
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index dc6697c..0577d7f 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6520,6 +6520,9 @@ int btrfs_read_sys_array(struct btrfs_root *root)
+ 			if (ret)
+ 				break;
+ 		} else {
++			printk(KERN_ERR
++		"BTRFS: unexpected item type %u in sys_array at offset %u\n",
++				(u32)key.type, cur_offset);
+ 			ret = -EIO;
+ 			break;
+ 		}
+-- 
+cgit v0.11.2
+
