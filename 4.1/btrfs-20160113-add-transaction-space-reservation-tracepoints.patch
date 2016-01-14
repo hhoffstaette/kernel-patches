@@ -1,7 +1,7 @@
-From:	Josef Bacik <jbacik@fb.com>
-To:	<linux-btrfs@vger.kernel.org>, <kernel-team@fb.com>
-Subject: [PATCH] Btrfs: add transaction space reservation tracepoints
-Date:	Wed, 13 Jan 2016 13:21:20 -0500
+From d43c97afc2b422913692c396bcf360d2a3793aae Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Wed, 13 Jan 2016 13:20:07 -0500
+Subject: Btrfs: add transaction space reservation tracepoints
 
 There are a few places where we add to trans->bytes_reserved but don't have the
 corresponding trace point.  With these added my tool no longer sees transaction
@@ -37,4 +37,5 @@ index f85ccf6..a4fec0c 100644
  	parent_inode = pending->dir;
  	parent_root = BTRFS_I(parent_inode)->root;
 -- 
-1.8.3.1
+cgit v0.11.2
+

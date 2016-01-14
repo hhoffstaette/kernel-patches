@@ -1,7 +1,7 @@
-From:	Josef Bacik <jbacik@fb.com>
-To:	<linux-btrfs@vger.kernel.org>, <kernel-team@fb.com>
-Subject: [PATCH] Btrfs: fix truncate_space_check
-Date:	Wed, 13 Jan 2016 11:48:06 -0500
+From f6af4b00d93ede652038357d95e2487bedcc492a Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Wed, 13 Jan 2016 11:45:56 -0500
+Subject: Btrfs: fix truncate_space_check
 
 truncate_space_check is using btrfs_csum_bytes_to_leaves() but forgetting to
 multiply by nodesize so we get an actual byte count.  We need a tracepoint here
@@ -40,4 +40,5 @@ index 2b8a3fe..44d138a 100644
  
  }
 -- 
-1.8.3.1
+cgit v0.11.2
+
