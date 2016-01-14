@@ -1,7 +1,7 @@
-From:	Josef Bacik <jbacik@fb.com>
-To:	<kernel-team@fb.com>, <linux-btrfs@vger.kernel.org>
-Subject: [PATCH] Btrfs: change how we update the global block rsv
-Date:	Mon, 11 Jan 2016 17:28:38 -0500
+From 0b5d5fbbd6db4897565799519310e28dbee3c10a Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Mon, 11 Jan 2016 17:26:07 -0500
+Subject: Btrfs: change how we update the global block rsv
 
 I'm writing a tool to visualize the enospc system in order to help debug enospc
 bugs and I found weird data and ran it down to when we update the global block
@@ -18,10 +18,10 @@ Signed-off-by: Josef Bacik <jbacik@fb.com>
  1 file changed, 20 insertions(+), 14 deletions(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index e478f91..3424ee8 100644
+index 4742ad0..2e91175 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -5529,27 +5529,33 @@ static void update_global_block_rsv(struct btrfs_fs_info *fs_info)
+@@ -5542,27 +5542,33 @@ static void update_global_block_rsv(struct btrfs_fs_info *fs_info)
  
  	block_rsv->size = min_t(u64, num_bytes, 512 * 1024 * 1024);
  
@@ -70,4 +70,5 @@ index e478f91..3424ee8 100644
  	spin_unlock(&sinfo->lock);
  }
 -- 
-1.8.3.1
+cgit v0.11.2
+
