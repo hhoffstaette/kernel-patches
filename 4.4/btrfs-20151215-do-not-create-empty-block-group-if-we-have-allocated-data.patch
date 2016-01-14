@@ -8,11 +8,11 @@ Now we force to create empty block group to keep data profile alive,
 however, in the below example, we eventually get an empty block group
 while we're trying to get more space for other types (metadata/system),
 
-- Before,
+Before,
 block group "A": size=2G, used=1.2G
 block group "B": size=2G, used=512M
 
-- After "btrfs balance start -dusage=50 mount_point",
+After "btrfs balance start -dusage=50 mount_point",
 block group "A": size=2G, used=(1.2+0.5)G
 block group "C": size=2G, used=0
 
@@ -29,11 +29,9 @@ Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
  1 files changed, 8 insertions(+), 1 deletions(-)
 
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 4564522..14139c9 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
 @@ -3400,6 +3400,7 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
-	u32 count_data = 0;
 	u32 count_meta = 0;
 	u32 count_sys = 0;
 	int chunk_reserved = 0;
@@ -44,7 +42,7 @@ index 4564522..14139c9 100644
 @@ -3538,7 +3539,13 @@ again:
  			goto loop;
  		}
- 
+
 -		if ((chunk_type & BTRFS_BLOCK_GROUP_DATA) && !chunk_reserved) {
 +		ASSERT(fs_info->data_sinfo);
 +		spin_lock(&fs_info->data_sinfo->lock);
