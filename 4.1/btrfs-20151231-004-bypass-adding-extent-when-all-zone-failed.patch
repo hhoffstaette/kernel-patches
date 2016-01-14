@@ -34,7 +34,7 @@ index 7733a09..ef9457e 100644
 +		have_zone = 1;
  	}
  	spin_unlock(&fs_info->reada_lock);
- 	btrfs_dev_replace_unlock(&fs_info->dev_replace, 0);
+ 	btrfs_dev_replace_unlock(&fs_info->dev_replace);
  
 +	if (!have_zone)
 +		goto error;
