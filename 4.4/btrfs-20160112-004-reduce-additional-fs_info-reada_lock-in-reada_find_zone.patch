@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 2/3] btrfs: reduce additional fs_info->reada_lock in reada_find_zone
-Date:	Fri, 18 Dec 2015 22:10:20 +0800
+From a0578e1fdc5330ed60af5b46ce9c5499470863b4 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Fri, 18 Dec 2015 21:48:48 +0800
+Subject: [PATCH 04/26] btrfs: reduce additional fs_info->reada_lock in reada_find_zone
 
 We can avoid additional locking-acquirment and one pair of
 kref_get/put by combine two condition.
@@ -13,7 +12,7 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 4 insertions(+), 8 deletions(-)
 
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index 6fb9c37..d8116fe 100644
+index 49b3fb7..7448080 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
 @@ -260,18 +260,14 @@ static struct reada_zone *reada_find_zone(struct btrfs_fs_info *fs_info,
@@ -40,4 +39,5 @@ index 6fb9c37..d8116fe 100644
  	if (!cache)
  		return NULL;
 -- 
-1.8.5.1
+2.7.0
+

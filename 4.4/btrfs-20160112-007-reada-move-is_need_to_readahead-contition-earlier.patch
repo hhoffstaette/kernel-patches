@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 02/10] btrfs: reada: Move is_need_to_readahead contition earlier
-Date:	Thu, 31 Dec 2015 23:03:36 +0800
+From ab3b652a196ece3655c2765b098b39a2d7d67fee Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 22:57:52 +0800
+Subject: [PATCH 07/26] btrfs: reada: Move is_need_to_readahead contition earlier
 
 Move is_need_to_readahead contition earlier to avoid useless loop
 to get relative data for readahead.
@@ -13,10 +12,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 9 insertions(+), 11 deletions(-)
 
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index fb21bf0..dcc5b69 100644
+index f0cf5f3..cb1f81f 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
-@@ -665,7 +665,6 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+@@ -660,7 +660,6 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
  	u64 logical;
  	int ret;
  	int i;
@@ -24,7 +23,7 @@ index fb21bf0..dcc5b69 100644
  
  	spin_lock(&fs_info->reada_lock);
  	if (dev->reada_curr_zone == NULL) {
-@@ -701,6 +700,15 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+@@ -696,6 +695,15 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
  
  	spin_unlock(&fs_info->reada_lock);
  
@@ -40,7 +39,7 @@ index fb21bf0..dcc5b69 100644
  	/*
  	 * find mirror num
  	 */
-@@ -712,18 +720,8 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+@@ -707,18 +715,8 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
  	}
  	logical = re->logical;
  
@@ -60,4 +59,5 @@ index fb21bf0..dcc5b69 100644
  	ret = reada_tree_block_flagged(fs_info->extent_root, logical,
  			mirror_num, &eb);
 -- 
-1.8.5.1
+2.7.0
+

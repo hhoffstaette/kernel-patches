@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 04/10] btrfs: reada: bypass adding extent when all zone failed
-Date:	Thu, 31 Dec 2015 23:03:38 +0800
+From a62ed10f40017c19332549af47266715491a53b4 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 18:48:54 +0800
+Subject: [PATCH 09/26] btrfs: reada: bypass adding extent when all zone failed
 
 When failed adding all dev_zones for a reada_extent, the extent
 will have no chance to be selected to run, and keep in memory
@@ -16,7 +15,7 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 5 insertions(+)
 
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index 7733a09..ef9457e 100644
+index 798b495..d54eae6 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
 @@ -330,6 +330,7 @@ static struct reada_extent *reada_find_extent(struct btrfs_root *root,
@@ -27,7 +26,7 @@ index 7733a09..ef9457e 100644
  
  	spin_lock(&fs_info->reada_lock);
  	re = radix_tree_lookup(&fs_info->reada_tree, index);
-@@ -461,10 +462,14 @@ static struct reada_extent *reada_find_extent(struct btrfs_root *root,
+@@ -456,10 +457,14 @@ static struct reada_extent *reada_find_extent(struct btrfs_root *root,
  			btrfs_dev_replace_unlock(&fs_info->dev_replace);
  			goto error;
  		}
@@ -43,4 +42,5 @@ index 7733a09..ef9457e 100644
  	return re;
  
 -- 
-1.8.5.1
+2.7.0
+

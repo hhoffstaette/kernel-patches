@@ -1,0 +1,48 @@
+From 6cc59653c270cd47db8036af06afdde17e19a008 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Mon, 8 Dec 2014 19:55:57 +0800
+Subject: [PATCH 22/26] btrfs: Fix calculation of rbio->dbitmap's size calculation
+
+Current code is trying to calculate rbio->dbitmap's size to make it
+align to sizeof(long), but implement haven't achived this object,
+it is align to sizeof(char) instead.
+This patch fixed above calculation, and use sizeof(long) instead of
+fixed "8" to increate compatibility.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/raid56.c | 4 ++--
+ fs/btrfs/scrub.c  | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
+index 6d70754..9ee11b4 100644
+--- a/fs/btrfs/raid56.c
++++ b/fs/btrfs/raid56.c
+@@ -966,8 +966,8 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
+ 	void *p;
+ 
+ 	rbio = kzalloc(sizeof(*rbio) + num_pages * sizeof(struct page *) * 2 +
+-		       DIV_ROUND_UP(stripe_npages, BITS_PER_LONG / 8),
+-			GFP_NOFS);
++		       DIV_ROUND_UP(stripe_npages, BITS_PER_LONG) *
++		       sizeof(long), GFP_NOFS);
+ 	if (!rbio)
+ 		return ERR_PTR(-ENOMEM);
+ 
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index 0c981eb..ed4902f 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -2813,7 +2813,7 @@ out:
+ 
+ static inline int scrub_calc_parity_bitmap_len(int nsectors)
+ {
+-	return DIV_ROUND_UP(nsectors, BITS_PER_LONG) * (BITS_PER_LONG / 8);
++	return DIV_ROUND_UP(nsectors, BITS_PER_LONG) * sizeof(long);
+ }
+ 
+ static void scrub_parity_get(struct scrub_parity *sparity)
+-- 
+2.7.0
+

@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 05/10] btrfs: reada: Remove level argument in severial functions
-Date:	Thu, 31 Dec 2015 23:03:39 +0800
+From 1290ed32fbc64854b2f7078919007264476f5103 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 20:30:00 +0800
+Subject: [PATCH 10/26] btrfs: reada: Remove level argument in severial functions
 
 level is not used in severial functions, remove them from arguments,
 and remove relative code for get its value.
@@ -13,7 +12,7 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 6 insertions(+), 9 deletions(-)
 
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index ef9457e..66409f3 100644
+index d54eae6..8aeb7ac 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
 @@ -101,7 +101,7 @@ static void reada_start_machine(struct btrfs_fs_info *fs_info);
@@ -44,7 +43,7 @@ index ef9457e..66409f3 100644
  {
  	int ret;
  	struct reada_extent *re = NULL;
-@@ -562,13 +561,13 @@ static void reada_control_release(struct kref *kref)
+@@ -557,13 +556,13 @@ static void reada_control_release(struct kref *kref)
  }
  
  static int reada_add_block(struct reada_control *rc, u64 logical,
@@ -60,7 +59,7 @@ index ef9457e..66409f3 100644
  	if (!re)
  		return -1;
  
-@@ -921,7 +920,6 @@ struct reada_control *btrfs_reada_add(struct btrfs_root *root,
+@@ -916,7 +915,6 @@ struct reada_control *btrfs_reada_add(struct btrfs_root *root,
  	struct reada_control *rc;
  	u64 start;
  	u64 generation;
@@ -68,7 +67,7 @@ index ef9457e..66409f3 100644
  	int ret;
  	struct extent_buffer *node;
  	static struct btrfs_key max_key = {
-@@ -944,11 +942,10 @@ struct reada_control *btrfs_reada_add(struct btrfs_root *root,
+@@ -939,11 +937,10 @@ struct reada_control *btrfs_reada_add(struct btrfs_root *root,
  
  	node = btrfs_root_node(root);
  	start = node->start;
@@ -82,4 +81,5 @@ index ef9457e..66409f3 100644
  		kfree(rc);
  		return ERR_PTR(ret);
 -- 
-1.8.5.1
+2.7.0
+

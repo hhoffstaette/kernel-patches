@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 2/3] btrfs: delete no_used argument in btrfs_copy_from_user
-Date:	Wed, 6 Jan 2016 19:00:18 +0800
+From 6cf2b90774631a6073973768b5ea3dbdb789f2fd Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Wed, 6 Jan 2016 18:47:31 +0800
+Subject: [PATCH 17/26] btrfs: delete no_used argument in btrfs_copy_from_user
 
 size_t write_bytes is not necessary for btrfs_copy_from_user(),
 delete it.
@@ -13,7 +12,7 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 2 insertions(+), 4 deletions(-)
 
 diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
-index 11fd981..e4f287c 100644
+index 22f6e6c..7a3068f 100644
 --- a/fs/btrfs/file.c
 +++ b/fs/btrfs/file.c
 @@ -406,8 +406,7 @@ int btrfs_run_defrag_inodes(struct btrfs_fs_info *fs_info)
@@ -26,7 +25,7 @@ index 11fd981..e4f287c 100644
  					 struct page **prepared_pages,
  					 struct iov_iter *i)
  {
-@@ -1575,8 +1574,7 @@ again:
+@@ -1585,8 +1584,7 @@ again:
  			ret = 0;
  		}
  
@@ -37,4 +36,5 @@ index 11fd981..e4f287c 100644
  		/*
  		 * if we have trouble faulting in the pages, fall
 -- 
-1.8.5.1
+2.7.0
+

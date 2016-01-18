@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 09/10] btrfs: reada: Jump into cleanup in direct way for __readahead_hook()
-Date:	Thu, 31 Dec 2015 23:03:43 +0800
+From c501d16f3a8080c1393ac56f169c0c076e949e60 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 22:20:59 +0800
+Subject: [PATCH 14/26] btrfs: reada: Jump into cleanup in direct way for __readahead_hook()
 
 Current code set nritems to 0 to make for_loop useless to bypass it,
 and set generation's value which is not necessary.
@@ -14,7 +13,7 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 21 insertions(+), 19 deletions(-)
 
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index 869bb1c..902f899 100644
+index aa0ea42..76c741a 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
 @@ -130,26 +130,26 @@ static void __readahead_hook(struct btrfs_fs_info *fs_info,
@@ -73,4 +72,5 @@ index 869bb1c..902f899 100644
  	 * free extctl records
  	 */
 -- 
-1.8.5.1
+2.7.0
+

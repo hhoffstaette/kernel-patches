@@ -1,0 +1,116 @@
+From c73ac5499e10241b15254d36bf71ae7378679e88 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Tue, 3 Mar 2015 20:38:46 +0800
+Subject: [PATCH 23/26] btrfs: Use unified stripe_page's index calculation
+
+We are using different index calculation method for stripe_page in
+current code:
+1: (rbio->stripe_len / PAGE_CACHE_SIZE) * stripe_index + page_index
+2: DIV_ROUND_UP(rbio->stripe_len, PAGE_CACHE_SIZE) * stripe_index + page_index
+3: DIV_ROUND_UP(rbio->stripe_len * stripe_index, PAGE_CACHE_SIZE) + page_index
+...
+
+They can get same result when stripe_len align to PAGE_CACHE_SIZE,
+this is why current code can work, intruduce and use a common function
+for calculation is a better choose.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/raid56.c | 43 +++++++++++++++++++++----------------------
+ 1 file changed, 21 insertions(+), 22 deletions(-)
+
+diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
+index 9ee11b4..c435fe0 100644
+--- a/fs/btrfs/raid56.c
++++ b/fs/btrfs/raid56.c
+@@ -609,13 +609,28 @@ static int rbio_can_merge(struct btrfs_raid_bio *last,
+ 	return 1;
+ }
+ 
++static int rbio_stripe_page_index(struct btrfs_raid_bio *rbio, int stripe,
++				  int index)
++{
++	return stripe * rbio->stripe_npages + index;
++}
++
++/*
++ * these are just the pages from the rbio array, not from anything
++ * the FS sent down to us
++ */
++static struct page *rbio_stripe_page(struct btrfs_raid_bio *rbio, int stripe,
++				     int index)
++{
++	return rbio->stripe_pages[rbio_stripe_page_index(rbio, stripe, index)];
++}
++
+ /*
+  * helper to index into the pstripe
+  */
+ static struct page *rbio_pstripe_page(struct btrfs_raid_bio *rbio, int index)
+ {
+-	index += (rbio->nr_data * rbio->stripe_len) >> PAGE_CACHE_SHIFT;
+-	return rbio->stripe_pages[index];
++	return rbio_stripe_page(rbio, rbio->nr_data, index);
+ }
+ 
+ /*
+@@ -626,10 +641,7 @@ static struct page *rbio_qstripe_page(struct btrfs_raid_bio *rbio, int index)
+ {
+ 	if (rbio->nr_data + 1 == rbio->real_stripes)
+ 		return NULL;
+-
+-	index += ((rbio->nr_data + 1) * rbio->stripe_len) >>
+-		PAGE_CACHE_SHIFT;
+-	return rbio->stripe_pages[index];
++	return rbio_stripe_page(rbio, rbio->nr_data + 1, index);
+ }
+ 
+ /*
+@@ -947,8 +959,7 @@ static struct page *page_in_rbio(struct btrfs_raid_bio *rbio,
+  */
+ static unsigned long rbio_nr_pages(unsigned long stripe_len, int nr_stripes)
+ {
+-	unsigned long nr = stripe_len * nr_stripes;
+-	return DIV_ROUND_UP(nr, PAGE_CACHE_SIZE);
++	return DIV_ROUND_UP(stripe_len, PAGE_CACHE_SIZE) * nr_stripes;
+ }
+ 
+ /*
+@@ -1026,13 +1037,13 @@ static int alloc_rbio_pages(struct btrfs_raid_bio *rbio)
+ 	return 0;
+ }
+ 
+-/* allocate pages for just the p/q stripes */
++/* only allocate pages for p/q stripes */
+ static int alloc_rbio_parity_pages(struct btrfs_raid_bio *rbio)
+ {
+ 	int i;
+ 	struct page *page;
+ 
+-	i = (rbio->nr_data * rbio->stripe_len) >> PAGE_CACHE_SHIFT;
++	i = rbio_stripe_page_index(rbio, rbio->nr_data, 0);
+ 
+ 	for (; i < rbio->nr_pages; i++) {
+ 		if (rbio->stripe_pages[i])
+@@ -1121,18 +1132,6 @@ static void validate_rbio_for_rmw(struct btrfs_raid_bio *rbio)
+ }
+ 
+ /*
+- * these are just the pages from the rbio array, not from anything
+- * the FS sent down to us
+- */
+-static struct page *rbio_stripe_page(struct btrfs_raid_bio *rbio, int stripe, int page)
+-{
+-	int index;
+-	index = stripe * (rbio->stripe_len >> PAGE_CACHE_SHIFT);
+-	index += page;
+-	return rbio->stripe_pages[index];
+-}
+-
+-/*
+  * helper function to walk our bio list and populate the bio_pages array with
+  * the result.  This seems expensive, but it is faster than constantly
+  * searching through the bio list as we setup the IO in finish_rmw or stripe
+-- 
+2.7.0
+

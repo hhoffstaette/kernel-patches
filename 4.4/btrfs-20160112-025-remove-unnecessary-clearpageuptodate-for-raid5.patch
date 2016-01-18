@@ -1,0 +1,36 @@
+From d014d378b8048e4b38671f8f14881278caa47008 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Tue, 12 Jan 2016 17:22:13 +0800
+Subject: [PATCH 25/26] btrfs: Remove unnecessary ClearPageUptodate for raid56
+
+PageUptodate flag already initialized to 0 for new page,
+no need to set it again.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+---
+ fs/btrfs/raid56.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
+index 719dbc0..2bc34e9 100644
+--- a/fs/btrfs/raid56.c
++++ b/fs/btrfs/raid56.c
+@@ -1032,7 +1032,6 @@ static int alloc_rbio_pages(struct btrfs_raid_bio *rbio)
+ 		if (!page)
+ 			return -ENOMEM;
+ 		rbio->stripe_pages[i] = page;
+-		ClearPageUptodate(page);
+ 	}
+ 	return 0;
+ }
+@@ -2273,7 +2272,6 @@ static int alloc_rbio_essential_pages(struct btrfs_raid_bio *rbio)
+ 			if (!page)
+ 				return -ENOMEM;
+ 			rbio->stripe_pages[index] = page;
+-			ClearPageUptodate(page);
+ 		}
+ 	}
+ 	return 0;
+-- 
+2.7.0
+
