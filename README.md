@@ -34,4 +34,5 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - time: misc. ntp & timekeeping fixes
 - tmpfs: space accounting, inode consistency
 - vfs: scalability & misc. other fixes from 4.2+
+- xfs: fix hang under pressure
 

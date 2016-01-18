@@ -1,0 +1,89 @@
+From 7a29ac474a47eb8cf212b45917683ae89d6fa13b Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Tue, 10 Nov 2015 10:10:34 +1100
+Subject: xfs: give all workqueues rescuer threads
+
+We're consistently hitting deadlocks here with XFS on recent kernels.
+After some digging through the crash files, it looks like everyone in
+the system is waiting for XFS to reclaim memory.
+
+Something like this:
+
+PID: 2733434  TASK: ffff8808cd242800  CPU: 19  COMMAND: "java"
+ #0 [ffff880019c53588] __schedule at ffffffff818c4df2
+ #1 [ffff880019c535d8] schedule at ffffffff818c5517
+ #2 [ffff880019c535f8] _xfs_log_force_lsn at ffffffff81316348
+ #3 [ffff880019c53688] xfs_log_force_lsn at ffffffff813164fb
+ #4 [ffff880019c536b8] xfs_iunpin_wait at ffffffff8130835e
+ #5 [ffff880019c53728] xfs_reclaim_inode at ffffffff812fd453
+ #6 [ffff880019c53778] xfs_reclaim_inodes_ag at ffffffff812fd8c7
+ #7 [ffff880019c53928] xfs_reclaim_inodes_nr at ffffffff812fe433
+ #8 [ffff880019c53958] xfs_fs_free_cached_objects at ffffffff8130d3b9
+ #9 [ffff880019c53968] super_cache_scan at ffffffff811a6f73
+#10 [ffff880019c539c8] shrink_slab at ffffffff811460e6
+#11 [ffff880019c53aa8] shrink_zone at ffffffff8114a53f
+#12 [ffff880019c53b48] do_try_to_free_pages at ffffffff8114a8ba
+#13 [ffff880019c53be8] try_to_free_pages at ffffffff8114ad5a
+#14 [ffff880019c53c78] __alloc_pages_nodemask at ffffffff8113e1b8
+#15 [ffff880019c53d88] alloc_kmem_pages_node at ffffffff8113e671
+#16 [ffff880019c53dd8] copy_process at ffffffff8104f781
+#17 [ffff880019c53ec8] do_fork at ffffffff8105129c
+#18 [ffff880019c53f38] sys_clone at ffffffff810515b6
+#19 [ffff880019c53f48] stub_clone at ffffffff818c8e4d
+
+xfs_log_force_lsn is waiting for logs to get cleaned, which is waiting
+for IO, which is waiting for workers to complete the IO which is waiting
+for worker threads that don't exist yet:
+
+PID: 2752451  TASK: ffff880bd6bdda00  CPU: 37  COMMAND: "kworker/37:1"
+ #0 [ffff8808d20abbb0] __schedule at ffffffff818c4df2
+ #1 [ffff8808d20abc00] schedule at ffffffff818c5517
+ #2 [ffff8808d20abc20] schedule_timeout at ffffffff818c7c6c
+ #3 [ffff8808d20abcc0] wait_for_completion_killable at ffffffff818c6495
+ #4 [ffff8808d20abd30] kthread_create_on_node at ffffffff8106ec82
+ #5 [ffff8808d20abdf0] create_worker at ffffffff8106752f
+ #6 [ffff8808d20abe40] worker_thread at ffffffff810699be
+ #7 [ffff8808d20abec0] kthread at ffffffff8106ef59
+ #8 [ffff8808d20abf50] ret_from_fork at ffffffff818c8ac8
+
+I think we should be using WQ_MEM_RECLAIM to make sure this thread
+pool makes progress when we're not able to allocate new workers.
+
+[dchinner: make all workqueues WQ_MEM_RECLAIM]
+
+Signed-off-by: Chris Mason <clm@fb.com>
+Reviewed-by: Dave Chinner <dchinner@redhat.com>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/xfs_super.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/fs/xfs/xfs_super.c b/fs/xfs/xfs_super.c
+index 29531ec..65fbfb7 100644
+--- a/fs/xfs/xfs_super.c
++++ b/fs/xfs/xfs_super.c
+@@ -838,17 +838,18 @@ xfs_init_mount_workqueues(
+ 		goto out_destroy_unwritten;
+ 
+ 	mp->m_reclaim_workqueue = alloc_workqueue("xfs-reclaim/%s",
+-			WQ_FREEZABLE, 0, mp->m_fsname);
++			WQ_MEM_RECLAIM|WQ_FREEZABLE, 0, mp->m_fsname);
+ 	if (!mp->m_reclaim_workqueue)
+ 		goto out_destroy_cil;
+ 
+ 	mp->m_log_workqueue = alloc_workqueue("xfs-log/%s",
+-			WQ_FREEZABLE|WQ_HIGHPRI, 0, mp->m_fsname);
++			WQ_MEM_RECLAIM|WQ_FREEZABLE|WQ_HIGHPRI, 0,
++			mp->m_fsname);
+ 	if (!mp->m_log_workqueue)
+ 		goto out_destroy_reclaim;
+ 
+ 	mp->m_eofblocks_workqueue = alloc_workqueue("xfs-eofblocks/%s",
+-			WQ_FREEZABLE, 0, mp->m_fsname);
++			WQ_MEM_RECLAIM|WQ_FREEZABLE, 0, mp->m_fsname);
+ 	if (!mp->m_eofblocks_workqueue)
+ 		goto out_destroy_log;
+ 
+-- 
+cgit v0.12
+
