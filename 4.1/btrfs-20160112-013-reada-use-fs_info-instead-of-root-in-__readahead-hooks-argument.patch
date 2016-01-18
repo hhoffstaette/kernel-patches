@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 08/10] btrfs: reada: Use fs_info instead of root in __readahead_hook's argument
-Date:	Thu, 31 Dec 2015 23:03:42 +0800
+From babf796becf4c5950a011c053649d386cd5eb7e0 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 22:46:45 +0800
+Subject: [PATCH 13/26] btrfs: reada: Use fs_info instead of root in __readahead_hook's argument
 
 What __readahead_hook() need exactly is fs_info, no need to convert
 fs_info to root in caller and convert back in __readahead_hook()
@@ -15,10 +14,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  3 files changed, 24 insertions(+), 25 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index 54e7b0d..0912f89 100644
+index c5f40dc..f538fc1 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
-@@ -4358,8 +4358,8 @@ struct reada_control *btrfs_reada_add(struct btrfs_root *root,
+@@ -4518,8 +4518,8 @@ struct reada_control *btrfs_reada_add(struct btrfs_root *root,
  			      struct btrfs_key *start, struct btrfs_key *end);
  int btrfs_reada_wait(void *handle);
  void btrfs_reada_detach(void *handle);
@@ -30,10 +29,10 @@ index 54e7b0d..0912f89 100644
  static inline int is_fstree(u64 rootid)
  {
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index 974be09..9d120e4 100644
+index c67c129..93f3d8a 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
-@@ -604,6 +604,7 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
+@@ -605,6 +605,7 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
  	int found_level;
  	struct extent_buffer *eb;
  	struct btrfs_root *root = BTRFS_I(page->mapping->host)->root;
@@ -41,7 +40,7 @@ index 974be09..9d120e4 100644
  	int ret = 0;
  	int reads_done;
  
-@@ -629,21 +630,21 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
+@@ -630,21 +631,21 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
  
  	found_start = btrfs_header_bytenr(eb);
  	if (found_start != eb->start) {
@@ -70,7 +69,7 @@ index 974be09..9d120e4 100644
  		ret = -EIO;
  		goto err;
  	}
-@@ -651,7 +652,7 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
+@@ -652,7 +653,7 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
  	btrfs_set_buffer_lockdep_class(btrfs_header_owner(eb),
  				       eb, found_level);
  
@@ -79,7 +78,7 @@ index 974be09..9d120e4 100644
  	if (ret) {
  		ret = -EIO;
  		goto err;
-@@ -672,7 +673,7 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
+@@ -673,7 +674,7 @@ static int btree_readpage_end_io_hook(struct btrfs_io_bio *io_bio,
  err:
  	if (reads_done &&
  	    test_and_clear_bit(EXTENT_BUFFER_READAHEAD, &eb->bflags))
@@ -88,7 +87,7 @@ index 974be09..9d120e4 100644
  
  	if (ret) {
  		/*
-@@ -691,14 +692,13 @@ out:
+@@ -692,14 +693,13 @@ out:
  static int btree_io_failed_hook(struct page *page, int failed_mirror)
  {
  	struct extent_buffer *eb;
@@ -105,7 +104,7 @@ index 974be09..9d120e4 100644
  }
  
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index 7668066..869bb1c 100644
+index cc3f314..aa0ea42 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
 @@ -105,15 +105,15 @@ static int reada_add_block(struct reada_control *rc, u64 logical,
@@ -157,7 +156,7 @@ index 7668066..869bb1c 100644
  
  	/* find extent */
  	spin_lock(&fs_info->reada_lock);
-@@ -729,9 +728,9 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+@@ -724,9 +723,9 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
  	ret = reada_tree_block_flagged(fs_info->extent_root, logical,
  			mirror_num, &eb);
  	if (ret)
@@ -170,4 +169,5 @@ index 7668066..869bb1c 100644
  	if (eb)
  		free_extent_buffer(eb);
 -- 
-1.8.5.1
+2.7.0
+

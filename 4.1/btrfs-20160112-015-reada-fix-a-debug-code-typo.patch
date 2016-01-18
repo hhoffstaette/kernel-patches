@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 10/10] btrfs: reada: Fix a debug code typo
-Date:	Thu, 31 Dec 2015 23:03:44 +0800
+From 80c377ec986893c16cc30794543be42d2bc8fc00 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 22:28:51 +0800
+Subject: [PATCH 15/26] btrfs: reada: Fix a debug code typo
 
 Remove one copy of loop to fix the typo of iterate zones.
 
@@ -12,10 +11,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 3 insertions(+), 8 deletions(-)
 
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index 902f899..53ee7b1 100644
+index 76c741a..bdae035 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
-@@ -898,14 +898,9 @@ static void dump_devs(struct btrfs_fs_info *fs_info, int all)
+@@ -893,14 +893,9 @@ static void dump_devs(struct btrfs_fs_info *fs_info, int all)
  			printk(KERN_CONT " zone %llu-%llu devs",
  				re->zones[i]->start,
  				re->zones[i]->end);
@@ -34,4 +33,5 @@ index 902f899..53ee7b1 100644
  		}
  		printk(KERN_CONT "\n");
 -- 
-1.8.5.1
+2.7.0
+

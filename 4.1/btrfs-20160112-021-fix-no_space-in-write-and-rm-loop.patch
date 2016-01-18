@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH] btrfs: Fix no_space in write and rm loop
-Date:	Tue, 1 Dec 2015 18:51:53 +0800
+From 13636e095987fc45170c36e5a38e53212ae64719 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Tue, 1 Dec 2015 18:39:40 +0800
+Subject: [PATCH 21/26] btrfs: Fix no_space in write and rm loop
 
 I see no_space in v4.4-rc1 again in xfstests generic/102.
 It happened randomly in some node only.
@@ -26,10 +25,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index acf3ed1..ab85393 100644
+index 9e10145..188627e 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -4086,8 +4086,10 @@ commit_trans:
+@@ -4139,8 +4139,10 @@ commit_trans:
  		    !atomic_read(&root->fs_info->open_ioctl_trans)) {
  			need_commit--;
  
@@ -42,4 +41,5 @@ index acf3ed1..ab85393 100644
  			trans = btrfs_join_transaction(root);
  			if (IS_ERR(trans))
 -- 
-1.8.5.1
+2.7.0
+

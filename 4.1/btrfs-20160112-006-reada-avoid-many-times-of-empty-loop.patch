@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 01/10] btrfs: reada: Avoid many times of empty loop
-Date:	Thu, 31 Dec 2015 23:03:35 +0800
+From b05b5a3ca84904cafb565a2d33e50652cc72aa09 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 16:57:21 +0800
+Subject: [PATCH 06/26] btrfs: reada: Avoid many times of empty loop
 
 We can see following loop(10000 times) in trace_log:
  [   75.416137] ZL_DEBUG: reada_start_machine_dev:730: pid=771 comm=kworker/u2:3 re->ref_cnt ffff88003741e0c0 1 -> 2
@@ -40,10 +39,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index c65b42f..fb21bf0 100644
+index 7e5d4ac..f0cf5f3 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
-@@ -713,7 +713,7 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+@@ -708,7 +708,7 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
  	logical = re->logical;
  
  	spin_lock(&re->lock);
@@ -53,4 +52,5 @@ index c65b42f..fb21bf0 100644
  		need_kick = 1;
  	}
 -- 
-1.8.5.1
+2.7.0
+

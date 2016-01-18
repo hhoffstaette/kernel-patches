@@ -1,8 +1,7 @@
-From: Zhaolei <zhaolei@cn.fujitsu.com>
-Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 1/6] btrfs: Fix calculation of rbio->dbitmap's size calculation
-Date: Thu, 5 Mar 2015 02:41:07 +0800
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43422>
+From 6cc59653c270cd47db8036af06afdde17e19a008 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Mon, 8 Dec 2014 19:55:57 +0800
+Subject: [PATCH 22/26] btrfs: Fix calculation of rbio->dbitmap's size calculation
 
 Current code is trying to calculate rbio->dbitmap's size to make it
 align to sizeof(long), but implement haven't achived this object,
@@ -17,10 +16,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  2 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
-index 5264858..0cfbfcf 100644
+index 6d70754..9ee11b4 100644
 --- a/fs/btrfs/raid56.c
 +++ b/fs/btrfs/raid56.c
-@@ -963,8 +963,8 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
+@@ -966,8 +966,8 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_root *root,
  	void *p;
  
  	rbio = kzalloc(sizeof(*rbio) + num_pages * sizeof(struct page *) * 2 +
@@ -32,10 +31,10 @@ index 5264858..0cfbfcf 100644
  		return ERR_PTR(-ENOMEM);
  
 diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
-index ec57687..1221a56 100644
+index 0c981eb..ed4902f 100644
 --- a/fs/btrfs/scrub.c
 +++ b/fs/btrfs/scrub.c
-@@ -2737,7 +2737,7 @@ out:
+@@ -2813,7 +2813,7 @@ out:
  
  static inline int scrub_calc_parity_bitmap_len(int nsectors)
  {
@@ -45,4 +44,5 @@ index ec57687..1221a56 100644
  
  static void scrub_parity_get(struct scrub_parity *sparity)
 -- 
-1.8.5.1
+2.7.0
+

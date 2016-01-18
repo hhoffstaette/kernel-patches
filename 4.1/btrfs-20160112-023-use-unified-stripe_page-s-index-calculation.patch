@@ -1,8 +1,7 @@
-From: Zhaolei <zhaolei@cn.fujitsu.com>
-Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 2/6] btrfs: Use unified stripe_page's index calculation
-Date: Thu, 5 Mar 2015 02:41:08 +0800
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43421>
+From c73ac5499e10241b15254d36bf71ae7378679e88 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Tue, 3 Mar 2015 20:38:46 +0800
+Subject: [PATCH 23/26] btrfs: Use unified stripe_page's index calculation
 
 We are using different index calculation method for stripe_page in
 current code:
@@ -12,8 +11,8 @@ current code:
 ...
 
 They can get same result when stripe_len align to PAGE_CACHE_SIZE,
-this is why current code can work.
-But anyway, we need to fix it to make code better.
+this is why current code can work, intruduce and use a common function
+for calculation is a better choose.
 
 Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
 ---
@@ -21,10 +20,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 21 insertions(+), 22 deletions(-)
 
 diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
-index 0cfbfcf..645bc37 100644
+index 9ee11b4..c435fe0 100644
 --- a/fs/btrfs/raid56.c
 +++ b/fs/btrfs/raid56.c
-@@ -612,13 +612,28 @@ static int rbio_can_merge(struct btrfs_raid_bio *last,
+@@ -609,13 +609,28 @@ static int rbio_can_merge(struct btrfs_raid_bio *last,
  	return 1;
  }
  
@@ -55,7 +54,7 @@ index 0cfbfcf..645bc37 100644
  }
  
  /*
-@@ -629,10 +644,7 @@ static struct page *rbio_qstripe_page(struct btrfs_raid_bio *rbio, int index)
+@@ -626,10 +641,7 @@ static struct page *rbio_qstripe_page(struct btrfs_raid_bio *rbio, int index)
  {
  	if (rbio->nr_data + 1 == rbio->real_stripes)
  		return NULL;
@@ -67,7 +66,7 @@ index 0cfbfcf..645bc37 100644
  }
  
  /*
-@@ -944,8 +956,7 @@ static struct page *page_in_rbio(struct btrfs_raid_bio *rbio,
+@@ -947,8 +959,7 @@ static struct page *page_in_rbio(struct btrfs_raid_bio *rbio,
   */
  static unsigned long rbio_nr_pages(unsigned long stripe_len, int nr_stripes)
  {
@@ -77,7 +76,7 @@ index 0cfbfcf..645bc37 100644
  }
  
  /*
-@@ -1023,13 +1034,13 @@ static int alloc_rbio_pages(struct btrfs_raid_bio *rbio)
+@@ -1026,13 +1037,13 @@ static int alloc_rbio_pages(struct btrfs_raid_bio *rbio)
  	return 0;
  }
  
@@ -93,7 +92,7 @@ index 0cfbfcf..645bc37 100644
  
  	for (; i < rbio->nr_pages; i++) {
  		if (rbio->stripe_pages[i])
-@@ -1119,18 +1130,6 @@ static void validate_rbio_for_rmw(struct btrfs_raid_bio *rbio)
+@@ -1121,18 +1132,6 @@ static void validate_rbio_for_rmw(struct btrfs_raid_bio *rbio)
  }
  
  /*
@@ -113,4 +112,5 @@ index 0cfbfcf..645bc37 100644
   * the result.  This seems expensive, but it is faster than constantly
   * searching through the bio list as we setup the IO in finish_rmw or stripe
 -- 
-1.8.5.1
+2.7.0
+

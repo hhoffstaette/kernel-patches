@@ -1,8 +1,7 @@
-From: Zhaolei <zhaolei@cn.fujitsu.com>
-Newsgroups: gmane.comp.file-systems.btrfs
-Subject: [PATCH 3/6] btrfs: use rbio->nr_pages to reduce calculation
-Date: Thu, 5 Mar 2015 02:41:09 +0800
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/43426>
+From 7bcf0caebd22164ac53734d0dbb28b1beda0e8a5 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Tue, 3 Mar 2015 20:42:48 +0800
+Subject: [PATCH 24/26] btrfs: use rbio->nr_pages to reduce calculation
 
 We can use rbio->stripe_npages to reduce unnecessary calculation in
 many code place.
@@ -13,10 +12,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 7 insertions(+), 12 deletions(-)
 
 diff --git a/fs/btrfs/raid56.c b/fs/btrfs/raid56.c
-index 645bc37..0d902ac 100644
+index c435fe0..719dbc0 100644
 --- a/fs/btrfs/raid56.c
 +++ b/fs/btrfs/raid56.c
-@@ -1172,7 +1172,6 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
+@@ -1174,7 +1174,6 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
  {
  	struct btrfs_bio *bbio = rbio->bbio;
  	void *pointers[rbio->real_stripes];
@@ -24,7 +23,7 @@ index 645bc37..0d902ac 100644
  	int nr_data = rbio->nr_data;
  	int stripe;
  	int pagenr;
-@@ -1180,7 +1179,6 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
+@@ -1182,7 +1181,6 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
  	int q_stripe = -1;
  	struct bio_list bio_list;
  	struct bio *bio;
@@ -32,7 +31,7 @@ index 645bc37..0d902ac 100644
  	int ret;
  
  	bio_list_init(&bio_list);
-@@ -1223,7 +1221,7 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
+@@ -1225,7 +1223,7 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
  	else
  		clear_bit(RBIO_CACHE_READY_BIT, &rbio->flags);
  
@@ -41,7 +40,7 @@ index 645bc37..0d902ac 100644
  		struct page *p;
  		/* first collect one page from each data stripe */
  		for (stripe = 0; stripe < nr_data; stripe++) {
-@@ -1265,7 +1263,7 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
+@@ -1267,7 +1265,7 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
  	 * everything else.
  	 */
  	for (stripe = 0; stripe < rbio->real_stripes; stripe++) {
@@ -50,7 +49,7 @@ index 645bc37..0d902ac 100644
  			struct page *page;
  			if (stripe < rbio->nr_data) {
  				page = page_in_rbio(rbio, stripe, pagenr, 1);
-@@ -1289,7 +1287,7 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
+@@ -1291,7 +1289,7 @@ static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
  		if (!bbio->tgtdev_map[stripe])
  			continue;
  
@@ -76,7 +75,7 @@ index 645bc37..0d902ac 100644
  			struct page *page;
  			/*
  			 * we want to find all the pages missing from
-@@ -1801,7 +1798,6 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
+@@ -1800,7 +1797,6 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
  	int pagenr, stripe;
  	void **pointers;
  	int faila = -1, failb = -1;
@@ -84,7 +83,7 @@ index 645bc37..0d902ac 100644
  	struct page *page;
  	int err;
  	int i;
-@@ -1824,7 +1820,7 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
+@@ -1823,7 +1819,7 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
  
  	index_rbio_pages(rbio);
  
@@ -102,7 +101,7 @@ index 645bc37..0d902ac 100644
  				if (faila != -1) {
  					page = rbio_stripe_page(rbio, faila, i);
  					SetPageUptodate(page);
-@@ -2027,7 +2023,6 @@ static int __raid56_parity_recover(struct btrfs_raid_bio *rbio)
+@@ -2030,7 +2026,6 @@ static int __raid56_parity_recover(struct btrfs_raid_bio *rbio)
  	int bios_to_read = 0;
  	struct bio_list bio_list;
  	int ret;
@@ -110,7 +109,7 @@ index 645bc37..0d902ac 100644
  	int pagenr;
  	int stripe;
  	struct bio *bio;
-@@ -2051,7 +2046,7 @@ static int __raid56_parity_recover(struct btrfs_raid_bio *rbio)
+@@ -2054,7 +2049,7 @@ static int __raid56_parity_recover(struct btrfs_raid_bio *rbio)
  			continue;
  		}
  
@@ -120,4 +119,5 @@ index 645bc37..0d902ac 100644
  
  			/*
 -- 
-1.8.5.1
+2.7.0
+

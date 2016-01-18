@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 1/2] btrfs: reada: limit max works count
-Date:	Tue, 12 Jan 2016 15:46:26 +0800
+From 0c7252a31ad447cf7d118e776e882e842db162e7 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 7 Jan 2016 18:38:48 +0800
+Subject: [PATCH 19/26] btrfs: reada: limit max works count
 
 reada create 2 works for each level of tree in recursion.
 
@@ -17,7 +16,7 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 10 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index 53ee7b1..7b150b2 100644
+index bdae035..a3762cb 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
 @@ -103,6 +103,9 @@ static void __reada_start_machine(struct btrfs_fs_info *fs_info);
@@ -30,7 +29,7 @@ index 53ee7b1..7b150b2 100644
  /* recurses */
  /* in case of err, eb might be NULL */
  static void __readahead_hook(struct btrfs_fs_info *fs_info,
-@@ -759,6 +762,8 @@ static void reada_start_machine_worker(struct btrfs_work *work)
+@@ -754,6 +757,8 @@ static void reada_start_machine_worker(struct btrfs_work *work)
  	set_task_ioprio(current, BTRFS_IOPRIO_READA);
  	__reada_start_machine(fs_info);
  	set_task_ioprio(current, old_ioprio);
@@ -39,7 +38,7 @@ index 53ee7b1..7b150b2 100644
  }
  
  static void __reada_start_machine(struct btrfs_fs_info *fs_info)
-@@ -790,8 +795,11 @@ static void __reada_start_machine(struct btrfs_fs_info *fs_info)
+@@ -785,8 +790,11 @@ static void __reada_start_machine(struct btrfs_fs_info *fs_info)
  	 * enqueue to workers to finish it. This will distribute the load to
  	 * the cores.
  	 */
@@ -52,7 +51,7 @@ index 53ee7b1..7b150b2 100644
  }
  
  static void reada_start_machine(struct btrfs_fs_info *fs_info)
-@@ -808,6 +816,7 @@ static void reada_start_machine(struct btrfs_fs_info *fs_info)
+@@ -803,6 +811,7 @@ static void reada_start_machine(struct btrfs_fs_info *fs_info)
  	rmw->fs_info = fs_info;
  
  	btrfs_queue_work(fs_info->readahead_workers, &rmw->work);
@@ -61,4 +60,5 @@ index 53ee7b1..7b150b2 100644
  
  #ifdef DEBUG
 -- 
-1.8.5.1
+2.7.0
+

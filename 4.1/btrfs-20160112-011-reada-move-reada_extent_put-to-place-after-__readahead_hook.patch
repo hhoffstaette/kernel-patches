@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 06/10] btrfs: reada: move reada_extent_put to place after __readahead_hook()
-Date:	Thu, 31 Dec 2015 23:03:40 +0800
+From 5cd9029aee96a7aefbe48699709df52cb9da581d Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 21:07:17 +0800
+Subject: [PATCH 11/26] btrfs: reada: move reada_extent_put to place after __readahead_hook()
 
 We can't release reada_extent earlier than __readahead_hook(), because
 __readahead_hook() still need to use it, it is necessary to hode a refcnt
@@ -21,10 +20,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
-index 66409f3..7015906 100644
+index 8aeb7ac..3431b4c 100644
 --- a/fs/btrfs/reada.c
 +++ b/fs/btrfs/reada.c
-@@ -722,8 +722,6 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+@@ -717,8 +717,6 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
  	}
  	logical = re->logical;
  
@@ -33,7 +32,7 @@ index 66409f3..7015906 100644
  	atomic_inc(&dev->reada_in_flight);
  	ret = reada_tree_block_flagged(fs_info->extent_root, logical,
  			mirror_num, &eb);
-@@ -735,6 +733,8 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+@@ -730,6 +728,8 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
  	if (eb)
  		free_extent_buffer(eb);
  
@@ -43,4 +42,5 @@ index 66409f3..7015906 100644
  
  }
 -- 
-1.8.5.1
+2.7.0
+

@@ -1,8 +1,7 @@
-From:	Zhao Lei <zhaolei@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-CC:	Zhao Lei <zhaolei@cn.fujitsu.com>
-Subject: [PATCH 3/3] btrfs: merge functions for wait snapshot creation
-Date:	Wed, 6 Jan 2016 19:00:19 +0800
+From 04b87eda829c29c213b4f112ffa2ba27a69ba8e1 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Wed, 6 Jan 2016 18:56:36 +0800
+Subject: [PATCH 18/26] btrfs: merge functions for wait snapshot creation
 
 wait_for_snapshot_creation() is in same group with oher two:
  btrfs_start_write_no_snapshoting()
@@ -19,10 +18,10 @@ Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
  3 files changed, 22 insertions(+), 21 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index 0912f89..5d7a2c4d 100644
+index f538fc1..fd0ee25 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
-@@ -3566,6 +3566,7 @@ int btrfs_delayed_refs_qgroup_accounting(struct btrfs_trans_handle *trans,
+@@ -3641,6 +3641,7 @@ int btrfs_delayed_refs_qgroup_accounting(struct btrfs_trans_handle *trans,
  int __get_raid_index(u64 flags);
  int btrfs_start_write_no_snapshoting(struct btrfs_root *root);
  void btrfs_end_write_no_snapshoting(struct btrfs_root *root);
@@ -31,10 +30,10 @@ index 0912f89..5d7a2c4d 100644
  			struct btrfs_root *root,
  			const u64 type);
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index dc3763a..e83ffa8 100644
+index 60cc139..9e10145 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -10704,3 +10704,23 @@ int btrfs_start_write_no_snapshoting(struct btrfs_root *root)
+@@ -10816,3 +10816,23 @@ int btrfs_start_write_no_snapshoting(struct btrfs_root *root)
  	}
  	return 1;
  }
@@ -59,10 +58,10 @@ index dc3763a..e83ffa8 100644
 +	}
 +}
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index 994490d..21d7cd1 100644
+index 85afe66..c8457bd 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -4897,26 +4897,6 @@ next:
+@@ -4873,26 +4873,6 @@ next:
  	return err;
  }
  
@@ -89,7 +88,7 @@ index 994490d..21d7cd1 100644
  static int btrfs_setsize(struct inode *inode, struct iattr *attr)
  {
  	struct btrfs_root *root = BTRFS_I(inode)->root;
-@@ -4948,7 +4928,7 @@ static int btrfs_setsize(struct inode *inode, struct iattr *attr)
+@@ -4924,7 +4904,7 @@ static int btrfs_setsize(struct inode *inode, struct iattr *attr)
  		 * truncation, it must capture all writes that happened before
  		 * this truncation.
  		 */
@@ -99,4 +98,5 @@ index 994490d..21d7cd1 100644
  		if (ret) {
  			btrfs_end_write_no_snapshoting(root);
 -- 
-1.8.5.1
+2.7.0
+
