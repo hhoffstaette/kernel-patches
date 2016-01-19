@@ -1,20 +1,18 @@
 From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
 To:	<linux-btrfs@vger.kernel.org>
-CC:	<clm@fb.com>
-Subject: [PATCH v5 1/2] btrfs: Introduce new mount option usebackuproot to replace recovery
-Date:	Tue, 12 Jan 2016 10:05:12 +0800
-Message-ID: <1452564313-22007-2-git-send-email-quwenruo@cn.fujitsu.com>
+Subject: [PATCH V7 1/3] btrfs: Introduce new mount option usebackuproot to replace recovery
+Date:	Tue, 19 Jan 2016 10:23:02 +0800
 
 Current "recovery" mount option will only try to use backup root.
 However the word "recovery" is too generic and may be confusing for some
 users.
 
-Here introduce a new and more specific mount option, "backuproot" to
+Here introduce a new and more specific mount option, "usebackuproot" to
 replace "recovery" mount option.
 "Recovery" will be kept for compatibility reason, but will be
 deprecated.
 
-Also, since "backuproot" will only affect mount behavior and after
+Also, since "usebackuproot" will only affect mount behavior and after
 open_ctree() it has nothing to do with the filesystem, so clear the flag
 after mount succeeded.
 
@@ -26,6 +24,10 @@ v4:
   Newly introduced to avoid confusion with later 'norecovery' patch.
 v5:
   Use 'usebackuproot' to replace 'backuproot' mount option.
+v6:
+  None
+v7:
+  Fix a copy-n-paste error in commit message
 ---
  Documentation/filesystems/btrfs.txt |  9 ++++++---
  fs/btrfs/ctree.h                    |  2 +-
