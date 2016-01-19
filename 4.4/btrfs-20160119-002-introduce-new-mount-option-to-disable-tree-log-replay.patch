@@ -1,8 +1,7 @@
 From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
 To:	<linux-btrfs@vger.kernel.org>
-CC:	<clm@fb.com>
-Subject: [PATCH v5 2/2] btrfs: Introduce new mount option to disable tree log replay
-Date:	Tue, 12 Jan 2016 10:05:13 +0800
+Subject: [PATCH V7 2/3] btrfs: Introduce new mount option to disable tree log replay
+Date:	Tue, 19 Jan 2016 10:23:03 +0800
 
 Introduce a new mount option "nologreplay" to co-operate with "ro" mount
 option to get real readonly mount, like "norecovery" in ext* and xfs.
@@ -13,6 +12,7 @@ so add a new parameter for parse_options().
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
 Reviewed-by: Chandan Rajendra <chandan@linux.vnet.ibm.com>
 Tested-by: Austin S. Hemmelgarn <ahferroin7@gmail.com>
+
 ---
 v2:
   Make RO check mandatory for btrfs_parse_options().
@@ -25,22 +25,25 @@ v4:
   Add 'norecovery' alias for 'nologreplay'.
 v5:
   None
+v6:
+  Splite alias for "norecovery" into another patch.
+v7:
+  None
 ---
- Documentation/filesystems/btrfs.txt |  9 +++++++++
+ Documentation/filesystems/btrfs.txt |  8 ++++++++
  fs/btrfs/ctree.h                    |  4 +++-
  fs/btrfs/disk-io.c                  |  7 ++++---
- fs/btrfs/super.c                    | 30 +++++++++++++++++++++++++++---
- 4 files changed, 43 insertions(+), 7 deletions(-)
+ fs/btrfs/super.c                    | 28 +++++++++++++++++++++++++---
+ 4 files changed, 40 insertions(+), 7 deletions(-)
 
 diff --git a/Documentation/filesystems/btrfs.txt b/Documentation/filesystems/btrfs.txt
-index 8e22d92..a4dab53 100644
+index 8e22d92..34ea3ed 100644
 --- a/Documentation/filesystems/btrfs.txt
 +++ b/Documentation/filesystems/btrfs.txt
-@@ -168,6 +168,15 @@ Options with (*) are default options and will not show in the mount options.
-  notreelog
-	Enable/disable the tree logging used for fsync and O_SYNC writes.
-
-+  norecovery
+@@ -168,6 +168,14 @@ Options with (*) are default options and will not show in the mount options.
+   notreelog
+ 	Enable/disable the tree logging used for fsync and O_SYNC writes.
+ 
 +  nologreplay
 +	Disable the log tree replay at mount time to prevent filesystem
 +	from getting modified.
@@ -100,27 +103,26 @@ index 6f16557..0ec4199 100644
  		if (ret) {
  			err = ret;
 diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
-index 0842456..df5534e 100644
+index 0842456..1f97aa1 100644
 --- a/fs/btrfs/super.c
 +++ b/fs/btrfs/super.c
 @@ -304,6 +304,7 @@ enum {
  	Opt_commit_interval, Opt_barrier, Opt_nodefrag, Opt_nodiscard,
  	Opt_noenospc_debug, Opt_noflushoncommit, Opt_acl, Opt_datacow,
  	Opt_datasum, Opt_treelog, Opt_noinode_cache, Opt_usebackuproot,
-+	Opt_norecovery, Opt_nologreplay,
++	Opt_nologreplay,
  #ifdef CONFIG_BTRFS_DEBUG
  	Opt_fragment_data, Opt_fragment_metadata, Opt_fragment_all,
  #endif
-@@ -335,6 +336,8 @@ static const match_table_t tokens = {
+@@ -335,6 +336,7 @@ static const match_table_t tokens = {
  	{Opt_noacl, "noacl"},
  	{Opt_notreelog, "notreelog"},
  	{Opt_treelog, "treelog"},
-+	{Opt_norecovery, "norecovery"},
 +	{Opt_nologreplay, "nologreplay"},
  	{Opt_flushoncommit, "flushoncommit"},
  	{Opt_noflushoncommit, "noflushoncommit"},
  	{Opt_ratio, "metadata_ratio=%d"},
-@@ -374,7 +377,8 @@ static const match_table_t tokens = {
+@@ -374,7 +376,8 @@ static const match_table_t tokens = {
   * reading in a new superblock is parsed here.
   * XXX JDM: This needs to be cleaned up for remount.
   */
@@ -130,7 +132,7 @@ index 0842456..df5534e 100644
  {
  	struct btrfs_fs_info *info = root->fs_info;
  	substring_t args[MAX_OPT_ARGS];
-@@ -391,8 +395,12 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
+@@ -391,8 +394,12 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
  	else if (cache_gen)
  		btrfs_set_opt(info->mount_opt, SPACE_CACHE);
  
@@ -144,19 +146,18 @@ index 0842456..df5534e 100644
  
  	/*
  	 * strsep changes the string, duplicate it because parse_options
-@@ -592,6 +600,11 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
+@@ -592,6 +599,10 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
  			btrfs_clear_and_info(root, NOTREELOG,
  					     "enabling tree log");
  			break;
 +		case Opt_nologreplay:
-+		case Opt_norecovery:
 +			btrfs_set_and_info(root, NOLOGREPLAY,
 +					   "disabling log replay at mount time");
 +			break;
  		case Opt_flushoncommit:
  			btrfs_set_and_info(root, FLUSHONCOMMIT,
  					   "turning on flush-on-commit");
-@@ -782,6 +795,15 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
+@@ -782,6 +793,15 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
  			break;
  		}
  	}
@@ -172,7 +173,7 @@ index 0842456..df5534e 100644
  out:
  	if (btrfs_fs_compat_ro(root->fs_info, FREE_SPACE_TREE) &&
  	    !btrfs_test_opt(root, FREE_SPACE_TREE) &&
-@@ -1192,6 +1214,8 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
+@@ -1192,6 +1212,8 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
  		seq_puts(seq, ",ssd");
  	if (btrfs_test_opt(root, NOTREELOG))
  		seq_puts(seq, ",notreelog");
@@ -181,7 +182,7 @@ index 0842456..df5534e 100644
  	if (btrfs_test_opt(root, FLUSHONCOMMIT))
  		seq_puts(seq, ",flushoncommit");
  	if (btrfs_test_opt(root, DISCARD))
-@@ -1677,7 +1701,7 @@ static int btrfs_remount(struct super_block *sb, int *flags, char *data)
+@@ -1677,7 +1699,7 @@ static int btrfs_remount(struct super_block *sb, int *flags, char *data)
  		}
  	}
  
