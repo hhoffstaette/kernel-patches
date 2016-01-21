@@ -21,7 +21,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS series: >=4.1.15**
+**LTS series: >=4.1.16**
 
 - bfs: [BFS v464](http://ck-hack.blogspot.de/2015/08/bfs-464-linux-41-ck2.html) (_not_ default-enabled)
 - bfq: [BFQ v7r8](http://algogroup.unimore.it/people/paolo/disk_sched/)
