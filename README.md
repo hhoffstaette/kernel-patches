@@ -28,4 +28,5 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - loop: observe rotational property of underlying device
 - net: TCP performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
 - time: misc. ntp/rtc/timekeeping fixes
+- vfs: performance improvements
 
