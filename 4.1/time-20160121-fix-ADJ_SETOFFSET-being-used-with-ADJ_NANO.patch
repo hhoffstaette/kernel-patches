@@ -1,0 +1,57 @@
+From dd4e17ab704269bce71402285f5e8b9ac24b1eff Mon Sep 17 00:00:00 2001
+From: John Stultz <john.stultz@linaro.org>
+Date: Thu, 21 Jan 2016 15:03:34 -0800
+Subject: ntp: Fix ADJ_SETOFFSET being used w/ ADJ_NANO
+
+Recently, in commit 37cf4dc3370f I forgot to check if the timeval being passed
+was actually a timespec (as is signaled with ADJ_NANO).
+
+This resulted in that patch breaking ADJ_SETOFFSET users who set
+ADJ_NANO, by rejecting valid timespecs that were compared with
+valid timeval ranges.
+
+This patch addresses this by checking for the ADJ_NANO flag and
+using the timepsec check instead in that case.
+
+Reported-by: Harald Hoyer <harald@redhat.com>
+Reported-by: Kay Sievers <kay@vrfy.org>
+Fixes: 37cf4dc3370f "time: Verify time values in adjtimex ADJ_SETOFFSET to avoid overflow"
+Signed-off-by: John Stultz <john.stultz@linaro.org>
+Cc: Sasha Levin <sasha.levin@oracle.com>
+Cc: Richard Cochran <richardcochran@gmail.com>
+Cc: Prarit Bhargava <prarit@redhat.com>
+Cc: David Herrmann <dh.herrmann@gmail.com>
+Link: http://lkml.kernel.org/r/1453417415-19110-2-git-send-email-john.stultz@linaro.org
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+---
+ kernel/time/ntp.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/time/ntp.c b/kernel/time/ntp.c
+index 36f2ca0..6df8927 100644
+--- a/kernel/time/ntp.c
++++ b/kernel/time/ntp.c
+@@ -685,8 +685,18 @@ int ntp_validate_timex(struct timex *txc)
+ 		if (!capable(CAP_SYS_TIME))
+ 			return -EPERM;
+ 
+-		if (!timeval_inject_offset_valid(&txc->time))
+-			return -EINVAL;
++		if (txc->modes & ADJ_NANO) {
++			struct timespec ts;
++
++			ts.tv_sec = txc->time.tv_sec;
++			ts.tv_nsec = txc->time.tv_usec;
++			if (!timespec_inject_offset_valid(&ts))
++				return -EINVAL;
++
++		} else {
++			if (!timeval_inject_offset_valid(&txc->time))
++				return -EINVAL;
++		}
+ 	}
+ 
+ 	/*
+-- 
+cgit v0.12
+
