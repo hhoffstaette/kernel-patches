@@ -1,0 +1,27 @@
+From 3e4c5efbb3ac7c9c4fb5f33b659fa98afe568ab1 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Mon, 25 Jan 2016 16:47:10 +0100
+Subject: btrfs: add free space tree to the cow-only list
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/relocation.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index ef6d8fc..c554030 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -575,7 +575,8 @@ static int is_cowonly_root(u64 root_objectid)
+ 	    root_objectid == BTRFS_TREE_LOG_OBJECTID ||
+ 	    root_objectid == BTRFS_CSUM_TREE_OBJECTID ||
+ 	    root_objectid == BTRFS_UUID_TREE_OBJECTID ||
+-	    root_objectid == BTRFS_QUOTA_TREE_OBJECTID)
++	    root_objectid == BTRFS_QUOTA_TREE_OBJECTID ||
++	    root_objectid == BTRFS_FREE_SPACE_TREE_OBJECTID)
+ 		return 1;
+ 	return 0;
+ }
+-- 
+cgit v0.12
+
