@@ -1,0 +1,25 @@
+From 6b20e0ad2e39b77b7d4a48cc06c4de39768c7bb8 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Mon, 25 Jan 2016 16:30:22 +0100
+Subject: btrfs: add free space tree to lockdep classes
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index c67c129..ca78bf2 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -176,6 +176,7 @@ static struct btrfs_lockdep_keyset {
+ 	{ .id = BTRFS_TREE_RELOC_OBJECTID,	.name_stem = "treloc"	},
+ 	{ .id = BTRFS_DATA_RELOC_TREE_OBJECTID,	.name_stem = "dreloc"	},
+ 	{ .id = BTRFS_UUID_TREE_OBJECTID,	.name_stem = "uuid"	},
++	{ .id = BTRFS_FREE_SPACE_TREE_OBJECTID,	.name_stem = "free-space" },
+ 	{ .id = 0,				.name_stem = "tree"	},
+ };
+ 
+-- 
+cgit v0.12
+
