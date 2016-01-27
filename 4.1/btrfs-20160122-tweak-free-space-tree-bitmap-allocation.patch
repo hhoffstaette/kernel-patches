@@ -1,0 +1,60 @@
+From 79b134a22b6fc45f48bcc1c27d6bf05b3ede5e06 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Fri, 22 Jan 2016 17:16:18 +0100
+Subject: btrfs: tweak free space tree bitmap allocation
+
+The requested bitmap size varies, observed numbers were < 4K up to 16K.
+Using vmalloc unconditionally would be too heavy, we'll try contiguous
+allocations first and fall back to vmalloc if there's no contig memory.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/free-space-tree.c | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/free-space-tree.c b/fs/btrfs/free-space-tree.c
+index 393e36b..0f33d58 100644
+--- a/fs/btrfs/free-space-tree.c
++++ b/fs/btrfs/free-space-tree.c
+@@ -153,6 +153,20 @@ static inline u32 free_space_bitmap_size(u64 size, u32 sectorsize)
+ 
+ static unsigned long *alloc_bitmap(u32 bitmap_size)
+ {
++	void *mem;
++
++	/*
++	 * The allocation size varies, observed numbers were < 4K up to 16K.
++	 * Using vmalloc unconditionally would be too heavy, we'll try
++	 * contiguous allocations first.
++	 */
++	if  (bitmap_size <= PAGE_SIZE)
++		return kzalloc(bitmap_size, GFP_NOFS);
++
++	mem = kzalloc(bitmap_size, GFP_NOFS | __GFP_HIGHMEM | __GFP_NOWARN);
++	if (mem)
++		return mem;
++
+ 	return __vmalloc(bitmap_size, GFP_NOFS | __GFP_HIGHMEM | __GFP_ZERO,
+ 			 PAGE_KERNEL);
+ }
+@@ -289,7 +303,7 @@ int convert_free_space_to_bitmaps(struct btrfs_trans_handle *trans,
+ 
+ 	ret = 0;
+ out:
+-	vfree(bitmap);
++	kvfree(bitmap);
+ 	if (ret)
+ 		btrfs_abort_transaction(trans, root, ret);
+ 	return ret;
+@@ -438,7 +452,7 @@ int convert_free_space_to_extents(struct btrfs_trans_handle *trans,
+ 
+ 	ret = 0;
+ out:
+-	vfree(bitmap);
++	kvfree(bitmap);
+ 	if (ret)
+ 		btrfs_abort_transaction(trans, root, ret);
+ 	return ret;
+-- 
+cgit v0.12
+
