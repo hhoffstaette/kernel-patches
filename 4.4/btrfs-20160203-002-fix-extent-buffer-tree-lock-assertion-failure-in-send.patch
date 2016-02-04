@@ -1,0 +1,180 @@
+From 039491a16a3dc52a3bc3e8c748ab54b207ae9c82 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Wed, 3 Feb 2016 23:57:31 +0000
+Subject: Btrfs: send, fix extent buffer tree lock assertion failure (BUG_ON)
+
+When the send stream issues a clone operation using a root that is not the
+send root, we can hit a BUG_ON() if the file's path consists of more than
+one parent directory and the inodes of all the directories in the path
+span at least 2 different leafs in the subvolume's btree. When this case
+happens we get the trace below:
+
+[12603.746869] kernel BUG at fs/btrfs/locking.c:310!
+[12603.747561] invalid opcode: 0000 [#1] PREEMPT SMP DEBUG_PAGEALLOC
+[12603.748516] Modules linked in: btrfs dm_flakey dm_mod ppdev xor raid6_pq sha256_generic hmac drbg ansi_cprng aesni_intel acpi_cpufreq aes_x86_64 tpm_tis ablk_helper tpm cryptd parport_pc lrw sg i2c_piix4 processor evdev gf128mul parport i2c_core glue_helper button pcspkr psmouse serio_raw loop autofs4 ext4 crc16 mbcache jbd2 sd_mod sr_mod cdrom ata_generic virtio_scsi ata_piix libata virtio_pci virtio_ring crc32c_intel scsi_mod e1000 virtio floppy [last unloaded: btrfs]
+[12603.748844] CPU: 15 PID: 4441 Comm: btrfs Tainted: G        W       4.4.0-rc6-btrfs-next-20+ #1
+[12603.748844] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS by qemu-project.org 04/01/2014
+[12603.748844] task: ffff88014e070800 ti: ffff8801bc934000 task.ti: ffff8801bc934000
+[12603.748844] RIP: 0010:[<ffffffffa067e735>]  [<ffffffffa067e735>] btrfs_assert_tree_read_locked+0x13/0x17 [btrfs]
+[12603.748844] RSP: 0018:ffff8801bc937968  EFLAGS: 00010246
+[12603.748844] RAX: 0000000000000000 RBX: ffff880085dc7e00 RCX: 0000000000000001
+[12603.748844] RDX: 0000000000000006 RSI: 0000000000000002 RDI: ffff880085dc7e00
+[12603.748844] RBP: ffff8801bc937968 R08: 0000000000000001 R09: 0000000000000000
+[12603.748844] R10: 0000160000000000 R11: ffffffff82f6e4cd R12: ffff880085dc7e00
+[12603.748844] R13: 0000000000000103 R14: 0000000000000102 R15: ffff880065a30d50
+[12603.748844] FS:  00007f79576578c0(0000) GS:ffff8802be9e0000(0000) knlGS:0000000000000000
+[12603.748844] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[12603.748844] CR2: 00007f7956605e38 CR3: 00000001c1cea000 CR4: 00000000001406e0
+[12603.748844] Stack:
+[12603.748844]  ffff8801bc937980 ffffffffa067ee71 00000000000000e4 ffff8801bc9379f8
+[12603.748844]  ffffffffa069f69c 00000000000000e5 ffff880006ee5000 000000000000000f
+[12603.748844]  00ffffff00000001 ffff8801af0aee00 0300000000001000 0c00000000000001
+[12603.748844] Call Trace:
+[12603.748844]  [<ffffffffa067ee71>] btrfs_set_lock_blocking_rw+0x87/0xbf [btrfs]
+[12603.748844]  [<ffffffffa069f69c>] btrfs_ref_to_path+0x148/0x1e8 [btrfs]
+[12603.748844]  [<ffffffffa06a6030>] iterate_inode_ref+0x169/0x2ad [btrfs]
+[12603.748844]  [<ffffffffa06a5e7d>] ? fs_path_add_path+0x36/0x36 [btrfs]
+[12603.748844]  [<ffffffffa06a987d>] process_extent+0xc25/0xdb7 [btrfs]
+[12603.748844]  [<ffffffffa06a9f8e>] changed_cb+0x57f/0x8bf [btrfs]
+[12603.748844]  [<ffffffffa0626a0f>] ? btrfs_item_key+0x19/0x1b [btrfs]
+[12603.748844]  [<ffffffffa0626a26>] ? btrfs_item_key_to_cpu+0x15/0x31 [btrfs]
+[12603.748844]  [<ffffffffa062e362>] btrfs_compare_trees+0x2eb/0x4f7 [btrfs]
+[12603.748844]  [<ffffffffa06a9a0f>] ? process_extent+0xdb7/0xdb7 [btrfs]
+[12603.748844]  [<ffffffffa06aaba7>] btrfs_ioctl_send+0x8d9/0xdaa [btrfs]
+[12603.748844]  [<ffffffffa067c12c>] btrfs_ioctl+0x19d/0x2793 [btrfs]
+[12603.748844]  [<ffffffff810881db>] ? arch_local_irq_save+0x9/0xc
+[12603.748844]  [<ffffffff81088a6d>] ? trace_hardirqs_off+0xd/0xf
+[12603.748844]  [<ffffffff8118650f>] ? rcu_read_unlock+0x3e/0x5d
+[12603.748844]  [<ffffffff8117d787>] do_vfs_ioctl+0x458/0x4dc
+[12603.748844]  [<ffffffff811866b0>] ? __fget_light+0x62/0x71
+[12603.748844]  [<ffffffff8117d862>] SyS_ioctl+0x57/0x79
+[12603.748844]  [<ffffffff8147e517>] entry_SYSCALL_64_fastpath+0x12/0x6b
+[12603.748844] Code: fe ff e9 67 fc ff ff 48 8d 65 d0 5b 41 5a 41 5c 41 5d 41 5e 41 5f 5d c3 0f 1f 44 00 00 8b 87 80 00 00 00 55 48 89 e5 85 c0 75 02 <0f> 0b 5d c3 0f 1f 44 00 00 55 48 89 e5 53 66 83 bf 94 00 00 00
+[12603.748844] RIP  [<ffffffffa067e735>] btrfs_assert_tree_read_locked+0x13/0x17 [btrfs]
+[12603.748844]  RSP <ffff8801bc937968>
+[12603.798346] ---[ end trace 3408fda56f989c5f ]---
+
+This is because btrfs_ref_to_path() assumes the search path it is given as
+a parameter does not have its member skip_locking set to true, which is
+true only when it's called from the send code.
+
+Fix this by not attempt to toggle the locking mode (spinning to blocking)
+nor unlock a leaf if the path has "skip_locking" set to true.
+
+The following test case for xfstests reproduces the problem.
+
+  seq=`basename $0`
+  seqres=$RESULT_DIR/$seq
+  echo "QA output created by $seq"
+
+  tmp=`mktemp -d`
+  status=1	# failure is the default!
+  trap "_cleanup; exit \$status" 0 1 2 3 15
+
+  _cleanup()
+  {
+      rm -f $tmp.*
+  }
+
+  # get standard environment, filters and checks
+  . ./common/rc
+  . ./common/filter
+  . ./common/reflink
+
+  # real QA test starts here
+  _supported_fs btrfs
+  _supported_os Linux
+  _require_scratch
+  _require_cp_reflink
+  _need_to_be_root
+
+  rm -f $seqres.full
+
+  _scratch_mkfs >>$seqres.full 2>&1
+  _scratch_mount
+
+  mkdir -p $SCRATCH_MNT/a/b/c
+  $XFS_IO_PROG -f -c "pwrite -S 0xfd 0 128K" $SCRATCH_MNT/a/b/c/x | _filter_xfs_io
+
+  _run_btrfs_util_prog subvolume snapshot -r $SCRATCH_MNT $SCRATCH_MNT/snap1
+
+  # Create a bunch of small and empty files, this is just to make sure our
+  # subvolume's btree gets more than 1 leaf, a condition necessary to trigger a
+  # past bug (1000 files is enough even for a leaf/node size of 64K, the largest
+  # possible size).
+  for ((i = 1; i <= 1000; i++)); do
+      echo -n > $SCRATCH_MNT/a/b/c/z_$i
+  done
+
+  # Create a clone of file x's extent and write some data to the middle of this
+  # new file, this is to guarantee the incremental send operation below issues
+  # a clone operation.
+  cp --reflink=always $SCRATCH_MNT/a/b/c/x $SCRATCH_MNT/a/b/c/y
+  $XFS_IO_PROG -c "pwrite -S 0xab 32K 16K" $SCRATCH_MNT/a/b/c/y | _filter_xfs_io
+
+  # Will be used as an extra source root for clone operations for the incremental
+  # send operation below.
+  _run_btrfs_util_prog subvolume snapshot -r $SCRATCH_MNT $SCRATCH_MNT/clones_snap
+
+  _run_btrfs_util_prog subvolume snapshot -r $SCRATCH_MNT $SCRATCH_MNT/snap2
+
+  _run_btrfs_util_prog send $SCRATCH_MNT/snap1 -f $tmp/1.snap
+  _run_btrfs_util_prog send $SCRATCH_MNT/clones_snap -f $tmp/clones.snap
+  _run_btrfs_util_prog send -p $SCRATCH_MNT/snap1 \
+      -c $SCRATCH_MNT/clones_snap $SCRATCH_MNT/snap2 -f $tmp/2.snap
+
+  echo "File digests in the original filesystem:"
+  md5sum $SCRATCH_MNT/snap1/a/b/c/x | _filter_scratch
+  md5sum $SCRATCH_MNT/snap2/a/b/c/x | _filter_scratch
+  md5sum $SCRATCH_MNT/snap2/a/b/c/y | _filter_scratch
+
+  _scratch_unmount
+  _scratch_mkfs >>$seqres.full 2>&1
+  _scratch_mount
+
+  _run_btrfs_util_prog receive $SCRATCH_MNT -f $tmp/1.snap
+  _run_btrfs_util_prog receive $SCRATCH_MNT -f $tmp/clones.snap
+  _run_btrfs_util_prog receive $SCRATCH_MNT -f $tmp/2.snap
+
+  echo "File digests in the new filesystem:"
+  # Should match the digests we had in the original filesystem.
+  md5sum $SCRATCH_MNT/snap1/a/b/c/x | _filter_scratch
+  md5sum $SCRATCH_MNT/snap2/a/b/c/x | _filter_scratch
+  md5sum $SCRATCH_MNT/snap2/a/b/c/y | _filter_scratch
+
+  status=0
+  exit
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/backref.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/backref.c b/fs/btrfs/backref.c
+index 198a0f8..f6dac40 100644
+--- a/fs/btrfs/backref.c
++++ b/fs/btrfs/backref.c
+@@ -1406,7 +1406,8 @@ char *btrfs_ref_to_path(struct btrfs_root *fs_root, struct btrfs_path *path,
+ 			read_extent_buffer(eb, dest + bytes_left,
+ 					   name_off, name_len);
+ 		if (eb != eb_in) {
+-			btrfs_tree_read_unlock_blocking(eb);
++			if (!path->skip_locking)
++				btrfs_tree_read_unlock_blocking(eb);
+ 			free_extent_buffer(eb);
+ 		}
+ 		ret = btrfs_find_item(fs_root, path, parent, 0,
+@@ -1426,7 +1427,8 @@ char *btrfs_ref_to_path(struct btrfs_root *fs_root, struct btrfs_path *path,
+ 		eb = path->nodes[0];
+ 		/* make sure we can use eb after releasing the path */
+ 		if (eb != eb_in) {
+-			btrfs_set_lock_blocking_rw(eb, BTRFS_READ_LOCK);
++			if (!path->skip_locking)
++				btrfs_set_lock_blocking_rw(eb, BTRFS_READ_LOCK);
+ 			path->nodes[0] = NULL;
+ 			path->locks[0] = 0;
+ 		}
+-- 
+cgit v0.12
+
