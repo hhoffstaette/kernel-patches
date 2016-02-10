@@ -1,0 +1,108 @@
+From: Waiman Long <Waiman.Long@hpe.com>
+Newsgroups: gmane.linux.file-systems,gmane.linux.kernel
+Subject: [PATCH v2 3/3] vfs: Enable list batching for the superblock's inode list
+Date: Fri, 29 Jan 2016 14:30:46 -0500
+Cc: linux-fsdevel@vger.kernel.org, x86@kernel.org,
+	linux-kernel@vger.kernel.org,
+	Peter Zijlstra <peterz@infradead.org>,
+	Andi Kleen <andi@firstfloor.org>,
+	Scott J Norton <scott.norton@hp.com>,
+	Douglas Hatch <doug.hatch@hp.com>,
+	Waiman Long <Waiman.Long@hpe.com>
+To: Thomas Gleixner <tglx@linutronix.de>,
+	Ingo Molnar <mingo@redhat.com>,
+	"H. Peter Anvin" <hpa@zytor.com>,
+	Alexander Viro <viro@zeniv.linux.org.uk>
+Archived-At: <http://permalink.gmane.org/gmane.linux.file-systems/104359>
+
+The inode_sb_list_add() and inode_sb_list_del() functions in the vfs
+layer just perform list addition and deletion under lock. So they can
+use the new list batching facility to speed up the list operations
+when many CPUs are trying to do it simultaneously.
+
+In particular, the inode_sb_list_del() function can be a performance
+bottleneck when large applications with many threads and associated
+inodes exit. With an exit microbenchmark that creates a large number
+of threads, attachs many inodes to them and then exits. The runtimes
+of that microbenchmark with 1000 threads before and after the patch
+on a 4-socket Intel E7-4820 v3 system (48 cores, 96 threads) were
+as follows:
+
+  Kernel        Elapsed Time    System Time
+  ------        ------------    -----------
+  Vanilla 4.4      65.29s         82m14s
+  Patched 4.4      45.69s         49m44s
+
+The elapsed time and the reported system time were reduced by 30%
+and 40% respectively.
+
+Signed-off-by: Waiman Long <Waiman.Long@hpe.com>
+---
+ fs/inode.c         |   13 +++++--------
+ fs/super.c         |    1 +
+ include/linux/fs.h |    2 ++
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index 9f62db3..870de8c 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -424,19 +424,16 @@ static void inode_lru_list_del(struct inode *inode)
+  */
+ void inode_sb_list_add(struct inode *inode)
+ {
+-	spin_lock(&inode->i_sb->s_inode_list_lock);
+-	list_add(&inode->i_sb_list, &inode->i_sb->s_inodes);
+-	spin_unlock(&inode->i_sb->s_inode_list_lock);
++	do_list_batch(&inode->i_sb->s_inode_list_lock, lb_cmd_add,
++			&inode->i_sb->s_list_batch, &inode->i_sb_list);
+ }
+ EXPORT_SYMBOL_GPL(inode_sb_list_add);
+ 
+ static inline void inode_sb_list_del(struct inode *inode)
+ {
+-	if (!list_empty(&inode->i_sb_list)) {
+-		spin_lock(&inode->i_sb->s_inode_list_lock);
+-		list_del_init(&inode->i_sb_list);
+-		spin_unlock(&inode->i_sb->s_inode_list_lock);
+-	}
++	if (!list_empty(&inode->i_sb_list))
++		do_list_batch(&inode->i_sb->s_inode_list_lock, lb_cmd_del_init,
++				&inode->i_sb->s_list_batch, &inode->i_sb_list);
+ }
+ 
+ static unsigned long hash(struct super_block *sb, unsigned long hashval)
+diff --git a/fs/super.c b/fs/super.c
+index 1182af8..b0e8540 100644
+--- a/fs/super.c
++++ b/fs/super.c
+@@ -206,6 +206,7 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags)
+ 	mutex_init(&s->s_sync_lock);
+ 	INIT_LIST_HEAD(&s->s_inodes);
+ 	spin_lock_init(&s->s_inode_list_lock);
++	list_batch_init(&s->s_list_batch, &s->s_inodes);
+ 	INIT_LIST_HEAD(&s->s_inodes_wb);
+ 	spin_lock_init(&s->s_inode_wblist_lock);
+ 
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 1a20462..11d8b77 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -9,6 +9,7 @@
+ #include <linux/stat.h>
+ #include <linux/cache.h>
+ #include <linux/list.h>
++#include <linux/list_batch.h>
+ #include <linux/list_lru.h>
+ #include <linux/llist.h>
+ #include <linux/radix-tree.h>
+@@ -1403,6 +1404,7 @@ struct super_block {
+ 	/* s_inode_list_lock protects s_inodes */
+ 	spinlock_t		s_inode_list_lock ____cacheline_aligned_in_smp;
+ 	struct list_head	s_inodes;	/* all inodes */
++	struct list_batch	s_list_batch;
+
+	spinlock_t		s_inode_wblist_lock;
+	struct list_head	s_inodes_wb;	/* writeback inodes */
+-- 
+1.7.1
