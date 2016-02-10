@@ -1,0 +1,179 @@
+From 0eb77e9880321915322d42913c3b53241739c8aa Mon Sep 17 00:00:00 2001
+From: Christoph Lameter <cl@linux.com>
+Date: Thu, 14 Jan 2016 15:21:40 -0800
+Subject: vmstat: make vmstat_updater deferrable again and shut down on idle
+
+Currently the vmstat updater is not deferrable as a result of commit
+ba4877b9ca51 ("vmstat: do not use deferrable delayed work for
+vmstat_update").  This in turn can cause multiple interruptions of the
+applications because the vmstat updater may run at
+
+Make vmstate_update deferrable again and provide a function that folds
+the differentials when the processor is going to idle mode thus
+addressing the issue of the above commit in a clean way.
+
+Note that the shepherd thread will continue scanning the differentials
+from another processor and will reenable the vmstat workers if it
+detects any changes.
+
+Fixes: ba4877b9ca51 ("vmstat: do not use deferrable delayed work for vmstat_update")
+Signed-off-by: Christoph Lameter <cl@linux.com>
+Cc: Michal Hocko <mhocko@suse.cz>
+Cc: Johannes Weiner <hannes@cmpxchg.org>
+Cc: Tetsuo Handa <penguin-kernel@i-love.sakura.ne.jp>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ include/linux/vmstat.h |  2 ++
+ kernel/sched/idle.c    |  1 +
+ mm/vmstat.c            | 69 ++++++++++++++++++++++++++++++++------------------
+ 3 files changed, 47 insertions(+), 25 deletions(-)
+
+diff --git a/include/linux/vmstat.h b/include/linux/vmstat.h
+index 3e5d907..73fae8c 100644
+--- a/include/linux/vmstat.h
++++ b/include/linux/vmstat.h
+@@ -189,6 +189,7 @@ extern void __inc_zone_state(struct zone *, enum zone_stat_item);
+ extern void dec_zone_state(struct zone *, enum zone_stat_item);
+ extern void __dec_zone_state(struct zone *, enum zone_stat_item);
+ 
++void quiet_vmstat(void);
+ void cpu_vm_stats_fold(int cpu);
+ void refresh_zone_stat_thresholds(void);
+ 
+@@ -249,6 +250,7 @@ static inline void __dec_zone_page_state(struct page *page,
+ 
+ static inline void refresh_zone_stat_thresholds(void) { }
+ static inline void cpu_vm_stats_fold(int cpu) { }
++static inline void quiet_vmstat(void) { }
+ 
+ static inline void drain_zonestat(struct zone *zone,
+ 			struct per_cpu_pageset *pset) { }
+diff --git a/kernel/sched/idle.c b/kernel/sched/idle.c
+index 4a2ef5a..2489140 100644
+--- a/kernel/sched/idle.c
++++ b/kernel/sched/idle.c
+@@ -219,6 +219,7 @@ static void cpu_idle_loop(void)
+ 		 */
+ 
+ 		__current_set_polling();
++		quiet_vmstat();
+ 		tick_nohz_idle_enter();
+ 
+ 		while (!need_resched()) {
+diff --git a/mm/vmstat.c b/mm/vmstat.c
+index c54fd29..83a003b 100644
+--- a/mm/vmstat.c
++++ b/mm/vmstat.c
+@@ -460,7 +460,7 @@ static int fold_diff(int *diff)
+  *
+  * The function returns the number of global counters updated.
+  */
+-static int refresh_cpu_vm_stats(void)
++static int refresh_cpu_vm_stats(bool do_pagesets)
+ {
+ 	struct zone *zone;
+ 	int i;
+@@ -484,33 +484,35 @@ static int refresh_cpu_vm_stats(void)
+ #endif
+ 			}
+ 		}
+-		cond_resched();
+ #ifdef CONFIG_NUMA
+-		/*
+-		 * Deal with draining the remote pageset of this
+-		 * processor
+-		 *
+-		 * Check if there are pages remaining in this pageset
+-		 * if not then there is nothing to expire.
+-		 */
+-		if (!__this_cpu_read(p->expire) ||
++		if (do_pagesets) {
++			cond_resched();
++			/*
++			 * Deal with draining the remote pageset of this
++			 * processor
++			 *
++			 * Check if there are pages remaining in this pageset
++			 * if not then there is nothing to expire.
++			 */
++			if (!__this_cpu_read(p->expire) ||
+ 			       !__this_cpu_read(p->pcp.count))
+-			continue;
++				continue;
+ 
+-		/*
+-		 * We never drain zones local to this processor.
+-		 */
+-		if (zone_to_nid(zone) == numa_node_id()) {
+-			__this_cpu_write(p->expire, 0);
+-			continue;
+-		}
++			/*
++			 * We never drain zones local to this processor.
++			 */
++			if (zone_to_nid(zone) == numa_node_id()) {
++				__this_cpu_write(p->expire, 0);
++				continue;
++			}
+ 
+-		if (__this_cpu_dec_return(p->expire))
+-			continue;
++			if (__this_cpu_dec_return(p->expire))
++				continue;
+ 
+-		if (__this_cpu_read(p->pcp.count)) {
+-			drain_zone_pages(zone, this_cpu_ptr(&p->pcp));
+-			changes++;
++			if (__this_cpu_read(p->pcp.count)) {
++				drain_zone_pages(zone, this_cpu_ptr(&p->pcp));
++				changes++;
++			}
+ 		}
+ #endif
+ 	}
+@@ -1386,7 +1388,7 @@ static cpumask_var_t cpu_stat_off;
+ 
+ static void vmstat_update(struct work_struct *w)
+ {
+-	if (refresh_cpu_vm_stats()) {
++	if (refresh_cpu_vm_stats(true)) {
+ 		/*
+ 		 * Counters were updated so we expect more updates
+ 		 * to occur in the future. Keep on running the
+@@ -1418,6 +1420,23 @@ static void vmstat_update(struct work_struct *w)
+ }
+ 
+ /*
++ * Switch off vmstat processing and then fold all the remaining differentials
++ * until the diffs stay at zero. The function is used by NOHZ and can only be
++ * invoked when tick processing is not active.
++ */
++void quiet_vmstat(void)
++{
++	if (system_state != SYSTEM_RUNNING)
++		return;
++
++	do {
++		if (!cpumask_test_and_set_cpu(smp_processor_id(), cpu_stat_off))
++			cancel_delayed_work(this_cpu_ptr(&vmstat_work));
++
++	} while (refresh_cpu_vm_stats(false));
++}
++
++/*
+  * Check if the diffs for a certain cpu indicate that
+  * an update is needed.
+  */
+@@ -1449,7 +1468,7 @@ static bool need_update(int cpu)
+  */
+ static void vmstat_shepherd(struct work_struct *w);
+ 
+-static DECLARE_DELAYED_WORK(shepherd, vmstat_shepherd);
++static DECLARE_DEFERRABLE_WORK(shepherd, vmstat_shepherd);
+ 
+ static void vmstat_shepherd(struct work_struct *w)
+ {
+-- 
+cgit v0.12
+
