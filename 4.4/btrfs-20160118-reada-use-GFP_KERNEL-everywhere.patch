@@ -1,7 +1,7 @@
-From a76b61bbe5231d67127028aa845ddd2bad98f9fb Mon Sep 17 00:00:00 2001
+From ed0244faf59e33ff915b83acd15c903b81fd357b Mon Sep 17 00:00:00 2001
 From: David Sterba <dsterba@suse.com>
 Date: Mon, 18 Jan 2016 18:42:13 +0100
-Subject: btrfs: reada: use GFP_KERNEL everywhere
+Subject: [PATCH] btrfs: reada: use GFP_KERNEL everywhere
 
 The readahead framework is not on the critical writeback path we don't
 need to use GFP_NOFS for allocations. All error paths are handled and
@@ -62,6 +62,3 @@ index 619f929..c5f1773 100644
  	if (!rc)
  		return ERR_PTR(-ENOMEM);
  
--- 
-cgit v0.12
-

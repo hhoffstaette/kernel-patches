@@ -1,7 +1,7 @@
-From 0a94d9ee1be0a8e2f7b6e268984a98336f6fe831 Mon Sep 17 00:00:00 2001
+From e780b0d1c1523ec8cd489c6910fb8c5ee452bb6c Mon Sep 17 00:00:00 2001
 From: David Sterba <dsterba@suse.com>
 Date: Mon, 18 Jan 2016 18:42:13 +0100
-Subject: btrfs: send: use GFP_KERNEL everywhere
+Subject: [PATCH] btrfs: send: use GFP_KERNEL everywhere
 
 The send operation is not on the critical writeback path we don't need
 to use GFP_NOFS for allocations. All error paths are handled and the
@@ -9,11 +9,25 @@ whole operation is restartable.
 
 Signed-off-by: David Sterba <dsterba@suse.com>
 ---
- fs/btrfs/send.c | 36 ++++++++++++++++++------------------
- 1 file changed, 18 insertions(+), 18 deletions(-)
+ fs/btrfs/ctree.c |  2 +-
+ fs/btrfs/send.c  | 36 ++++++++++++++++++------------------
+ 2 files changed, 19 insertions(+), 19 deletions(-)
 
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 769e0ff..00741eb 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -5361,7 +5361,7 @@ int btrfs_compare_trees(struct btrfs_root *left_root,
+ 		goto out;
+ 	}
+ 
+-	tmp_buf = kmalloc(left_root->nodesize, GFP_NOFS);
++	tmp_buf = kmalloc(left_root->nodesize, GFP_KERNEL);
+ 	if (!tmp_buf) {
+ 		ret = -ENOMEM;
+ 		goto out;
 diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
-index 355a458..1affded 100644
+index 63a6152..d2e2992 100644
 --- a/fs/btrfs/send.c
 +++ b/fs/btrfs/send.c
 @@ -304,7 +304,7 @@ static struct fs_path *fs_path_alloc(void)
@@ -66,7 +80,7 @@ index 355a458..1affded 100644
  	if (!backref_ctx) {
  		ret = -ENOMEM;
  		goto out;
-@@ -1970,7 +1970,7 @@ static int name_cache_insert(struct send_ctx *sctx,
+@@ -1984,7 +1984,7 @@ static int name_cache_insert(struct send_ctx *sctx,
  	nce_head = radix_tree_lookup(&sctx->name_cache,
  			(unsigned long)nce->ino);
  	if (!nce_head) {
@@ -75,7 +89,7 @@ index 355a458..1affded 100644
  		if (!nce_head) {
  			kfree(nce);
  			return -ENOMEM;
-@@ -2165,7 +2165,7 @@ out_cache:
+@@ -2179,7 +2179,7 @@ static int __get_cur_name_and_parent(struct send_ctx *sctx,
  	/*
  	 * Store the result of the lookup in the name cache.
  	 */
@@ -84,7 +98,7 @@ index 355a458..1affded 100644
  	if (!nce) {
  		ret = -ENOMEM;
  		goto out;
-@@ -2301,7 +2301,7 @@ static int send_subvol_begin(struct send_ctx *sctx)
+@@ -2315,7 +2315,7 @@ static int send_subvol_begin(struct send_ctx *sctx)
  	if (!path)
  		return -ENOMEM;
  
@@ -93,7 +107,7 @@ index 355a458..1affded 100644
  	if (!name) {
  		btrfs_free_path(path);
  		return -ENOMEM;
-@@ -2716,7 +2716,7 @@ static int __record_ref(struct list_head *head, u64 dir,
+@@ -2730,7 +2730,7 @@ static int __record_ref(struct list_head *head, u64 dir,
  {
  	struct recorded_ref *ref;
  
@@ -102,7 +116,7 @@ index 355a458..1affded 100644
  	if (!ref)
  		return -ENOMEM;
  
-@@ -2741,7 +2741,7 @@ static int dup_ref(struct recorded_ref *ref, struct list_head *list)
+@@ -2755,7 +2755,7 @@ static int dup_ref(struct recorded_ref *ref, struct list_head *list)
  {
  	struct recorded_ref *new;
  
@@ -111,7 +125,7 @@ index 355a458..1affded 100644
  	if (!new)
  		return -ENOMEM;
  
-@@ -2804,7 +2804,7 @@ add_orphan_dir_info(struct send_ctx *sctx, u64 dir_ino)
+@@ -2818,7 +2818,7 @@ add_orphan_dir_info(struct send_ctx *sctx, u64 dir_ino)
  	struct rb_node *parent = NULL;
  	struct orphan_dir_info *entry, *odi;
  
@@ -120,7 +134,7 @@ index 355a458..1affded 100644
  	if (!odi)
  		return ERR_PTR(-ENOMEM);
  	odi->ino = dir_ino;
-@@ -2959,7 +2959,7 @@ static int add_waiting_dir_move(struct send_ctx *sctx, u64 ino, bool orphanized)
+@@ -2973,7 +2973,7 @@ static int add_waiting_dir_move(struct send_ctx *sctx, u64 ino, bool orphanized)
  	struct rb_node *parent = NULL;
  	struct waiting_dir_move *entry, *dm;
  
@@ -129,7 +143,7 @@ index 355a458..1affded 100644
  	if (!dm)
  		return -ENOMEM;
  	dm->ino = ino;
-@@ -3026,7 +3026,7 @@ static int add_pending_dir_move(struct send_ctx *sctx,
+@@ -3040,7 +3040,7 @@ static int add_pending_dir_move(struct send_ctx *sctx,
  	int exists = 0;
  	int ret;
  
@@ -138,7 +152,7 @@ index 355a458..1affded 100644
  	if (!pm)
  		return -ENOMEM;
  	pm->parent_ino = parent_ino;
-@@ -4266,7 +4266,7 @@ static int __find_xattr(int num, struct btrfs_key *di_key,
+@@ -4280,7 +4280,7 @@ static int __find_xattr(int num, struct btrfs_key *di_key,
  	    strncmp(name, ctx->name, name_len) == 0) {
  		ctx->found_idx = num;
  		ctx->found_data_len = data_len;
@@ -147,7 +161,7 @@ index 355a458..1affded 100644
  		if (!ctx->found_data)
  			return -ENOMEM;
  		return 1;
-@@ -4467,7 +4467,7 @@ static ssize_t fill_read_buf(struct send_ctx *sctx, u64 offset, u32 len)
+@@ -4481,7 +4481,7 @@ static ssize_t fill_read_buf(struct send_ctx *sctx, u64 offset, u32 len)
  	while (index <= last_index) {
  		unsigned cur_len = min_t(unsigned, len,
  					 PAGE_CACHE_SIZE - pg_offset);
@@ -156,7 +170,7 @@ index 355a458..1affded 100644
  		if (!page) {
  			ret = -ENOMEM;
  			break;
-@@ -5975,7 +5975,7 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
+@@ -5989,7 +5989,7 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
  		goto out;
  	}
  
@@ -165,7 +179,7 @@ index 355a458..1affded 100644
  	if (!sctx) {
  		ret = -ENOMEM;
  		goto out;
-@@ -5983,7 +5983,7 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
+@@ -5997,7 +5997,7 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
  
  	INIT_LIST_HEAD(&sctx->new_refs);
  	INIT_LIST_HEAD(&sctx->deleted_refs);
@@ -174,6 +188,3 @@ index 355a458..1affded 100644
  	INIT_LIST_HEAD(&sctx->name_cache_list);
  
  	sctx->flags = arg->flags;
--- 
-cgit v0.12
-
