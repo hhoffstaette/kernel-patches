@@ -1,0 +1,27 @@
+From 66722f7c059089ad7f11eaa3e27af2321ab1b0e6 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Thu, 11 Feb 2016 15:01:38 +0100
+Subject: [PATCH] btrfs: switch to kcalloc in btrfs_cmp_data_prepare
+
+Kcalloc is functionally equivalent and does overflow checks.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ioctl.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 55440a7..11dae2a 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -2925,8 +2925,8 @@ static int btrfs_cmp_data_prepare(struct inode *src, u64 loff,
+ 	 * of the array is bounded by len, which is in turn bounded by
+ 	 * BTRFS_MAX_DEDUPE_LEN.
+ 	 */
+-	src_pgarr = kzalloc(num_pages * sizeof(struct page *), GFP_KERNEL);
+-	dst_pgarr = kzalloc(num_pages * sizeof(struct page *), GFP_KERNEL);
++	src_pgarr = kcalloc(num_pages, sizeof(struct page *), GFP_KERNEL);
++	dst_pgarr = kcalloc(num_pages, sizeof(struct page *), GFP_KERNEL);
+ 	if (!src_pgarr || !dst_pgarr) {
+ 		kfree(src_pgarr);
+ 		kfree(dst_pgarr);
