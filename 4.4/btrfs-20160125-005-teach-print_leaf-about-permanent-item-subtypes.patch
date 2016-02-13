@@ -1,0 +1,33 @@
+From 585a3d0d238dfe42909cb58b0d05f644365fed14 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Mon, 25 Jan 2016 18:44:13 +0100
+Subject: [PATCH] btrfs: teach print_leaf about permanent item subtypes
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/print-tree.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/print-tree.c b/fs/btrfs/print-tree.c
+index 647ab12..7bd0bdfc 100644
+--- a/fs/btrfs/print-tree.c
++++ b/fs/btrfs/print-tree.c
+@@ -295,8 +295,16 @@ void btrfs_print_leaf(struct btrfs_root *root, struct extent_buffer *l)
+ 			       btrfs_dev_extent_chunk_offset(l, dev_extent),
+ 			       btrfs_dev_extent_length(l, dev_extent));
+ 			break;
+-		case BTRFS_DEV_STATS_KEY:
+-			printk(KERN_INFO "\t\tdevice stats\n");
++		case BTRFS_PERSISTENT_ITEM_KEY:
++			printk(KERN_INFO "\t\tpersistent item objectid %llu offset %llu\n",
++					key.objectid, key.offset);
++			switch (key.objectid) {
++			case BTRFS_DEV_STATS_OBJECTID:
++				printk(KERN_INFO "\t\tdevice stats\n");
++				break;
++			default:
++				printk(KERN_INFO "\t\tunknown persistent item\n");
++			}
+ 			break;
+ 		case BTRFS_DEV_REPLACE_KEY:
+ 			printk(KERN_INFO "\t\tdev replace\n");

@@ -1,0 +1,51 @@
+From 50c2d5abe64c1726b48d292a2ab04f60e8238933 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Mon, 25 Jan 2016 17:32:11 +0100
+Subject: [PATCH] btrfs: introduce key type for persistent permanent items
+
+The number of distinct key types is not that big that we could waste one
+for something new we want to store in the tree.
+
+Similar to the temporary items, we'll introduce a new name for an
+existing key value and use the objectid for further extension.  The
+victim is the BTRFS_DEV_STATS_KEY (248).
+
+The device stats are an example of a permanent item.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 20 +++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index e20f406..ffc081e 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -2204,10 +2204,24 @@ struct btrfs_ioctl_defrag_range_args {
+ #define BTRFS_TEMPORARY_ITEM_KEY	248
+ 
+ /*
+- * Persistantly stores the io stats in the device tree.
+- * One key for all stats, (0, BTRFS_DEV_STATS_KEY, devid).
++ * Obsolete name, see BTRFS_PERSISTENT_ITEM_KEY
+  */
+-#define BTRFS_DEV_STATS_KEY	249
++#define BTRFS_DEV_STATS_KEY		249
++
++/*
++ * The key type for tree items that are stored persistently and usually exist
++ * for a long period, eg. filesystem lifetime. The item kinds can be status
++ * information, stats or preference values. The item can exist in any tree.
++ *
++ * [subtype, BTRFS_PERSISTENT_ITEM_KEY, data]
++ *
++ * Existing items:
++ *
++ * - device statistics, store IO stats in the device tree, one key for all
++ *   stats
++ *   (0, BTRFS_DEV_STATS_KEY, 0)
++ */
++#define BTRFS_PERSISTENT_ITEM_KEY	249
+ 
+ /*
+  * Persistantly stores the device replace state in the device tree.
