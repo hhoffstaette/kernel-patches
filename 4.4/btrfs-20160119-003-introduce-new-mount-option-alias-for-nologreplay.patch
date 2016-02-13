@@ -1,23 +1,19 @@
-From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-Subject: [PATCH V7 3/3] btrfs: Introduce new mount option alias for nologreplay
-Date:	Tue, 19 Jan 2016 10:23:04 +0800
+From fed8f166ebf3afb8b91a1fd73d706788e07a91ef Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Date: Tue, 19 Jan 2016 10:23:04 +0800
+Subject: [PATCH] btrfs: Introduce new mount option alias for nologreplay
 
 Introduce new mount option alias "norecovery" for nologreplay, to keep
 "norecovery" behavior the same with other filesystems.
 
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
----
-v6:
-  Newly introduced
-v7:
-  None
+Signed-off-by: David Sterba <dsterba@suse.com>
 ---
  fs/btrfs/super.c | 4 +++-
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
-index 1f97aa1..501a1de 100644
+index e8a7a9f..bf75200c 100644
 --- a/fs/btrfs/super.c
 +++ b/fs/btrfs/super.c
 @@ -304,7 +304,7 @@ enum {
@@ -37,7 +33,7 @@ index 1f97aa1..501a1de 100644
  	{Opt_flushoncommit, "flushoncommit"},
  	{Opt_noflushoncommit, "noflushoncommit"},
  	{Opt_ratio, "metadata_ratio=%d"},
-@@ -599,6 +600,7 @@ int btrfs_parse_options(struct btrfs_root *root, char *options,
+@@ -614,6 +615,7 @@ int btrfs_parse_options(struct btrfs_root *root, char *options,
  			btrfs_clear_and_info(root, NOTREELOG,
  					     "enabling tree log");
  			break;
@@ -45,5 +41,3 @@ index 1f97aa1..501a1de 100644
  		case Opt_nologreplay:
  			btrfs_set_and_info(root, NOLOGREPLAY,
  					   "disabling log replay at mount time");
--- 
-2.7.0

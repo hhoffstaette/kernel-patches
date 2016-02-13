@@ -1,7 +1,7 @@
-From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
-To:	<linux-btrfs@vger.kernel.org>
-Subject: [PATCH V7 1/3] btrfs: Introduce new mount option usebackuproot to replace recovery
-Date:	Tue, 19 Jan 2016 10:23:02 +0800
+From 8dcddfa048de637c8bbfa20ffd22757aeab7c604 Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Date: Tue, 19 Jan 2016 10:23:02 +0800
+Subject: [PATCH] btrfs: Introduce new mount option usebackuproot to replace recovery
 
 Current "recovery" mount option will only try to use backup root.
 However the word "recovery" is too generic and may be confusing for some
@@ -19,27 +19,21 @@ after mount succeeded.
 This provides the basis for later unified "norecovery" mount option.
 
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+[ dropped usebackuproot from show_mount, added note about 'recovery' to
+  docs ]
+Signed-off-by: David Sterba <dsterba@suse.com>
 ---
-v4:
-  Newly introduced to avoid confusion with later 'norecovery' patch.
-v5:
-  Use 'usebackuproot' to replace 'backuproot' mount option.
-v6:
-  None
-v7:
-  Fix a copy-n-paste error in commit message
----
- Documentation/filesystems/btrfs.txt |  9 ++++++---
+ Documentation/filesystems/btrfs.txt | 11 ++++++++---
  fs/btrfs/ctree.h                    |  2 +-
  fs/btrfs/disk-io.c                  |  8 +++++++-
- fs/btrfs/super.c                    | 17 +++++++++++------
+ fs/btrfs/super.c                    | 15 +++++++++------
  4 files changed, 25 insertions(+), 11 deletions(-)
 
 diff --git a/Documentation/filesystems/btrfs.txt b/Documentation/filesystems/btrfs.txt
-index c772b47..8e22d92 100644
+index c772b47..a2b1c508 100644
 --- a/Documentation/filesystems/btrfs.txt
 +++ b/Documentation/filesystems/btrfs.txt
-@@ -168,10 +168,13 @@ Options with (*) are default options and will not show in the mount options.
+@@ -168,10 +168,15 @@ Options with (*) are default options and will not show in the mount options.
    notreelog
  	Enable/disable the tree logging used for fsync and O_SYNC writes.
  
@@ -53,11 +47,13 @@ index c772b47..8e22d92 100644
  	use the first readable.
 +	And since the mount option doesn't affect any behavior after mount,
 +	it won't be shown in mount info.
++	Prior to 4.6, this was done by 'recovery' option that has been
++	deprecated, but will work.
  
    rescan_uuid_tree
  	Force check and rebuild procedure of the UUID tree. This should not
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index c5f40dc..47a96a7 100644
+index bfe4a33..e39eeb9 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
 @@ -2241,7 +2241,7 @@ struct btrfs_ioctl_defrag_range_args {
@@ -70,10 +66,10 @@ index c5f40dc..47a96a7 100644
  #define BTRFS_MOUNT_CHECK_INTEGRITY	(1 << 20)
  #define BTRFS_MOUNT_CHECK_INTEGRITY_INCLUDING_EXTENT_DATA (1 << 21)
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index c67c129..6f16557 100644
+index 4545e2e..c0363626 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
-@@ -3141,6 +3141,12 @@ retry_root_backup:
+@@ -3146,6 +3146,12 @@ int open_ctree(struct super_block *sb,
  
  	fs_info->open = 1;
  
@@ -86,7 +82,7 @@ index c67c129..6f16557 100644
  	return 0;
  
  fail_qgroup:
-@@ -3195,7 +3201,7 @@ fail:
+@@ -3200,7 +3206,7 @@ int open_ctree(struct super_block *sb,
  	return err;
  
  recovery_tree_root:
@@ -96,7 +92,7 @@ index c67c129..6f16557 100644
  
  	free_root_pointers(fs_info, 0);
 diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
-index 86f7fdc..0842456 100644
+index d41e09f..7ed3863 100644
 --- a/fs/btrfs/super.c
 +++ b/fs/btrfs/super.c
 @@ -303,7 +303,7 @@ enum {
@@ -118,7 +114,7 @@ index 86f7fdc..0842456 100644
  	{Opt_skip_balance, "skip_balance"},
  	{Opt_check_integrity, "check_int"},
  	{Opt_check_integrity_including_extent_data, "check_int_data"},
-@@ -681,8 +682,12 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
+@@ -696,8 +697,12 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
  					     "disabling auto defrag");
  			break;
  		case Opt_recovery:
@@ -133,16 +129,12 @@ index 86f7fdc..0842456 100644
  			break;
  		case Opt_skip_balance:
  			btrfs_set_opt(info->mount_opt, SKIP_BALANCE);
-@@ -1213,8 +1218,8 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
+@@ -1228,8 +1233,6 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
  		seq_puts(seq, ",inode_cache");
  	if (btrfs_test_opt(root, SKIP_BALANCE))
  		seq_puts(seq, ",skip_balance");
 -	if (btrfs_test_opt(root, RECOVERY))
 -		seq_puts(seq, ",recovery");
-+	if (btrfs_test_opt(root, USEBACKUPROOT))
-+		seq_puts(seq, ",usebackuproot");
  #ifdef CONFIG_BTRFS_FS_CHECK_INTEGRITY
  	if (btrfs_test_opt(root, CHECK_INTEGRITY_INCLUDING_EXTENT_DATA))
  		seq_puts(seq, ",check_int_data");
--- 
-2.7.0
