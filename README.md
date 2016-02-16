@@ -21,12 +21,15 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS series: >=4.4.0**
+**LTS series: >=4.4.2**
 
-- btrfs: fixes up to 4.5+ (block allocator, cleanups, data loss etc.)
+- btrfs: fixes up to 4.5+ (block allocator, cleanups, data loss, recovery etc.)
+- ext4: corruption/crash consistency fixes
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - net: TCP performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
+- sched: CFS scheduler fixes
 - time: misc. ntp/rtc/timekeeping fixes
 - vfs: performance improvements
+- wq: workqueue fixes
 
