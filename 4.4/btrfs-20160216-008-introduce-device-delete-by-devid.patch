@@ -1,0 +1,194 @@
+From ef43275760458dac09c6e983a2c390333dd419a2 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Sat, 13 Feb 2016 10:01:39 +0800
+Subject: [PATCH] btrfs: introduce device delete by devid
+
+This introduces new ioctl BTRFS_IOC_RM_DEV_V2, which uses enhanced struct
+btrfs_ioctl_vol_args_v2 to carry devid as an user argument.
+
+The patch won't delete the old ioctl interface and so kernel remains
+backward compatible with user land progs.
+
+Test case/script:
+echo "0 $(blockdev --getsz /dev/sdf) linear /dev/sdf 0" | dmsetup create bad_disk
+mkfs.btrfs -f -d raid1 -m raid1 /dev/sdd /dev/sde /dev/mapper/bad_disk
+mount /dev/sdd /btrfs
+dmsetup suspend bad_disk
+echo "0 $(blockdev --getsz /dev/sdf) error /dev/sdf 0" | dmsetup load bad_disk
+dmsetup resume bad_disk
+echo "bad disk failed. now deleting/replacing"
+btrfs dev del  3  /btrfs
+echo $?
+btrfs fi show /btrfs
+umount /btrfs
+btrfs-show-super /dev/sdd | egrep num_device
+dmsetup remove bad_disk
+wipefs -a /dev/sdf
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Reported-by: Martin <m_btrfs@ml1.co.uk>
+[ adjust messages, s/disk/device/ ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ioctl.c           | 58 +++++++++++++++++++++++++++++++++++++++++++++-
+ fs/btrfs/volumes.c         |  4 ++--
+ fs/btrfs/volumes.h         |  2 +-
+ include/uapi/linux/btrfs.h | 14 ++++++++++-
+ 4 files changed, 73 insertions(+), 5 deletions(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 952172c..379f041 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -2669,6 +2669,60 @@ static long btrfs_ioctl_add_dev(struct btrfs_root *root, void __user *arg)
+ 	return ret;
+ }
+ 
++static long btrfs_ioctl_rm_dev_v2(struct file *file, void __user *arg)
++{
++	struct btrfs_root *root = BTRFS_I(file_inode(file))->root;
++	struct btrfs_ioctl_vol_args_v2 *vol_args;
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++
++	ret = mnt_want_write_file(file);
++	if (ret)
++		return ret;
++
++	vol_args = memdup_user(arg, sizeof(*vol_args));
++	if (IS_ERR(vol_args)) {
++		ret = PTR_ERR(vol_args);
++		goto err_drop;
++	}
++
++	/* Check for compatibility reject unknown flags */
++	if (vol_args->flags & ~BTRFS_VOL_ARG_V2_FLAGS)
++		return -ENOTTY;
++
++	if (atomic_xchg(&root->fs_info->mutually_exclusive_operation_running,
++			1)) {
++		ret = BTRFS_ERROR_DEV_EXCL_RUN_IN_PROGRESS;
++		goto out;
++	}
++
++	mutex_lock(&root->fs_info->volume_mutex);
++	if (vol_args->flags & BTRFS_DEVICE_BY_ID) {
++		ret = btrfs_rm_device(root, NULL, vol_args->devid);
++	} else {
++		vol_args->name[BTRFS_SUBVOL_NAME_MAX] = '\0';
++		ret = btrfs_rm_device(root, vol_args->name, 0);
++	}
++	mutex_unlock(&root->fs_info->volume_mutex);
++	atomic_set(&root->fs_info->mutually_exclusive_operation_running, 0);
++
++	if (!ret) {
++		if (vol_args->flags & BTRFS_DEVICE_BY_ID)
++			btrfs_info(root->fs_info, "device deleted: id %llu",
++					vol_args->devid);
++		else
++			btrfs_info(root->fs_info, "device deleted: %s",
++					vol_args->name);
++	}
++out:
++	kfree(vol_args);
++err_drop:
++	mnt_drop_write_file(file);
++	return ret;
++}
++
+ static long btrfs_ioctl_rm_dev(struct file *file, void __user *arg)
+ {
+ 	struct btrfs_root *root = BTRFS_I(file_inode(file))->root;
+@@ -2697,7 +2751,7 @@ static long btrfs_ioctl_rm_dev(struct file *file, void __user *arg)
+ 	}
+ 
+ 	mutex_lock(&root->fs_info->volume_mutex);
+-	ret = btrfs_rm_device(root, vol_args->name);
++	ret = btrfs_rm_device(root, vol_args->name, 0);
+ 	mutex_unlock(&root->fs_info->volume_mutex);
+ 	atomic_set(&root->fs_info->mutually_exclusive_operation_running, 0);
+ 
+@@ -5383,6 +5437,8 @@ long btrfs_ioctl(struct file *file, unsigned int
+ 		return btrfs_ioctl_add_dev(root, argp);
+ 	case BTRFS_IOC_RM_DEV:
+ 		return btrfs_ioctl_rm_dev(file, argp);
++	case BTRFS_IOC_RM_DEV_V2:
++		return btrfs_ioctl_rm_dev_v2(file, argp);
+ 	case BTRFS_IOC_FS_INFO:
+ 		return btrfs_ioctl_fs_info(root, argp);
+ 	case BTRFS_IOC_DEV_INFO:
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 0b1fa2f..5e49adb 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1747,7 +1747,7 @@ static int __check_raid_min_devices(struct btrfs_fs_info *fs_info)
+ 	return 0;
+ }
+ 
+-int btrfs_rm_device(struct btrfs_root *root, char *device_path)
++int btrfs_rm_device(struct btrfs_root *root, char *device_path, u64 devid)
+ {
+ 	struct btrfs_device *device;
+ 	struct btrfs_device *next_device;
+@@ -1763,7 +1763,7 @@ int btrfs_rm_device(struct btrfs_root *root, char *device_path)
+ 	if (ret)
+ 		goto out;
+ 
+-	ret = btrfs_find_device_by_user_input(root, 0, device_path,
++	ret = btrfs_find_device_by_user_input(root, devid, device_path,
+ 				&device);
+ 	if (ret)
+ 		goto out;
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 5087393..c73d027 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -454,7 +454,7 @@ int btrfs_find_device_by_user_input(struct btrfs_root *root, u64 srcdevid,
+ struct btrfs_device *btrfs_alloc_device(struct btrfs_fs_info *fs_info,
+ 					const u64 *devid,
+ 					const u8 *uuid);
+-int btrfs_rm_device(struct btrfs_root *root, char *device_path);
++int btrfs_rm_device(struct btrfs_root *root, char *device_path, u64 devid);
+ void btrfs_cleanup_fs_uuids(void);
+ int btrfs_num_copies(struct btrfs_fs_info *fs_info, u64 logical, u64 len);
+ int btrfs_grow_device(struct btrfs_trans_handle *trans,
+diff --git a/include/uapi/linux/btrfs.h b/include/uapi/linux/btrfs.h
+index dea8931..396a4ef 100644
+--- a/include/uapi/linux/btrfs.h
++++ b/include/uapi/linux/btrfs.h
+@@ -36,6 +36,13 @@ struct btrfs_ioctl_vol_args {
+ #define BTRFS_SUBVOL_CREATE_ASYNC	(1ULL << 0)
+ #define BTRFS_SUBVOL_RDONLY		(1ULL << 1)
+ #define BTRFS_SUBVOL_QGROUP_INHERIT	(1ULL << 2)
++#define BTRFS_DEVICE_BY_ID		(1ULL << 3)
++#define BTRFS_VOL_ARG_V2_FLAGS				\
++			(BTRFS_SUBVOL_CREATE_ASYNC |	\
++			BTRFS_SUBVOL_RDONLY |		\
++			BTRFS_SUBVOL_QGROUP_INHERIT |	\
++			BTRFS_DEVICE_BY_ID)
++
+ #define BTRFS_FSID_SIZE 16
+ #define BTRFS_UUID_SIZE 16
+ #define BTRFS_UUID_UNPARSED_SIZE	37
+@@ -76,7 +83,10 @@ struct btrfs_ioctl_vol_args_v2 {
+ 		};
+ 		__u64 unused[4];
+ 	};
+-	char name[BTRFS_SUBVOL_NAME_MAX + 1];
++	union {
++		char name[BTRFS_SUBVOL_NAME_MAX + 1];
++		u64 devid;
++	};
+ };
+ 
+ /*
+@@ -659,5 +669,7 @@ static inline char *btrfs_err_str(enum btrfs_err_code err_code)
+ 				   struct btrfs_ioctl_feature_flags[2])
+ #define BTRFS_IOC_GET_SUPPORTED_FEATURES _IOR(BTRFS_IOCTL_MAGIC, 57, \
+ 				   struct btrfs_ioctl_feature_flags[3])
++#define BTRFS_IOC_RM_DEV_V2 _IOW(BTRFS_IOCTL_MAGIC, 58, \
++				   struct btrfs_ioctl_vol_args_v2)
+ 
+ #endif /* _UAPI_LINUX_BTRFS_H */
