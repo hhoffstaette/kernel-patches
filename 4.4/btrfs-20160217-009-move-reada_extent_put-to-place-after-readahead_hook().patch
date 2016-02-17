@@ -1,0 +1,44 @@
+From a1f8dda0ef95d9a19f8b6f527f25572fe1febe8f Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 21:07:17 +0800
+Subject: [PATCH] btrfs: reada: move reada_extent_put to place after __readahead_hook()
+
+We can't release reada_extent earlier than __readahead_hook(), because
+__readahead_hook() still need to use it, it is necessary to hode a refcnt
+to avoid it be freed.
+
+Actually it is not a problem after my patch named:
+  Avoid many times of empty loop
+It make reada_extent in above line include at least one reada_extctl,
+which keeps additional one refcnt for reada_extent.
+
+But we still need this patch to make the code in pretty logic.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/reada.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
+index 8aeb7ac..3431b4c2 100644
+--- a/fs/btrfs/reada.c
++++ b/fs/btrfs/reada.c
+@@ -717,8 +717,6 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+ 	}
+ 	logical = re->logical;
+ 
+-	reada_extent_put(fs_info, re);
+-
+ 	atomic_inc(&dev->reada_in_flight);
+ 	ret = reada_tree_block_flagged(fs_info->extent_root, logical,
+ 			mirror_num, &eb);
+@@ -730,6 +728,8 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+ 	if (eb)
+ 		free_extent_buffer(eb);
+ 
++	reada_extent_put(fs_info, re);
++
+ 	return 1;
+ 
+ }

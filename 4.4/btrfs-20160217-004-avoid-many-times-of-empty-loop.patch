@@ -1,0 +1,54 @@
+From 97d5f0e63d78a48cef35349261f90d0d4266dc24 Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Thu, 31 Dec 2015 16:57:21 +0800
+Subject: [PATCH] btrfs: reada: Avoid many times of empty loop
+
+We can see following loop(10000 times) in trace_log:
+ [   75.416137] ZL_DEBUG: reada_start_machine_dev:730: pid=771 comm=kworker/u2:3 re->ref_cnt ffff88003741e0c0 1 -> 2
+ [   75.417413] ZL_DEBUG: reada_extent_put:524: pid=771 comm=kworker/u2:3 re = ffff88003741e0c0, refcnt = 2 -> 1
+ [   75.418611] ZL_DEBUG: __readahead_hook:129: pid=771 comm=kworker/u2:3 re->ref_cnt ffff88003741e0c0 1 -> 2
+ [   75.419793] ZL_DEBUG: reada_extent_put:524: pid=771 comm=kworker/u2:3 re = ffff88003741e0c0, refcnt = 2 -> 1
+
+ [   75.421016] ZL_DEBUG: reada_start_machine_dev:730: pid=771 comm=kworker/u2:3 re->ref_cnt ffff88003741e0c0 1 -> 2
+ [   75.422324] ZL_DEBUG: reada_extent_put:524: pid=771 comm=kworker/u2:3 re = ffff88003741e0c0, refcnt = 2 -> 1
+ [   75.423661] ZL_DEBUG: __readahead_hook:129: pid=771 comm=kworker/u2:3 re->ref_cnt ffff88003741e0c0 1 -> 2
+ [   75.424882] ZL_DEBUG: reada_extent_put:524: pid=771 comm=kworker/u2:3 re = ffff88003741e0c0, refcnt = 2 -> 1
+
+ ...(10000 times)
+
+ [  124.101672] ZL_DEBUG: reada_start_machine_dev:730: pid=771 comm=kworker/u2:3 re->ref_cnt ffff88003741e0c0 1 -> 2
+ [  124.102850] ZL_DEBUG: reada_extent_put:524: pid=771 comm=kworker/u2:3 re = ffff88003741e0c0, refcnt = 2 -> 1
+ [  124.104008] ZL_DEBUG: __readahead_hook:129: pid=771 comm=kworker/u2:3 re->ref_cnt ffff88003741e0c0 1 -> 2
+ [  124.105121] ZL_DEBUG: reada_extent_put:524: pid=771 comm=kworker/u2:3 re = ffff88003741e0c0, refcnt = 2 -> 1
+
+Reason:
+ If more than one user trigger reada in same extent, the first task
+ finished setting of reada data struct and call reada_start_machine()
+ to start, and the second task only add a ref_count but have not
+ add reada_extctl struct completely, the reada_extent can not finished
+ all jobs, and will be selected in __reada_start_machine() for 10000
+ times(total times in __reada_start_machine()).
+
+Fix:
+ For a reada_extent without job, we don't need to run it, just return
+ 0 to let caller break.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/reada.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
+index 7e5d4ac..f0cf5f3 100644
+--- a/fs/btrfs/reada.c
++++ b/fs/btrfs/reada.c
+@@ -708,7 +708,7 @@ static int reada_start_machine_dev(struct btrfs_fs_info *fs_info,
+ 	logical = re->logical;
+ 
+ 	spin_lock(&re->lock);
+-	if (re->scheduled_for == NULL) {
++	if (!re->scheduled_for && !list_empty(&re->extctl)) {
+ 		re->scheduled_for = dev;
+ 		need_kick = 1;
+ 	}

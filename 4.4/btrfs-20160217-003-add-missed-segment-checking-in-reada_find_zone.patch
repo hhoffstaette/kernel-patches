@@ -1,0 +1,30 @@
+From 8e9aa51f5405b2a01a44818120116b65a2ba4d3a Mon Sep 17 00:00:00 2001
+From: Zhao Lei <zhaolei@cn.fujitsu.com>
+Date: Fri, 18 Dec 2015 21:56:08 +0800
+Subject: [PATCH] btrfs: reada: Add missed segment checking in reada_find_zone
+
+In rechecking zone-in-tree, we still need to check zone include
+our logical address.
+
+Signed-off-by: Zhao Lei <zhaolei@cn.fujitsu.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/reada.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
+index 7448080..7e5d4ac 100644
+--- a/fs/btrfs/reada.c
++++ b/fs/btrfs/reada.c
+@@ -303,8 +303,10 @@ static struct reada_zone *reada_find_zone(struct btrfs_fs_info *fs_info,
+ 		kfree(zone);
+ 		ret = radix_tree_gang_lookup(&dev->reada_zones, (void **)&zone,
+ 					     logical >> PAGE_CACHE_SHIFT, 1);
+-		if (ret == 1)
++		if (ret == 1 && logical >= zone->start && logical <= zone->end)
+ 			kref_get(&zone->refcnt);
++		else
++			zone = NULL;
+ 	}
+ 	spin_unlock(&fs_info->reada_lock);
+ 
