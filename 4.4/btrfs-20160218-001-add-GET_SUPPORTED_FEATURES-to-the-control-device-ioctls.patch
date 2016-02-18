@@ -1,0 +1,58 @@
+From f85225cc3f232fda01c71c5c1afee0139a8ee5ef Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Wed, 17 Feb 2016 15:24:14 +0100
+Subject: [PATCH] btrfs: add GET_SUPPORTED_FEATURES to the control device ioctls
+
+The control device is accessible when no filesystem is mounted and we
+may want to query features supported by the module. This is already
+possible using the sysfs files, this ioctl is for parity and
+convenience.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 1 +
+ fs/btrfs/ioctl.c | 3 +--
+ fs/btrfs/super.c | 4 ++++
+ 3 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index bfe4a33..47bc50f 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -4129,6 +4129,7 @@
+ 
+ /* ioctl.c */
+ long btrfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
++int btrfs_ioctl_get_supported_features(struct file *file, void __user *arg);
+ long btrfs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+ void btrfs_update_iflags(struct inode *inode);
+ void btrfs_inherit_iflags(struct inode *inode, struct inode *dir);
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 952172c..f4c6ed5 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -5187,8 +5187,7 @@ static int btrfs_ioctl_set_fslabel(struct file *file, void __user *arg)
+ 	  .compat_ro_flags = BTRFS_FEATURE_COMPAT_RO_##suffix, \
+ 	  .incompat_flags = BTRFS_FEATURE_INCOMPAT_##suffix }
+ 
+-static int btrfs_ioctl_get_supported_features(struct file *file,
+-					      void __user *arg)
++int btrfs_ioctl_get_supported_features(struct file *file, void __user *arg)
+ {
+ 	static const struct btrfs_ioctl_feature_flags features[3] = {
+ 		INIT_FEATURE_FLAGS(SUPP),
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index d41e09f..dda6f64d 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -2163,6 +2163,10 @@ static long btrfs_control_ioctl(struct file *file, unsigned int cmd,
+ 			break;
+ 		ret = !(fs_devices->num_devices == fs_devices->total_devices);
+ 		break;
++	case BTRFS_IOC_GET_SUPPORTED_FEATURES:
++		ret = btrfs_ioctl_get_supported_features(NULL,
++				(void __user*)arg);
++		break;
+ 	}
+ 
+ 	kfree(vol);
