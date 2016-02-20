@@ -1,0 +1,31 @@
+From 0138b6fe8f7ea6aa83ed7ccfcabc89b490528ce8 Mon Sep 17 00:00:00 2001
+From: Byongho Lee <bhlee.kernel@gmail.com>
+Date: Wed, 27 Jan 2016 01:33:04 +0900
+Subject: btrfs: simplify expression in btrfs_calc_trans_metadata_size()
+
+Simplify expression in btrfs_calc_trans_metadata_size().
+
+Signed-off-by: Byongho Lee <bhlee.kernel@gmail.com>
+Reviewed-by: Stefan Behrens <sbehrens@giantdisaster.de>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index bfe4a33..91449e4 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -3448,8 +3448,7 @@ u64 btrfs_csum_bytes_to_leaves(struct btrfs_root *root, u64 csum_bytes);
+ static inline u64 btrfs_calc_trans_metadata_size(struct btrfs_root *root,
+ 						 unsigned num_items)
+ {
+-	return (root->nodesize + root->nodesize * (BTRFS_MAX_LEVEL - 1)) *
+-		2 * num_items;
++	return root->nodesize * BTRFS_MAX_LEVEL * 2 * num_items;
+ }
+ 
+ /*
+-- 
+cgit v0.12
+
