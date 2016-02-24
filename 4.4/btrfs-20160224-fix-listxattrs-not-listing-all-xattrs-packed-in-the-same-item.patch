@@ -1,7 +1,9 @@
-From 2df9515e7ec26ea89b4bd4d83e638db3b0c1d88d Mon Sep 17 00:00:00 2001
+From:	fdmanana@kernel.org
+To:	linux-btrfs@vger.kernel.org
+Subject: [PATCH v2] Btrfs: fix listxattrs not listing all xattrs packed in the same item
+Date:	Wed, 24 Feb 2016 15:53:59 +0000
+
 From: Filipe Manana <fdmanana@suse.com>
-Date: Sun, 21 Feb 2016 15:03:02 +0000
-Subject: Btrfs: fix listxattrs not listing all xattrs packed in the same item
 
 In the listxattrs handler, we were not listing all the xattrs that are
 packed in the same btree item, which happens when multiple xattrs have
@@ -61,11 +63,15 @@ The following test case for xfstests reproduces the issue:
 
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/xattr.c | 62 +++++++++++++++++++++++++++++++++++---------------------
- 1 file changed, 39 insertions(+), 23 deletions(-)
+
+V2: Fixed logic to jump into next item, which was detected by warnings
+    from gcc 5.3.0 (reported by Holger).
+
+ fs/btrfs/xattr.c | 65 +++++++++++++++++++++++++++++++++++---------------------
+ 1 file changed, 41 insertions(+), 24 deletions(-)
 
 diff --git a/fs/btrfs/xattr.c b/fs/btrfs/xattr.c
-index f2a20d5..caf643d 100644
+index f2a20d5..145d2b8 100644
 --- a/fs/btrfs/xattr.c
 +++ b/fs/btrfs/xattr.c
 @@ -260,16 +260,12 @@ out:
@@ -101,8 +107,12 @@ index f2a20d5..caf643d 100644
  		leaf = path->nodes[0];
  		slot = path->slots[0];
  
-@@ -319,28 +322,41 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
- 			goto next;
+@@ -316,31 +319,45 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
+ 		if (found_key.type > BTRFS_XATTR_ITEM_KEY)
+ 			break;
+ 		if (found_key.type < BTRFS_XATTR_ITEM_KEY)
+-			goto next;
++			goto next_item;
  
  		di = btrfs_item_ptr(leaf, slot, struct btrfs_dir_item);
 -		if (verify_dir_item(root, leaf, di))
@@ -157,9 +167,9 @@ index f2a20d5..caf643d 100644
 +			cur += this_len;
 +			di = (struct btrfs_dir_item *)((char *)di + this_len);
 +		}
++next_item:
  		path->slots[0]++;
  	}
  	ret = total_size;
 -- 
-cgit v0.12
-
+2.7.0.rc3
