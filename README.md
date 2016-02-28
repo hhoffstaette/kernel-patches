@@ -23,6 +23,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **LTS series: >=4.4.3**
 
+- bfs: [BFS v467](http://ck-hack.blogspot.de/2015/12/bfs-467-linux-43-ck3.html)
 - btrfs: fixes up to 4.6+ (block allocator, cleanups, data loss, recovery etc.)
 - ext4: corruption/crash consistency fixes, performance
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
