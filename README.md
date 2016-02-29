@@ -24,7 +24,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **LTS series: >=4.4.3**
 
 - btrfs: fixes up to 4.6+ (block allocator, cleanups, data loss, recovery etc.)
-- ext4: corruption/crash consistency fixes
+- ext4: corruption/crash consistency fixes, performance
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - net: TCP performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
