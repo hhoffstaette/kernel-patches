@@ -1,0 +1,48 @@
+From: Eric Sandeen <sandeen@redhat.com>
+Subject: [PATCH] xfs: ensure committed is initialized in xfs_trans_roll
+Date: Thu, 10 Mar 2016 12:00:48 -0600
+Cc: Dan Carpenter <dan.carpenter@oracle.com>
+To: xfs@oss.sgi.com
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.xfs.general/73735>
+
+__xfs_trans_roll() can return without setting the
+*committed argument; this was a problem for xfs_bmap_finish():
+
+        int       committed;/* xact committed or not */
+...
+        error = __xfs_trans_roll(tp, ip, &committed);
+        if (error) {
+...
+                if (committed) {
+
+and we tested an uninitialized "committed" variable on the
+error path.  No caller is preserving "committed" state across
+calls to __xfs_trans_roll(), so just initialize committed inside
+the function to avoid future errors like this.
+
+Reported-by: Dan Carpenter <dan.carpenter@oracle.com>
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+---
+
+diff --git a/fs/xfs/xfs_trans.c b/fs/xfs/xfs_trans.c
+index 748b16a..20c5366 100644
+--- a/fs/xfs/xfs_trans.c
++++ b/fs/xfs/xfs_trans.c
+@@ -1028,6 +1028,8 @@ __xfs_trans_roll(
+ 	struct xfs_trans_res	tres;
+ 	int			error;
+ 
++	*committed = 0;
++
+ 	/*
+ 	 * Ensure that the inode is always logged.
+ 	 */
+@@ -1082,6 +1084,6 @@ xfs_trans_roll(
+ 	struct xfs_trans	**tpp,
+ 	struct xfs_inode	*dp)
+ {
+-	int			committed = 0;
++	int			committed;
+ 	return __xfs_trans_roll(tpp, dp, &committed);
+ }
+
