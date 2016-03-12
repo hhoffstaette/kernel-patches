@@ -63,7 +63,7 @@ index cc768b2..65b0fcb 100644
  	 * btrfs_dirty_inode will update the inode under btrfs_join_transaction
  	 * which doesn't reserve space for speed.  This is a problem since we
  	 * still need to reserve space for this update, so try to reserve the
-@@ -632,50 +655,10 @@ static int btrfs_delayed_inode_reserve_metadata(
+@@ -632,46 +655,10 @@ static int btrfs_delayed_inode_reserve_metadata(
  						      num_bytes, 1);
  		}
  		return ret;
@@ -91,12 +91,8 @@ index cc768b2..65b0fcb 100644
 -			goto out;
 -
 -		ret = btrfs_block_rsv_migrate(src_rsv, dst_rsv, num_bytes, 1);
--		if (!ret)
+-		if (!WARN_ON(ret))
 -			goto out;
--
--		if (btrfs_test_opt(root, ENOSPC_DEBUG))
--			WARN(1, KERN_DEBUG
--			     "btrfs: block rsv migrate returned %d\n", ret);
 -
 -		/*
 -		 * Ok this is a problem, let's just steal from the global rsv

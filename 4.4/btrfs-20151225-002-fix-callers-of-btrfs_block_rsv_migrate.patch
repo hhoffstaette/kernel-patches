@@ -63,7 +63,7 @@ index e0941fb..cc768b2 100644
  
 -		ret = btrfs_block_rsv_migrate(src_rsv, dst_rsv, num_bytes);
 +		ret = btrfs_block_rsv_migrate(src_rsv, dst_rsv, num_bytes, 1);
- 		if (!ret)
+ 		if (!WARN_ON(ret))
  			goto out;
  
 @@ -664,12 +664,12 @@ static int btrfs_delayed_inode_reserve_metadata(
