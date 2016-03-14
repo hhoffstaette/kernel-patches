@@ -21,7 +21,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS series: >=4.4.5**
+**LTS series: >=4.4.6**
 
 - bfs: [BFS v467](http://ck-hack.blogspot.de/2015/12/bfs-467-linux-43-ck3.html)
 - btrfs: fixes up to 4.6+ (block allocator, cleanups, data loss, recovery etc.)
