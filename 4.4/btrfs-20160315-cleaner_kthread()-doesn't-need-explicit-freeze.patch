@@ -1,0 +1,39 @@
+Date:	Tue, 15 Mar 2016 11:28:54 +0100 (CET)
+From:	Jiri Kosina <jkosina@suse.cz>
+To:	Chris Mason <clm@fb.com>, Josef Bacik <jbacik@fb.com>,
+	David Sterba <dsterba@suse.com>
+cc:	linux-btrfs@vger.kernel.org, linux-btrfs@vger.kernel.org,
+	jack@suse.cz, mhocko@suse.cz
+Subject: [PATCH 1/2] btrfs: cleaner_kthread() doesn't need explicit freeze
+
+cleaner_kthread() is not marked freezable, and therefore calling 
+try_to_freeze() in its context is a pointless no-op.
+
+In addition to that, as has been clearly demonstrated by 80ad623edd2d 
+("Revert "btrfs: clear PF_NOFREEZE in cleaner_kthread()"), it's perfectly 
+valid / legal for cleaner_kthread() to stay scheduled out in an arbitrary 
+place during suspend (in that particular example that was waiting for 
+reading of extent pages), so there is no need to leave any traces of 
+freezer in this kthread.
+
+Fixes: 80ad623edd2d ("Revert "btrfs: clear PF_NOFREEZE in cleaner_kthread()")
+Fixes: 696249132158 ("btrfs: clear PF_NOFREEZE in cleaner_kthread()")
+Signed-off-by: Jiri Kosina <jkosina@suse.cz>
+---
+ fs/btrfs/disk-io.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 4545e2e..d8d68af 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1830,7 +1830,7 @@ static int cleaner_kthread(void *arg)
+ 		 */
+ 		btrfs_delete_unused_bgs(root->fs_info);
+ sleep:
+-		if (!try_to_freeze() && !again) {
++		if (!again) {
+ 			set_current_state(TASK_INTERRUPTIBLE);
+ 			if (!kthread_should_stop())
+ 				schedule();
+-- 
