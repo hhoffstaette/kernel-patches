@@ -1,0 +1,31 @@
+From 371cac609c11a483d1d1b79cc4cdd620fb676dc9 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Mon, 21 Mar 2016 14:59:53 -0700
+Subject: [PATCH] Btrfs: fix invalid reference in replace_path
+
+Dan Carpenter's static checker has found this error, it's introduced by
+commit 64c043de466d
+("Btrfs: fix up read_tree_block to return proper error")
+
+It's really supposed to 'break' the loop on error like others.
+
+Cc: Dan Carpenter <dan.carpenter@oracle.com>
+Reported-by: Dan Carpenter <dan.carpenter@oracle.com>
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/relocation.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 2bd00114..5c806f0 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -1850,6 +1850,7 @@ int replace_path(struct btrfs_trans_handle *trans,
+ 			eb = read_tree_block(dest, old_bytenr, old_ptr_gen);
+ 			if (IS_ERR(eb)) {
+ 				ret = PTR_ERR(eb);
++				break;
+ 			} else if (!extent_buffer_uptodate(eb)) {
+ 				ret = -EIO;
+ 				free_extent_buffer(eb);
