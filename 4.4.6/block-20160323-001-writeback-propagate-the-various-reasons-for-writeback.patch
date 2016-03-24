@@ -1,0 +1,58 @@
+From 7ee6886699d4c425beac1ac5b57226ee0af35fa7 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Tue, 22 Mar 2016 21:49:20 -0600
+Subject: writeback: propagate the various reasons for writeback
+
+Avoid losing context by propagating the various reason why we
+initiate writeback.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ fs/fs-writeback.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/fs/fs-writeback.c b/fs/fs-writeback.c
+index 5c46ed9..387610c 100644
+--- a/fs/fs-writeback.c
++++ b/fs/fs-writeback.c
+@@ -52,6 +52,7 @@ struct wb_writeback_work {
+ 	unsigned int range_cyclic:1;
+ 	unsigned int for_background:1;
+ 	unsigned int for_sync:1;	/* sync(2) WB_SYNC_ALL writeback */
++	unsigned int for_reclaim:1;	/* for mem reclaim */
+ 	unsigned int auto_free:1;	/* free on completion */
+ 	enum wb_reason reason;		/* why was writeback initiated? */
+ 
+@@ -942,6 +943,21 @@ void wb_start_writeback(struct bdi_writeback *wb, long nr_pages,
+ 	work->reason	= reason;
+ 	work->auto_free	= 1;
+ 
++	switch (reason) {
++	case WB_REASON_BACKGROUND:
++	case WB_REASON_PERIODIC:
++		work->for_background = 1;
++		break;
++	case WB_REASON_TRY_TO_FREE_PAGES:
++	case WB_REASON_FREE_MORE_MEM:
++		work->for_reclaim = 1;
++	case WB_REASON_SYNC:
++		work->for_sync = 1;
++		break;
++	default:
++		break;
++	}
++
+ 	wb_queue_work(wb, work);
+ }
+ 
+@@ -1443,6 +1459,7 @@ static long writeback_sb_inodes(struct super_block *sb,
+ 		.for_kupdate		= work->for_kupdate,
+ 		.for_background		= work->for_background,
+ 		.for_sync		= work->for_sync,
++		.for_reclaim		= work->for_reclaim,
+ 		.range_cyclic		= work->range_cyclic,
+ 		.range_start		= 0,
+ 		.range_end		= LLONG_MAX,
+-- 
+cgit v0.12
+

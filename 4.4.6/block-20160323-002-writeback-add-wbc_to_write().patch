@@ -1,0 +1,170 @@
+From bd1639f2905dc84d1d59030f3dd4cd87605cbf8e Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Tue, 22 Mar 2016 21:36:10 -0600
+Subject: writeback: add wbc_to_write()
+
+Add wbc_to_write(), which returns the write type to use, based on a
+struct writeback_control. No functional changes in this patch, but it
+prepares us for factoring other wbc fields for write type.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ fs/block_dev.c            | 2 +-
+ fs/buffer.c               | 2 +-
+ fs/f2fs/data.c            | 2 +-
+ fs/f2fs/node.c            | 2 +-
+ fs/gfs2/meta_io.c         | 3 +--
+ fs/mpage.c                | 9 ++++-----
+ fs/xfs/xfs_aops.c         | 2 +-
+ include/linux/writeback.h | 8 ++++++++
+ 8 files changed, 18 insertions(+), 12 deletions(-)
+
+diff --git a/fs/block_dev.c b/fs/block_dev.c
+index 3172c4e..b11d4e0 100644
+--- a/fs/block_dev.c
++++ b/fs/block_dev.c
+@@ -432,7 +432,7 @@ int bdev_write_page(struct block_device *bdev, sector_t sector,
+ 			struct page *page, struct writeback_control *wbc)
+ {
+ 	int result;
+-	int rw = (wbc->sync_mode == WB_SYNC_ALL) ? WRITE_SYNC : WRITE;
++	int rw = wbc_to_write(wbc);
+ 	const struct block_device_operations *ops = bdev->bd_disk->fops;
+ 
+ 	if (!ops->rw_page || bdev_get_integrity(bdev))
+diff --git a/fs/buffer.c b/fs/buffer.c
+index 33be296..28273ca 100644
+--- a/fs/buffer.c
++++ b/fs/buffer.c
+@@ -1697,7 +1697,7 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
+ 	struct buffer_head *bh, *head;
+ 	unsigned int blocksize, bbits;
+ 	int nr_underway = 0;
+-	int write_op = (wbc->sync_mode == WB_SYNC_ALL ? WRITE_SYNC : WRITE);
++	int write_op = wbc_to_write(wbc);
+ 
+ 	head = create_page_buffers(page, inode,
+ 					(1 << BH_Dirty)|(1 << BH_Uptodate));
+diff --git a/fs/f2fs/data.c b/fs/f2fs/data.c
+index e5c762b..dca5d43 100644
+--- a/fs/f2fs/data.c
++++ b/fs/f2fs/data.c
+@@ -1143,7 +1143,7 @@ static int f2fs_write_data_page(struct page *page,
+ 	struct f2fs_io_info fio = {
+ 		.sbi = sbi,
+ 		.type = DATA,
+-		.rw = (wbc->sync_mode == WB_SYNC_ALL) ? WRITE_SYNC : WRITE,
++		.rw = wbc_to_write(wbc),
+ 		.page = page,
+ 		.encrypted_page = NULL,
+ 	};
+diff --git a/fs/f2fs/node.c b/fs/f2fs/node.c
+index 118321b..db9201f 100644
+--- a/fs/f2fs/node.c
++++ b/fs/f2fs/node.c
+@@ -1397,7 +1397,7 @@ static int f2fs_write_node_page(struct page *page,
+ 	struct f2fs_io_info fio = {
+ 		.sbi = sbi,
+ 		.type = NODE,
+-		.rw = (wbc->sync_mode == WB_SYNC_ALL) ? WRITE_SYNC : WRITE,
++		.rw = wbc_to_write(wbc),
+ 		.page = page,
+ 		.encrypted_page = NULL,
+ 	};
+diff --git a/fs/gfs2/meta_io.c b/fs/gfs2/meta_io.c
+index e137d96..ede8730 100644
+--- a/fs/gfs2/meta_io.c
++++ b/fs/gfs2/meta_io.c
+@@ -37,8 +37,7 @@ static int gfs2_aspace_writepage(struct page *page, struct writeback_control *wb
+ {
+ 	struct buffer_head *bh, *head;
+ 	int nr_underway = 0;
+-	int write_op = REQ_META | REQ_PRIO |
+-		(wbc->sync_mode == WB_SYNC_ALL ? WRITE_SYNC : WRITE);
++	int write_op = REQ_META | REQ_PRIO | wbc_to_write(wbc);
+ 
+ 	BUG_ON(!PageLocked(page));
+ 	BUG_ON(!page_has_buffers(page));
+diff --git a/fs/mpage.c b/fs/mpage.c
+index 6bd9fd9..9986c75 100644
+--- a/fs/mpage.c
++++ b/fs/mpage.c
+@@ -486,7 +486,6 @@ static int __mpage_writepage(struct page *page, struct writeback_control *wbc,
+ 	struct buffer_head map_bh;
+ 	loff_t i_size = i_size_read(inode);
+ 	int ret = 0;
+-	int wr = (wbc->sync_mode == WB_SYNC_ALL ?  WRITE_SYNC : WRITE);
+ 
+ 	if (page_has_buffers(page)) {
+ 		struct buffer_head *head = page_buffers(page);
+@@ -595,7 +594,7 @@ page_is_mapped:
+ 	 * This page will go to BIO.  Do we need to send this BIO off first?
+ 	 */
+ 	if (bio && mpd->last_block_in_bio != blocks[0] - 1)
+-		bio = mpage_bio_submit(wr, bio);
++		bio = mpage_bio_submit(wbc_to_write(wbc), bio);
+ 
+ alloc_new:
+ 	if (bio == NULL) {
+@@ -622,7 +621,7 @@ alloc_new:
+ 	wbc_account_io(wbc, page, PAGE_SIZE);
+ 	length = first_unmapped << blkbits;
+ 	if (bio_add_page(bio, page, length, 0) < length) {
+-		bio = mpage_bio_submit(wr, bio);
++		bio = mpage_bio_submit(wbc_to_write(wbc), bio);
+ 		goto alloc_new;
+ 	}
+ 
+@@ -632,7 +631,7 @@ alloc_new:
+ 	set_page_writeback(page);
+ 	unlock_page(page);
+ 	if (boundary || (first_unmapped != blocks_per_page)) {
+-		bio = mpage_bio_submit(wr, bio);
++		bio = mpage_bio_submit(wbc_to_write(wbc), bio);
+ 		if (boundary_block) {
+ 			write_boundary_block(boundary_bdev,
+ 					boundary_block, 1 << blkbits);
+@@ -644,7 +643,7 @@ alloc_new:
+ 
+ confused:
+ 	if (bio)
+-		bio = mpage_bio_submit(wr, bio);
++		bio = mpage_bio_submit(wbc_to_write(wbc), bio);
+ 
+ 	if (mpd->use_writepage) {
+ 		ret = mapping->a_ops->writepage(page, wbc);
+diff --git a/fs/xfs/xfs_aops.c b/fs/xfs/xfs_aops.c
+index d445a64..239a612 100644
+--- a/fs/xfs/xfs_aops.c
++++ b/fs/xfs/xfs_aops.c
+@@ -393,7 +393,7 @@ xfs_submit_ioend_bio(
+ 	atomic_inc(&ioend->io_remaining);
+ 	bio->bi_private = ioend;
+ 	bio->bi_end_io = xfs_end_bio;
+-	submit_bio(wbc->sync_mode == WB_SYNC_ALL ? WRITE_SYNC : WRITE, bio);
++	submit_bio(wbc_to_write(wbc), bio);
+ }
+ 
+ STATIC struct bio *
+diff --git a/include/linux/writeback.h b/include/linux/writeback.h
+index d0b5ca5..719c255 100644
+--- a/include/linux/writeback.h
++++ b/include/linux/writeback.h
+@@ -100,6 +100,14 @@ struct writeback_control {
+ #endif
+ };
+ 
++static inline int wbc_to_write(struct writeback_control *wbc)
++{
++	if (wbc->sync_mode == WB_SYNC_ALL)
++		return WRITE_SYNC;
++
++	return WRITE;
++}
++
+ /*
+  * A wb_domain represents a domain that wb's (bdi_writeback's) belong to
+  * and are measured against each other in.  There always is one global
+-- 
+cgit v0.12
+

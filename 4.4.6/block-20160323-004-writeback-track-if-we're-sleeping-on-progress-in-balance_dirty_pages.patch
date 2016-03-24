@@ -1,0 +1,45 @@
+From bf0542ae6d5d9b5913c7866c0cc93ae6949eb974 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Tue, 22 Mar 2016 22:47:06 -0600
+Subject: writeback: track if we're sleeping on progress in balance_dirty_pages()
+
+Note in the bdi_writeback structure if a task is currently being
+limited in balance_dirty_pages(), waiting for writeback to
+proceed.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ include/linux/backing-dev-defs.h | 2 ++
+ mm/page-writeback.c              | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/include/linux/backing-dev-defs.h b/include/linux/backing-dev-defs.h
+index 1b4d69f..f702309 100644
+--- a/include/linux/backing-dev-defs.h
++++ b/include/linux/backing-dev-defs.h
+@@ -116,6 +116,8 @@ struct bdi_writeback {
+ 	struct list_head work_list;
+ 	struct delayed_work dwork;	/* work item used for writeback */
+ 
++	int dirty_sleeping;		/* waiting on dirty limit exceeded */
++
+ 	struct list_head bdi_node;	/* anchored at bdi->wb_list */
+ 
+ #ifdef CONFIG_CGROUP_WRITEBACK
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 11ff8f7..15e696b 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -1746,7 +1746,9 @@ pause:
+ 					  pause,
+ 					  start_time);
+ 		__set_current_state(TASK_KILLABLE);
++		wb->dirty_sleeping = 1;
+ 		io_schedule_timeout(pause);
++		wb->dirty_sleeping = 0;
+ 
+ 		current->dirty_paused_when = now + pause;
+ 		current->nr_dirtied = 0;
+-- 
+cgit v0.12
+
