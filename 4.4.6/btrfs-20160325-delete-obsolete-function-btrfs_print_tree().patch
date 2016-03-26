@@ -1,0 +1,76 @@
+From c99a1f4f0ca0e2737684b0f0d186e6116d1b534e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Holger=20Hoffst=C3=A4tte?= <holger.hoffstaette@googlemail.com>
+Date: Fri, 25 Mar 2016 15:43:27 +0100
+Subject: [PATCH] btrfs: delete obsolete function btrfs_print_tree()
+
+Dan Carpenter's static checker recently found missing IS_ERR handling
+in print-tree.c:btrfs_print_tree(). While looking into this I found that
+this function is no longer called anywhere and was moved to btrfs-progs
+long ago. It can simply be removed.
+
+Reported-by: Dan Carpenter <dan.carpenter@oracle.com>
+Signed-off-by: Holger Hoffstätte <holger.hoffstaette@googlemail.com>
+---
+ fs/btrfs/print-tree.c | 38 --------------------------------------
+ fs/btrfs/print-tree.h |  1 -
+ 2 files changed, 39 deletions(-)
+
+diff --git a/fs/btrfs/print-tree.c b/fs/btrfs/print-tree.c
+index 147dc6c..dc28db8 100644
+--- a/fs/btrfs/print-tree.c
++++ b/fs/btrfs/print-tree.c
+@@ -328,41 +328,3 @@ void btrfs_print_leaf(struct btrfs_root *root, struct extent_buffer *l)
+ 		};
+ 	}
+ }
+-
+-void btrfs_print_tree(struct btrfs_root *root, struct extent_buffer *c)
+-{
+-	int i; u32 nr;
+-	struct btrfs_key key;
+-	int level;
+-
+-	if (!c)
+-		return;
+-	nr = btrfs_header_nritems(c);
+-	level = btrfs_header_level(c);
+-	if (level == 0) {
+-		btrfs_print_leaf(root, c);
+-		return;
+-	}
+-	btrfs_info(root->fs_info, "node %llu level %d total ptrs %d free spc %u",
+-		btrfs_header_bytenr(c), level, nr,
+-		(u32)BTRFS_NODEPTRS_PER_BLOCK(root) - nr);
+-	for (i = 0; i < nr; i++) {
+-		btrfs_node_key_to_cpu(c, &key, i);
+-		printk(KERN_INFO "\tkey %d (%llu %u %llu) block %llu\n",
+-		       i, key.objectid, key.type, key.offset,
+-		       btrfs_node_blockptr(c, i));
+-	}
+-	for (i = 0; i < nr; i++) {
+-		struct extent_buffer *next = read_tree_block(root,
+-					btrfs_node_blockptr(c, i),
+-					btrfs_node_ptr_generation(c, i));
+-		if (btrfs_is_leaf(next) &&
+-		   level != 1)
+-			BUG();
+-		if (btrfs_header_level(next) !=
+-		       level - 1)
+-			BUG();
+-		btrfs_print_tree(root, next);
+-		free_extent_buffer(next);
+-	}
+-}
+diff --git a/fs/btrfs/print-tree.h b/fs/btrfs/print-tree.h
+index 7faddfa..9dd56b9 100644
+--- a/fs/btrfs/print-tree.h
++++ b/fs/btrfs/print-tree.h
+@@ -19,5 +19,4 @@
+ #ifndef __PRINT_TREE_
+ #define __PRINT_TREE_
+ void btrfs_print_leaf(struct btrfs_root *root, struct extent_buffer *l);
+-void btrfs_print_tree(struct btrfs_root *root, struct extent_buffer *c);
+ #endif
+-- 
+2.7.4
+
