@@ -1,0 +1,73 @@
+From a426f99c91d1036767a7819aaaba6bd3191b7f06 Mon Sep 17 00:00:00 2001
+From: Waiman Long <Waiman.Long@hpe.com>
+Date: Wed, 25 Nov 2015 14:09:38 -0500
+Subject: sched/fair: Avoid redundant idle_cpu() call in update_sg_lb_stats()
+
+Part of the responsibility of the update_sg_lb_stats() function is to
+update the idle_cpus statistical counter in struct sg_lb_stats. This
+check is done by calling idle_cpu(). The idle_cpu() function, in
+turn, checks a number of fields within the run queue structure such
+as rq->curr and rq->nr_running.
+
+With the current layout of the run queue structure, rq->curr and
+rq->nr_running are in separate cachelines. The rq->curr variable is
+checked first followed by nr_running. As nr_running is also accessed
+by update_sg_lb_stats() earlier, it makes no sense to load another
+cacheline when nr_running is not 0 as idle_cpu() will always return
+false in this case.
+
+This patch eliminates this redundant cacheline load by checking the
+cached nr_running before calling idle_cpu().
+
+Signed-off-by: Waiman Long <Waiman.Long@hpe.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Douglas Hatch <doug.hatch@hpe.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Scott J Norton <scott.norton@hpe.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Link: http://lkml.kernel.org/r/1448478580-26467-2-git-send-email-Waiman.Long@hpe.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/fair.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index efd664c..4b0e8b8 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6398,7 +6398,7 @@ static inline void update_sg_lb_stats(struct lb_env *env,
+ 			bool *overload)
+ {
+ 	unsigned long load;
+-	int i;
++	int i, nr_running;
+ 
+ 	memset(sgs, 0, sizeof(*sgs));
+ 
+@@ -6415,7 +6415,8 @@ static inline void update_sg_lb_stats(struct lb_env *env,
+ 		sgs->group_util += cpu_util(i);
+ 		sgs->sum_nr_running += rq->cfs.h_nr_running;
+ 
+-		if (rq->nr_running > 1)
++		nr_running = rq->nr_running;
++		if (nr_running > 1)
+ 			*overload = true;
+ 
+ #ifdef CONFIG_NUMA_BALANCING
+@@ -6423,7 +6424,10 @@ static inline void update_sg_lb_stats(struct lb_env *env,
+ 		sgs->nr_preferred_running += rq->nr_preferred_running;
+ #endif
+ 		sgs->sum_weighted_load += weighted_cpuload(i);
+-		if (idle_cpu(i))
++		/*
++		 * No need to call idle_cpu() if nr_running is not 0
++		 */
++		if (!nr_running && idle_cpu(i))
+ 			sgs->idle_cpus++;
+ 	}
+ 
+-- 
+cgit v0.12
+
