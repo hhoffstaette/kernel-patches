@@ -1,0 +1,46 @@
+From e795421e40b39bf874c5ed9434365fb4a4b6c5d1 Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.com>
+Date: Tue, 12 Jan 2016 16:24:15 +0100
+Subject: cfq-iosched: Don't group_idle if cfqq has big thinktime
+
+There is no point in idling on a cfq group if the only cfq queue that is
+there has too big thinktime.
+
+Signed-off-by: Jan Kara <jack@suse.com>
+Acked-by: Tejun Heo <tj@kernel.org>
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/cfq-iosched.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/block/cfq-iosched.c b/block/cfq-iosched.c
+index 1f9093e..0a6a70a 100644
+--- a/block/cfq-iosched.c
++++ b/block/cfq-iosched.c
+@@ -2897,6 +2897,7 @@ static bool cfq_should_idle(struct cfq_data *cfqd, struct cfq_queue *cfqq)
+ static void cfq_arm_slice_timer(struct cfq_data *cfqd)
+ {
+ 	struct cfq_queue *cfqq = cfqd->active_queue;
++	struct cfq_rb_root *st = cfqq->service_tree;
+ 	struct cfq_io_cq *cic;
+ 	unsigned long sl, group_idle = 0;
+ 
+@@ -2947,8 +2948,13 @@ static void cfq_arm_slice_timer(struct cfq_data *cfqd)
+ 		return;
+ 	}
+ 
+-	/* There are other queues in the group, don't do group idle */
+-	if (group_idle && cfqq->cfqg->nr_cfqq > 1)
++	/*
++	 * There are other queues in the group or this is the only group and
++	 * it has too big thinktime, don't do group idle.
++	 */
++	if (group_idle &&
++	    (cfqq->cfqg->nr_cfqq > 1 ||
++	     cfq_io_thinktime_big(cfqd, &st->ttime, true)))
+ 		return;
+ 
+ 	cfq_mark_cfqq_wait_request(cfqq);
+-- 
+cgit v0.12
+
