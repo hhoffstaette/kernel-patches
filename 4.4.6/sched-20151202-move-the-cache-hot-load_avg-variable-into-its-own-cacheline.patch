@@ -1,0 +1,135 @@
+From b0367629acf62a78404c467cd09df447c2fea804 Mon Sep 17 00:00:00 2001
+From: Waiman Long <Waiman.Long@hpe.com>
+Date: Wed, 2 Dec 2015 13:41:49 -0500
+Subject: sched/fair: Move the cache-hot 'load_avg' variable into its own
+ cacheline
+
+If a system with large number of sockets was driven to full
+utilization, it was found that the clock tick handling occupied a
+rather significant proportion of CPU time when fair group scheduling
+and autogroup were enabled.
+
+Running a java benchmark on a 16-socket IvyBridge-EX system, the perf
+profile looked like:
+
+  10.52%   0.00%  java   [kernel.vmlinux]  [k] smp_apic_timer_interrupt
+   9.66%   0.05%  java   [kernel.vmlinux]  [k] hrtimer_interrupt
+   8.65%   0.03%  java   [kernel.vmlinux]  [k] tick_sched_timer
+   8.56%   0.00%  java   [kernel.vmlinux]  [k] update_process_times
+   8.07%   0.03%  java   [kernel.vmlinux]  [k] scheduler_tick
+   6.91%   1.78%  java   [kernel.vmlinux]  [k] task_tick_fair
+   5.24%   5.04%  java   [kernel.vmlinux]  [k] update_cfs_shares
+
+In particular, the high CPU time consumed by update_cfs_shares()
+was mostly due to contention on the cacheline that contained the
+task_group's load_avg statistical counter. This cacheline may also
+contains variables like shares, cfs_rq & se which are accessed rather
+frequently during clock tick processing.
+
+This patch moves the load_avg variable into another cacheline
+separated from the other frequently accessed variables. It also
+creates a cacheline aligned kmemcache for task_group to make sure
+that all the allocated task_group's are cacheline aligned.
+
+By doing so, the perf profile became:
+
+   9.44%   0.00%  java   [kernel.vmlinux]  [k] smp_apic_timer_interrupt
+   8.74%   0.01%  java   [kernel.vmlinux]  [k] hrtimer_interrupt
+   7.83%   0.03%  java   [kernel.vmlinux]  [k] tick_sched_timer
+   7.74%   0.00%  java   [kernel.vmlinux]  [k] update_process_times
+   7.27%   0.03%  java   [kernel.vmlinux]  [k] scheduler_tick
+   5.94%   1.74%  java   [kernel.vmlinux]  [k] task_tick_fair
+   4.15%   3.92%  java   [kernel.vmlinux]  [k] update_cfs_shares
+
+The %cpu time is still pretty high, but it is better than before. The
+benchmark results before and after the patch was as follows:
+
+  Before patch - Max-jOPs: 907533    Critical-jOps: 134877
+  After patch  - Max-jOPs: 916011    Critical-jOps: 142366
+
+Signed-off-by: Waiman Long <Waiman.Long@hpe.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Ben Segall <bsegall@google.com>
+Cc: Douglas Hatch <doug.hatch@hpe.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Morten Rasmussen <morten.rasmussen@arm.com>
+Cc: Paul Turner <pjt@google.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Scott J Norton <scott.norton@hpe.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Yuyang Du <yuyang.du@intel.com>
+Link: http://lkml.kernel.org/r/1449081710-20185-3-git-send-email-Waiman.Long@hpe.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/core.c  | 10 +++++++---
+ kernel/sched/sched.h |  7 ++++++-
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index d591db1..aa3f978 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -7370,6 +7370,9 @@ int in_sched_functions(unsigned long addr)
+  */
+ struct task_group root_task_group;
+ LIST_HEAD(task_groups);
++
++/* Cacheline aligned slab cache for task_group */
++static struct kmem_cache *task_group_cache __read_mostly;
+ #endif
+ 
+ DECLARE_PER_CPU(cpumask_var_t, load_balance_mask);
+@@ -7427,11 +7430,12 @@ void __init sched_init(void)
+ #endif /* CONFIG_RT_GROUP_SCHED */
+ 
+ #ifdef CONFIG_CGROUP_SCHED
++	task_group_cache = KMEM_CACHE(task_group, 0);
++
+ 	list_add(&root_task_group.list, &task_groups);
+ 	INIT_LIST_HEAD(&root_task_group.children);
+ 	INIT_LIST_HEAD(&root_task_group.siblings);
+ 	autogroup_init(&init_task);
+-
+ #endif /* CONFIG_CGROUP_SCHED */
+ 
+ 	for_each_possible_cpu(i) {
+@@ -7712,7 +7716,7 @@ static void free_sched_group(struct task_group *tg)
+ 	free_fair_sched_group(tg);
+ 	free_rt_sched_group(tg);
+ 	autogroup_free(tg);
+-	kfree(tg);
++	kmem_cache_free(task_group_cache, tg);
+ }
+ 
+ /* allocate runqueue etc for a new task group */
+@@ -7720,7 +7724,7 @@ struct task_group *sched_create_group(struct task_group *parent)
+ {
+ 	struct task_group *tg;
+ 
+-	tg = kzalloc(sizeof(*tg), GFP_KERNEL);
++	tg = kmem_cache_alloc(task_group_cache, GFP_KERNEL | __GFP_ZERO);
+ 	if (!tg)
+ 		return ERR_PTR(-ENOMEM);
+ 
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 472cd14..a5a6b3e 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -248,7 +248,12 @@ struct task_group {
+ 	unsigned long shares;
+ 
+ #ifdef	CONFIG_SMP
+-	atomic_long_t load_avg;
++	/*
++	 * load_avg can be heavily contended at clock tick time, so put
++	 * it in its own cacheline separated from the fields above which
++	 * will also be accessed at each tick.
++	 */
++	atomic_long_t load_avg ____cacheline_aligned;
+ #endif
+ #endif
+ 
+-- 
+cgit v0.12
+
