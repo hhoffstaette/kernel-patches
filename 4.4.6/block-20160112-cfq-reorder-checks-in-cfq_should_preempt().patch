@@ -1,0 +1,50 @@
+From 6c80731c75bd3289d35b89a21a4e317cbcb306e3 Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.com>
+Date: Tue, 12 Jan 2016 16:24:16 +0100
+Subject: cfq-iosched: Reorder checks in cfq_should_preempt()
+
+Move check for preemption by rt class up. There is no functional change
+but it makes arguing about conditions simpler since we can be sure both
+cfq queues are from the same ioprio class.
+
+Acked-by: Tejun Heo <tj@kernel.org>
+Signed-off-by: Jan Kara <jack@suse.com>
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/cfq-iosched.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/block/cfq-iosched.c b/block/cfq-iosched.c
+index 0a6a70a..2544c21 100644
+--- a/block/cfq-iosched.c
++++ b/block/cfq-iosched.c
+@@ -3959,6 +3959,13 @@ cfq_should_preempt(struct cfq_data *cfqd, struct cfq_queue *new_cfqq,
+ 	if (cfq_slice_used(cfqq))
+ 		return true;
+ 
++	/*
++	 * Allow an RT request to pre-empt an ongoing non-RT cfqq timeslice.
++	 */
++	if (cfq_class_rt(new_cfqq) && !cfq_class_rt(cfqq))
++		return true;
++
++	WARN_ON_ONCE(cfqq->ioprio_class != new_cfqq->ioprio_class);
+ 	/* Allow preemption only if we are idling on sync-noidle tree */
+ 	if (cfqd->serving_wl_type == SYNC_NOIDLE_WORKLOAD &&
+ 	    cfqq_type(new_cfqq) == SYNC_NOIDLE_WORKLOAD &&
+@@ -3973,12 +3980,6 @@ cfq_should_preempt(struct cfq_data *cfqd, struct cfq_queue *new_cfqq,
+ 	if ((rq->cmd_flags & REQ_PRIO) && !cfqq->prio_pending)
+ 		return true;
+ 
+-	/*
+-	 * Allow an RT request to pre-empt an ongoing non-RT cfqq timeslice.
+-	 */
+-	if (cfq_class_rt(new_cfqq) && !cfq_class_rt(cfqq))
+-		return true;
+-
+ 	/* An idle queue should not be idle now for some reason */
+ 	if (RB_EMPTY_ROOT(&cfqq->sort_list) && !cfq_should_idle(cfqd, cfqq))
+ 		return true;
+-- 
+cgit v0.12
+
