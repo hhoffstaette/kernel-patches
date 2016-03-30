@@ -1,0 +1,56 @@
+From a257ae3e482e1cbd5fc573efeef5a73bffe09757 Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.com>
+Date: Tue, 12 Jan 2016 16:24:17 +0100
+Subject: cfq-iosched: Allow sync noidle workloads to preempt each other
+
+The original idea with preemption of sync noidle queues (introduced in
+commit 718eee0579b8 "cfq-iosched: fairness for sync no-idle queues") was
+that we service all sync noidle queues together, we don't idle on any of
+the queues individually and we idle only if there is no sync noidle
+queue to be served. This intention also matches the original test:
+
+	if (cfqd->serving_type == SYNC_NOIDLE_WORKLOAD
+	   && new_cfqq->service_tree == cfqq->service_tree)
+		return true;
+
+However since at that time cfqq->service_tree was not set for idling
+queues, this test was unreliable and was replaced in commit e4a229196a7c
+"cfq-iosched: fix no-idle preemption logic" by:
+
+	if (cfqd->serving_type == SYNC_NOIDLE_WORKLOAD &&
+	    cfqq_type(new_cfqq) == SYNC_NOIDLE_WORKLOAD &&
+	    new_cfqq->service_tree->count == 1)
+		return true;
+
+That was a reliable test but was actually doing something different -
+now we preempt sync noidle queue only if the new queue is the only one
+busy in the service tree.
+
+These days cfq queue is kept in service tree even if it is idling and
+thus the original check would be safe again. But since we actually check
+that cfq queues are in the same cgroup, of the same priority class and
+workload type (sync noidle), we know that new_cfqq is fine to preempt
+cfqq. So just remove the service tree check.
+
+Acked-by: Tejun Heo <tj@kernel.org>
+Signed-off-by: Jan Kara <jack@suse.com>
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/cfq-iosched.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/block/cfq-iosched.c b/block/cfq-iosched.c
+index 2544c21..98569c2 100644
+--- a/block/cfq-iosched.c
++++ b/block/cfq-iosched.c
+@@ -3969,7 +3969,6 @@ cfq_should_preempt(struct cfq_data *cfqd, struct cfq_queue *new_cfqq,
+ 	/* Allow preemption only if we are idling on sync-noidle tree */
+ 	if (cfqd->serving_wl_type == SYNC_NOIDLE_WORKLOAD &&
+ 	    cfqq_type(new_cfqq) == SYNC_NOIDLE_WORKLOAD &&
+-	    new_cfqq->service_tree->count == 2 &&
+ 	    RB_EMPTY_ROOT(&cfqq->sort_list))
+ 		return true;
+ 
+-- 
+cgit v0.12
+
