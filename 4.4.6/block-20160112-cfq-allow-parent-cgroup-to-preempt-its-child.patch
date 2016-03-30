@@ -1,0 +1,78 @@
+From 3984aa55204e2c3f423a70b013c44c64261788df Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.com>
+Date: Tue, 12 Jan 2016 16:24:19 +0100
+Subject: cfq-iosched: Allow parent cgroup to preempt its child
+
+Currently we don't allow sync workload of one cgroup to preempt sync
+workload of any other cgroup. This is because we want to achieve service
+separation between cgroups. However in cases where cgroup preempting is
+ancestor of the current cgroup, there is no need of separation and
+idling introduces unnecessary overhead. This hurts for example the case
+when workload is isolated within a cgroup but journalling threads are in
+root cgroup. Simple way to demostrate the issue is using:
+
+dbench4 -c /usr/share/dbench4/client.txt -t 10 -D /mnt 1
+
+on ext4 filesystem on plain SATA drive (mounted with barrier=0 to make
+difference more visible). When all processes are in the root cgroup,
+reported throughput is 153.132 MB/sec. When dbench process gets its own
+blkio cgroup, reported throughput drops to 26.1006 MB/sec.
+
+Fix the problem by making check in cfq_should_preempt() more benevolent
+and allow preemption by ancestor cgroup. This improves the throughput
+reported by dbench4 to 48.9106 MB/sec.
+
+Acked-by: Tejun Heo <tj@kernel.org>
+Signed-off-by: Jan Kara <jack@suse.com>
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/cfq-iosched.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/block/cfq-iosched.c b/block/cfq-iosched.c
+index 98569c2..e3c591d 100644
+--- a/block/cfq-iosched.c
++++ b/block/cfq-iosched.c
+@@ -632,6 +632,13 @@ static inline struct cfq_group *cfqg_parent(struct cfq_group *cfqg)
+ 	return pblkg ? blkg_to_cfqg(pblkg) : NULL;
+ }
+ 
++static inline bool cfqg_is_descendant(struct cfq_group *cfqg,
++				      struct cfq_group *ancestor)
++{
++	return cgroup_is_descendant(cfqg_to_blkg(cfqg)->blkcg->css.cgroup,
++				    cfqg_to_blkg(ancestor)->blkcg->css.cgroup);
++}
++
+ static inline void cfqg_get(struct cfq_group *cfqg)
+ {
+ 	return blkg_get(cfqg_to_blkg(cfqg));
+@@ -758,6 +765,11 @@ static void cfqg_stats_xfer_dead(struct cfq_group *cfqg)
+ #else	/* CONFIG_CFQ_GROUP_IOSCHED */
+ 
+ static inline struct cfq_group *cfqg_parent(struct cfq_group *cfqg) { return NULL; }
++static inline bool cfqg_is_descendant(struct cfq_group *cfqg,
++				      struct cfq_group *ancestor)
++{
++	return true;
++}
+ static inline void cfqg_get(struct cfq_group *cfqg) { }
+ static inline void cfqg_put(struct cfq_group *cfqg) { }
+ 
+@@ -3953,7 +3965,12 @@ cfq_should_preempt(struct cfq_data *cfqd, struct cfq_queue *new_cfqq,
+ 	if (rq_is_sync(rq) && !cfq_cfqq_sync(cfqq))
+ 		return true;
+ 
+-	if (new_cfqq->cfqg != cfqq->cfqg)
++	/*
++	 * Treat ancestors of current cgroup the same way as current cgroup.
++	 * For anybody else we disallow preemption to guarantee service
++	 * fairness among cgroups.
++	 */
++	if (!cfqg_is_descendant(cfqq->cfqg, new_cfqq->cfqg))
+ 		return false;
+ 
+ 	if (cfq_slice_used(cfqq))
+-- 
+cgit v0.12
+
