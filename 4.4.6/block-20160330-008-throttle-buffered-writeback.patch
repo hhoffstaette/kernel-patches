@@ -1,7 +1,7 @@
-From 256ed34c5c723b24a6e444e626e3699de6a9217d Mon Sep 17 00:00:00 2001
+From f7486eef5ea239905ed71f2316a40eae757ffed2 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
-Date: Wed, 23 Mar 2016 09:16:02 -0600
-Subject: writeback: throttle buffered writeback
+Date: Tue, 29 Mar 2016 19:34:13 -0600
+Subject: [PATCH] writeback: throttle buffered writeback
 
 Test patch that throttles buffered writeback to make it a lot
 more smooth, and has way less impact on other system activity.
@@ -13,42 +13,45 @@ we do, since that would impact file system layout in the presence
 of delayed allocation. So just throttle back buffered writeback,
 unless someone is waiting for it.
 
-Would likely need a dynamic adaption to the current device, this
-one has only been tested on NVMe. But it brings down background
-activity impact from 1-2s to tens of milliseconds instead.
-
 This is just a test patch, and as such, it registers a queue sysfs
 entry to both monitor the current state:
 
 $ cat /sys/block/nvme0n1/queue/wb_stats
-limit=4, batch=2, inflight=0, wait=0, timer=0
+idle=16, normal=32, max=64, inflight=0, wait=0, timer=0, bdp_wait=0
 
-'limit' denotes how many requests we will allow inflight for buffered
-writeback, this settings can be tweaked through writing to the
-'wb_depth' file. Writing '0' turns this off completely. 'inflight' shows
-how many requests are currently inflight for buffered writeback, 'wait'
-shows if anyone is currently waiting for access, and 'timer' shows
-if we have processes being deferred in write back cache timeout.
+'idle' denotes how many requests we will allow inflight for idle
+buffered writeback, 'normal' for higher priority writeback, and 'max'
+for when it's urgent we clean pages. The values are calculated based
+on the queue depth of the device, and the 'wb_percent' setting. If
+'wb_percent' is set to zero, the functionality is turned off.
 
-Background buffered writeback will be throttled at depth 'wb_depth',
-and even lower (QD=1) if the device recently completed "competing" IO.
-If we are doing reclaim or otherwise sync buffered writeback, the limit
-is increased 4x to achieve full device bandwidth.
+'inflight' shows how many requests are currently inflight for buffered
+writeback, 'wait' shows if anyone is currently waiting for access,
+'timer' shows if we have processes being deferred in write back cache
+timeout, and bdp_wait shows if someone is currently throttled on this
+device in balance_dirty_pages().
 
 Finally, if the device has write back caching, 'wb_cache_delay' delays
 by this amount of usecs when a write completes before allowing more.
 
+It'd be nice to auto-tune 'wb_percent' based on device response. Flash
+is less picky than rotating storage, but still needs throttling. For
+flash storage, a wb_percent setting of 50% gives good read latencies
+while still having good write bandwidth. For rotating storage, lower
+settings (like 10-15%) are more reasonable.
+
 Signed-off-by: Jens Axboe <axboe@fb.com>
 ---
  block/Makefile            |   2 +-
- block/blk-core.c          |  15 ++++
- block/blk-mq.c            |  32 ++++++-
- block/blk-sysfs.c         |  84 ++++++++++++++++++
- block/blk-wb.c            | 219 ++++++++++++++++++++++++++++++++++++++++++++++
- block/blk-wb.h            |  27 ++++++
+ block/blk-core.c          |  15 +++
+ block/blk-mq.c            |  31 +++++-
+ block/blk-settings.c      |   3 +
+ block/blk-sysfs.c         |  89 +++++++++++++++++
+ block/blk-wb.c            | 238 ++++++++++++++++++++++++++++++++++++++++++++++
+ block/blk-wb.h            |  33 +++++++
  include/linux/blk_types.h |   2 +
  include/linux/blkdev.h    |   3 +
- 8 files changed, 381 insertions(+), 3 deletions(-)
+ 9 files changed, 413 insertions(+), 3 deletions(-)
  create mode 100644 block/blk-wb.c
  create mode 100644 block/blk-wb.h
 
@@ -66,7 +69,7 @@ index 9eda232..9df911a 100644
  			genhd.o scsi_ioctl.o partition-generic.o ioprio.o \
  			badblocks.o partitions/
 diff --git a/block/blk-core.c b/block/blk-core.c
-index 827f8ba..887a9e6 100644
+index 827f8ba..85a92cd 100644
 --- a/block/blk-core.c
 +++ b/block/blk-core.c
 @@ -39,6 +39,7 @@
@@ -77,21 +80,21 @@ index 827f8ba..887a9e6 100644
  
  EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_remap);
  EXPORT_TRACEPOINT_SYMBOL_GPL(block_rq_remap);
-@@ -848,6 +849,9 @@ blk_init_allocated_queue(struct request_queue *q, request_fn_proc *rfn,
- 	if (blk_init_rl(&q->root_rl, q, GFP_KERNEL))
- 		goto fail;
+@@ -863,6 +864,9 @@ blk_init_allocated_queue(struct request_queue *q, request_fn_proc *rfn,
+ 	 */
+ 	blk_queue_make_request(q, blk_queue_bio);
  
-+	if (blk_buffered_writeback_init(q))
++	if (blk_wb_init(q))
 +		goto fail;
 +
-	q->request_fn		= rfn;
-	q->prep_rq_fn		= NULL;
-	q->unprep_rq_fn		= NULL;
+ 	q->sg_reserved_size = INT_MAX;
+ 
+ 	/* Protect q->elevator from elevator_change */
 @@ -880,6 +884,7 @@ blk_init_allocated_queue(struct request_queue *q, request_fn_proc *rfn,
  
  fail:
  	blk_free_flush_queue(q->fq);
-+	blk_buffered_writeback_exit(q);
++	blk_wb_exit(q);
  	return NULL;
  }
  EXPORT_SYMBOL(blk_init_allocated_queue);
@@ -99,7 +102,7 @@ index 827f8ba..887a9e6 100644
  	/* this is a bio leak */
  	WARN_ON(req->bio != NULL);
  
-+	blk_buffered_writeback_done(q->rq_wb, req);
++	blk_wb_done(q->rq_wb, req);
 +
  	/*
  	 * Request may not have originated from ll_rw_blk. if not,
@@ -116,7 +119,7 @@ index 827f8ba..887a9e6 100644
  	}
  
  get_rq:
-+	wb_acct = blk_buffered_writeback_wait(q->rq_wb, bio, q->queue_lock);
++	wb_acct = blk_wb_wait(q->rq_wb, bio, q->queue_lock);
 +
  	/*
  	 * This sync check and mask will be re-done in init_request_from_bio(),
@@ -126,7 +129,7 @@ index 827f8ba..887a9e6 100644
  	req = get_request(q, rw_flags, bio, GFP_NOIO);
  	if (IS_ERR(req)) {
 +		if (wb_acct)
-+			__blk_buffered_writeback_done(q->rq_wb);
++			__blk_wb_done(q->rq_wb);
  		bio->bi_error = PTR_ERR(req);
  		bio_endio(bio);
  		goto out_unlock;
@@ -139,7 +142,7 @@ index 827f8ba..887a9e6 100644
  	 * After dropping the lock and possibly sleeping here, our request
  	 * may now be mergeable after it had proven unmergeable (above).
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 050f7a1..55aace9 100644
+index 1699baf..437cdc9 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -29,6 +29,7 @@
@@ -155,7 +158,7 @@ index 050f7a1..55aace9 100644
  	if (rq->cmd_flags & REQ_MQ_INFLIGHT)
  		atomic_dec(&hctx->nr_active);
 +
-+	blk_buffered_writeback_done(q->rq_wb, rq);
++	blk_wb_done(q->rq_wb, rq);
 +
  	rq->cmd_flags = 0;
  
@@ -172,13 +175,13 @@ index 050f7a1..55aace9 100644
  	} else
  		request_count = blk_plug_queued_count(q);
  
-+	wb_acct = blk_buffered_writeback_wait(q->rq_wb, bio, NULL);
++	wb_acct = blk_wb_wait(q->rq_wb, bio, NULL);
 +
  	rq = blk_mq_map_request(q, bio, &data);
 -	if (unlikely(!rq))
 +	if (unlikely(!rq)) {
 +		if (wb_acct)
-+			__blk_buffered_writeback_done(q->rq_wb);
++			__blk_wb_done(q->rq_wb);
  		return BLK_QC_T_NONE;
 +	}
 +
@@ -199,13 +202,13 @@ index 050f7a1..55aace9 100644
  	    blk_attempt_plug_merge(q, bio, &request_count, NULL))
  		return BLK_QC_T_NONE;
  
-+	wb_acct = blk_buffered_writeback_wait(q->rq_wb, bio, NULL);
++	wb_acct = blk_wb_wait(q->rq_wb, bio, NULL);
 +
  	rq = blk_mq_map_request(q, bio, &data);
 -	if (unlikely(!rq))
 +	if (unlikely(!rq)) {
 +		if (wb_acct)
-+			__blk_buffered_writeback_done(q->rq_wb);
++			__blk_wb_done(q->rq_wb);
  		return BLK_QC_T_NONE;
 +	}
 +
@@ -214,35 +217,48 @@ index 050f7a1..55aace9 100644
  
  	cookie = blk_tag_to_qc_t(rq->tag, data.hctx->queue_num);
  
-@@ -2018,6 +2040,9 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
- 	unsigned int *map;
- 	int i;
+@@ -2062,6 +2084,9 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
+ 	 */
+ 	q->nr_requests = set->queue_depth;
  
-+	if (blk_buffered_writeback_init(q))
-+		return ERR_PTR(-ENOMEM);
++	if (blk_wb_init(q))
++		goto err_hctxs;
 +
- 	ctx = alloc_percpu(struct blk_mq_ctx);
- 	if (!ctx)
- 		return ERR_PTR(-ENOMEM);
-@@ -2084,6 +2109,7 @@ err_map:
- 	kfree(hctxs);
- err_percpu:
- 	free_percpu(ctx);
-+	blk_buffered_writeback_exit(q);
- 	return ERR_PTR(-ENOMEM);
- }
- EXPORT_SYMBOL(blk_mq_init_allocated_queue);
-@@ -2096,6 +2122,8 @@ void blk_mq_free_queue(struct request_queue *q)
+ 	if (set->ops->complete)
+ 		blk_queue_softirq_done(q, set->ops->complete);
+ 
+@@ -2097,6 +2122,8 @@ void blk_mq_free_queue(struct request_queue *q)
  	list_del_init(&q->all_q_node);
  	mutex_unlock(&all_q_mutex);
  
-+	blk_buffered_writeback_exit(q);
++	blk_wb_exit(q);
 +
  	blk_mq_del_queue_tag_set(q);
  
  	blk_mq_exit_hw_queues(q, set, set->nr_hw_queues);
+diff --git a/block/blk-settings.c b/block/blk-settings.c
+index 06e0168..bd713a8 100644
+--- a/block/blk-settings.c
++++ b/block/blk-settings.c
+@@ -13,6 +13,7 @@
+ #include <linux/gfp.h>
+ 
+ #include "blk.h"
++#include "blk-wb.h"
+ 
+ unsigned long blk_max_low_pfn;
+ EXPORT_SYMBOL(blk_max_low_pfn);
+@@ -823,6 +824,8 @@ EXPORT_SYMBOL(blk_queue_update_dma_alignment);
+ void blk_set_queue_depth(struct request_queue *q, unsigned int depth)
+ {
+ 	q->queue_depth = depth;
++	if (q->rq_wb)
++		blk_wb_update_limits(q->rq_wb, depth);
+ }
+ EXPORT_SYMBOL(blk_set_queue_depth);
+ 
 diff --git a/block/blk-sysfs.c b/block/blk-sysfs.c
-index 954e510..9ac9be2 100644
+index 954e510..2afd5cb 100644
 --- a/block/blk-sysfs.c
 +++ b/block/blk-sysfs.c
 @@ -13,6 +13,7 @@
@@ -253,7 +269,7 @@ index 954e510..9ac9be2 100644
  
  struct queue_sysfs_entry {
  	struct attribute attr;
-@@ -347,6 +348,71 @@ static ssize_t queue_poll_store(struct request_queue *q, const char *page,
+@@ -347,6 +348,76 @@ static ssize_t queue_poll_store(struct request_queue *q, const char *page,
  	return ret;
  }
  
@@ -264,35 +280,40 @@ index 954e510..9ac9be2 100644
 +	if (!q->rq_wb)
 +		return -EINVAL;
 +
-+	return sprintf(page, "limit=%d, batch=%d, inflight=%d, wait=%d, timer=%d\n",
-+			wb->limit, wb->batch, atomic_read(&wb->inflight),
-+			waitqueue_active(&wb->wait), timer_pending(&wb->timer));
++	return sprintf(page, "idle=%d, normal=%d, max=%d, inflight=%d, wait=%d,"
++				" timer=%d, bdp_wait=%d\n", wb->wb_idle,
++					wb->wb_normal, wb->wb_max,
++					atomic_read(&wb->inflight),
++					waitqueue_active(&wb->wait),
++					timer_pending(&wb->timer),
++					*wb->bdp_wait);
 +}
 +
-+static ssize_t queue_wb_depth_show(struct request_queue *q, char *page)
++static ssize_t queue_wb_perc_show(struct request_queue *q, char *page)
 +{
 +	if (!q->rq_wb)
 +		return -EINVAL;
 +
-+	return queue_var_show(q->rq_wb->limit, page);
++	return queue_var_show(q->rq_wb->perc, page);
 +}
 +
-+static ssize_t queue_wb_depth_store(struct request_queue *q, const char *page,
-+				    size_t count)
++static ssize_t queue_wb_perc_store(struct request_queue *q, const char *page,
++				   size_t count)
 +{
-+	unsigned long var;
++	unsigned long perc;
 +	ssize_t ret;
 +
 +	if (!q->rq_wb)
 +		return -EINVAL;
 +
-+	ret = queue_var_store(&var, page, count);
++	ret = queue_var_store(&perc, page, count);
 +	if (ret < 0)
 +		return ret;
-+	if (var != (unsigned int) var)
++	if (perc > 100)
 +		return -EINVAL;
 +
-+	blk_update_wb_limit(q->rq_wb, var);
++	q->rq_wb->perc = perc;
++	blk_wb_update_limits(q->rq_wb, blk_queue_depth(q));
 +	return ret;
 +}
 +
@@ -325,7 +346,7 @@ index 954e510..9ac9be2 100644
  static ssize_t queue_wc_show(struct request_queue *q, char *page)
  {
  	if (test_bit(QUEUE_FLAG_WC, &q->queue_flags))
-@@ -516,6 +582,21 @@ static struct queue_sysfs_entry queue_wc_entry = {
+@@ -516,6 +587,21 @@ static struct queue_sysfs_entry queue_wc_entry = {
  	.store = queue_wc_store,
  };
  
@@ -338,31 +359,31 @@ index 954e510..9ac9be2 100644
 +	.show = queue_wb_cache_delay_show,
 +	.store = queue_wb_cache_delay_store,
 +};
-+static struct queue_sysfs_entry queue_wb_depth_entry = {
-+	.attr = {.name = "wb_depth", .mode = S_IRUGO | S_IWUSR },
-+	.show = queue_wb_depth_show,
-+	.store = queue_wb_depth_store,
++static struct queue_sysfs_entry queue_wb_perc_entry = {
++	.attr = {.name = "wb_percent", .mode = S_IRUGO | S_IWUSR },
++	.show = queue_wb_perc_show,
++	.store = queue_wb_perc_store,
 +};
 +
  static struct attribute *default_attrs[] = {
  	&queue_requests_entry.attr,
  	&queue_ra_entry.attr,
-@@ -542,6 +623,9 @@ static struct attribute *default_attrs[] = {
+@@ -542,6 +628,9 @@ static struct attribute *default_attrs[] = {
  	&queue_random_entry.attr,
  	&queue_poll_entry.attr,
  	&queue_wc_entry.attr,
 +	&queue_wb_stats_entry.attr,
 +	&queue_wb_cache_delay_entry.attr,
-+	&queue_wb_depth_entry.attr,
++	&queue_wb_perc_entry.attr,
  	NULL,
  };
  
 diff --git a/block/blk-wb.c b/block/blk-wb.c
 new file mode 100644
-index 0000000..2aa3753
+index 0000000..d93dd1c
 --- /dev/null
 +++ b/block/blk-wb.c
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,238 @@
 +/*
 + * buffered writeback throttling
 + *
@@ -370,10 +391,9 @@ index 0000000..2aa3753
 + *
 + * Things that need changing:
 + *
-+ *	- Auto-detection of most of this, no tunables. Cache type we can get,
-+ *	  and most other settings we can tweak/gather based on time.
-+ *	- Better solution for rwb->bdp_wait?
-+ *	- Higher depth for WB_SYNC_ALL?
++ *	- Auto-detection of optimal wb_percent setting. A lower setting
++ *	  is appropriate on rotating storage (wb_percent=15 gives good
++ *	  separation, while still getting full bandwidth with wb cache).
 + *
 + */
 +#include <linux/kernel.h>
@@ -383,12 +403,17 @@ index 0000000..2aa3753
 +#include "blk.h"
 +#include "blk-wb.h"
 +
-+void __blk_buffered_writeback_done(struct rq_wb *rwb)
++static inline bool rwb_enabled(struct rq_wb *rwb)
 +{
-+	int inflight;
++	return rwb->wb_normal != 0;
++}
++
++void __blk_wb_done(struct rq_wb *rwb)
++{
++	int inflight, limit = rwb->wb_normal;
 +
 +	inflight = atomic_dec_return(&rwb->inflight);
-+	if (inflight >= rwb->limit)
++	if (inflight >= limit)
 +		return;
 +
 +	/*
@@ -405,9 +430,9 @@ index 0000000..2aa3753
 +	}
 +
 +	if (waitqueue_active(&rwb->wait)) {
-+		int diff = rwb->limit - inflight;
++		int diff = limit - inflight;
 +
-+		if (diff >= rwb->batch)
++		if (diff >= rwb->wb_idle / 2)
 +			wake_up_nr(&rwb->wait, 1);
 +	}
 +}
@@ -416,15 +441,17 @@ index 0000000..2aa3753
 + * Called on completion of a request. Note that it's also called when
 + * a request is merged, when the request gets freed.
 + */
-+void blk_buffered_writeback_done(struct rq_wb *rwb, struct request *rq)
++void blk_wb_done(struct rq_wb *rwb, struct request *rq)
 +{
 +	if (!(rq->cmd_flags & REQ_BUF_INFLIGHT)) {
-+		const unsigned long cur = jiffies;
++		if (rwb_enabled(rwb)) {
++			const unsigned long cur = jiffies;
 +
-+		if (rwb->limit && cur != rwb->last_comp)
-+			rwb->last_comp = cur;
++			if (cur != rwb->last_comp)
++				rwb->last_comp = cur;
++		}
 +	} else
-+		__blk_buffered_writeback_done(rwb);
++		__blk_wb_done(rwb);
 +}
 +
 +/*
@@ -449,17 +476,39 @@ index 0000000..2aa3753
 +	return true;
 +}
 +
++static inline unsigned int get_limit(struct rq_wb *rwb, unsigned int rw)
++{
++	unsigned int limit;
++
++	/*
++	 * At this point we know it's a buffered write. If REQ_SYNC is
++	 * set, then it's WB_SYNC_ALL writeback. Bump the limit 4x for
++	 * those, since someone is (or will be) waiting on that.
++	 */
++	if ((rw & REQ_SYNC) || *rwb->bdp_wait)
++		limit = rwb->wb_max;
++	else if (time_before(jiffies, rwb->last_comp + HZ / 10)) {
++		/*
++		 * If less than 100ms since we completed unrelated IO,
++		 * limit us to half the depth for background writeback.
++		 */
++		limit = rwb->wb_idle;
++	} else
++		limit = rwb->wb_normal;
++
++	return limit;
++}
++
 +/*
 + * Block if we will exceed our limit, or if we are currently waiting for
 + * the timer to kick off queuing again.
 + */
-+static void __blk_buffered_writeback_wait(struct rq_wb *rwb, unsigned int limit,
-+					  spinlock_t *lock)
++static void __blk_wb_wait(struct rq_wb *rwb, unsigned int rw, spinlock_t *lock)
 +{
 +	DEFINE_WAIT(wait);
 +
 +	if (!timer_pending(&rwb->timer) &&
-+	    atomic_inc_below(&rwb->inflight, limit))
++	    atomic_inc_below(&rwb->inflight, get_limit(rwb, rw)))
 +		return;
 +
 +	do {
@@ -467,7 +516,7 @@ index 0000000..2aa3753
 +						TASK_UNINTERRUPTIBLE);
 +
 +		if (!timer_pending(&rwb->timer) &&
-+		    atomic_inc_below(&rwb->inflight, limit))
++		    atomic_inc_below(&rwb->inflight, get_limit(rwb, rw)))
 +			break;
 +
 +		if (lock)
@@ -488,15 +537,12 @@ index 0000000..2aa3753
 + * in an irq held spinlock, if it holds one when calling this function.
 + * If we do sleep, we'll release and re-grab it.
 + */
-+bool blk_buffered_writeback_wait(struct rq_wb *rwb, struct bio *bio,
-+				 spinlock_t *lock)
++bool blk_wb_wait(struct rq_wb *rwb, struct bio *bio, spinlock_t *lock)
 +{
-+	unsigned int limit;
-+
 +	/*
 +	 * If disabled, or not a WRITE (or a discard), do nothing
 +	 */
-+	if (!rwb->limit || !(bio->bi_rw & REQ_WRITE) ||
++	if (!rwb_enabled(rwb) || !(bio->bi_rw & REQ_WRITE) ||
 +	    (bio->bi_rw & REQ_DISCARD))
 +		return false;
 +
@@ -506,42 +552,36 @@ index 0000000..2aa3753
 +	if ((bio->bi_rw & (REQ_SYNC | REQ_NOIDLE)) == REQ_SYNC)
 +		return false;
 +
-+	/*
-+	 * At this point we know it's a buffered write. If REQ_SYNC is
-+	 * set, then it's WB_SYNC_ALL writeback. Bump the limit 4x for
-+	 * those, since someone is (or will be) waiting on that.
-+	 */
-+	limit = rwb->limit;
-+	if (bio->bi_rw & REQ_SYNC)
-+		limit <<= 2;
-+	else if (limit != 1) {
-+		/*
-+		 * If less than 100ms since we completed unrelated IO,
-+		 * limit us to a depth of 1 for background writeback.
-+		 */
-+		if (time_before(jiffies, rwb->last_comp + HZ / 10))
-+			limit = 1;
-+		else if (!*rwb->bdp_wait)
-+			limit >>= 1;
-+	}
-+
-+	__blk_buffered_writeback_wait(rwb, limit, lock);
++	__blk_wb_wait(rwb, bio->bi_rw, lock);
 +	return true;
 +}
 +
-+void blk_update_wb_limit(struct rq_wb *rwb, unsigned int limit)
++static void calc_wb_limits(struct rq_wb *rwb, unsigned int depth,
++			   unsigned int perc)
 +{
-+	rwb->limit = limit;
-+	rwb->batch = rwb->limit / 2;
-+	if (!rwb->batch && rwb->limit)
-+		rwb->batch = 1;
-+	else if (rwb->batch > 4)
-+		rwb->batch = 4;
++	/*
++	 * We'll use depth==64 as a reasonable max limit that should be able
++	 * to achieve full device bandwidth anywhere.
++	 */
++	depth = min(64U, depth);
 +
++	/*
++	 * Full perf writes are max 'perc' percentage of the depth
++	 */
++	rwb->wb_max = (perc * depth + 1) / 100;
++	if (!rwb->wb_max && perc)
++		rwb->wb_max = 1;
++	rwb->wb_normal = (rwb->wb_max + 1) / 2;
++	rwb->wb_idle = (rwb->wb_max + 3) / 4;
++}
++
++void blk_wb_update_limits(struct rq_wb *rwb, unsigned int depth)
++{
++	calc_wb_limits(rwb, depth, rwb->perc);
 +	wake_up_all(&rwb->wait);
 +}
 +
-+static void blk_buffered_writeback_timer(unsigned long data)
++static void blk_wb_timer(unsigned long data)
 +{
 +	struct rq_wb *rwb = (struct rq_wb *) data;
 +
@@ -549,10 +589,10 @@ index 0000000..2aa3753
 +		wake_up_nr(&rwb->wait, 1);
 +}
 +
-+#define DEF_WB_LIMIT		4
++#define DEF_WB_PERC		50
 +#define DEF_WB_CACHE_DELAY	10000
 +
-+int blk_buffered_writeback_init(struct request_queue *q)
++int blk_wb_init(struct request_queue *q)
 +{
 +	struct rq_wb *rwb;
 +
@@ -564,17 +604,17 @@ index 0000000..2aa3753
 +	init_waitqueue_head(&rwb->wait);
 +	rwb->last_comp = jiffies;
 +	rwb->bdp_wait = &q->backing_dev_info.wb.dirty_sleeping;
-+	setup_timer(&rwb->timer, blk_buffered_writeback_timer,
-+			(unsigned long) rwb);
++	setup_timer(&rwb->timer, blk_wb_timer, (unsigned long) rwb);
++	rwb->perc = DEF_WB_PERC;
 +	rwb->cache_delay_usecs = DEF_WB_CACHE_DELAY;
 +	rwb->cache_delay = usecs_to_jiffies(rwb->cache_delay);
 +	rwb->q = q;
-+	blk_update_wb_limit(rwb, DEF_WB_LIMIT);
++	blk_wb_update_limits(rwb, blk_queue_depth(q));
 +	q->rq_wb = rwb;
 +	return 0;
 +}
 +
-+void blk_buffered_writeback_exit(struct request_queue *q)
++void blk_wb_exit(struct request_queue *q)
 +{
 +	if (q->rq_wb)
 +		del_timer_sync(&q->rq_wb->timer);
@@ -584,10 +624,10 @@ index 0000000..2aa3753
 +}
 diff --git a/block/blk-wb.h b/block/blk-wb.h
 new file mode 100644
-index 0000000..f3b4cd1
+index 0000000..201bc00
 --- /dev/null
 +++ b/block/blk-wb.h
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,33 @@
 +#ifndef BLK_WB_H
 +#define BLK_WB_H
 +
@@ -595,8 +635,14 @@ index 0000000..f3b4cd1
 +#include <linux/wait.h>
 +
 +struct rq_wb {
-+	unsigned int limit;
-+	unsigned int batch;
++	/*
++	 * Settings that govern how we throttle
++	 */
++	unsigned int perc;			/* INPUT */
++	unsigned int wb_idle;			/* idle writeback */
++	unsigned int wb_normal;			/* normal writeback */
++	unsigned int wb_max;			/* max throughput writeback */
++
 +	unsigned int cache_delay;
 +	unsigned int cache_delay_usecs;
 +	unsigned long last_comp;
@@ -607,12 +653,12 @@ index 0000000..f3b4cd1
 +	struct timer_list timer;
 +};
 +
-+void __blk_buffered_writeback_done(struct rq_wb *);
-+void blk_buffered_writeback_done(struct rq_wb *, struct request *);
-+bool blk_buffered_writeback_wait(struct rq_wb *, struct bio *, spinlock_t *);
-+int blk_buffered_writeback_init(struct request_queue *);
-+void blk_buffered_writeback_exit(struct request_queue *);
-+void blk_update_wb_limit(struct rq_wb *, unsigned int);
++void __blk_wb_done(struct rq_wb *);
++void blk_wb_done(struct rq_wb *, struct request *);
++bool blk_wb_wait(struct rq_wb *, struct bio *, spinlock_t *);
++int blk_wb_init(struct request_queue *);
++void blk_wb_exit(struct request_queue *);
++void blk_wb_update_limits(struct rq_wb *, unsigned int);
 +
 +#endif
 diff --git a/include/linux/blk_types.h b/include/linux/blk_types.h
@@ -636,7 +682,7 @@ index 86a38ea..6f2a174 100644
  typedef unsigned int blk_qc_t;
  #define BLK_QC_T_NONE	-1U
 diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index 76e8751..8586685 100644
+index 08b897b..ee9b90f 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
 @@ -37,6 +37,7 @@ struct bsg_job;
@@ -657,4 +703,5 @@ index 76e8751..8586685 100644
  	 * If blkcg is not used, @q->root_rl serves all requests.  If blkcg
  	 * is used, root blkg allocates from @q->root_rl and all other
 -- 
-cgit v0.12
+2.5.0
+

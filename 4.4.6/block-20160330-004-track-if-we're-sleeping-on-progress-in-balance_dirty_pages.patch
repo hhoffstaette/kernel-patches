@@ -1,7 +1,7 @@
-From bf0542ae6d5d9b5913c7866c0cc93ae6949eb974 Mon Sep 17 00:00:00 2001
+From 70e858656e7aac6bb945256765dc906807317912 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Tue, 22 Mar 2016 22:47:06 -0600
-Subject: writeback: track if we're sleeping on progress in balance_dirty_pages()
+Subject: [PATCH] writeback: track if we're sleeping on progress in balance_dirty_pages()
 
 Note in the bdi_writeback structure if a task is currently being
 limited in balance_dirty_pages(), waiting for writeback to
@@ -41,5 +41,5 @@ index 11ff8f7..15e696b 100644
  		current->dirty_paused_when = now + pause;
  		current->nr_dirtied = 0;
 -- 
-cgit v0.12
+2.5.0
 

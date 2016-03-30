@@ -1,7 +1,7 @@
-From bd1639f2905dc84d1d59030f3dd4cd87605cbf8e Mon Sep 17 00:00:00 2001
+From 9df8cf758f4c6b591e02755c7f5056bfe2e2999b Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Tue, 22 Mar 2016 21:36:10 -0600
-Subject: writeback: add wbc_to_write()
+Subject: [PATCH] writeback: add wbc_to_write()
 
 Add wbc_to_write(), which returns the write type to use, based on a
 struct writeback_control. No functional changes in this patch, but it
@@ -166,5 +166,5 @@ index d0b5ca5..719c255 100644
   * A wb_domain represents a domain that wb's (bdi_writeback's) belong to
   * and are measured against each other in.  There always is one global
 -- 
-cgit v0.12
+2.5.0
 

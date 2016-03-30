@@ -1,7 +1,7 @@
-From 53b068def60a7f70da572ed36357f83b4b98fa04 Mon Sep 17 00:00:00 2001
+From 46d270acefa8f268bc7c7375dad531843db3a54b Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Tue, 22 Mar 2016 21:50:47 -0600
-Subject: writeback: use WRITE_SYNC for reclaim or sync writeback
+Subject: [PATCH] writeback: use WRITE_SYNC for reclaim or sync writeback
 
 If we're doing reclaim or sync IO, use WRITE_SYNC to inform the lower
 levels of the importance of this IO.
@@ -25,5 +25,5 @@ index 719c255..b2c75b8 100644
  
  	return WRITE;
 -- 
-cgit v0.12
+2.5.0
 

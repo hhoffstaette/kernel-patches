@@ -1,7 +1,7 @@
-From 88fa2b6e810a78b3648ffe75e2ebf173e1e6dee5 Mon Sep 17 00:00:00 2001
+From 02a4bf1c255280fd79a3b963dd23b0d1af226db1 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Tue, 22 Mar 2016 22:43:57 -0600
-Subject: block: add ability to flag write back caching on a device
+Subject: [PATCH] block: add ability to flag write back caching on a device
 
 Add an internal helper and flag for setting whether a queue has
 write back caching, or write through (or none). Add a sysfs file
@@ -133,5 +133,5 @@ index 7e5d7e0..76e8751 100644
  
  extern int blk_rq_map_sg(struct request_queue *, struct request *, struct scatterlist *);
 -- 
-cgit v0.12
+2.5.0
 
