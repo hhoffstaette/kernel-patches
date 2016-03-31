@@ -1,0 +1,60 @@
+From:	Luis de Bethencourt <luisbg@osg.samsung.com>
+To:	linux-kernel@vger.kernel.org
+Cc:	clm@fb.com, jbacik@fb.com, dsterba@suse.com,
+	linux-btrfs@vger.kernel.org,
+	Luis de Bethencourt <luisbg@osg.samsung.com>
+Subject: [PATCH 1/2] btrfs: fix mixed block count of available space
+Date:	Wed, 30 Mar 2016 21:53:38 +0100
+
+Metadata for mixed block is already accounted in total data and should not
+be counted as part of the free metadata space.
+
+Signed-off-by: Luis de Bethencourt <luisbg@osg.samsung.com>
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=114281
+---
+ fs/btrfs/super.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 00b8f37..bdca79c 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -2051,6 +2051,7 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 	struct btrfs_block_rsv *block_rsv = &fs_info->global_block_rsv;
+ 	int ret;
+ 	u64 thresh = 0;
++	int mixed = 0;
+ 
+ 	/*
+ 	 * holding chunk_muext to avoid allocating new chunks, holding
+@@ -2076,8 +2077,17 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 				}
+ 			}
+ 		}
+-		if (found->flags & BTRFS_BLOCK_GROUP_METADATA)
+-			total_free_meta += found->disk_total - found->disk_used;
++
++		/*
++		 * Metadata in mixed block goup profiles are accounted in data
++		 */
++		if (!mixed && found->flags & BTRFS_BLOCK_GROUP_METADATA) {
++			if (found->flags & BTRFS_BLOCK_GROUP_DATA)
++				mixed = 1;
++			else
++				total_free_meta += found->disk_total -
++					found->disk_used;
++		}
+ 
+ 		total_used += found->disk_used;
+ 	}
+@@ -2115,7 +2125,7 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 	 */
+ 	thresh = 4 * 1024 * 1024;
+ 
+-	if (total_free_meta - thresh < block_rsv->size)
++	if (!mixed && total_free_meta - thresh < block_rsv->size)
+ 		buf->f_bavail = 0;
+ 
+ 	buf->f_type = BTRFS_SUPER_MAGIC;
+-- 
+2.5.3
