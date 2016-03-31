@@ -1,0 +1,37 @@
+From f21fb0e42c7347bd639a17341dcd3f72c1a30d29 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Thu, 31 Mar 2016 08:44:59 -0600
+Subject: blk-wb: treat REQ_META and REQ_PRIO as boosters
+
+Write these out at max bandwidth, similarly to how we treat REQ_SYNC.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/blk-wb.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/block/blk-wb.c b/block/blk-wb.c
+index d93dd1c..8b12005 100644
+--- a/block/blk-wb.c
++++ b/block/blk-wb.c
+@@ -90,6 +90,8 @@ static bool atomic_inc_below(atomic_t *v, int below)
+ 	return true;
+ }
+ 
++#define REQ_HIPRIO	(REQ_SYNC | REQ_META | REQ_PRIO)
++
+ static inline unsigned int get_limit(struct rq_wb *rwb, unsigned int rw)
+ {
+ 	unsigned int limit;
+@@ -99,7 +101,7 @@ static inline unsigned int get_limit(struct rq_wb *rwb, unsigned int rw)
+ 	 * set, then it's WB_SYNC_ALL writeback. Bump the limit 4x for
+ 	 * those, since someone is (or will be) waiting on that.
+ 	 */
+-	if ((rw & REQ_SYNC) || *rwb->bdp_wait)
++	if ((rw & REQ_HIPRIO) || *rwb->bdp_wait)
+ 		limit = rwb->wb_max;
+ 	else if (time_before(jiffies, rwb->last_comp + HZ / 10)) {
+ 		/*
+-- 
+cgit v0.11.2
+
