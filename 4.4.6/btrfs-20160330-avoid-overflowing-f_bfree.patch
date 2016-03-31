@@ -1,0 +1,43 @@
+From:	Luis de Bethencourt <luisbg@osg.samsung.com>
+To:	linux-kernel@vger.kernel.org
+Cc:	clm@fb.com, jbacik@fb.com, dsterba@suse.com, fdmanana@gmail.com,
+	linux-btrfs@vger.kernel.org,
+	Luis de Bethencourt <luisbg@osg.samsung.com>
+Subject: [PATCH v2 2/2] btrfs: avoid overflowing f_bfree
+Date:	Wed, 30 Mar 2016 23:18:14 +0100
+
+Since mixed block groups accounting isn't byte-accurate and f_bree is an
+unsigned integer, it could overflow. Avoid this.
+
+Signed-off-by: Luis de Bethencourt <luisbg@osg.samsung.com>
+Suggested-by: David Sterba <dsterba@suse.com>
+---
+Hi,
+
+Thanks to Filipe Manana for spotting a mistake in the first version of this
+patch.
+
+Luis
+
+ fs/btrfs/super.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index bdca79c..fe03efb 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -2100,7 +2100,11 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 
+ 	/* Account global block reserve as used, it's in logical size already */
+ 	spin_lock(&block_rsv->lock);
+-	buf->f_bfree -= block_rsv->size >> bits;
++	/* Mixed block groups accounting is not byte-accurate, avoid overflow */
++	if (buf->f_bfree >= block_rsv->size >> bits)
++		buf->f_bfree -= block_rsv->size >> bits;
++	else
++		buf->f_bfree = 0;
+ 	spin_unlock(&block_rsv->lock);
+ 
+ 	buf->f_bavail = div_u64(total_free_data, factor);
+-- 
+2.5.3
