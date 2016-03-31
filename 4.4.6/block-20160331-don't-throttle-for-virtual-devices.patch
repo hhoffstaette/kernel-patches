@@ -1,0 +1,88 @@
+From 1131f64d74958d495d8a6d5f9b981e86ed3beb7a Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Thu, 31 Mar 2016 10:15:48 -0600
+Subject: blk-mq: don't throttle for virtual devices
+
+Let that throttling happen at the backend, we don't want two different
+layers of throttling at potentially different depths / loads.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/blk-mq.c               | 6 +++++-
+ drivers/block/loop.c         | 2 +-
+ drivers/block/virtio_blk.c   | 2 +-
+ drivers/block/xen-blkfront.c | 2 +-
+ include/linux/blk-mq.h       | 1 +
+ 5 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 437cdc9..b0373ed 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -2084,7 +2084,11 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
+ 	 */
+ 	q->nr_requests = set->queue_depth;
+ 
+-	if (blk_wb_init(q))
++	/*
++	 * If the device is a virtual front end, don't throttle here,
++	 * let that happen at the back end
++	 */
++	if (!(set->flags & BLK_MQ_F_VIRT) && blk_wb_init(q))
+ 		goto err_hctxs;
+ 
+ 	if (set->ops->complete)
+diff --git a/drivers/block/loop.c b/drivers/block/loop.c
+index 7e5e27a..f0f4243 100644
+--- a/drivers/block/loop.c
++++ b/drivers/block/loop.c
+@@ -1739,7 +1739,7 @@ static int loop_add(struct loop_device **l, int i)
+ 	lo->tag_set.queue_depth = 128;
+ 	lo->tag_set.numa_node = NUMA_NO_NODE;
+ 	lo->tag_set.cmd_size = sizeof(struct loop_cmd);
+-	lo->tag_set.flags = BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_SG_MERGE;
++	lo->tag_set.flags = BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_SG_MERGE | BLK_MQ_F_VIRT;
+ 	lo->tag_set.driver_data = lo;
+ 
+ 	err = blk_mq_alloc_tag_set(&lo->tag_set);
+diff --git a/drivers/block/virtio_blk.c b/drivers/block/virtio_blk.c
+index 42758b5..10b3452 100644
+--- a/drivers/block/virtio_blk.c
++++ b/drivers/block/virtio_blk.c
+@@ -631,7 +631,7 @@ static int virtblk_probe(struct virtio_device *vdev)
+ 	vblk->tag_set.ops = &virtio_mq_ops;
+ 	vblk->tag_set.queue_depth = virtblk_queue_depth;
+ 	vblk->tag_set.numa_node = NUMA_NO_NODE;
+-	vblk->tag_set.flags = BLK_MQ_F_SHOULD_MERGE;
++	vblk->tag_set.flags = BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_VIRT;
+ 	vblk->tag_set.cmd_size =
+ 		sizeof(struct virtblk_req) +
+ 		sizeof(struct scatterlist) * sg_elems;
+diff --git a/drivers/block/xen-blkfront.c b/drivers/block/xen-blkfront.c
+index ca13df8..3748fb0 100644
+--- a/drivers/block/xen-blkfront.c
++++ b/drivers/block/xen-blkfront.c
+@@ -938,7 +938,7 @@ static int xlvbd_init_blk_queue(struct gendisk *gd, u16 sector_size,
+ 	} else
+ 		info->tag_set.queue_depth = BLK_RING_SIZE(info);
+ 	info->tag_set.numa_node = NUMA_NO_NODE;
+-	info->tag_set.flags = BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_SG_MERGE;
++	info->tag_set.flags = BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_SG_MERGE | BLK_MQ_F_VIRT;
+ 	info->tag_set.cmd_size = 0;
+ 	info->tag_set.driver_data = info;
+ 
+diff --git a/include/linux/blk-mq.h b/include/linux/blk-mq.h
+index 9ac9799..90a5941 100644
+--- a/include/linux/blk-mq.h
++++ b/include/linux/blk-mq.h
+@@ -156,6 +156,7 @@ enum {
+ 	BLK_MQ_F_TAG_SHARED	= 1 << 1,
+ 	BLK_MQ_F_SG_MERGE	= 1 << 2,
+ 	BLK_MQ_F_DEFER_ISSUE	= 1 << 4,
++	BLK_MQ_F_VIRT		= 1 << 5,
+ 	BLK_MQ_F_ALLOC_POLICY_START_BIT = 8,
+ 	BLK_MQ_F_ALLOC_POLICY_BITS = 1,
+ 
+-- 
+cgit v0.11.2
+
