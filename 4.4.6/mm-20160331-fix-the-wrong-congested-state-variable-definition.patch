@@ -1,0 +1,41 @@
+From: Kaixu Xia <xiakaixu@huawei.com>
+Subject: [PATCH] writeback: fix the wrong congested state variable definition
+Date: Thu, 31 Mar 2016 13:19:41 +0000
+Cc: <lizefan@huawei.com>, <jack@suse.cz>, <linux-mm@kvack.org>,
+        <akpm@linux-foundation.org>, <mhocko@suse.com>, <neilb@suse.de>,
+        <linux-kernel@vger.kernel.org>, <xiakaixu@huawei.com>
+To: <tj@kernel.org>, <axboe@kernel.dk>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.mm/149023>
+
+The right variable definition should be wb_congested_state that
+include WB_async_congested and WB_sync_congested. So fix it.
+
+Signed-off-by: Kaixu Xia <xiakaixu@huawei.com>
+---
+ mm/backing-dev.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mm/backing-dev.c b/mm/backing-dev.c
+index bfbd709..0c6317b 100644
+--- a/mm/backing-dev.c
++++ b/mm/backing-dev.c
+@@ -898,7 +898,7 @@ static atomic_t nr_wb_congested[2];
+ void clear_wb_congested(struct bdi_writeback_congested *congested, int sync)
+ {
+ 	wait_queue_head_t *wqh = &congestion_wqh[sync];
+-	enum wb_state bit;
++	enum wb_congested_state bit;
+ 
+ 	bit = sync ? WB_sync_congested : WB_async_congested;
+ 	if (test_and_clear_bit(bit, &congested->state))
+@@ -911,7 +911,7 @@ EXPORT_SYMBOL(clear_wb_congested);
+ 
+ void set_wb_congested(struct bdi_writeback_congested *congested, int sync)
+ {
+-	enum wb_state bit;
++	enum wb_congested_state bit;
+ 
+ 	bit = sync ? WB_sync_congested : WB_async_congested;
+ 	if (!test_and_set_bit(bit, &congested->state))
+-- 
+1.8.3.4
