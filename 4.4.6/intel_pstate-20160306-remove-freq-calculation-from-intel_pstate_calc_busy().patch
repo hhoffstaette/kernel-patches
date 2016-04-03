@@ -1,0 +1,66 @@
+From 8fa520af50817d5f30d293f507c937f561b3e6b9 Mon Sep 17 00:00:00 2001
+From: Philippe Longepe <philippe.longepe@linux.intel.com>
+Date: Sun, 6 Mar 2016 08:34:06 +0100
+Subject: intel_pstate: Remove freq calculation from intel_pstate_calc_busy()
+
+Use a helper function to compute the average pstate and call it only
+where it is needed (only when tracing or in intel_pstate_get).
+
+Signed-off-by: Philippe Longepe <philippe.longepe@linux.intel.com>
+Acked-by: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+---
+ drivers/cpufreq/intel_pstate.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/cpufreq/intel_pstate.c b/drivers/cpufreq/intel_pstate.c
+index 95cc217..4acb904 100644
+--- a/drivers/cpufreq/intel_pstate.c
++++ b/drivers/cpufreq/intel_pstate.c
+@@ -881,12 +881,6 @@ static inline void intel_pstate_calc_busy(struct cpudata *cpu)
+ 	core_pct = int_tofp(sample->aperf) * int_tofp(100);
+ 	core_pct = div64_u64(core_pct, int_tofp(sample->mperf));
+ 
+-	sample->freq = fp_toint(
+-		mul_fp(int_tofp(
+-			cpu->pstate.max_pstate_physical *
+-			cpu->pstate.scaling / 100),
+-			core_pct));
+-
+ 	sample->core_pct_busy = (int32_t)core_pct;
+ }
+ 
+@@ -920,6 +914,12 @@ static inline void intel_pstate_sample(struct cpudata *cpu, u64 time)
+ 	cpu->prev_tsc = tsc;
+ }
+ 
++static inline int32_t get_avg_frequency(struct cpudata *cpu)
++{
++	return div64_u64(cpu->pstate.max_pstate_physical * cpu->sample.aperf *
++		cpu->pstate.scaling, cpu->sample.mperf);
++}
++
+ static inline int32_t get_target_pstate_use_cpu_load(struct cpudata *cpu)
+ {
+ 	struct sample *sample = &cpu->sample;
+@@ -1015,7 +1015,7 @@ static inline void intel_pstate_adjust_busy_pstate(struct cpudata *cpu)
+ 		sample->mperf,
+ 		sample->aperf,
+ 		sample->tsc,
+-		sample->freq);
++		get_avg_frequency(cpu));
+ }
+ 
+ static void intel_pstate_update_util(struct update_util_data *data, u64 time,
+@@ -1104,7 +1104,7 @@ static unsigned int intel_pstate_get(unsigned int cpu_num)
+ 	if (!cpu)
+ 		return 0;
+ 	sample = &cpu->sample;
+-	return sample->freq;
++	return get_avg_frequency(cpu);
+ }
+ 
+ static int intel_pstate_set_policy(struct cpufreq_policy *policy)
+-- 
+cgit v0.12
+
