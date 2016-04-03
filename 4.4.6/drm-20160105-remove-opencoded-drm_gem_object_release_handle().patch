@@ -1,0 +1,102 @@
+From 8815b23aa0933653812e9c13c506f6f60fac474e Mon Sep 17 00:00:00 2001
+From: Chris Wilson <chris@chris-wilson.co.uk>
+Date: Tue, 5 Jan 2016 09:42:31 +0000
+Subject: drm: Remove opencoded drm_gem_object_release_handle()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+drm_gem_handle_delete() contains its own version of
+drm_gem_object_release_handle(), so lets just call the release method
+instead.
+
+Reported-by: Ville Syrjälä <ville.syrjala@linux.intel.com>
+Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+Cc: Ville Syrjälä <ville.syrjala@linux.intel.com>
+Link: http://patchwork.freedesktop.org/patch/msgid/1451986951-3703-2-git-send-email-chris@chris-wilson.co.uk
+Reviewed-by: Thierry Reding <treding@nvidia.com>
+Signed-off-by: Daniel Vetter <daniel.vetter@ffwll.ch>
+
+diff --git a/drivers/gpu/drm/drm_gem.c b/drivers/gpu/drm/drm_gem.c
+index eeee320..2e8c77e 100644
+--- a/drivers/gpu/drm/drm_gem.c
++++ b/drivers/gpu/drm/drm_gem.c
+@@ -244,6 +244,29 @@ drm_gem_object_handle_unreference_unlocked(struct drm_gem_object *obj)
+ 		drm_gem_object_unreference_unlocked(obj);
+ }
+ 
++/*
++ * Called at device or object close to release the file's
++ * handle references on objects.
++ */
++static int
++drm_gem_object_release_handle(int id, void *ptr, void *data)
++{
++	struct drm_file *file_priv = data;
++	struct drm_gem_object *obj = ptr;
++	struct drm_device *dev = obj->dev;
++
++	if (drm_core_check_feature(dev, DRIVER_PRIME))
++		drm_gem_remove_prime_handles(obj, file_priv);
++	drm_vma_node_revoke(&obj->vma_node, file_priv->filp);
++
++	if (dev->driver->gem_close_object)
++		dev->driver->gem_close_object(obj, file_priv);
++
++	drm_gem_object_handle_unreference_unlocked(obj);
++
++	return 0;
++}
++
+ /**
+  * drm_gem_handle_delete - deletes the given file-private handle
+  * @filp: drm file-private structure to use for the handle look up
+@@ -282,14 +305,7 @@ drm_gem_handle_delete(struct drm_file *filp, u32 handle)
+ 	idr_remove(&filp->object_idr, handle);
+ 	spin_unlock(&filp->table_lock);
+ 
+-	if (drm_core_check_feature(dev, DRIVER_PRIME))
+-		drm_gem_remove_prime_handles(obj, filp);
+-	drm_vma_node_revoke(&obj->vma_node, filp->filp);
+-
+-	if (dev->driver->gem_close_object)
+-		dev->driver->gem_close_object(obj, filp);
+-	drm_gem_object_handle_unreference_unlocked(obj);
+-
++	drm_gem_object_release_handle(handle, obj, filp);
+ 	return 0;
+ }
+ EXPORT_SYMBOL(drm_gem_handle_delete);
+@@ -726,29 +742,6 @@ drm_gem_open(struct drm_device *dev, struct drm_file *file_private)
+ 	spin_lock_init(&file_private->table_lock);
+ }
+ 
+-/*
+- * Called at device close to release the file's
+- * handle references on objects.
+- */
+-static int
+-drm_gem_object_release_handle(int id, void *ptr, void *data)
+-{
+-	struct drm_file *file_priv = data;
+-	struct drm_gem_object *obj = ptr;
+-	struct drm_device *dev = obj->dev;
+-
+-	if (drm_core_check_feature(dev, DRIVER_PRIME))
+-		drm_gem_remove_prime_handles(obj, file_priv);
+-	drm_vma_node_revoke(&obj->vma_node, file_priv->filp);
+-
+-	if (dev->driver->gem_close_object)
+-		dev->driver->gem_close_object(obj, file_priv);
+-
+-	drm_gem_object_handle_unreference_unlocked(obj);
+-
+-	return 0;
+-}
+-
+ /**
+  * drm_gem_release - release file-private GEM resources
+  * @dev: drm_device which is being closed by userspace
+-- 
+cgit v0.10.2
+

@@ -1,0 +1,50 @@
+From 0f646425b94a01606450eb03b3a8f3b5e03ea9b8 Mon Sep 17 00:00:00 2001
+From: Chris Wilson <chris@chris-wilson.co.uk>
+Date: Mon, 4 Jan 2016 10:11:01 +0000
+Subject: drm: Use a normal idr allocation for the obj->name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Unlike the handle, the name table uses a sleeping mutex rather than a
+spinlock. The allocation is in a normal context, and we can use the
+simpler sleeping gfp_t, rather than have to take from the atomic
+reserves.
+
+Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+Reviewed-by: Ville Syrjälä <ville.syrjala@linux.intel.com>
+Link: http://patchwork.freedesktop.org/patch/msgid/1451902261-25380-3-git-send-email-chris@chris-wilson.co.uk
+Signed-off-by: Daniel Vetter <daniel.vetter@ffwll.ch>
+
+diff --git a/drivers/gpu/drm/drm_gem.c b/drivers/gpu/drm/drm_gem.c
+index ad955d7..1b0c2c1 100644
+--- a/drivers/gpu/drm/drm_gem.c
++++ b/drivers/gpu/drm/drm_gem.c
+@@ -642,7 +642,6 @@ drm_gem_flink_ioctl(struct drm_device *dev, void *data,
+ 		return -ENOENT;
+ 
+ 	mutex_lock(&dev->object_name_lock);
+-	idr_preload(GFP_KERNEL);
+ 	/* prevent races with concurrent gem_close. */
+ 	if (obj->handle_count == 0) {
+ 		ret = -ENOENT;
+@@ -650,7 +649,7 @@ drm_gem_flink_ioctl(struct drm_device *dev, void *data,
+ 	}
+ 
+ 	if (!obj->name) {
+-		ret = idr_alloc(&dev->object_name_idr, obj, 1, 0, GFP_NOWAIT);
++		ret = idr_alloc(&dev->object_name_idr, obj, 1, 0, GFP_KERNEL);
+ 		if (ret < 0)
+ 			goto err;
+ 
+@@ -661,7 +660,6 @@ drm_gem_flink_ioctl(struct drm_device *dev, void *data,
+ 	ret = 0;
+ 
+ err:
+-	idr_preload_end();
+ 	mutex_unlock(&dev->object_name_lock);
+ 	drm_gem_object_unreference_unlocked(obj);
+ 	return ret;
+-- 
+cgit v0.10.2
+

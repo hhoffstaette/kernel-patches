@@ -1,0 +1,69 @@
+From 6984128d01cf935820a0563f3a00c6623ba58109 Mon Sep 17 00:00:00 2001
+From: Chris Wilson <chris@chris-wilson.co.uk>
+Date: Mon, 4 Jan 2016 10:10:59 +0000
+Subject: drm: Balance error path for GEM handle allocation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The current error path for failure when establishing a handle for a GEM
+object is unbalance, e.g. we call object_close() without calling first
+object_open(). Use the typical onion structure to only undo what has
+been set up prior to the error.
+
+Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+Reviewed-by: Ville Syrjälä <ville.syrjala@linux.intel.com>
+Signed-off-by: Daniel Vetter <daniel.vetter@ffwll.ch>
+
+diff --git a/drivers/gpu/drm/drm_gem.c b/drivers/gpu/drm/drm_gem.c
+index 2e10bba..a08176d 100644
+--- a/drivers/gpu/drm/drm_gem.c
++++ b/drivers/gpu/drm/drm_gem.c
+@@ -343,27 +343,32 @@ drm_gem_handle_create_tail(struct drm_file *file_priv,
+ 	spin_unlock(&file_priv->table_lock);
+ 	idr_preload_end();
+ 	mutex_unlock(&dev->object_name_lock);
+-	if (ret < 0) {
+-		drm_gem_object_handle_unreference_unlocked(obj);
+-		return ret;
+-	}
++	if (ret < 0)
++		goto err_unref;
++
+ 	*handlep = ret;
+ 
+ 	ret = drm_vma_node_allow(&obj->vma_node, file_priv->filp);
+-	if (ret) {
+-		drm_gem_handle_delete(file_priv, *handlep);
+-		return ret;
+-	}
++	if (ret)
++		goto err_remove;
+ 
+ 	if (dev->driver->gem_open_object) {
+ 		ret = dev->driver->gem_open_object(obj, file_priv);
+-		if (ret) {
+-			drm_gem_handle_delete(file_priv, *handlep);
+-			return ret;
+-		}
++		if (ret)
++			goto err_revoke;
+ 	}
+ 
+ 	return 0;
++
++err_revoke:
++	drm_vma_node_revoke(&obj->vma_node, file_priv->filp);
++err_remove:
++	spin_lock(&file_priv->table_lock);
++	idr_remove(&file_priv->object_idr, *handlep);
++	spin_unlock(&file_priv->table_lock);
++err_unref:
++	drm_gem_object_handle_unreference_unlocked(obj);
++	return ret;
+ }
+ 
+ /**
+-- 
+cgit v0.10.2
+
