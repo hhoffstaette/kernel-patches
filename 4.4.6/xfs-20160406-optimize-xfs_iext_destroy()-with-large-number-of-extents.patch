@@ -1,0 +1,107 @@
+From: "Alex Lyakas" <alex@zadarastorage.com>
+Subject: Re: xfs_iext_realloc_indirect and "XFS: possible memory allocation	deadlock"
+Date: Wed, 6 Apr 2016 19:39:21 +0300
+Cc: Danny Shavit <danny@zadarastorage.com>,
+	Shyam Kaushik <shyam@zadarastorage.com>, bfoster@redhat.com,
+	Yair Hershko <yair@zadarastorage.com>, xfs@oss.sgi.com,
+	Christoph Hellwig <hch@infradead.org>
+To: "Dave Chinner" <david@fromorbit.com>
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.xfs.general/74254>
+
+[..]
+Meanwhile, I found another issue happening when files have many extents. 
+When unmounting XFS, we call xfs_inode_free => xfs_idestroy_fork => xfs_iext_destroy
+This goes over the whole indirection array and calls xfs_iext_irec_remove 
+for each one of the erps (from the last one to the first one). As a result, 
+we keep shrinking (reallocating actually) the indirection array until we 
+shrink out all of its elements. When we have files with huge numbers of 
+extents, umount takes 30-80 sec, depending on the amount of files that XFS 
+loaded and the amount of indirection entries of each file. The unmount stack 
+looks like [1].
+
+That patch in [2] seems to address the issue. Do you think it is reasonable? 
+It was tested only on kernel 3.18.19.
+
+Thanks,
+Alex.
+
+[1]
+[<ffffffffc0b6d200>] xfs_iext_realloc_indirect+0x40/0x60 [xfs]
+[<ffffffffc0b6cd8e>] xfs_iext_irec_remove+0xee/0xf0 [xfs]
+[<ffffffffc0b6cdcd>] xfs_iext_destroy+0x3d/0xb0 [xfs]
+[<ffffffffc0b6cef6>] xfs_idestroy_fork+0xb6/0xf0 [xfs]
+[<ffffffffc0b87002>] xfs_inode_free+0xb2/0xc0 [xfs]
+[<ffffffffc0b87260>] xfs_reclaim_inode+0x250/0x340 [xfs]
+[<ffffffffc0b87583>] xfs_reclaim_inodes_ag+0x233/0x370 [xfs]
+[<ffffffffc0b8823d>] xfs_reclaim_inodes+0x1d/0x20 [xfs]
+[<ffffffffc0b96feb>] xfs_unmountfs+0x7b/0x1a0 [xfs]
+[<ffffffffc0b98e4d>] xfs_fs_put_super+0x2d/0x70 [xfs]
+[<ffffffff811e9e36>] generic_shutdown_super+0x76/0x100
+[<ffffffff811ea207>] kill_block_super+0x27/0x70
+[<ffffffff811ea519>] deactivate_locked_super+0x49/0x60
+[<ffffffff811eaaee>] deactivate_super+0x4e/0x70
+[<ffffffff81207593>] cleanup_mnt+0x43/0x90
+[<ffffffff81207632>] __cleanup_mnt+0x12/0x20
+[<ffffffff8108f8e7>] task_work_run+0xa7/0xe0
+[<ffffffff81014ff7>] do_notify_resume+0x97/0xb0
+[<ffffffff81717c6f>] int_signal+0x12/0x17
+
+[2]
+--- a/fs/xfs/libxfs/xfs_inode_fork.c	2016-04-06 16:35:51.172255372 +0300
++++ b/fs/xfs/libxfs/xfs_inode_fork.c	2016-04-06 19:25:55.349593353 +0300
+@@ -1489,34 +1489,48 @@
+ 	kmem_free(ifp->if_u1.if_ext_irec);
+ 	ifp->if_flags &= ~XFS_IFEXTIREC;
+ 	ifp->if_u1.if_extents = ep;
+ 	ifp->if_bytes = size;
+ 	if (nextents < XFS_LINEAR_EXTS) {
+ 		xfs_iext_realloc_direct(ifp, size);
+ 	}
+ }
+ 
+ /*
++ * Remove all records from the indirection array.
++ */
++STATIC void
++xfs_iext_irec_remove_all(xfs_ifork_t	*ifp)	/* inode fork pointer */
++{
++	int nlists;	/* number of irec's (ex lists) */
++	int i;		/* loop counter */
++
++	ASSERT(ifp->if_flags & XFS_IFEXTIREC);
++	nlists = ifp->if_real_bytes / XFS_IEXT_BUFSZ;
++	for (i = 0; i < nlists; i++) {
++	xfs_ext_irec_t *erp = &ifp->if_u1.if_ext_irec[i];
++	if (erp->er_extbuf)
++		kmem_free(erp->er_extbuf);
++	}
++	kmem_free(ifp->if_u1.if_ext_irec);
++	ifp->if_real_bytes = 0;
++}
++
++/*
+  * Free incore file extents.
+  */
+ void
+ xfs_iext_destroy(
+ 	xfs_ifork_t	*ifp)		/* inode fork pointer */
+ {
+ 	if (ifp->if_flags & XFS_IFEXTIREC) {
+-		int	erp_idx;
+-		int	nlists;
+-
+-		nlists = ifp->if_real_bytes / XFS_IEXT_BUFSZ;
+-		for (erp_idx = nlists - 1; erp_idx >= 0 ; erp_idx--) {
+-			xfs_iext_irec_remove(ifp, erp_idx);
+-		}
++		xfs_iext_irec_remove_all(ifp);
+ 		ifp->if_flags &= ~XFS_IFEXTIREC;
+ 	} else if (ifp->if_real_bytes) {
+		kmem_free(ifp->if_u1.if_extents);
+ 	} else if (ifp->if_bytes) {
+ 		memset(ifp->if_u2.if_inline_ext, 0, XFS_INLINE_EXTS *
+			sizeof(xfs_bmbt_rec_t));
+ 	}
+ 	ifp->if_u1.if_extents = NULL;
+ 	ifp->if_real_bytes = 0;
+ 	ifp->if_bytes = 0;
