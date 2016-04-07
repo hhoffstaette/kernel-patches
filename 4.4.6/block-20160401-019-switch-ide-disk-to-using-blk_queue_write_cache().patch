@@ -1,0 +1,41 @@
+From e8f06e64b186f2e668f38e50519573414e7e9f4d Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 30 Mar 2016 10:16:25 -0600
+Subject: ide-disk: update to using blk_queue_write_cache()
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ drivers/ide/ide-disk.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/ide/ide-disk.c b/drivers/ide/ide-disk.c
+index 37a8a90..05dbcce 100644
+--- a/drivers/ide/ide-disk.c
++++ b/drivers/ide/ide-disk.c
+@@ -522,7 +522,7 @@ static int ide_do_setfeature(ide_drive_t *drive, u8 feature, u8 nsect)
+ static void update_flush(ide_drive_t *drive)
+ {
+ 	u16 *id = drive->id;
+-	unsigned flush = 0;
++	bool wc = false;
+ 
+ 	if (drive->dev_flags & IDE_DFLAG_WCACHE) {
+ 		unsigned long long capacity;
+@@ -546,12 +546,12 @@ static void update_flush(ide_drive_t *drive)
+ 		       drive->name, barrier ? "" : "not ");
+ 
+ 		if (barrier) {
+-			flush = REQ_FLUSH;
++			wc = true;
+ 			blk_queue_prep_rq(drive->queue, idedisk_prep_fn);
+ 		}
+ 	}
+ 
+-	blk_queue_flush(drive->queue, flush);
++	blk_queue_write_cache(drive->queue, wc, false);
+ }
+ 
+ ide_devset_get_flag(wcache, IDE_DFLAG_WCACHE);
+-- 
+cgit v0.11.2
+

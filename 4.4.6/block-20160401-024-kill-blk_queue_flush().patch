@@ -1,0 +1,83 @@
+From 487b5a1d59ab2ff2adf274679c0206608ca8f3e2 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 30 Mar 2016 10:19:30 -0600
+Subject: block: kill blk_queue_flush()
+
+We don't have any drivers left using it, so kill it off. Update
+documentation to use the newer blk_queue_write_cache().
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ Documentation/block/writeback_cache_control.txt |  4 ++--
+ block/blk-settings.c                            | 20 --------------------
+ include/linux/blkdev.h                          |  1 -
+ 3 files changed, 2 insertions(+), 23 deletions(-)
+
+diff --git a/Documentation/block/writeback_cache_control.txt b/Documentation/block/writeback_cache_control.txt
+index 83407d3..59e0516 100644
+--- a/Documentation/block/writeback_cache_control.txt
++++ b/Documentation/block/writeback_cache_control.txt
+@@ -71,7 +71,7 @@ requests that have a payload.  For devices with volatile write caches the
+ driver needs to tell the block layer that it supports flushing caches by
+ doing:
+ 
+-	blk_queue_flush(sdkp->disk->queue, REQ_FLUSH);
++	blk_queue_write_cache(sdkp->disk->queue, true, false);
+ 
+ and handle empty REQ_FLUSH requests in its prep_fn/request_fn.  Note that
+ REQ_FLUSH requests with a payload are automatically turned into a sequence
+@@ -79,7 +79,7 @@ of an empty REQ_FLUSH request followed by the actual write by the block
+ layer.  For devices that also support the FUA bit the block layer needs
+ to be told to pass through the REQ_FUA bit using:
+ 
+-	blk_queue_flush(sdkp->disk->queue, REQ_FLUSH | REQ_FUA);
++	blk_queue_write_cache(sdkp->disk->queue, true, true);
+ 
+ and the driver must handle write requests that have the REQ_FUA bit set
+ in prep_fn/request_fn.  If the FUA bit is not natively supported the block
+diff --git a/block/blk-settings.c b/block/blk-settings.c
+index 53f857e..a1eda1f 100644
+--- a/block/blk-settings.c
++++ b/block/blk-settings.c
+@@ -820,26 +820,6 @@ void blk_queue_update_dma_alignment(struct request_queue *q, int mask)
+ }
+ EXPORT_SYMBOL(blk_queue_update_dma_alignment);
+ 
+-/**
+- * blk_queue_flush - configure queue's cache flush capability
+- * @q:		the request queue for the device
+- * @flush:	0, REQ_FLUSH or REQ_FLUSH | REQ_FUA
+- *
+- * Tell block layer cache flush capability of @q.  If it supports
+- * flushing, REQ_FLUSH should be set.  If it supports bypassing
+- * write cache for individual writes, REQ_FUA should be set.
+- */
+-void blk_queue_flush(struct request_queue *q, unsigned int flush)
+-{
+-	WARN_ON_ONCE(flush & ~(REQ_FLUSH | REQ_FUA));
+-
+-	if (WARN_ON_ONCE(!(flush & REQ_FLUSH) && (flush & REQ_FUA)))
+-		flush &= ~REQ_FUA;
+-
+-	q->flush_flags = flush & (REQ_FLUSH | REQ_FUA);
+-}
+-EXPORT_SYMBOL_GPL(blk_queue_flush);
+-
+ void blk_queue_flush_queueable(struct request_queue *q, bool queueable)
+ {
+ 	q->flush_not_queueable = !queueable;
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index f7047bf..2fbec4b 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -1009,7 +1009,6 @@ extern void blk_queue_update_dma_alignment(struct request_queue *, int);
+ extern void blk_queue_softirq_done(struct request_queue *, softirq_done_fn *);
+ extern void blk_queue_rq_timed_out(struct request_queue *, rq_timed_out_fn *);
+ extern void blk_queue_rq_timeout(struct request_queue *, unsigned int);
+-extern void blk_queue_flush(struct request_queue *q, unsigned int flush);
+ extern void blk_queue_flush_queueable(struct request_queue *q, bool queueable);
+ extern void blk_queue_write_cache(struct request_queue *q, bool enabled, bool fua);
+ extern struct backing_dev_info *blk_get_backing_dev_info(struct block_device *bdev);
+-- 
+cgit v0.11.2
+

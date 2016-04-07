@@ -1,7 +1,7 @@
-From f7486eef5ea239905ed71f2316a40eae757ffed2 Mon Sep 17 00:00:00 2001
+From 847eba0de3483072660d20b726eda5e7dd54dee3 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
-Date: Tue, 29 Mar 2016 19:34:13 -0600
-Subject: [PATCH] writeback: throttle buffered writeback
+Date: Fri, 1 Apr 2016 09:21:10 -0600
+Subject: writeback: throttle buffered writeback
 
 Test patch that throttles buffered writeback to make it a lot
 more smooth, and has way less impact on other system activity.
@@ -44,14 +44,14 @@ Signed-off-by: Jens Axboe <axboe@fb.com>
 ---
  block/Makefile            |   2 +-
  block/blk-core.c          |  15 +++
- block/blk-mq.c            |  31 +++++-
+ block/blk-mq.c            |  35 ++++++-
  block/blk-settings.c      |   3 +
  block/blk-sysfs.c         |  89 +++++++++++++++++
- block/blk-wb.c            | 238 ++++++++++++++++++++++++++++++++++++++++++++++
- block/blk-wb.h            |  33 +++++++
+ block/blk-wb.c            | 248 ++++++++++++++++++++++++++++++++++++++++++++++
+ block/blk-wb.h            |  33 ++++++
  include/linux/blk_types.h |   2 +
  include/linux/blkdev.h    |   3 +
- 9 files changed, 413 insertions(+), 3 deletions(-)
+ 9 files changed, 427 insertions(+), 3 deletions(-)
  create mode 100644 block/blk-wb.c
  create mode 100644 block/blk-wb.h
 
@@ -142,7 +142,7 @@ index 827f8ba..85a92cd 100644
  	 * After dropping the lock and possibly sleeping here, our request
  	 * may now be mergeable after it had proven unmergeable (above).
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 1699baf..437cdc9 100644
+index 1699baf..9f330f3 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -29,6 +29,7 @@
@@ -217,17 +217,21 @@ index 1699baf..437cdc9 100644
  
  	cookie = blk_tag_to_qc_t(rq->tag, data.hctx->queue_num);
  
-@@ -2062,6 +2084,9 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
+@@ -2062,6 +2084,13 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
  	 */
  	q->nr_requests = set->queue_depth;
  
-+	if (blk_wb_init(q))
++	/*
++	 * Enable throttling, except for virtual devices. Those should
++	 * throttle at the back end
++	 */
++	if (!(set->flags & BLK_MQ_F_VIRT) && blk_wb_init(q))
 +		goto err_hctxs;
 +
  	if (set->ops->complete)
  		blk_queue_softirq_done(q, set->ops->complete);
  
-@@ -2097,6 +2122,8 @@ void blk_mq_free_queue(struct request_queue *q)
+@@ -2097,6 +2126,8 @@ void blk_mq_free_queue(struct request_queue *q)
  	list_del_init(&q->all_q_node);
  	mutex_unlock(&all_q_mutex);
  
@@ -237,7 +241,7 @@ index 1699baf..437cdc9 100644
  
  	blk_mq_exit_hw_queues(q, set, set->nr_hw_queues);
 diff --git a/block/blk-settings.c b/block/blk-settings.c
-index 06e0168..bd713a8 100644
+index 1d5fa42..c01c980 100644
 --- a/block/blk-settings.c
 +++ b/block/blk-settings.c
 @@ -13,6 +13,7 @@
@@ -248,7 +252,7 @@ index 06e0168..bd713a8 100644
  
  unsigned long blk_max_low_pfn;
  EXPORT_SYMBOL(blk_max_low_pfn);
-@@ -823,6 +824,8 @@ EXPORT_SYMBOL(blk_queue_update_dma_alignment);
+@@ -835,6 +836,8 @@ EXPORT_SYMBOL_GPL(blk_queue_flush_queueable);
  void blk_set_queue_depth(struct request_queue *q, unsigned int depth)
  {
  	q->queue_depth = depth;
@@ -380,10 +384,10 @@ index 954e510..2afd5cb 100644
  
 diff --git a/block/blk-wb.c b/block/blk-wb.c
 new file mode 100644
-index 0000000..d93dd1c
+index 0000000..8f1d5d5
 --- /dev/null
 +++ b/block/blk-wb.c
-@@ -0,0 +1,238 @@
+@@ -0,0 +1,248 @@
 +/*
 + * buffered writeback throttling
 + *
@@ -405,16 +409,24 @@ index 0000000..d93dd1c
 +
 +static inline bool rwb_enabled(struct rq_wb *rwb)
 +{
-+	return rwb->wb_normal != 0;
++	return rwb && rwb->wb_normal != 0;
 +}
 +
 +void __blk_wb_done(struct rq_wb *rwb)
 +{
 +	int inflight, limit = rwb->wb_normal;
 +
++	/*
++	 * Don't wake anyone up if we are above the normal limit. If
++	 * throttling got disabled (limit == 0) with waiters, ensure
++	 * that we wake them up.
++	 */
 +	inflight = atomic_dec_return(&rwb->inflight);
-+	if (inflight >= limit)
++	if (inflight >= limit) {
++		if (!limit)
++			wake_up_all(&rwb->wait);
 +		return;
++	}
 +
 +	/*
 +	 * If the device does caching, we can still flood it with IO
@@ -476,6 +488,8 @@ index 0000000..d93dd1c
 +	return true;
 +}
 +
++#define REQ_HIPRIO	(REQ_SYNC | REQ_META | REQ_PRIO)
++
 +static inline unsigned int get_limit(struct rq_wb *rwb, unsigned int rw)
 +{
 +	unsigned int limit;
@@ -485,7 +499,7 @@ index 0000000..d93dd1c
 +	 * set, then it's WB_SYNC_ALL writeback. Bump the limit 4x for
 +	 * those, since someone is (or will be) waiting on that.
 +	 */
-+	if ((rw & REQ_SYNC) || *rwb->bdp_wait)
++	if ((rw & REQ_HIPRIO) || *rwb->bdp_wait)
 +		limit = rwb->wb_max;
 +	else if (time_before(jiffies, rwb->last_comp + HZ / 10)) {
 +		/*
@@ -682,7 +696,7 @@ index 86a38ea..6f2a174 100644
  typedef unsigned int blk_qc_t;
  #define BLK_QC_T_NONE	-1U
 diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index 08b897b..ee9b90f 100644
+index 6702cb6..9d1e9ef 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
 @@ -37,6 +37,7 @@ struct bsg_job;
@@ -703,5 +717,5 @@ index 08b897b..ee9b90f 100644
  	 * If blkcg is not used, @q->root_rl serves all requests.  If blkcg
  	 * is used, root blkg allocates from @q->root_rl and all other
 -- 
-2.5.0
+cgit v0.11.2
 

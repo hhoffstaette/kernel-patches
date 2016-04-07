@@ -1,7 +1,7 @@
-From 2f8149ed2bafac6a50b05397e3902c854428c5da Mon Sep 17 00:00:00 2001
+From aca24bbde6a60c1349a23e54f8a7fd5b0bfd5ea1 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Mon, 28 Mar 2016 09:12:17 -0600
-Subject: [PATCH] writeback: propagate the various reasons for writeback
+Subject: writeback: propagate the various reasons for writeback
 
 Avoid losing context by propagating the various reason why we
 initiate writeback. If we are doing more important reclaim or
@@ -51,5 +51,5 @@ index fee81e8..4300ee7 100644
  		.range_start		= 0,
  		.range_end		= LLONG_MAX,
 -- 
-2.5.0
+cgit v0.11.2
 

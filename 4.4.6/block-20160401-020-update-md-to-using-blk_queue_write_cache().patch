@@ -1,0 +1,26 @@
+From 8d1f3486471a2cfc3995d48473eb9f46ecf7e807 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 30 Mar 2016 10:16:53 -0600
+Subject: md: update to using blk_queue_write_cache()
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ drivers/md/md.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/md/md.c b/drivers/md/md.c
+index c068f17..21a63f5 100644
+--- a/drivers/md/md.c
++++ b/drivers/md/md.c
+@@ -5034,7 +5034,7 @@ static int md_alloc(dev_t dev, char *name)
+ 	disk->fops = &md_fops;
+ 	disk->private_data = mddev;
+ 	disk->queue = mddev->queue;
+-	blk_queue_flush(mddev->queue, REQ_FLUSH | REQ_FUA);
++	blk_queue_write_cache(mddev->queue, true, true);
+ 	/* Allow extended partitions.  This makes the
+ 	 * 'mdp' device redundant, but we can't really
+ 	 * remove it now.
+-- 
+cgit v0.11.2
+

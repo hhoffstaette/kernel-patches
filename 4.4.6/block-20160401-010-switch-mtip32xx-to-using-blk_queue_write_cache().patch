@@ -1,0 +1,26 @@
+From f28e9cff1fac7288971b5972b6cae446129bb340 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 30 Mar 2016 10:10:21 -0600
+Subject: mtip32xx: switch to using blk_queue_write_cache()
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ drivers/block/mtip32xx/mtip32xx.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/block/mtip32xx/mtip32xx.c b/drivers/block/mtip32xx/mtip32xx.c
+index 25824c1..6b5c30f 100644
+--- a/drivers/block/mtip32xx/mtip32xx.c
++++ b/drivers/block/mtip32xx/mtip32xx.c
+@@ -4027,7 +4027,7 @@ skip_create_disk:
+ 	 * write back cache is not supported in the device. FUA depends on
+ 	 * write back cache support, hence setting flush support to zero.
+ 	 */
+-	blk_queue_flush(dd->queue, 0);
++	blk_queue_write_cache(dd->queue, false, false);
+ 
+ 	/* Signal trim support */
+ 	if (dd->trim_supp == true) {
+-- 
+cgit v0.11.2
+

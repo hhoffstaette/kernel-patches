@@ -1,7 +1,7 @@
-From 5569d5f86db30a2d202ed57222a177d32a2234b3 Mon Sep 17 00:00:00 2001
+From ab7b06caf31ef839dc5bacd9bbbaef4f3d17ef0f Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
-Date: Tue, 29 Mar 2016 09:54:03 -0600
-Subject: [PATCH] block: add code to track actual device queue depth
+Date: Wed, 30 Mar 2016 10:21:08 -0600
+Subject: block: add code to track actual device queue depth
 
 For blk-mq, ->nr_requests does track queue depth, at least at init
 time. But for the older queue paths, it's simply a soft setting.
@@ -14,28 +14,34 @@ real queue depth.
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
 ---
- block/blk-settings.c   |  6 ++++++
+ block/blk-settings.c   | 12 ++++++++++++
  drivers/scsi/scsi.c    |  3 +++
  include/linux/blkdev.h | 11 +++++++++++
- 3 files changed, 20 insertions(+)
+ 3 files changed, 26 insertions(+)
 
 diff --git a/block/blk-settings.c b/block/blk-settings.c
-index 4dbd511..06e0168 100644
+index a1eda1f..1d5fa42 100644
 --- a/block/blk-settings.c
 +++ b/block/blk-settings.c
-@@ -820,6 +820,12 @@ void blk_queue_update_dma_alignment(struct request_queue *q, int mask)
- }
- EXPORT_SYMBOL(blk_queue_update_dma_alignment);
+@@ -827,6 +827,18 @@ void blk_queue_flush_queueable(struct request_queue *q, bool queueable)
+ EXPORT_SYMBOL_GPL(blk_queue_flush_queueable);
  
+ /**
++ * blk_set_queue_depth - tell the block layer about the device queue depth
++ * @q:		the request queue for the device
++ * @depth:		queue depth
++ *
++ */
 +void blk_set_queue_depth(struct request_queue *q, unsigned int depth)
 +{
 +	q->queue_depth = depth;
 +}
 +EXPORT_SYMBOL(blk_set_queue_depth);
 +
- /**
-  * blk_queue_flush - configure queue's cache flush capability
++/**
+  * blk_queue_write_cache - configure queue's write cache
   * @q:		the request queue for the device
+  * @wc:		write back cache on or off
 diff --git a/drivers/scsi/scsi.c b/drivers/scsi/scsi.c
 index b1bf42b..6503724 100644
 --- a/drivers/scsi/scsi.c
@@ -51,7 +57,7 @@ index b1bf42b..6503724 100644
  }
  EXPORT_SYMBOL(scsi_change_queue_depth);
 diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index 76e8751..08b897b 100644
+index 2fbec4b..6702cb6 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
 @@ -315,6 +315,8 @@ struct request_queue {
@@ -63,7 +69,7 @@ index 76e8751..08b897b 100644
  	/* hw dispatch queues */
  	struct blk_mq_hw_ctx	**queue_hw_ctx;
  	unsigned int		nr_hw_queues;
-@@ -683,6 +685,14 @@ static inline bool blk_write_same_mergeable(struct bio *a, struct bio *b)
+@@ -682,6 +684,14 @@ static inline bool blk_write_same_mergeable(struct bio *a, struct bio *b)
  	return false;
  }
  
@@ -78,7 +84,7 @@ index 76e8751..08b897b 100644
  /*
   * q->prep_rq_fn return values
   */
-@@ -986,6 +996,7 @@ extern void blk_limits_io_min(struct queue_limits *limits, unsigned int min);
+@@ -985,6 +995,7 @@ extern void blk_limits_io_min(struct queue_limits *limits, unsigned int min);
  extern void blk_queue_io_min(struct request_queue *q, unsigned int min);
  extern void blk_limits_io_opt(struct queue_limits *limits, unsigned int opt);
  extern void blk_queue_io_opt(struct request_queue *q, unsigned int opt);
@@ -87,5 +93,5 @@ index 76e8751..08b897b 100644
  extern void blk_set_stacking_limits(struct queue_limits *lim);
  extern int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 -- 
-2.5.0
+cgit v0.11.2
 

@@ -1,0 +1,26 @@
+From 102a1730ffe877db3b756d672d73624294d27d8b Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 30 Mar 2016 10:09:35 -0600
+Subject: loop: switch to using blk_queue_write_cache()
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ drivers/block/loop.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/block/loop.c b/drivers/block/loop.c
+index 423f4ca..7e5e27a 100644
+--- a/drivers/block/loop.c
++++ b/drivers/block/loop.c
+@@ -937,7 +937,7 @@ static int loop_set_fd(struct loop_device *lo, fmode_t mode,
+ 	mapping_set_gfp_mask(mapping, lo->old_gfp_mask & ~(__GFP_IO|__GFP_FS));
+ 
+ 	if (!(lo_flags & LO_FLAGS_READ_ONLY) && file->f_op->fsync)
+-		blk_queue_flush(lo->lo_queue, REQ_FLUSH);
++		blk_queue_write_cache(lo->lo_queue, true, false);
+ 
+ 	loop_update_dio(lo);
+ 	set_capacity(lo->lo_disk, size);
+-- 
+cgit v0.11.2
+

@@ -1,0 +1,26 @@
+From 2db55237534740fa21808fb4aeea5009da12e702 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 30 Mar 2016 10:11:15 -0600
+Subject: osdblk: switch to using blk_queue_write_cache()
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ drivers/block/osdblk.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/block/osdblk.c b/drivers/block/osdblk.c
+index 1b709a4..c2854a2 100644
+--- a/drivers/block/osdblk.c
++++ b/drivers/block/osdblk.c
+@@ -437,7 +437,7 @@ static int osdblk_init_disk(struct osdblk_device *osdev)
+ 	blk_queue_stack_limits(q, osd_request_queue(osdev->osd));
+ 
+ 	blk_queue_prep_rq(q, blk_queue_start_tag);
+-	blk_queue_flush(q, REQ_FLUSH);
++	blk_queue_write_cache(q, true, false);
+ 
+ 	disk->queue = q;
+ 
+-- 
+cgit v0.11.2
+

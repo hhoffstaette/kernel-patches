@@ -1,37 +1,19 @@
-From 1131f64d74958d495d8a6d5f9b981e86ed3beb7a Mon Sep 17 00:00:00 2001
+From 6ef2f64a2d7120a8579fc264d32ddca403016157 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Thu, 31 Mar 2016 10:15:48 -0600
-Subject: blk-mq: don't throttle for virtual devices
+Subject: blk-mq: mark virtual devices as such
 
-Let that throttling happen at the backend, we don't want two different
-layers of throttling at potentially different depths / loads.
+Some drivers sit on top of a backend/real driver and storage. Mark
+those drivers as such.
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
 ---
- block/blk-mq.c               | 6 +++++-
  drivers/block/loop.c         | 2 +-
  drivers/block/virtio_blk.c   | 2 +-
  drivers/block/xen-blkfront.c | 2 +-
  include/linux/blk-mq.h       | 1 +
- 5 files changed, 9 insertions(+), 4 deletions(-)
+ 4 files changed, 4 insertions(+), 3 deletions(-)
 
-diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 437cdc9..b0373ed 100644
---- a/block/blk-mq.c
-+++ b/block/blk-mq.c
-@@ -2084,7 +2084,11 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
- 	 */
- 	q->nr_requests = set->queue_depth;
- 
--	if (blk_wb_init(q))
-+	/*
-+	 * If the device is a virtual front end, don't throttle here,
-+	 * let that happen at the back end
-+	 */
-+	if (!(set->flags & BLK_MQ_F_VIRT) && blk_wb_init(q))
- 		goto err_hctxs;
- 
- 	if (set->ops->complete)
 diff --git a/drivers/block/loop.c b/drivers/block/loop.c
 index 7e5e27a..f0f4243 100644
 --- a/drivers/block/loop.c

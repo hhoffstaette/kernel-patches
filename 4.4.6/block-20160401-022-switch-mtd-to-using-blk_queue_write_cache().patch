@@ -1,0 +1,26 @@
+From 804a20c30495ade8d30032e0e4011cb23002c10e Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 30 Mar 2016 10:17:47 -0600
+Subject: mtd: switch to using blk_queue_write_cache()
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ drivers/mtd/mtd_blkdevs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/mtd/mtd_blkdevs.c b/drivers/mtd/mtd_blkdevs.c
+index f470118..74ae243 100644
+--- a/drivers/mtd/mtd_blkdevs.c
++++ b/drivers/mtd/mtd_blkdevs.c
+@@ -409,7 +409,7 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
+ 		goto error3;
+ 
+ 	if (tr->flush)
+-		blk_queue_flush(new->rq, REQ_FLUSH);
++		blk_queue_write_cache(new->rq, true, false);
+ 
+ 	new->rq->queuedata = new;
+ 	blk_queue_logical_block_size(new->rq, tr->blksize);
+-- 
+cgit v0.11.2
+

@@ -1,0 +1,26 @@
+From 5737a78a461b8d05b1aaa4773d4fb9df67d82fba Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 30 Mar 2016 10:13:22 -0600
+Subject: bcache: switch to using blk_queue_write_cache()
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ drivers/md/bcache/super.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/md/bcache/super.c b/drivers/md/bcache/super.c
+index a296425..f5dbb4e 100644
+--- a/drivers/md/bcache/super.c
++++ b/drivers/md/bcache/super.c
+@@ -816,7 +816,7 @@ static int bcache_device_init(struct bcache_device *d, unsigned block_size,
+ 	clear_bit(QUEUE_FLAG_ADD_RANDOM, &d->disk->queue->queue_flags);
+ 	set_bit(QUEUE_FLAG_DISCARD,	&d->disk->queue->queue_flags);
+ 
+-	blk_queue_flush(q, REQ_FLUSH|REQ_FUA);
++	blk_queue_write_cache(q, true, true);
+ 
+ 	return 0;
+ }
+-- 
+cgit v0.11.2
+

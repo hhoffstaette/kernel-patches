@@ -1,34 +1,53 @@
-From 02a4bf1c255280fd79a3b963dd23b0d1af226db1 Mon Sep 17 00:00:00 2001
+From 66e2f46500bda10a22ce7dfc4be7a1d1012cf400 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
-Date: Tue, 22 Mar 2016 22:43:57 -0600
-Subject: [PATCH] block: add ability to flag write back caching on a device
+Date: Wed, 30 Mar 2016 10:04:12 -0600
+Subject: block: add ability to flag write back caching on a device
 
 Add an internal helper and flag for setting whether a queue has
 write back caching, or write through (or none). Add a sysfs file
 to show this as well, and make it changeable from user space.
 
+This will replace the (awkward) blk_queue_flush() interface that
+drivers currently use to inform the block layer of write cache state
+and capabilities.
+
 Signed-off-by: Jens Axboe <axboe@fb.com>
 ---
- block/blk-settings.c   | 11 +++++++++++
+ block/blk-settings.c   | 26 ++++++++++++++++++++++++++
  block/blk-sysfs.c      | 39 +++++++++++++++++++++++++++++++++++++++
- include/linux/blkdev.h |  4 ++++
- 3 files changed, 54 insertions(+)
+ include/linux/blkdev.h |  3 +++
+ 3 files changed, 68 insertions(+)
 
 diff --git a/block/blk-settings.c b/block/blk-settings.c
-index c7bb666..4dbd511 100644
+index c7bb666..53f857e 100644
 --- a/block/blk-settings.c
 +++ b/block/blk-settings.c
-@@ -846,6 +846,17 @@ void blk_queue_flush_queueable(struct request_queue *q, bool queueable)
+@@ -846,6 +846,32 @@ void blk_queue_flush_queueable(struct request_queue *q, bool queueable)
  }
  EXPORT_SYMBOL_GPL(blk_queue_flush_queueable);
  
-+void blk_queue_write_cache(struct request_queue *q, bool enabled)
++/**
++ * blk_queue_write_cache - configure queue's write cache
++ * @q:		the request queue for the device
++ * @wc:		write back cache on or off
++ * @fua:	device supports FUA writes, if true
++ *
++ * Tell the block layer about the write cache of @q.
++ */
++void blk_queue_write_cache(struct request_queue *q, bool wc, bool fua)
 +{
 +	spin_lock_irq(q->queue_lock);
-+	if (enabled)
++	if (wc) {
 +		queue_flag_set(QUEUE_FLAG_WC, q);
-+	else
++		q->flush_flags = REQ_FLUSH;
++	} else
 +		queue_flag_clear(QUEUE_FLAG_WC, q);
++	if (fua) {
++		if (wc)
++			q->flush_flags |= REQ_FUA;
++		queue_flag_set(QUEUE_FLAG_FUA, q);
++	} else
++		queue_flag_clear(QUEUE_FLAG_FUA, q);
 +	spin_unlock_irq(q->queue_lock);
 +}
 +EXPORT_SYMBOL_GPL(blk_queue_write_cache);
@@ -101,37 +120,26 @@ index dd93763..954e510 100644
  };
  
 diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index 7e5d7e0..76e8751 100644
+index 7e5d7e0..f7047bf 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
-@@ -491,15 +491,18 @@ struct request_queue {
+@@ -491,6 +491,8 @@ struct request_queue {
  #define QUEUE_FLAG_INIT_DONE   20	/* queue is initialized */
  #define QUEUE_FLAG_NO_SG_MERGE 21	/* don't attempt to merge SG segments*/
  #define QUEUE_FLAG_POLL	       22	/* IO polling enabled if set */
 +#define QUEUE_FLAG_WC	       23	/* Write back caching */
++#define QUEUE_FLAG_FUA	       24	/* device supports FUA writes */
  
  #define QUEUE_FLAG_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
  				 (1 << QUEUE_FLAG_STACKABLE)	|	\
- 				 (1 << QUEUE_FLAG_SAME_COMP)	|	\
-+				 (1 << QUEUE_FLAG_WC)		|	\
- 				 (1 << QUEUE_FLAG_ADD_RANDOM))
- 
- #define QUEUE_FLAG_MQ_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
- 				 (1 << QUEUE_FLAG_STACKABLE)	|	\
--				 (1 << QUEUE_FLAG_SAME_COMP))
-+ 				 (1 << QUEUE_FLAG_SAME_COMP)	|	\
-+				 (1 << QUEUE_FLAG_WC))
- 
- static inline void queue_lockdep_assert_held(struct request_queue *q)
- {
-@@ -1009,6 +1012,7 @@ extern void blk_queue_rq_timed_out(struct request_queue *, rq_timed_out_fn *);
+@@ -1009,6 +1011,7 @@ extern void blk_queue_rq_timed_out(struct request_queue *, rq_timed_out_fn *);
  extern void blk_queue_rq_timeout(struct request_queue *, unsigned int);
  extern void blk_queue_flush(struct request_queue *q, unsigned int flush);
  extern void blk_queue_flush_queueable(struct request_queue *q, bool queueable);
-+extern void blk_queue_write_cache(struct request_queue *q, bool enabled);
++extern void blk_queue_write_cache(struct request_queue *q, bool enabled, bool fua);
  extern struct backing_dev_info *blk_get_backing_dev_info(struct block_device *bdev);
  
  extern int blk_rq_map_sg(struct request_queue *, struct request *, struct scatterlist *);
 -- 
-2.5.0
+cgit v0.11.2
 
