@@ -1,0 +1,55 @@
+From: "Rafael J. Wysocki" <rjw@rjwysocki.net>
+Subject: [PATCH] intel_pstate: Avoid getting stuck in high P-states when idle
+Date: Sun, 10 Apr 2016 06:09:45 +0200
+Cc: Jörg Otte <jrg.otte@gmail.com>,
+	Linux Kernel Mailing List <linux-kernel@vger.kernel.org>, Doug Smythies
+	<dsmythies@telus.net>, len.brown@intel.com
+To: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>, Linux PM list
+	<linux-pm@vger.kernel.org>
+Archived-At: <http://permalink.gmane.org/gmane.linux.power-management.general/74547>
+
+Jörg Otte reports that commit a4675fbc4a7a (cpufreq: intel_pstate:
+Replace timers with utilization update callbacks) caused the CPUs in
+his Haswell-based system to stay in the very high frequency region
+even if the system is completely idle.
+
+That turns out to be an existing problem in the intel_pstate driver's
+P-state selection algorithm for Core processors.  Namely, all
+decisions made by that algorithm are based on the average frequency
+of the CPU between sampling events and on the P-state requested on
+the last invocation, so it may get stuck at a very hight frequency
+even if the utilization of the CPU is very low (in fact, it may get
+stuck in a inadequate P-state regardless of the CPU utilization).
+The only way to kick it out of that limbo is a sufficiently long idle
+period (3 times longer than the prescribed sampling interval), but if
+that doesn't happen often enough (eg. due to a timing change like
+after the above commit), the P-state of the CPU may be inadequate
+pretty much all the time.
+
+To address the most egregious manifestations of that issue, reset the
+core_busy value used to determine the next P-state to request if the
+utilization of the CPU, determined with the help of the MPERF
+feedback register and the TSC, is below 1%.
+
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=115771
+Reported-and-tested-by: Jörg Otte <jrg.otte@gmail.com>
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+---
+ drivers/cpufreq/intel_pstate.c |    4 ++++
+ 1 file changed, 4 insertions(+)
+
+Index: linux-pm/drivers/cpufreq/intel_pstate.c
+===================================================================
+--- linux-pm.orig/drivers/cpufreq/intel_pstate.c
++++ linux-pm/drivers/cpufreq/intel_pstate.c
+@@ -1146,6 +1146,10 @@ static inline int32_t get_target_pstate_
+ 	if (duration_us > sample_time * 3) {
+ 		sample_ratio = div_fp(sample_time, duration_us);
+ 		core_busy = mul_fp(core_busy, sample_ratio);
++	} else {
++		sample_ratio = div_fp(100 * cpu->sample.mperf, cpu->sample.tsc);
++		if (sample_ratio < int_tofp(1))
++			core_busy = 0;
+ 	}
+ 
+ 	cpu->sample.busy_scaled = core_busy;
