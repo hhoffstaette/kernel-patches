@@ -1,0 +1,57 @@
+From d59b1087a98e402ed9a7cc577f4da435f9a555f5 Mon Sep 17 00:00:00 2001
+From: Andrey Ryabinin <aryabinin@virtuozzo.com>
+Date: Tue, 15 Mar 2016 14:55:27 -0700
+Subject: mm/page-writeback: fix dirty_ratelimit calculation
+
+Calculation of dirty_ratelimit sometimes is not correct.  E.g.  initial
+values of dirty_ratelimit == INIT_BW and step == 0, lead to the
+following result:
+
+   UBSAN: Undefined behaviour in ../mm/page-writeback.c:1286:7
+   shift exponent 25600 is too large for 64-bit type 'long unsigned int'
+
+The fix is straightforward - make step 0 if the shift exponent is too
+big.
+
+Signed-off-by: Andrey Ryabinin <aryabinin@virtuozzo.com>
+Cc: Wu Fengguang <fengguang.wu@intel.com>
+Cc: Tejun Heo <tj@kernel.org>
+Cc: Andy Shevchenko <andy.shevchenko@gmail.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/page-writeback.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 6fe7d15..d782cba 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -1169,6 +1169,7 @@ static void wb_update_dirty_ratelimit(struct dirty_throttle_control *dtc,
+ 	unsigned long balanced_dirty_ratelimit;
+ 	unsigned long step;
+ 	unsigned long x;
++	unsigned long shift;
+ 
+ 	/*
+ 	 * The dirty rate will match the writeout rate in long term, except
+@@ -1293,11 +1294,11 @@ static void wb_update_dirty_ratelimit(struct dirty_throttle_control *dtc,
+ 	 * rate itself is constantly fluctuating. So decrease the track speed
+ 	 * when it gets close to the target. Helps eliminate pointless tremors.
+ 	 */
+-	step >>= dirty_ratelimit / (2 * step + 1);
+-	/*
+-	 * Limit the tracking speed to avoid overshooting.
+-	 */
+-	step = (step + 7) / 8;
++	shift = dirty_ratelimit / (2 * step + 1);
++	if (shift < BITS_PER_LONG)
++		step = DIV_ROUND_UP(step >> shift, 8);
++	else
++		step = 0;
+ 
+ 	if (dirty_ratelimit < balanced_dirty_ratelimit)
+ 		dirty_ratelimit += step;
+-- 
+cgit v0.12
+
