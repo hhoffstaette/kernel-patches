@@ -1,0 +1,34 @@
+From: Dave Chinner <david@fromorbit.com>
+Subject: [PATCH 04/11] xfs: skip stale inodes in xfs_iflush_cluster
+Date: Wed, 13 Apr 2016 15:31:25 +1000
+To: xfs@oss.sgi.com
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.xfs.general/74454>
+
+From: Dave Chinner <dchinner@redhat.com>
+
+We don't write back stale inodes so we should skip them in
+xfs_iflush_cluster, too.
+
+cc: <stable@vger.kernel.org> # 3.10.x-
+Signed-off-by: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/xfs_inode.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/xfs/xfs_inode.c b/fs/xfs/xfs_inode.c
+index e302f11..ad0ad8d 100644
+--- a/fs/xfs/xfs_inode.c
++++ b/fs/xfs/xfs_inode.c
+@@ -3194,6 +3194,7 @@ xfs_iflush_cluster(
+ 		 */
+ 		spin_lock(&iq->i_flags_lock);
+ 		if (!iq->i_ino ||
++		    __xfs_iflags_test(iq, XFS_ISTALE) ||
+ 		    (XFS_INO_TO_AGINO(mp, iq->i_ino) & mask) != first_index) {
+ 			spin_unlock(&iq->i_flags_lock);
+ 			continue;
+-- 
+2.7.0

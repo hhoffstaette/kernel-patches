@@ -1,8 +1,8 @@
 From: Dave Chinner <david@fromorbit.com>
-Subject: [PATCH 5/5] xfs: mark reclaimed inodes invalid earlier
-Date: Wed,  6 Apr 2016 19:22:54 +1000
+Subject: [PATCH 07/11] xfs: mark reclaimed inodes invalid earlier
+Date: Wed, 13 Apr 2016 15:31:28 +1000
 To: xfs@oss.sgi.com
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.xfs.general/74246>
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.xfs.general/74453>
 
 From: Dave Chinner <dchinner@redhat.com>
 
@@ -30,11 +30,14 @@ if the inode number if valid while we have these locks held we know
 that it has not progressed through reclaim to the point where it is
 clean and is about to be freed.
 
+[bfoster: fixed __xfs_inode_clear_reclaim() using ip->i_ino after it
+	  had already been zeroed.]
+
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
 ---
  fs/xfs/xfs_icache.c | 40 ++++++++++++++++++++++++++++++++--------
- fs/xfs/xfs_inode.c  | 14 +++++++++++++-
- 2 files changed, 45 insertions(+), 9 deletions(-)
+ fs/xfs/xfs_inode.c  | 13 +++++++++++++
+ 2 files changed, 45 insertions(+), 8 deletions(-)
 
 diff --git a/fs/xfs/xfs_icache.c b/fs/xfs/xfs_icache.c
 index 0c94cde..a60db43 100644
@@ -123,18 +126,10 @@ index 0c94cde..a60db43 100644
  
  out_ifunlock:
 diff --git a/fs/xfs/xfs_inode.c b/fs/xfs/xfs_inode.c
-index b984be4..5b84bbc 100644
+index ad0ad8d..8931375 100644
 --- a/fs/xfs/xfs_inode.c
 +++ b/fs/xfs/xfs_inode.c
-@@ -3222,7 +3222,6 @@ xfs_iflush_cluster(
- 		 * Try to get locks.  If any are unavailable or it is pinned,
- 		 * then this inode cannot be flushed and is skipped.
- 		 */
--
- 		if (!xfs_ilock_nowait(cip, XFS_ILOCK_SHARED))
- 			continue;
- 		if (!xfs_iflock_nowait(cip)) {
-@@ -3235,6 +3234,19 @@ xfs_iflush_cluster(
+@@ -3226,6 +3226,19 @@ xfs_iflush_cluster(
  			continue;
  		}
  
@@ -145,9 +140,9 @@ index b984be4..5b84bbc 100644
 +		 * in that function for more information as to why the initial
 +		 * check is not sufficient.
 +		 */
-+		if (!cip->i_ino) {
-+			xfs_ifunlock(cip);
-+			xfs_iunlock(cip, XFS_ILOCK_SHARED);
++		if (!iq->i_ino) {
++			xfs_ifunlock(iq);
++			xfs_iunlock(iq, XFS_ILOCK_SHARED);
 +			continue;
 +		}
 +

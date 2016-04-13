@@ -1,0 +1,102 @@
+From: Dave Chinner <david@fromorbit.com>
+Subject: [PATCH 05/11] xfs: optimise xfs_iext_destroy
+Date: Wed, 13 Apr 2016 15:31:26 +1000
+To: xfs@oss.sgi.com
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.xfs.general/74456>
+
+From: Alex Lyakas <alex@zadarastorage.com>
+
+When unmounting XFS, we call:
+
+xfs_inode_free => xfs_idestroy_fork => xfs_iext_destroy
+
+This goes over the whole indirection array and calls
+xfs_iext_irec_remove for each one of the erps (from the last one to
+the first one). As a result, we keep shrinking (reallocating
+actually) the indirection array until we shrink out all of its
+elements. When we have files with huge numbers of extents, umount
+takes 30-80 sec, depending on the amount of files that XFS loaded
+and the amount of indirection entries of each file. The unmount
+stack looks like:
+
+[<ffffffffc0b6d200>] xfs_iext_realloc_indirect+0x40/0x60 [xfs]
+[<ffffffffc0b6cd8e>] xfs_iext_irec_remove+0xee/0xf0 [xfs]
+[<ffffffffc0b6cdcd>] xfs_iext_destroy+0x3d/0xb0 [xfs]
+[<ffffffffc0b6cef6>] xfs_idestroy_fork+0xb6/0xf0 [xfs]
+[<ffffffffc0b87002>] xfs_inode_free+0xb2/0xc0 [xfs]
+[<ffffffffc0b87260>] xfs_reclaim_inode+0x250/0x340 [xfs]
+[<ffffffffc0b87583>] xfs_reclaim_inodes_ag+0x233/0x370 [xfs]
+[<ffffffffc0b8823d>] xfs_reclaim_inodes+0x1d/0x20 [xfs]
+[<ffffffffc0b96feb>] xfs_unmountfs+0x7b/0x1a0 [xfs]
+[<ffffffffc0b98e4d>] xfs_fs_put_super+0x2d/0x70 [xfs]
+[<ffffffff811e9e36>] generic_shutdown_super+0x76/0x100
+[<ffffffff811ea207>] kill_block_super+0x27/0x70
+[<ffffffff811ea519>] deactivate_locked_super+0x49/0x60
+[<ffffffff811eaaee>] deactivate_super+0x4e/0x70
+[<ffffffff81207593>] cleanup_mnt+0x43/0x90
+[<ffffffff81207632>] __cleanup_mnt+0x12/0x20
+[<ffffffff8108f8e7>] task_work_run+0xa7/0xe0
+[<ffffffff81014ff7>] do_notify_resume+0x97/0xb0
+[<ffffffff81717c6f>] int_signal+0x12/0x17
+
+Further, this reallocation prevents us from freeing the extent list
+from a RCU callback as allocation can block. Hence if the extent
+list is in indirect format, optimise the freeing of the extent list
+to only use kmem_free calls by freeing entire extent buffer pages at
+a time, rather than extent by extent.
+
+Signed-off-by: Alex Lyakas <alex@zadarastorage.com>
+Reviewed-by: Dave Chinner <dchinner@redhat.com>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/libxfs/xfs_inode_fork.c | 28 +++++++++++++++++++++-------
+ 1 file changed, 21 insertions(+), 7 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_inode_fork.c b/fs/xfs/libxfs/xfs_inode_fork.c
+index d3d1477..27497e1 100644
+--- a/fs/xfs/libxfs/xfs_inode_fork.c
++++ b/fs/xfs/libxfs/xfs_inode_fork.c
+@@ -1519,6 +1519,26 @@ xfs_iext_indirect_to_direct(
+ }
+ 
+ /*
++ * Remove all records from the indirection array.
++ */
++STATIC void
++xfs_iext_irec_remove_all(
++	struct xfs_ifork *ifp)
++{
++	int		nlists;
++	int		i;
++
++	ASSERT(ifp->if_flags & XFS_IFEXTIREC);
++	nlists = ifp->if_real_bytes / XFS_IEXT_BUFSZ;
++	for (i = 0; i < nlists; i++) {
++		xfs_ext_irec_t *erp = &ifp->if_u1.if_ext_irec[i];
++		if (erp->er_extbuf)
++			kmem_free(erp->er_extbuf);
++	}
++	kmem_free(ifp->if_u1.if_ext_irec);
++}
++
++/*
+  * Free incore file extents.
+  */
+ void
+@@ -1526,13 +1546,7 @@ xfs_iext_destroy(
+ 	xfs_ifork_t	*ifp)		/* inode fork pointer */
+ {
+ 	if (ifp->if_flags & XFS_IFEXTIREC) {
+-		int	erp_idx;
+-		int	nlists;
+-
+-		nlists = ifp->if_real_bytes / XFS_IEXT_BUFSZ;
+-		for (erp_idx = nlists - 1; erp_idx >= 0 ; erp_idx--) {
+-			xfs_iext_irec_remove(ifp, erp_idx);
+-		}
++		xfs_iext_irec_remove_all(ifp);
+ 		ifp->if_flags &= ~XFS_IFEXTIREC;
+ 	} else if (ifp->if_real_bytes) {
+ 		kmem_free(ifp->if_u1.if_extents);
+-- 
+2.7.0

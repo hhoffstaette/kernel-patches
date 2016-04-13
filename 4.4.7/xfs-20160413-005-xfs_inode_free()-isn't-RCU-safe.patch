@@ -1,8 +1,8 @@
 From: Dave Chinner <david@fromorbit.com>
-Subject: [PATCH 4/5] xfs: xfs_inode_free() isn't RCU safe
-Date: Wed,  6 Apr 2016 19:22:53 +1000
+Subject: [PATCH 06/11] xfs: xfs_inode_free() isn't RCU safe
+Date: Wed, 13 Apr 2016 15:31:27 +1000
 To: xfs@oss.sgi.com
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.xfs.general/74245>
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.xfs.general/74458>
 
 From: Dave Chinner <dchinner@redhat.com>
 
@@ -47,6 +47,8 @@ in.
 
 Discovered-by: Brain Foster <bfoster@redhat.com>
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
 ---
  fs/xfs/xfs_icache.c | 14 +++++++-------
  1 file changed, 7 insertions(+), 7 deletions(-)
