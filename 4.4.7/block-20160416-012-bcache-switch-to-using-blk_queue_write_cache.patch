@@ -1,9 +1,10 @@
-From 5737a78a461b8d05b1aaa4773d4fb9df67d82fba Mon Sep 17 00:00:00 2001
+From 051f9146a611bce9753f64d89fb53c66a1befd8c Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:13:22 -0600
-Subject: bcache: switch to using blk_queue_write_cache()
+Subject: [PATCH 12/31] bcache: switch to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/md/bcache/super.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -22,5 +23,5 @@ index a296425..f5dbb4e 100644
  	return 0;
  }
 -- 
-cgit v0.11.2
+2.8.1
 

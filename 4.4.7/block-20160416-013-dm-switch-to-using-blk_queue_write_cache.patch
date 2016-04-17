@@ -1,9 +1,10 @@
-From daf32f93807cb0c7c3f053955d2c839c789254eb Mon Sep 17 00:00:00 2001
+From 7abf34b9e8da87659604a5a0a06e655e3197f560 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:14:14 -0600
-Subject: dm: switch to using blk_queue_write_cache()
+Subject: [PATCH 13/31] dm: switch to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/md/dm-table.c | 8 ++++----
  1 file changed, 4 insertions(+), 4 deletions(-)
@@ -37,5 +38,5 @@ index f9e8f0b..4b1ffc0 100644
  	if (!dm_table_discard_zeroes_data(t))
  		q->limits.discard_zeroes_data = 0;
 -- 
-cgit v0.11.2
+2.8.1
 

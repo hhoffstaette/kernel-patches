@@ -1,0 +1,545 @@
+From 2adccca124ad1eab2cd7a9418771eb9bff620d42 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Fri, 15 Apr 2016 20:19:24 -0600
+Subject: [PATCH] blk-wb: make it auto-tuning
+
+Use some techniques from CoDel to make this auto-tuning. Monitor the
+read latencies over a window of time, and step down the queue depth
+if we exceed that latency. The window is 10 msec by default. If we
+miss a latency deadline, then we increment the miss count and scale
+down the queue depth by 75%. The monitoring window is then scaled
+down by a factor of 1 / sqrt(miss_count). If we haven't missed
+a deadline in the specified window, then we reset the window size
+and the miss count.
+
+'wb_percent' reflects the current scaling percentage, and the machinery
+can be reset by writing to that like before.
+
+'wb_percent' will go away, and we'll add a single tunable to manage
+this, which will be the target minimum latency. The cache delay
+sysfs entries have been removed, that's no longer a tunable. For
+write back cache devices, we let the queue drain to 0 before allowing
+more writes (if there's nothing important to flush).
+
+You can monitor the state changes through dmesg for now, this debug
+information will go away in the future. When the scaling is triggered,
+you'll see entries like this:
+
+[   89.881398] blk-wb: 26856988 > 2000000
+[   89.881403]    read lat: mean=35887735, min=26856988, max=44918482, samples=2
+[   89.881405]   write lat: mean=20560671, min=5135651, max=52034279, samples=171
+[   89.881408] blk-wb: scaling step 1, limit 75%
+[   89.964320] blk-wb: 25314731 > 2000000
+[   89.964324]    read lat: mean=29891783, min=25314731, max=34468836, samples=2
+[   89.964325]   write lat: mean=16791535, min=1498329, max=53683178, samples=126
+
+The percentage numbers here are percentages of max depth of the device,
+and the latencies dumped are the ones that made us do the scaling.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/blk-sysfs.c |  38 +-------
+ block/blk-wb.c    | 279 +++++++++++++++++++++++++++++++++++++++---------------
+ block/blk-wb.h    |  11 ++-
+ 3 files changed, 209 insertions(+), 119 deletions(-)
+
+diff --git a/block/blk-sysfs.c b/block/blk-sysfs.c
+index 21a2ae7..177aca8 100644
+--- a/block/blk-sysfs.c
++++ b/block/blk-sysfs.c
+@@ -355,12 +355,11 @@ static ssize_t queue_wb_stats_show(struct request_queue *q, char *page)
+ 	if (!q->rq_wb)
+ 		return -EINVAL;
+ 
+-	return sprintf(page, "idle=%d, normal=%d, max=%d, inflight=%d, wait=%d,"
+-				" timer=%d, bdp_wait=%d\n", wb->wb_idle,
++	return sprintf(page, "background=%d, normal=%d, max=%d, inflight=%d,"
++				" wait=%d, bdp_wait=%d\n", wb->wb_background,
+ 					wb->wb_normal, wb->wb_max,
+ 					atomic_read(&wb->inflight),
+ 					waitqueue_active(&wb->wait),
+-					timer_pending(&wb->timer),
+ 					atomic_read(wb->bdp_wait));
+ }
+ 
+@@ -392,32 +391,6 @@ static ssize_t queue_wb_perc_store(struct request_queue *q, const char *page,
+ 	return ret;
+ }
+ 
+-static ssize_t queue_wb_cache_delay_show(struct request_queue *q, char *page)
+-{
+-	if (!q->rq_wb)
+-		return -EINVAL;
+-
+-	return queue_var_show(q->rq_wb->cache_delay_usecs, page);
+-}
+-
+-static ssize_t queue_wb_cache_delay_store(struct request_queue *q,
+-					  const char *page, size_t count)
+-{
+-	unsigned long var;
+-	ssize_t ret;
+-
+-	if (!q->rq_wb)
+-		return -EINVAL;
+-
+-	ret = queue_var_store(&var, page, count);
+-	if (ret < 0)
+-		return ret;
+-
+-	q->rq_wb->cache_delay_usecs = var;
+-	q->rq_wb->cache_delay = usecs_to_jiffies(var);
+-	return ret;
+-}
+-
+ static ssize_t queue_wc_show(struct request_queue *q, char *page)
+ {
+ 	if (test_bit(QUEUE_FLAG_WC, &q->queue_flags))
+@@ -617,12 +590,6 @@ static struct queue_sysfs_entry queue_wb_stats_entry = {
+ 	.show = queue_wb_stats_show,
+ };
+ 
+-static struct queue_sysfs_entry queue_wb_cache_delay_entry = {
+-	.attr = {.name = "wb_cache_usecs", .mode = S_IRUGO | S_IWUSR },
+-	.show = queue_wb_cache_delay_show,
+-	.store = queue_wb_cache_delay_store,
+-};
+-
+ static struct queue_sysfs_entry queue_wb_perc_entry = {
+ 	.attr = {.name = "wb_percent", .mode = S_IRUGO | S_IWUSR },
+ 	.show = queue_wb_perc_show,
+@@ -657,7 +624,6 @@ static struct attribute *default_attrs[] = {
+ 	&queue_wc_entry.attr,
+ 	&queue_stats_entry.attr,
+ 	&queue_wb_stats_entry.attr,
+-	&queue_wb_cache_delay_entry.attr,
+ 	&queue_wb_perc_entry.attr,
+ 	NULL,
+ };
+diff --git a/block/blk-wb.c b/block/blk-wb.c
+index f88d659..5cb26f5 100644
+--- a/block/blk-wb.c
++++ b/block/blk-wb.c
+@@ -5,9 +5,13 @@
+  *
+  * Things that need changing:
+  *
+- *	- Auto-detection of optimal wb_percent setting. A lower setting
+- *	  is appropriate on rotating storage (wb_percent=15 gives good
+- *	  separation, while still getting full bandwidth with wb cache).
++ *	- Different scaling of background/normal/high priority writeback.
++ *	  We may have to violate guarantees for max.
++ *	- We can have mismatches between the stat window and our window.
++ *	- We have outlier reads that exceed min, and we scale back. Better
++ *	  check for whether writes happened at the same time, or whether
++ *	  it was just the device being in a lower power state and hence
++ *	  being slower for the initial IO.
+  *
+  */
+ #include <linux/kernel.h>
+@@ -16,6 +20,29 @@
+ 
+ #include "blk.h"
+ #include "blk-wb.h"
++#include "blk-stat.h"
++
++enum {
++	/*
++	 * Might need to be higher
++	 */
++	RWB_MAX_DEPTH	= 64,
++
++	/*
++	 * 10msec window for non-rotational, 100ms for rotational
++	 */
++	RWB_ROT_END_INC		= 10 * 1000 * 1000ULL,
++	RWB_NONROT_END_INC	= 100 * 1000 * 1000ULL,
++
++	RWB_MIN_WRITE_SAMPLES	= 3,
++	RWB_MIN_READ_SAMPLES	= 1,
++
++	/*
++	 * Target min latencies, in nsecs
++	 */
++	RWB_ROT_LAT	= 75000000ULL,	/* 75 msec */
++	RWB_NONROT_LAT	= 2000000ULL,	/*   2 msec */
++};
+ 
+ static inline bool rwb_enabled(struct rq_wb *rwb)
+ {
+@@ -27,53 +54,54 @@ void __blk_wb_done(struct rq_wb *rwb)
+ 	int inflight, limit = rwb->wb_normal;
+ 
+ 	/*
++	 * If the device does write back caching, drop further down
++	 * before we wake people up.
++	 */
++	if (test_bit(QUEUE_FLAG_WC, &rwb->q->queue_flags) &&
++	    !atomic_read(rwb->bdp_wait))
++		limit = 0;
++	else
++		limit = rwb->wb_normal;
++
++	/*
+ 	 * Don't wake anyone up if we are above the normal limit. If
+ 	 * throttling got disabled (limit == 0) with waiters, ensure
+ 	 * that we wake them up.
+ 	 */
+ 	inflight = atomic_dec_return(&rwb->inflight);
+-	if (inflight >= limit) {
+-		if (!limit)
++	if (limit && inflight >= limit) {
++		if (!rwb->wb_max)
+ 			wake_up_all(&rwb->wait);
+ 		return;
+ 	}
+ 
+-	/*
+-	 * If the device does caching, we can still flood it with IO
+-	 * even at a low depth. If caching is on, delay a bit before
+-	 * submitting the next, if we're still purely background
+-	 * activity.
+-	 */
+-	if (test_bit(QUEUE_FLAG_WC, &rwb->q->queue_flags) &&
+-	    !atomic_read(rwb->bdp_wait) &&
+-	    time_before(jiffies, rwb->last_comp + rwb->cache_delay)) {
+-		if (!timer_pending(&rwb->timer))
+-			mod_timer(&rwb->timer, jiffies + rwb->cache_delay);
+-		return;
+-	}
+-
+ 	if (waitqueue_active(&rwb->wait)) {
+ 		int diff = limit - inflight;
+ 
+-		if (diff >= rwb->wb_idle / 2)
++		if (!inflight || diff >= rwb->wb_background / 2)
+ 			wake_up_nr(&rwb->wait, 1);
+ 	}
+ }
+ 
++static void wb_timestamp(struct rq_wb *rwb, unsigned long *var)
++{
++	if (rwb_enabled(rwb)) {
++		const unsigned long cur = jiffies;
++
++		if (cur != *var)
++			*var = cur;
++	}
++}
++
+ /*
+  * Called on completion of a request. Note that it's also called when
+  * a request is merged, when the request gets freed.
+  */
+ void blk_wb_done(struct rq_wb *rwb, struct request *rq)
+ {
+-	if (!(rq->cmd_flags & REQ_BUF_INFLIGHT)) {
+-		if (rwb_enabled(rwb)) {
+-			const unsigned long cur = jiffies;
+-
+-			if (cur != rwb->last_comp)
+-				rwb->last_comp = cur;
+-		}
+-	} else
++	if (!(rq->cmd_flags & REQ_BUF_INFLIGHT))
++		wb_timestamp(rwb, &rwb->last_comp);
++	else
+ 		__blk_wb_done(rwb);
+ }
+ 
+@@ -99,12 +127,141 @@ static bool atomic_inc_below(atomic_t *v, int below)
+ 	return true;
+ }
+ 
++static void calc_wb_limits(struct rq_wb *rwb, unsigned int depth)
++{
++	depth = min_t(unsigned int, RWB_MAX_DEPTH, depth);
++
++	/*
++	 * Full perf writes are max 'perc' percentage of the depth
++	 */
++	rwb->wb_max = (rwb->perc * depth + 1) / 100;
++	if (!rwb->wb_max && rwb->perc)
++		rwb->wb_max = 1;
++	rwb->wb_normal = (rwb->wb_max + 1) / 2;
++	rwb->wb_background = (rwb->wb_max + 3) / 4;
++}
++
++static bool inline stat_sample_valid(struct blk_rq_stat *stat)
++{
++	/*
++	 * We need at least one read sample, and a minimum of
++	 * RWB_MIN_WRITE_SAMPLES. We require some write samples to know
++	 * that it's writes impacting us, and not just some sole read on
++	 * a device that is in a lower power state.
++	 */
++	return stat[0].nr_samples >= RWB_MIN_READ_SAMPLES &&
++		stat[1].nr_samples >= RWB_MIN_WRITE_SAMPLES;
++}
++
++static bool lat_exceeded(struct rq_wb *rwb, struct blk_rq_stat *stat)
++{
++	unsigned long maxlat;
++
++	if (!stat_sample_valid(stat))
++		return false;
++
++	/*
++	 * We can't do anything with a max of 1, so just return
++	 */
++	if (rwb->wb_max <= 1)
++		return false;
++
++	if (blk_queue_nonrot(rwb->q))
++		maxlat = RWB_NONROT_LAT;
++	else
++		maxlat = RWB_ROT_LAT;
++
++	if (stat[0].min > maxlat) {
++		printk(KERN_ERR "blk-wb: %lu > %lu\n", (unsigned long) stat[0].min, (unsigned long) maxlat);
++		printk(KERN_ERR "   read lat: mean=%llu, min=%llu, max=%llu, samples=%llu\n", stat[0].mean, stat[0].min, stat[0].max, stat[0].nr_samples);
++		printk(KERN_ERR "  write lat: mean=%llu, min=%llu, max=%llu, samples=%llu\n", stat[1].mean, stat[1].min, stat[1].max, stat[1].nr_samples);
++		return true;
++	}
++
++	return false;
++}
++
++static void set_limits(struct rq_wb *rwb, unsigned int depth, u64 now)
++{
++	u64 nsec;
++
++	nsec = 1000000000ULL / int_sqrt((rwb->scale_step + 1) * 100);
++	rwb->end_time = now + nsec;
++
++	if (rwb->scale_step)
++		printk(KERN_ERR "blk-wb: scaling step %u, limit %u%%\n", rwb->scale_step, rwb->perc);
++
++	calc_wb_limits(rwb, depth);
++}
++
++static void __update_limits(struct rq_wb *rwb, unsigned int depth, u64 now)
++{
++	struct blk_rq_stat stat[2];
++
++	blk_queue_stat_get(rwb->q, stat);
++
++	/*
++	 * Reset window and steps if we had a good result
++	 */
++	if (!lat_exceeded(rwb, stat)) {
++		rwb->scale_step = 0;
++		if (blk_queue_nonrot(rwb->q))
++			rwb->end_time = now + RWB_NONROT_END_INC;
++		else
++			rwb->end_time = now + RWB_ROT_END_INC;
++		return;
++	}
++
++	/*
++	 * Nothing more to do...
++	 */
++	if (rwb->wb_max == 1)
++		return;
++
++	/*
++	 * Scale down queue depth by 75%
++	 */
++	rwb->scale_step++;
++	rwb->perc = (rwb->perc * 3) / 4;
++	if (!rwb->perc)
++		rwb->perc = 1;
++	blk_stat_clear(rwb->q);
++	set_limits(rwb, depth, now);
++}
++
++static void update_limits(struct rq_wb *rwb)
++{
++	u64 now = ktime_to_ns(ktime_get());
++
++	if (now < rwb->end_time)
++		return;
++
++	__update_limits(rwb, RWB_MAX_DEPTH, now);
++}
++
++void blk_wb_update_limits(struct rq_wb *rwb, unsigned int depth)
++{
++	rwb->scale_step = 0;
++	set_limits(rwb, depth, ktime_to_ns(ktime_get()));
++	wake_up_all(&rwb->wait);
++}
++
++static bool close_io(struct rq_wb *rwb)
++{
++	const unsigned long now = jiffies;
++
++	return time_before(now, rwb->last_issue + HZ / 10) ||
++		time_before(now, rwb->last_comp + HZ / 10);
++}
++
+ #define REQ_HIPRIO	(REQ_SYNC | REQ_META | REQ_PRIO)
+ 
+ static inline unsigned int get_limit(struct rq_wb *rwb, unsigned long rw)
+ {
+ 	unsigned int limit;
+ 
++	update_limits(rwb);
++
+ 	/*
+ 	 * At this point we know it's a buffered write. If REQ_SYNC is
+ 	 * set, then it's WB_SYNC_ALL writeback, and we'll use the max
+@@ -114,13 +271,12 @@ static inline unsigned int get_limit(struct rq_wb *rwb, unsigned long rw)
+ 	 */
+ 	if ((rw & REQ_HIPRIO) || atomic_read(rwb->bdp_wait))
+ 		limit = rwb->wb_max;
+-	else if (time_before(jiffies, rwb->last_comp + HZ / 10) ||
+-		 (rw & REQ_BG)) {
++	else if ((rw & REQ_BG) || close_io(rwb)) {
+ 		/*
+ 		 * If less than 100ms since we completed unrelated IO,
+ 		 * limit us to half the depth for background writeback.
+ 		 */
+-		limit = rwb->wb_idle;
++		limit = rwb->wb_background;
+ 	} else
+ 		limit = rwb->wb_normal;
+ 
+@@ -129,13 +285,17 @@ static inline unsigned int get_limit(struct rq_wb *rwb, unsigned long rw)
+ 
+ static inline bool may_queue(struct rq_wb *rwb, unsigned long rw)
+ {
++	/*
++	 * Inc it here even if disabled, since we'll dec it at completion.
++	 * This only happens if the task was sleeping in __blk_wb_wait(),
++	 * and someone turned it off at the same time.
++	 */
+ 	if (!rwb_enabled(rwb)) {
+ 		atomic_inc(&rwb->inflight);
+ 		return true;
+ 	}
+ 
+-	if (!timer_pending(&rwb->timer) &&
+-	    atomic_inc_below(&rwb->inflight, get_limit(rwb, rw)))
++	if (atomic_inc_below(&rwb->inflight, get_limit(rwb, rw)))
+ 		return true;
+ 
+ 	return false;
+@@ -184,54 +344,22 @@ bool blk_wb_wait(struct rq_wb *rwb, struct bio *bio, spinlock_t *lock)
+ 	 */
+ 	if (!rwb_enabled(rwb) || !(bio->bi_rw & REQ_WRITE) ||
+ 	    (bio->bi_rw & REQ_DISCARD))
+-		return false;
++		goto no_q;
+ 
+ 	/*
+ 	 * Don't throttle WRITE_ODIRECT
+ 	 */
+ 	if ((bio->bi_rw & (REQ_SYNC | REQ_NOIDLE)) == REQ_SYNC)
+-		return false;
++		goto no_q;
+ 
+ 	__blk_wb_wait(rwb, bio->bi_rw, lock);
+ 	return true;
+-}
+-
+-static void calc_wb_limits(struct rq_wb *rwb, unsigned int depth,
+-			   unsigned int perc)
+-{
+-	/*
+-	 * We'll use depth==64 as a reasonable max limit that should be able
+-	 * to achieve full device bandwidth anywhere.
+-	 */
+-	depth = min(64U, depth);
+-
+-	/*
+-	 * Full perf writes are max 'perc' percentage of the depth
+-	 */
+-	rwb->wb_max = (perc * depth + 1) / 100;
+-	if (!rwb->wb_max && perc)
+-		rwb->wb_max = 1;
+-	rwb->wb_normal = (rwb->wb_max + 1) / 2;
+-	rwb->wb_idle = (rwb->wb_max + 3) / 4;
+-}
+ 
+-void blk_wb_update_limits(struct rq_wb *rwb, unsigned int depth)
+-{
+-	calc_wb_limits(rwb, depth, rwb->perc);
+-	wake_up_all(&rwb->wait);
+-}
+-
+-static void blk_wb_timer(unsigned long data)
+-{
+-	struct rq_wb *rwb = (struct rq_wb *) data;
+-
+-	if (waitqueue_active(&rwb->wait))
+-		wake_up_nr(&rwb->wait, 1);
++no_q:
++	wb_timestamp(rwb, &rwb->last_issue);
++	return false;
+ }
+ 
+-#define DEF_WB_PERC		50
+-#define DEF_WB_CACHE_DELAY	10000
+-
+ int blk_wb_init(struct request_queue *q)
+ {
+ 	struct rq_wb *rwb;
+@@ -242,12 +370,10 @@ int blk_wb_init(struct request_queue *q)
+ 
+ 	atomic_set(&rwb->inflight, 0);
+ 	init_waitqueue_head(&rwb->wait);
+-	rwb->last_comp = jiffies;
++	rwb->last_comp = rwb->last_issue = jiffies;
+ 	rwb->bdp_wait = &q->backing_dev_info.wb.dirty_sleeping;
+-	setup_timer(&rwb->timer, blk_wb_timer, (unsigned long) rwb);
+-	rwb->perc = DEF_WB_PERC;
+-	rwb->cache_delay_usecs = DEF_WB_CACHE_DELAY;
+-	rwb->cache_delay = usecs_to_jiffies(rwb->cache_delay);
++	rwb->perc = 100;
++	rwb->end_time = ktime_to_ns(ktime_get()) + RWB_NONROT_END_INC;
+ 	rwb->q = q;
+ 	blk_wb_update_limits(rwb, blk_queue_depth(q));
+ 	q->rq_wb = rwb;
+@@ -256,9 +382,6 @@ int blk_wb_init(struct request_queue *q)
+ 
+ void blk_wb_exit(struct request_queue *q)
+ {
+-	if (q->rq_wb)
+-		del_timer_sync(&q->rq_wb->timer);
+-
+ 	kfree(q->rq_wb);
+ 	q->rq_wb = NULL;
+ }
+diff --git a/block/blk-wb.h b/block/blk-wb.h
+index 8fcf19b..44e5b21 100644
+--- a/block/blk-wb.h
++++ b/block/blk-wb.h
+@@ -9,18 +9,19 @@ struct rq_wb {
+ 	 * Settings that govern how we throttle
+ 	 */
+ 	unsigned int perc;			/* INPUT */
+-	unsigned int wb_idle;			/* idle writeback */
++	unsigned int wb_background;		/* background writeback */
+ 	unsigned int wb_normal;			/* normal writeback */
+ 	unsigned int wb_max;			/* max throughput writeback */
+ 
+-	unsigned int cache_delay;
+-	unsigned int cache_delay_usecs;
+-	unsigned long last_comp;
++	unsigned int scale_step;
++	s64 end_time;
++
++	unsigned long last_issue;		/* last non-throttled issue */
++	unsigned long last_comp;		/* last non-throttled comp */
+ 	atomic_t *bdp_wait;
+ 	struct request_queue *q;
+ 	atomic_t inflight;
+ 	wait_queue_head_t wait;
+-	struct timer_list timer;
+ };
+ 
+ void __blk_wb_done(struct rq_wb *);
+-- 
+2.8.1
+

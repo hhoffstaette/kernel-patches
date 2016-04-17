@@ -1,7 +1,7 @@
-From 6ef2f64a2d7120a8579fc264d32ddca403016157 Mon Sep 17 00:00:00 2001
+From 65c1afb5c2bd4a4390cad5164aa3300ddfa60c72 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Thu, 31 Mar 2016 10:15:48 -0600
-Subject: blk-mq: mark virtual devices as such
+Subject: [PATCH 28/31] blk-mq: mark virtual devices as such
 
 Some drivers sit on top of a backend/real driver and storage. Mark
 those drivers as such.
@@ -66,5 +66,5 @@ index 9ac9799..90a5941 100644
  	BLK_MQ_F_ALLOC_POLICY_BITS = 1,
  
 -- 
-cgit v0.11.2
+2.8.1
 

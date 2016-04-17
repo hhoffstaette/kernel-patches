@@ -1,7 +1,8 @@
-From 66e2f46500bda10a22ce7dfc4be7a1d1012cf400 Mon Sep 17 00:00:00 2001
+From 47b5abbe9bf202c525ec2ce0e0311ac82cbb2687 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
-Date: Wed, 30 Mar 2016 10:04:12 -0600
-Subject: block: add ability to flag write back caching on a device
+Date: Tue, 12 Apr 2016 12:32:46 -0600
+Subject: [PATCH 01/31] block: add ability to flag write back caching on a
+ device
 
 Add an internal helper and flag for setting whether a queue has
 write back caching, or write through (or none). Add a sysfs file
@@ -12,12 +13,34 @@ drivers currently use to inform the block layer of write cache state
 and capabilities.
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
- block/blk-settings.c   | 26 ++++++++++++++++++++++++++
- block/blk-sysfs.c      | 39 +++++++++++++++++++++++++++++++++++++++
- include/linux/blkdev.h |  3 +++
- 3 files changed, 68 insertions(+)
+ Documentation/block/queue-sysfs.txt |  9 +++++++++
+ block/blk-settings.c                | 26 +++++++++++++++++++++++++
+ block/blk-sysfs.c                   | 39 +++++++++++++++++++++++++++++++++++++
+ include/linux/blkdev.h              |  3 +++
+ 4 files changed, 77 insertions(+)
 
+diff --git a/Documentation/block/queue-sysfs.txt b/Documentation/block/queue-sysfs.txt
+index e5d9148..dce25d8 100644
+--- a/Documentation/block/queue-sysfs.txt
++++ b/Documentation/block/queue-sysfs.txt
+@@ -141,6 +141,15 @@ control of this block device to that new IO scheduler. Note that writing
+ an IO scheduler name to this file will attempt to load that IO scheduler
+ module, if it isn't already present in the system.
+ 
++write_cache (RW)
++----------------
++When read, this file will display whether the device has write back
++caching enabled or not. It will return "write back" for the former
++case, and "write through" for the latter. Writing to this file can
++change the kernels view of the device, but it doesn't alter the
++device state. This means that it might not be safe to toggle the
++setting from "write back" to "write through", since that will also
++eliminate cache flushes issued by the kernel.
+ 
+ 
+ Jens Axboe <jens.axboe@oracle.com>, February 2009
 diff --git a/block/blk-settings.c b/block/blk-settings.c
 index c7bb666..53f857e 100644
 --- a/block/blk-settings.c
@@ -141,5 +164,5 @@ index 7e5d7e0..f7047bf 100644
  
  extern int blk_rq_map_sg(struct request_queue *, struct request *, struct scatterlist *);
 -- 
-cgit v0.11.2
+2.8.1
 

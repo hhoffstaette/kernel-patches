@@ -1,9 +1,10 @@
-From e8f06e64b186f2e668f38e50519573414e7e9f4d Mon Sep 17 00:00:00 2001
+From dab205427a9cb637e2f0e6b924f4e37425a215ba Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:16:25 -0600
-Subject: ide-disk: update to using blk_queue_write_cache()
+Subject: [PATCH 15/31] ide-disk: update to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/ide/ide-disk.c | 6 +++---
  1 file changed, 3 insertions(+), 3 deletions(-)
@@ -37,5 +38,5 @@ index 37a8a90..05dbcce 100644
  
  ide_devset_get_flag(wcache, IDE_DFLAG_WCACHE);
 -- 
-cgit v0.11.2
+2.8.1
 

@@ -1,9 +1,10 @@
-From 8d1f3486471a2cfc3995d48473eb9f46ecf7e807 Mon Sep 17 00:00:00 2001
+From f9e783cef31b7f51178b11c3b92c00c2092e8772 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:16:53 -0600
-Subject: md: update to using blk_queue_write_cache()
+Subject: [PATCH 16/31] md: update to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/md/md.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -22,5 +23,5 @@ index c068f17..21a63f5 100644
  	 * 'mdp' device redundant, but we can't really
  	 * remove it now.
 -- 
-cgit v0.11.2
+2.8.1
 

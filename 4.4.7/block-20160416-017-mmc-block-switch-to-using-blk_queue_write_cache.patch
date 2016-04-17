@@ -1,9 +1,10 @@
-From 342b543331daf7bd3667688dd61f82a50e877111 Mon Sep 17 00:00:00 2001
+From 7e7148906080458376b152f3e62d173049c99965 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:17:20 -0600
-Subject: mmc/block: switch to using blk_queue_write_cache()
+Subject: [PATCH 17/31] mmc/block: switch to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/mmc/card/block.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -22,5 +23,5 @@ index 3bdbe50..32daf43 100644
  
  	if (mmc_card_mmc(card) &&
 -- 
-cgit v0.11.2
+2.8.1
 

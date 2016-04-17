@@ -1,0 +1,34 @@
+From 2c75f209e7a77351120fb1b3ef6d8f42f3f171a0 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Tue, 12 Apr 2016 15:45:39 -0600
+Subject: [PATCH 06/31] mtip32xx: remove call to blk_queue_flush()
+
+The driver calls it with 0 for flags, since it doesn't have a writeback
+cache. Just remove the call, as it's a no-op right now.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+---
+ drivers/block/mtip32xx/mtip32xx.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/drivers/block/mtip32xx/mtip32xx.c b/drivers/block/mtip32xx/mtip32xx.c
+index 25824c1..c383e90 100644
+--- a/drivers/block/mtip32xx/mtip32xx.c
++++ b/drivers/block/mtip32xx/mtip32xx.c
+@@ -4023,12 +4023,6 @@ skip_create_disk:
+ 	blk_queue_io_min(dd->queue, 4096);
+ 	blk_queue_bounce_limit(dd->queue, dd->pdev->dma_mask);
+ 
+-	/*
+-	 * write back cache is not supported in the device. FUA depends on
+-	 * write back cache support, hence setting flush support to zero.
+-	 */
+-	blk_queue_flush(dd->queue, 0);
+-
+ 	/* Signal trim support */
+ 	if (dd->trim_supp == true) {
+ 		set_bit(QUEUE_FLAG_DISCARD, &dd->queue->queue_flags);
+-- 
+2.8.1
+

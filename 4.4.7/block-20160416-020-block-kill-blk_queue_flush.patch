@@ -1,12 +1,13 @@
-From 487b5a1d59ab2ff2adf274679c0206608ca8f3e2 Mon Sep 17 00:00:00 2001
+From 909ff547278adf9c65989484b4a06b39384c8cf1 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:19:30 -0600
-Subject: block: kill blk_queue_flush()
+Subject: [PATCH 20/31] block: kill blk_queue_flush()
 
 We don't have any drivers left using it, so kill it off. Update
 documentation to use the newer blk_queue_write_cache().
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  Documentation/block/writeback_cache_control.txt |  4 ++--
  block/blk-settings.c                            | 20 --------------------
@@ -79,5 +80,5 @@ index f7047bf..2fbec4b 100644
  extern void blk_queue_write_cache(struct request_queue *q, bool enabled, bool fua);
  extern struct backing_dev_info *blk_get_backing_dev_info(struct block_device *bdev);
 -- 
-cgit v0.11.2
+2.8.1
 

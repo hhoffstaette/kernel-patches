@@ -1,9 +1,10 @@
-From c344ab2f5c9d4c41c810c785a0fd17b06552e94c Mon Sep 17 00:00:00 2001
+From 6ee9cd8a372169458eb3369b15257c2c1889aff1 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:19:17 -0600
-Subject: um: switch to using blk_queue_write_cache()
+Subject: [PATCH 19/31] um: switch to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  arch/um/drivers/ubd_kern.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -22,5 +23,5 @@ index 39ba207..17e96dc 100644
  	blk_queue_max_segments(ubd_dev->queue, MAX_SG);
  	err = ubd_disk_register(UBD_MAJOR, ubd_dev->size, n, &ubd_gendisk[n]);
 -- 
-cgit v0.11.2
+2.8.1
 

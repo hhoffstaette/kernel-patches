@@ -1,9 +1,10 @@
-From c89e67fdede272ebf4a54d5c85034d82485a72c9 Mon Sep 17 00:00:00 2001
+From d4cf3b19b41959dd27019fd7091b86c969e806e5 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:09:01 -0600
-Subject: drbd: switch to using blk_queue_write_cache()
+Subject: [PATCH 04/31] drbd: switch to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/block/drbd/drbd_main.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -22,5 +23,5 @@ index fa20977..2ba1494 100644
  	   This triggers a max_bio_size message upon first attach or connect */
  	blk_queue_max_hw_sectors(q, DRBD_MAX_BIO_SIZE_SAFE >> 8);
 -- 
-cgit v0.11.2
+2.8.1
 

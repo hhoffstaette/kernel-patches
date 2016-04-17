@@ -1,9 +1,10 @@
-From 804a20c30495ade8d30032e0e4011cb23002c10e Mon Sep 17 00:00:00 2001
+From 6324f59b42e497af80086a829427981106290f5a Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:17:47 -0600
-Subject: mtd: switch to using blk_queue_write_cache()
+Subject: [PATCH 18/31] mtd: switch to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/mtd/mtd_blkdevs.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -22,5 +23,5 @@ index f470118..74ae243 100644
  	new->rq->queuedata = new;
  	blk_queue_logical_block_size(new->rq, tr->blksize);
 -- 
-cgit v0.11.2
+2.8.1
 

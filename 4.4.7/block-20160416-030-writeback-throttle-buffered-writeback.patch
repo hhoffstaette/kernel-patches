@@ -1,7 +1,7 @@
-From 847eba0de3483072660d20b726eda5e7dd54dee3 Mon Sep 17 00:00:00 2001
+From df7870393e0a68c609d1a176f1cc34e21ed429d1 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
-Date: Fri, 1 Apr 2016 09:21:10 -0600
-Subject: writeback: throttle buffered writeback
+Date: Fri, 15 Apr 2016 15:39:20 -0600
+Subject: [PATCH 30/31] writeback: throttle buffered writeback
 
 Test patch that throttles buffered writeback to make it a lot
 more smooth, and has way less impact on other system activity.
@@ -44,32 +44,32 @@ Signed-off-by: Jens Axboe <axboe@fb.com>
 ---
  block/Makefile            |   2 +-
  block/blk-core.c          |  15 +++
- block/blk-mq.c            |  35 ++++++-
+ block/blk-mq.c            |  35 +++++-
  block/blk-settings.c      |   3 +
- block/blk-sysfs.c         |  89 +++++++++++++++++
- block/blk-wb.c            | 248 ++++++++++++++++++++++++++++++++++++++++++++++
+ block/blk-sysfs.c         |  91 ++++++++++++++++
+ block/blk-wb.c            | 264 ++++++++++++++++++++++++++++++++++++++++++++++
  block/blk-wb.h            |  33 ++++++
  include/linux/blk_types.h |   2 +
  include/linux/blkdev.h    |   3 +
- 9 files changed, 427 insertions(+), 3 deletions(-)
+ 9 files changed, 445 insertions(+), 3 deletions(-)
  create mode 100644 block/blk-wb.c
  create mode 100644 block/blk-wb.h
 
 diff --git a/block/Makefile b/block/Makefile
-index 9eda232..9df911a 100644
+index 3446e04..7e4be7a 100644
 --- a/block/Makefile
 +++ b/block/Makefile
 @@ -5,7 +5,7 @@
  obj-$(CONFIG_BLOCK) := bio.o elevator.o blk-core.o blk-tag.o blk-sysfs.o \
  			blk-flush.o blk-settings.o blk-ioc.o blk-map.o \
  			blk-exec.o blk-merge.o blk-softirq.o blk-timeout.o \
--			blk-iopoll.o blk-lib.o blk-mq.o blk-mq-tag.o \
-+			blk-iopoll.o blk-lib.o blk-mq.o blk-mq-tag.o blk-wb.o \
+-			blk-iopoll.o blk-lib.o blk-mq.o blk-mq-tag.o blk-stat.o \
++			blk-iopoll.o blk-lib.o blk-mq.o blk-mq-tag.o blk-stat.o blk-wb.o \
  			blk-mq-sysfs.o blk-mq-cpu.o blk-mq-cpumap.o ioctl.o \
  			genhd.o scsi_ioctl.o partition-generic.o ioprio.o \
  			badblocks.o partitions/
 diff --git a/block/blk-core.c b/block/blk-core.c
-index 827f8ba..85a92cd 100644
+index 70f5845..e55a280 100644
 --- a/block/blk-core.c
 +++ b/block/blk-core.c
 @@ -39,6 +39,7 @@
@@ -142,18 +142,18 @@ index 827f8ba..85a92cd 100644
  	 * After dropping the lock and possibly sleeping here, our request
  	 * may now be mergeable after it had proven unmergeable (above).
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 1699baf..9f330f3 100644
+index 71b4a13..52c2bd5 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
-@@ -29,6 +29,7 @@
- #include "blk.h"
+@@ -30,6 +30,7 @@
  #include "blk-mq.h"
  #include "blk-mq-tag.h"
+ #include "blk-stat.h"
 +#include "blk-wb.h"
  
  static DEFINE_MUTEX(all_q_mutex);
  static LIST_HEAD(all_q_list);
-@@ -274,6 +275,9 @@ static void __blk_mq_free_request(struct blk_mq_hw_ctx *hctx,
+@@ -275,6 +276,9 @@ static void __blk_mq_free_request(struct blk_mq_hw_ctx *hctx,
  
  	if (rq->cmd_flags & REQ_MQ_INFLIGHT)
  		atomic_dec(&hctx->nr_active);
@@ -163,7 +163,7 @@ index 1699baf..9f330f3 100644
  	rq->cmd_flags = 0;
  
  	clear_bit(REQ_ATOM_STARTED, &rq->atomic_flags);
-@@ -1253,6 +1257,7 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
+@@ -1265,6 +1269,7 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
  	struct blk_plug *plug;
  	struct request *same_queue_rq = NULL;
  	blk_qc_t cookie;
@@ -171,7 +171,7 @@ index 1699baf..9f330f3 100644
  
  	blk_queue_bounce(q, &bio);
  
-@@ -1270,9 +1275,17 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
+@@ -1282,9 +1287,17 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
  	} else
  		request_count = blk_plug_queued_count(q);
  
@@ -190,7 +190,7 @@ index 1699baf..9f330f3 100644
  
  	cookie = blk_tag_to_qc_t(rq->tag, data.hctx->queue_num);
  
-@@ -1349,6 +1362,7 @@ static blk_qc_t blk_sq_make_request(struct request_queue *q, struct bio *bio)
+@@ -1361,6 +1374,7 @@ static blk_qc_t blk_sq_make_request(struct request_queue *q, struct bio *bio)
  	struct blk_map_ctx data;
  	struct request *rq;
  	blk_qc_t cookie;
@@ -198,7 +198,7 @@ index 1699baf..9f330f3 100644
  
  	blk_queue_bounce(q, &bio);
  
-@@ -1363,9 +1377,17 @@ static blk_qc_t blk_sq_make_request(struct request_queue *q, struct bio *bio)
+@@ -1375,9 +1389,17 @@ static blk_qc_t blk_sq_make_request(struct request_queue *q, struct bio *bio)
  	    blk_attempt_plug_merge(q, bio, &request_count, NULL))
  		return BLK_QC_T_NONE;
  
@@ -217,7 +217,7 @@ index 1699baf..9f330f3 100644
  
  	cookie = blk_tag_to_qc_t(rq->tag, data.hctx->queue_num);
  
-@@ -2062,6 +2084,13 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
+@@ -2076,6 +2098,13 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
  	 */
  	q->nr_requests = set->queue_depth;
  
@@ -231,7 +231,7 @@ index 1699baf..9f330f3 100644
  	if (set->ops->complete)
  		blk_queue_softirq_done(q, set->ops->complete);
  
-@@ -2097,6 +2126,8 @@ void blk_mq_free_queue(struct request_queue *q)
+@@ -2111,6 +2140,8 @@ void blk_mq_free_queue(struct request_queue *q)
  	list_del_init(&q->all_q_node);
  	mutex_unlock(&all_q_mutex);
  
@@ -241,7 +241,7 @@ index 1699baf..9f330f3 100644
  
  	blk_mq_exit_hw_queues(q, set, set->nr_hw_queues);
 diff --git a/block/blk-settings.c b/block/blk-settings.c
-index 1d5fa42..c01c980 100644
+index 5f3f0df..9056594 100644
 --- a/block/blk-settings.c
 +++ b/block/blk-settings.c
 @@ -13,6 +13,7 @@
@@ -252,7 +252,7 @@ index 1d5fa42..c01c980 100644
  
  unsigned long blk_max_low_pfn;
  EXPORT_SYMBOL(blk_max_low_pfn);
-@@ -835,6 +836,8 @@ EXPORT_SYMBOL_GPL(blk_queue_flush_queueable);
+@@ -840,6 +841,8 @@ EXPORT_SYMBOL_GPL(blk_queue_flush_queueable);
  void blk_set_queue_depth(struct request_queue *q, unsigned int depth)
  {
  	q->queue_depth = depth;
@@ -262,7 +262,7 @@ index 1d5fa42..c01c980 100644
  EXPORT_SYMBOL(blk_set_queue_depth);
  
 diff --git a/block/blk-sysfs.c b/block/blk-sysfs.c
-index 954e510..2afd5cb 100644
+index 177201e..21a2ae7 100644
 --- a/block/blk-sysfs.c
 +++ b/block/blk-sysfs.c
 @@ -13,6 +13,7 @@
@@ -290,7 +290,7 @@ index 954e510..2afd5cb 100644
 +					atomic_read(&wb->inflight),
 +					waitqueue_active(&wb->wait),
 +					timer_pending(&wb->timer),
-+					*wb->bdp_wait);
++					atomic_read(wb->bdp_wait));
 +}
 +
 +static ssize_t queue_wb_perc_show(struct request_queue *q, char *page)
@@ -350,19 +350,21 @@ index 954e510..2afd5cb 100644
  static ssize_t queue_wc_show(struct request_queue *q, char *page)
  {
  	if (test_bit(QUEUE_FLAG_WC, &q->queue_flags))
-@@ -516,6 +587,21 @@ static struct queue_sysfs_entry queue_wc_entry = {
- 	.store = queue_wc_store,
+@@ -541,6 +612,23 @@ static struct queue_sysfs_entry queue_stats_entry = {
+ 	.show = queue_stats_show,
  };
  
 +static struct queue_sysfs_entry queue_wb_stats_entry = {
 +	.attr = {.name = "wb_stats", .mode = S_IRUGO },
 +	.show = queue_wb_stats_show,
 +};
++
 +static struct queue_sysfs_entry queue_wb_cache_delay_entry = {
 +	.attr = {.name = "wb_cache_usecs", .mode = S_IRUGO | S_IWUSR },
 +	.show = queue_wb_cache_delay_show,
 +	.store = queue_wb_cache_delay_store,
 +};
++
 +static struct queue_sysfs_entry queue_wb_perc_entry = {
 +	.attr = {.name = "wb_percent", .mode = S_IRUGO | S_IWUSR },
 +	.show = queue_wb_perc_show,
@@ -372,10 +374,10 @@ index 954e510..2afd5cb 100644
  static struct attribute *default_attrs[] = {
  	&queue_requests_entry.attr,
  	&queue_ra_entry.attr,
-@@ -542,6 +628,9 @@ static struct attribute *default_attrs[] = {
- 	&queue_random_entry.attr,
+@@ -568,6 +656,9 @@ static struct attribute *default_attrs[] = {
  	&queue_poll_entry.attr,
  	&queue_wc_entry.attr,
+ 	&queue_stats_entry.attr,
 +	&queue_wb_stats_entry.attr,
 +	&queue_wb_cache_delay_entry.attr,
 +	&queue_wb_perc_entry.attr,
@@ -384,10 +386,10 @@ index 954e510..2afd5cb 100644
  
 diff --git a/block/blk-wb.c b/block/blk-wb.c
 new file mode 100644
-index 0000000..8f1d5d5
+index 0000000..f88d659
 --- /dev/null
 +++ b/block/blk-wb.c
-@@ -0,0 +1,248 @@
+@@ -0,0 +1,264 @@
 +/*
 + * buffered writeback throttling
 + *
@@ -434,7 +436,8 @@ index 0000000..8f1d5d5
 +	 * submitting the next, if we're still purely background
 +	 * activity.
 +	 */
-+	if (test_bit(QUEUE_FLAG_WC, &rwb->q->queue_flags) && !*rwb->bdp_wait &&
++	if (test_bit(QUEUE_FLAG_WC, &rwb->q->queue_flags) &&
++	    !atomic_read(rwb->bdp_wait) &&
 +	    time_before(jiffies, rwb->last_comp + rwb->cache_delay)) {
 +		if (!timer_pending(&rwb->timer))
 +			mod_timer(&rwb->timer, jiffies + rwb->cache_delay);
@@ -490,18 +493,21 @@ index 0000000..8f1d5d5
 +
 +#define REQ_HIPRIO	(REQ_SYNC | REQ_META | REQ_PRIO)
 +
-+static inline unsigned int get_limit(struct rq_wb *rwb, unsigned int rw)
++static inline unsigned int get_limit(struct rq_wb *rwb, unsigned long rw)
 +{
 +	unsigned int limit;
 +
 +	/*
 +	 * At this point we know it's a buffered write. If REQ_SYNC is
-+	 * set, then it's WB_SYNC_ALL writeback. Bump the limit 4x for
-+	 * those, since someone is (or will be) waiting on that.
++	 * set, then it's WB_SYNC_ALL writeback, and we'll use the max
++	 * limit for that. If the write is marked as a background write,
++	 * then use the idle limit, or go to normal if we haven't had
++	 * competing IO for a bit.
 +	 */
-+	if ((rw & REQ_HIPRIO) || *rwb->bdp_wait)
++	if ((rw & REQ_HIPRIO) || atomic_read(rwb->bdp_wait))
 +		limit = rwb->wb_max;
-+	else if (time_before(jiffies, rwb->last_comp + HZ / 10)) {
++	else if (time_before(jiffies, rwb->last_comp + HZ / 10) ||
++		 (rw & REQ_BG)) {
 +		/*
 +		 * If less than 100ms since we completed unrelated IO,
 +		 * limit us to half the depth for background writeback.
@@ -513,24 +519,36 @@ index 0000000..8f1d5d5
 +	return limit;
 +}
 +
++static inline bool may_queue(struct rq_wb *rwb, unsigned long rw)
++{
++	if (!rwb_enabled(rwb)) {
++		atomic_inc(&rwb->inflight);
++		return true;
++	}
++
++	if (!timer_pending(&rwb->timer) &&
++	    atomic_inc_below(&rwb->inflight, get_limit(rwb, rw)))
++		return true;
++
++	return false;
++}
++
 +/*
 + * Block if we will exceed our limit, or if we are currently waiting for
 + * the timer to kick off queuing again.
 + */
-+static void __blk_wb_wait(struct rq_wb *rwb, unsigned int rw, spinlock_t *lock)
++static void __blk_wb_wait(struct rq_wb *rwb, unsigned long rw, spinlock_t *lock)
 +{
 +	DEFINE_WAIT(wait);
 +
-+	if (!timer_pending(&rwb->timer) &&
-+	    atomic_inc_below(&rwb->inflight, get_limit(rwb, rw)))
++	if (may_queue(rwb, rw))
 +		return;
 +
 +	do {
 +		prepare_to_wait_exclusive(&rwb->wait, &wait,
 +						TASK_UNINTERRUPTIBLE);
 +
-+		if (!timer_pending(&rwb->timer) &&
-+		    atomic_inc_below(&rwb->inflight, get_limit(rwb, rw)))
++		if (may_queue(rwb, rw))
 +			break;
 +
 +		if (lock)
@@ -638,7 +656,7 @@ index 0000000..8f1d5d5
 +}
 diff --git a/block/blk-wb.h b/block/blk-wb.h
 new file mode 100644
-index 0000000..201bc00
+index 0000000..8fcf19b
 --- /dev/null
 +++ b/block/blk-wb.h
 @@ -0,0 +1,33 @@
@@ -660,7 +678,7 @@ index 0000000..201bc00
 +	unsigned int cache_delay;
 +	unsigned int cache_delay_usecs;
 +	unsigned long last_comp;
-+	unsigned int *bdp_wait;
++	atomic_t *bdp_wait;
 +	struct request_queue *q;
 +	atomic_t inflight;
 +	wait_queue_head_t wait;
@@ -676,10 +694,10 @@ index 0000000..201bc00
 +
 +#endif
 diff --git a/include/linux/blk_types.h b/include/linux/blk_types.h
-index 86a38ea..6f2a174 100644
+index 2b4414f..c41f8a3 100644
 --- a/include/linux/blk_types.h
 +++ b/include/linux/blk_types.h
-@@ -188,6 +188,7 @@ enum rq_flag_bits {
+@@ -189,6 +189,7 @@ enum rq_flag_bits {
  	__REQ_HASHED,		/* on IO scheduler merge hash */
  	__REQ_MQ_INFLIGHT,	/* track inflight for MQ */
  	__REQ_NO_TIMEOUT,	/* requests may never expire */
@@ -687,7 +705,7 @@ index 86a38ea..6f2a174 100644
  	__REQ_NR_BITS,		/* stops here */
  };
  
-@@ -241,6 +242,7 @@ enum rq_flag_bits {
+@@ -243,6 +244,7 @@ enum rq_flag_bits {
  #define REQ_HASHED		(1ULL << __REQ_HASHED)
  #define REQ_MQ_INFLIGHT		(1ULL << __REQ_MQ_INFLIGHT)
  #define REQ_NO_TIMEOUT		(1ULL << __REQ_NO_TIMEOUT)
@@ -696,7 +714,7 @@ index 86a38ea..6f2a174 100644
  typedef unsigned int blk_qc_t;
  #define BLK_QC_T_NONE	-1U
 diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index 6702cb6..9d1e9ef 100644
+index 10d7b94..5112e38 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
 @@ -37,6 +37,7 @@ struct bsg_job;
@@ -707,7 +725,7 @@ index 6702cb6..9d1e9ef 100644
  
  #define BLKDEV_MIN_RQ	4
  #define BLKDEV_MAX_RQ	128	/* Default maximum */
-@@ -290,6 +291,8 @@ struct request_queue {
+@@ -291,6 +292,8 @@ struct request_queue {
  	int			nr_rqs[2];	/* # allocated [a]sync rqs */
  	int			nr_rqs_elvpriv;	/* # allocated rqs w/ elvpriv */
  
@@ -717,5 +735,5 @@ index 6702cb6..9d1e9ef 100644
  	 * If blkcg is not used, @q->root_rl serves all requests.  If blkcg
  	 * is used, root blkg allocates from @q->root_rl and all other
 -- 
-cgit v0.11.2
+2.8.1
 

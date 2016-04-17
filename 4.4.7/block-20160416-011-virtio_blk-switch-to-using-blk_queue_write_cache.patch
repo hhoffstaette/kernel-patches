@@ -1,9 +1,10 @@
-From a3d305d3d0e26a942c79b11a111212dae2a8cc7e Mon Sep 17 00:00:00 2001
+From b7debbeaa96da18a4fbf65c39cbd37ef86636bb6 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:12:58 -0600
-Subject: virtio_blk: switch to using blk_queue_write_cache()
+Subject: [PATCH 11/31] virtio_blk: switch to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/block/virtio_blk.c | 6 +-----
  1 file changed, 1 insertion(+), 5 deletions(-)
@@ -26,5 +27,5 @@ index 28cff0d..42758b5 100644
  }
  
 -- 
-cgit v0.11.2
+2.8.1
 

@@ -1,9 +1,10 @@
-From 0c6a35c99d6069810b94d1965ba178d7b51077e9 Mon Sep 17 00:00:00 2001
+From b93847a930e2d5e65afcb6cd827e5a76cedf0a1c Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:15:21 -0600
-Subject: xen-blkfront: switch to using blk_queue_write_cache()
+Subject: [PATCH 14/31] xen-blkfront: switch to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/block/xen-blkfront.c | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)
@@ -23,5 +24,5 @@ index 6405b65..ca13df8 100644
  		info->gd->disk_name, flush_info(info->feature_flush),
  		"persistent grants:", info->feature_persistent ?
 -- 
-cgit v0.11.2
+2.8.1
 

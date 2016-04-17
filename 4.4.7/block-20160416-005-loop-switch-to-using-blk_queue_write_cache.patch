@@ -1,9 +1,10 @@
-From 102a1730ffe877db3b756d672d73624294d27d8b Mon Sep 17 00:00:00 2001
+From d759a07011cabe9d24cb6d87ee1687aa05b52253 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@fb.com>
 Date: Wed, 30 Mar 2016 10:09:35 -0600
-Subject: loop: switch to using blk_queue_write_cache()
+Subject: [PATCH 05/31] loop: switch to using blk_queue_write_cache()
 
 Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
  drivers/block/loop.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -22,5 +23,5 @@ index 423f4ca..7e5e27a 100644
  	loop_update_dio(lo);
  	set_capacity(lo->lo_disk, size);
 -- 
-cgit v0.11.2
+2.8.1
 
