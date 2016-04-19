@@ -1,0 +1,85 @@
+From 5e1021f2b6dff1a86a468a1424d59faae2bc63c1 Mon Sep 17 00:00:00 2001
+From: Eryu Guan <guaneryu@gmail.com>
+Date: Sat, 12 Mar 2016 21:40:32 -0500
+Subject: ext4: fix NULL pointer dereference in ext4_mark_inode_dirty()
+
+ext4_reserve_inode_write() in ext4_mark_inode_dirty() could fail on
+error (e.g. EIO) and iloc.bh can be NULL in this case. But the error is
+ignored in the following "if" condition and ext4_expand_extra_isize()
+might be called with NULL iloc.bh set, which triggers NULL pointer
+dereference.
+
+This is uncovered by commit 8b4953e13f4c ("ext4: reserve code points for
+the project quota feature"), which enlarges the ext4_inode size, and
+run the following script on new kernel but with old mke2fs:
+
+  #/bin/bash
+  mnt=/mnt/ext4
+  devname=ext4-error
+  dev=/dev/mapper/$devname
+  fsimg=/home/fs.img
+
+  trap cleanup 0 1 2 3 9 15
+
+  cleanup()
+  {
+          umount $mnt >/dev/null 2>&1
+          dmsetup remove $devname
+          losetup -d $backend_dev
+          rm -f $fsimg
+          exit 0
+  }
+
+  rm -f $fsimg
+  fallocate -l 1g $fsimg
+  backend_dev=`losetup -f --show $fsimg`
+  devsize=`blockdev --getsz $backend_dev`
+
+  good_tab="0 $devsize linear $backend_dev 0"
+  error_tab="0 $devsize error $backend_dev 0"
+
+  dmsetup create $devname --table "$good_tab"
+
+  mkfs -t ext4 $dev
+  mount -t ext4 -o errors=continue,strictatime $dev $mnt
+
+  dmsetup load $devname --table "$error_tab" && dmsetup resume $devname
+  echo 3 > /proc/sys/vm/drop_caches
+  ls -l $mnt
+  exit 0
+
+[ Patch changed to simplify the function a tiny bit. -- Ted ]
+
+Signed-off-by: Eryu Guan <guaneryu@gmail.com>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ fs/ext4/inode.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/ext4/inode.c b/fs/ext4/inode.c
+index ce2c4c6..b41432e 100644
+--- a/fs/ext4/inode.c
++++ b/fs/ext4/inode.c
+@@ -5312,6 +5312,8 @@ int ext4_mark_inode_dirty(handle_t *handle, struct inode *inode)
+ 	might_sleep();
+ 	trace_ext4_mark_inode_dirty(inode, _RET_IP_);
+ 	err = ext4_reserve_inode_write(handle, inode, &iloc);
++	if (err)
++		return err;
+ 	if (ext4_handle_valid(handle) &&
+ 	    EXT4_I(inode)->i_extra_isize < sbi->s_want_extra_isize &&
+ 	    !ext4_test_inode_state(inode, EXT4_STATE_NO_EXPAND)) {
+@@ -5342,9 +5344,7 @@ int ext4_mark_inode_dirty(handle_t *handle, struct inode *inode)
+ 			}
+ 		}
+ 	}
+-	if (!err)
+-		err = ext4_mark_iloc_dirty(handle, inode, &iloc);
+-	return err;
++	return ext4_mark_iloc_dirty(handle, inode, &iloc);
+ }
+ 
+ /*
+-- 
+cgit v0.12
+
