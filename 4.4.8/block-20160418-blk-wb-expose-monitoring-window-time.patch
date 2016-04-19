@@ -1,0 +1,116 @@
+From bd168b5a5d7e36bd4bab690f099c24b9261da500 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Mon, 18 Apr 2016 10:32:05 -0500
+Subject: blk-wb: expose monitoring window time
+
+Probably won't keep this exported, but it's handy for experimentation
+right now.
+
+The default window is 100 msec. The sysfs export is 'wb_win_usec'.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/blk-sysfs.c | 54 ++++++++++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 50 insertions(+), 4 deletions(-)
+
+diff --git a/block/blk-sysfs.c b/block/blk-sysfs.c
+index 13f325d..1f81610 100644
+--- a/block/blk-sysfs.c
++++ b/block/blk-sysfs.c
+@@ -42,6 +42,19 @@ queue_var_store(unsigned long *var, const char *page, size_t count)
+ 	return count;
+ }
+ 
++static ssize_t queue_var_store64(u64 *var, const char *page)
++{
++	int err;
++	u64 v;
++
++	err = kstrtou64(page, 10, &v);
++	if (err < 0)
++		return err;
++
++	*var = v;
++	return 0;
++}
++
+ static ssize_t queue_requests_show(struct request_queue *q, char *page)
+ {
+ 	return queue_var_show(q->nr_requests, (page));
+@@ -363,6 +376,32 @@ static ssize_t queue_wb_stats_show(struct request_queue *q, char *page)
+ 					atomic_read(rwb->bdp_wait));
+ }
+ 
++static ssize_t queue_wb_win_show(struct request_queue *q, char *page)
++{
++	if (!q->rq_wb)
++		return -EINVAL;
++
++	return sprintf(page, "%llu\n", q->rq_wb->win_nsec / 1000ULL);
++}
++
++static ssize_t queue_wb_win_store(struct request_queue *q, const char *page,
++				  size_t count)
++{
++	ssize_t ret;
++	u64 val;
++
++	if (!q->rq_wb)
++		return -EINVAL;
++
++	ret = queue_var_store64(&val, page);
++	if (ret < 0)
++		return ret;
++
++	q->rq_wb->win_nsec = val * 1000ULL;
++	blk_wb_update_limits(q->rq_wb);
++	return count;
++}
++
+ static ssize_t queue_wb_lat_show(struct request_queue *q, char *page)
+ {
+ 	if (!q->rq_wb)
+@@ -374,15 +413,15 @@ static ssize_t queue_wb_lat_show(struct request_queue *q, char *page)
+ static ssize_t queue_wb_lat_store(struct request_queue *q, const char *page,
+ 				  size_t count)
+ {
++	ssize_t ret;
+ 	u64 val;
+-	int err;
+ 
+ 	if (!q->rq_wb)
+ 		return -EINVAL;
+ 
+-	err = kstrtou64(page, 10, &val);
+-	if (err < 0)
+-		return err;
++	ret = queue_var_store64(&val, page);
++	if (ret < 0)
++		return ret;
+ 
+ 	q->rq_wb->min_lat_nsec = val * 1000ULL;
+ 	blk_wb_update_limits(q->rq_wb);
+@@ -594,6 +633,12 @@ static struct queue_sysfs_entry queue_wb_lat_entry = {
+ 	.store = queue_wb_lat_store,
+ };
+ 
++static struct queue_sysfs_entry queue_wb_win_entry = {
++	.attr = {.name = "wb_win_usec", .mode = S_IRUGO | S_IWUSR },
++	.show = queue_wb_win_show,
++	.store = queue_wb_win_store,
++};
++
+ static struct attribute *default_attrs[] = {
+ 	&queue_requests_entry.attr,
+ 	&queue_ra_entry.attr,
+@@ -623,6 +668,7 @@ static struct attribute *default_attrs[] = {
+ 	&queue_stats_entry.attr,
+ 	&queue_wb_stats_entry.attr,
+ 	&queue_wb_lat_entry.attr,
++	&queue_wb_win_entry.attr,
+ 	NULL,
+ };
+ 
+-- 
+cgit v0.11.2
+
