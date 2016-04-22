@@ -1,0 +1,42 @@
+From 372022830b06d9980c7e8b41fa0a4081cff883b0 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Thu, 11 Feb 2016 08:58:18 -0800
+Subject: tcp: do not set rtt_min to 1
+
+There are some cases where rtt_us derives from deltas of jiffies,
+instead of using usec timestamps.
+
+Since we want to track minimal rtt, better to assume a delta of 0 jiffie
+might be in fact be very close to 1 jiffie.
+
+It is kind of sad jiffies_to_usecs(1) calls a function instead of simply
+using a constant.
+
+Fixes: f672258391b42 ("tcp: track min RTT using windowed min-filter")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Cc: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_input.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 1c2a734..3b2c8e9 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -2896,7 +2896,10 @@ static void tcp_update_rtt_min(struct sock *sk, u32 rtt_us)
+ {
+ 	const u32 now = tcp_time_stamp, wlen = sysctl_tcp_min_rtt_wlen * HZ;
+ 	struct rtt_meas *m = tcp_sk(sk)->rtt_min;
+-	struct rtt_meas rttm = { .rtt = (rtt_us ? : 1), .ts = now };
++	struct rtt_meas rttm = {
++		.rtt = likely(rtt_us) ? rtt_us : jiffies_to_usecs(1),
++		.ts = now,
++	};
+ 	u32 elapsed;
+ 
+ 	/* Check if the new measurement updates the 1st, 2nd, or 3rd choices */
+-- 
+cgit v0.12
+
