@@ -1,0 +1,130 @@
+From d34999c97ae87cd56514b8cbc6269651efe274fe Mon Sep 17 00:00:00 2001
+From: Brian Foster <bfoster@redhat.com>
+Date: Tue, 15 Mar 2016 11:42:47 +1100
+Subject: xfs: borrow indirect blocks from freed extent when available
+
+xfs_bmap_del_extent() handles extent removal from the in-core and
+on-disk extent lists. When removing a delalloc range, it updates the
+indirect block reservation appropriately based on the removal. It
+currently enforces that the new indirect block reservation is less than
+or equal to the original. This is normally the case in all situations
+except for in certain cases when the removed range creates a hole in a
+single delalloc extent, thus splitting a single delalloc extent in two.
+
+It is possible with small enough extents to split an indlen==1 extent
+into two such slightly smaller extents. This leaves one extent with 0
+indirect blocks and leads to assert failures in other areas (e.g.,
+xfs_bunmapi() if the extent happens to be removed).
+
+Update the indlen distribution code to steal blocks from the deleted
+extent, if necessary, to satisfy the worst case total indirect
+reservation for the new extents. This is safe as the caller does not
+update the fdblocks counters until the extent is removed. Blocks stolen
+in this manner simply remain accounted as allocated, having ownership
+transferred from the data extent to an indirect reservation.
+
+As a precaution, fall back to the original reservation algorithm if the
+new indlen requirement is not met and warn if we end up with extents
+without any reservation at all to detect this more easily in the future.
+
+Signed-off-by: Brian Foster <bfoster@redhat.com>
+Reviewed-by: Dave Chinner <dchinner@redhat.com>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/libxfs/xfs_bmap.c | 46 ++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 36 insertions(+), 10 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
+index 6de613b..2a43d5c 100644
+--- a/fs/xfs/libxfs/xfs_bmap.c
++++ b/fs/xfs/libxfs/xfs_bmap.c
+@@ -4727,22 +4727,39 @@ error0:
+  *
+  * Given the original reservation and the worst case indlen for the two new
+  * extents (as calculated by xfs_bmap_worst_indlen()), split the original
+- * reservation fairly across the two new extents.
++ * reservation fairly across the two new extents. If necessary, steal available
++ * blocks from a deleted extent to make up a reservation deficiency (e.g., if
++ * ores == 1). The number of stolen blocks is returned. The availability and
++ * subsequent accounting of stolen blocks is the responsibility of the caller.
+  */
+-static void
++static xfs_filblks_t
+ xfs_bmap_split_indlen(
+ 	xfs_filblks_t			ores,		/* original res. */
+ 	xfs_filblks_t			*indlen1,	/* ext1 worst indlen */
+-	xfs_filblks_t			*indlen2)	/* ext2 worst indlen */
++	xfs_filblks_t			*indlen2,	/* ext2 worst indlen */
++	xfs_filblks_t			avail)		/* stealable blocks */
+ {
+ 	xfs_filblks_t			len1 = *indlen1;
+ 	xfs_filblks_t			len2 = *indlen2;
+ 	xfs_filblks_t			nres = len1 + len2; /* new total res. */
++	xfs_filblks_t			stolen = 0;
++
++	/*
++	 * Steal as many blocks as we can to try and satisfy the worst case
++	 * indlen for both new extents.
++	 */
++	while (nres > ores && avail) {
++		nres--;
++		avail--;
++		stolen++;
++	}
+ 
+ 	/*
+-	 * The only blocks available are those reserved for the original extent.
+-	 * Therefore, we have to skim blocks off each of the new reservations so
+-	 * long as the new total reservation is greater than the original.
++	 * The only blocks available are those reserved for the original
++	 * extent and what we can steal from the extent being removed.
++	 * If this still isn't enough to satisfy the combined
++	 * requirements for the two new extents, skim blocks off of each
++	 * of the new reservations until they match what is available.
+ 	 */
+ 	while (nres > ores) {
+ 		if (len1) {
+@@ -4759,6 +4776,8 @@ xfs_bmap_split_indlen(
+ 
+ 	*indlen1 = len1;
+ 	*indlen2 = len2;
++
++	return stolen;
+ }
+ 
+ /*
+@@ -5025,20 +5044,27 @@ xfs_bmap_del_extent(
+ 			XFS_IFORK_NEXT_SET(ip, whichfork,
+ 				XFS_IFORK_NEXTENTS(ip, whichfork) + 1);
+ 		} else {
++			xfs_filblks_t	stolen;
+ 			ASSERT(whichfork == XFS_DATA_FORK);
+ 
+ 			/*
+ 			 * Distribute the original indlen reservation across the
+-			 * two new extents.
++			 * two new extents. Steal blocks from the deleted extent
++			 * if necessary. Stealing blocks simply fudges the
++			 * fdblocks accounting in xfs_bunmapi().
+ 			 */
+ 			temp = xfs_bmap_worst_indlen(ip, got.br_blockcount);
+ 			temp2 = xfs_bmap_worst_indlen(ip, new.br_blockcount);
+-			xfs_bmap_split_indlen(da_old, &temp, &temp2);
+-			da_new = temp + temp2;
++			stolen = xfs_bmap_split_indlen(da_old, &temp, &temp2,
++						       del->br_blockcount);
++			da_new = temp + temp2 - stolen;
++			del->br_blockcount -= stolen;
+ 
+ 			/*
+-			 * Set the reservation for each extent.
++			 * Set the reservation for each extent. Warn if either
++			 * is zero as this can lead to delalloc problems.
+ 			 */
++			WARN_ON_ONCE(!temp || !temp2);
+ 			xfs_bmbt_set_startblock(ep, nullstartblock((int)temp));
+ 			new.br_startblock = nullstartblock((int)temp2);
+ 		}
+-- 
+cgit v0.12
+

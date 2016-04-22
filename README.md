@@ -35,5 +35,5 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - vfs: performance improvements
 - wq: workqueue fixes
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: misc. correctness fixes
+- xfs: misc. correctness fixes, performance
 
