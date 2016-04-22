@@ -1,0 +1,69 @@
+From 9d691539eea2d977e3eb86766c389a19a9c13146 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Mon, 1 Feb 2016 21:03:08 -0800
+Subject: tcp: do not enqueue skb with SYN flag
+
+If we remove the SYN flag from the skbs that tcp_fastopen_add_skb()
+places in socket receive queue, then we can remove the test that
+tcp_recvmsg() has to perform in fast path.
+
+All we have to do is to adjust SEQ in the slow path.
+
+For the moment, we place an unlikely() and output a message
+if we find an skb having SYN flag set.
+Goal would be to get rid of the test completely.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp.c          | 8 ++++++--
+ net/ipv4/tcp_fastopen.c | 3 +++
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 19746b3..c507577 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -1466,8 +1466,10 @@ static struct sk_buff *tcp_recv_skb(struct sock *sk, u32 seq, u32 *off)
+ 
+ 	while ((skb = skb_peek(&sk->sk_receive_queue)) != NULL) {
+ 		offset = seq - TCP_SKB_CB(skb)->seq;
+-		if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_SYN)
++		if (unlikely(TCP_SKB_CB(skb)->tcp_flags & TCPHDR_SYN)) {
++			pr_err_once("%s: found a SYN, please report !\n", __func__);
+ 			offset--;
++		}
+ 		if (offset < skb->len || (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN)) {
+ 			*off = offset;
+ 			return skb;
+@@ -1657,8 +1659,10 @@ int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int nonblock,
+ 				break;
+ 
+ 			offset = *seq - TCP_SKB_CB(skb)->seq;
+-			if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_SYN)
++			if (unlikely(TCP_SKB_CB(skb)->tcp_flags & TCPHDR_SYN)) {
++				pr_err_once("%s: found a SYN, please report !\n", __func__);
+ 				offset--;
++			}
+ 			if (offset < skb->len)
+ 				goto found_ok_skb;
+ 			if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN)
+diff --git a/net/ipv4/tcp_fastopen.c b/net/ipv4/tcp_fastopen.c
+index 467d3e9..6a6e11e 100644
+--- a/net/ipv4/tcp_fastopen.c
++++ b/net/ipv4/tcp_fastopen.c
+@@ -143,6 +143,9 @@ void tcp_fastopen_add_skb(struct sock *sk, struct sk_buff *skb)
+ 	__skb_pull(skb, tcp_hdrlen(skb));
+ 	skb_set_owner_r(skb, sk);
+ 
++	TCP_SKB_CB(skb)->seq++;
++	TCP_SKB_CB(skb)->tcp_flags &= ~TCPHDR_SYN;
++
+ 	tp->rcv_nxt = TCP_SKB_CB(skb)->end_seq;
+ 	__skb_queue_tail(&sk->sk_receive_queue, skb);
+ 	tp->syn_data_acked = 1;
+-- 
+cgit v0.12
+
