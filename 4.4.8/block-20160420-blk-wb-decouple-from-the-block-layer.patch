@@ -1,0 +1,832 @@
+From 8e2f2d6f1a68fc3027e0d48f0d39df9e46be7041 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Wed, 20 Apr 2016 23:07:27 -0400
+Subject: blk-wb: decouple from the block layer
+
+We still need to move the block/blk-wb.c file to somewhere else,
+but apart from that, it's now oblivious whether it's attached
+to a block device or something else.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/blk-core.c            |  20 ++++----
+ block/blk-mq.c              |  27 +++++------
+ block/blk-settings.c        |   7 ++-
+ block/blk-stat.c            |   5 +-
+ block/blk-sysfs.c           |  43 ++++++++++++++--
+ block/blk-wb.c              | 116 ++++++++++++++++++++++----------------------
+ block/blk-wb.h              |  45 -----------------
+ include/linux/blk_types.h   |   2 -
+ include/linux/blkdev.h      |   3 +-
+ include/linux/wb-throttle.h |  93 +++++++++++++++++++++++++++++++++++
+ 10 files changed, 221 insertions(+), 140 deletions(-)
+ delete mode 100644 block/blk-wb.h
+ create mode 100644 include/linux/wb-throttle.h
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index d941f69..b380818 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -33,13 +33,13 @@
+ #include <linux/ratelimit.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/blk-cgroup.h>
++#include <linux/wb-throttle.h>
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/block.h>
+ 
+ #include "blk.h"
+ #include "blk-mq.h"
+-#include "blk-wb.h"
+ 
+ EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_remap);
+ EXPORT_TRACEPOINT_SYMBOL_GPL(block_rq_remap);
+@@ -881,7 +881,8 @@ blk_init_allocated_queue(struct request_queue *q, request_fn_proc *rfn,
+ 
+ fail:
+ 	blk_free_flush_queue(q->fq);
+-	blk_wb_exit(q);
++	wbt_exit(q->rq_wb);
++	q->rq_wb = NULL;
+ 	return NULL;
+ }
+ EXPORT_SYMBOL(blk_init_allocated_queue);
+@@ -1397,7 +1398,7 @@ void blk_requeue_request(struct request_queue *q, struct request *rq)
+ 	blk_delete_timer(rq);
+ 	blk_clear_rq_complete(rq);
+ 	trace_block_rq_requeue(q, rq);
+-	blk_wb_requeue(q->rq_wb, rq);
++	wbt_requeue(q->rq_wb, &rq->wb_stat);
+ 
+ 	if (rq->cmd_flags & REQ_QUEUED)
+ 		blk_queue_end_tag(q, rq);
+@@ -1488,7 +1489,7 @@ void __blk_put_request(struct request_queue *q, struct request *req)
+ 	/* this is a bio leak */
+ 	WARN_ON(req->bio != NULL);
+ 
+-	blk_wb_done(q->rq_wb, req);
++	wbt_done(q->rq_wb, &req->wb_stat);
+ 
+ 	/*
+ 	 * Request may not have originated from ll_rw_blk. if not,
+@@ -1772,7 +1773,7 @@ static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
+ 	}
+ 
+ get_rq:
+-	wb_acct = blk_wb_wait(q->rq_wb, bio, q->queue_lock);
++	wb_acct = wbt_wait(q->rq_wb, bio->bi_rw, q->queue_lock);
+ 
+ 	/*
+ 	 * This sync check and mask will be re-done in init_request_from_bio(),
+@@ -1790,14 +1791,14 @@ get_rq:
+ 	req = get_request(q, rw_flags, bio, GFP_NOIO);
+ 	if (IS_ERR(req)) {
+ 		if (wb_acct)
+-			__blk_wb_done(q->rq_wb);
++			__wbt_done(q->rq_wb);
+ 		bio->bi_error = PTR_ERR(req);
+ 		bio_endio(bio);
+ 		goto out_unlock;
+ 	}
+ 
+ 	if (wb_acct)
+-		req->cmd_flags |= REQ_BUF_INFLIGHT;
++		wbt_mark_tracked(&req->wb_stat);
+ 
+ 	/*
+ 	 * After dropping the lock and possibly sleeping here, our request
+@@ -2527,8 +2528,7 @@ void blk_start_request(struct request *req)
+ {
+ 	blk_dequeue_request(req);
+ 
+-	req->issue_time = ktime_to_ns(ktime_get());
+-	blk_wb_issue(req->q->rq_wb, req);
++	wbt_issue(req->q->rq_wb, &req->wb_stat);
+ 
+ 	/*
+ 	 * We are now handing the request to the hardware, initialize
+@@ -2765,7 +2765,7 @@ void blk_finish_request(struct request *req, int error)
+ 		blk_unprep_request(req);
+ 
+ 	blk_account_io_done(req);
+-	blk_wb_done(req->q->rq_wb, req);
++	wbt_done(req->q->rq_wb, &req->wb_stat);
+ 
+ 	if (req->end_io)
+ 		req->end_io(req, error);
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index c0c5207..5e22933 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -22,6 +22,7 @@
+ #include <linux/sched/sysctl.h>
+ #include <linux/delay.h>
+ #include <linux/crash_dump.h>
++#include <linux/wb-throttle.h>
+ 
+ #include <trace/events/block.h>
+ 
+@@ -30,7 +31,6 @@
+ #include "blk-mq.h"
+ #include "blk-mq-tag.h"
+ #include "blk-stat.h"
+-#include "blk-wb.h"
+ 
+ static DEFINE_MUTEX(all_q_mutex);
+ static LIST_HEAD(all_q_list);
+@@ -277,8 +277,7 @@ static void __blk_mq_free_request(struct blk_mq_hw_ctx *hctx,
+ 	if (rq->cmd_flags & REQ_MQ_INFLIGHT)
+ 		atomic_dec(&hctx->nr_active);
+ 
+-	blk_wb_done(q->rq_wb, rq);
+-
++	wbt_done(q->rq_wb, &rq->wb_stat);
+ 	rq->cmd_flags = 0;
+ 
+ 	clear_bit(REQ_ATOM_STARTED, &rq->atomic_flags);
+@@ -309,9 +308,9 @@ EXPORT_SYMBOL_GPL(blk_mq_free_request);
+ inline void __blk_mq_end_request(struct request *rq, int error)
+ {
+ 	blk_account_io_done(rq);
+-	blk_wb_done(rq->q->rq_wb, rq);
+ 
+ 	if (rq->end_io) {
++		wbt_done(rq->q->rq_wb, &rq->wb_stat);
+ 		rq->end_io(rq, error);
+ 	} else {
+ 		if (unlikely(blk_bidi_rq(rq)))
+@@ -418,8 +417,7 @@ void blk_mq_start_request(struct request *rq)
+ 	if (unlikely(blk_bidi_rq(rq)))
+ 		rq->next_rq->resid_len = blk_rq_bytes(rq->next_rq);
+ 
+-	rq->issue_time = ktime_to_ns(ktime_get());
+-	blk_wb_issue(q->rq_wb, rq);
++	wbt_issue(q->rq_wb, &rq->wb_stat);
+ 
+ 	blk_add_timer(rq);
+ 
+@@ -456,7 +454,7 @@ static void __blk_mq_requeue_request(struct request *rq)
+ 	struct request_queue *q = rq->q;
+ 
+ 	trace_block_rq_requeue(q, rq);
+-	blk_wb_requeue(q->rq_wb, rq);
++	wbt_requeue(q->rq_wb, &rq->wb_stat);
+ 
+ 	if (test_and_clear_bit(REQ_ATOM_STARTED, &rq->atomic_flags)) {
+ 		if (q->dma_drain_size && blk_rq_bytes(rq))
+@@ -1290,17 +1288,17 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
+ 	} else
+ 		request_count = blk_plug_queued_count(q);
+ 
+-	wb_acct = blk_wb_wait(q->rq_wb, bio, NULL);
++	wb_acct = wbt_wait(q->rq_wb, bio->bi_rw, NULL);
+ 
+ 	rq = blk_mq_map_request(q, bio, &data);
+ 	if (unlikely(!rq)) {
+ 		if (wb_acct)
+-			__blk_wb_done(q->rq_wb);
++			__wbt_done(q->rq_wb);
+ 		return BLK_QC_T_NONE;
+ 	}
+ 
+ 	if (wb_acct)
+-		rq->cmd_flags |= REQ_BUF_INFLIGHT;
++		wbt_mark_tracked(&rq->wb_stat);
+ 
+ 	cookie = blk_tag_to_qc_t(rq->tag, data.hctx->queue_num);
+ 
+@@ -1392,17 +1390,17 @@ static blk_qc_t blk_sq_make_request(struct request_queue *q, struct bio *bio)
+ 	    blk_attempt_plug_merge(q, bio, &request_count, NULL))
+ 		return BLK_QC_T_NONE;
+ 
+-	wb_acct = blk_wb_wait(q->rq_wb, bio, NULL);
++	wb_acct = wbt_wait(q->rq_wb, bio->bi_rw, NULL);
+ 
+ 	rq = blk_mq_map_request(q, bio, &data);
+ 	if (unlikely(!rq)) {
+ 		if (wb_acct)
+-			__blk_wb_done(q->rq_wb);
++			__wbt_done(q->rq_wb);
+ 		return BLK_QC_T_NONE;
+ 	}
+ 
+ 	if (wb_acct)
+-		rq->cmd_flags |= REQ_BUF_INFLIGHT;
++		wbt_mark_tracked(&rq->wb_stat);
+ 
+ 	cookie = blk_tag_to_qc_t(rq->tag, data.hctx->queue_num);
+ 
+@@ -2136,7 +2134,8 @@ void blk_mq_free_queue(struct request_queue *q)
+ 	list_del_init(&q->all_q_node);
+ 	mutex_unlock(&all_q_mutex);
+ 
+-	blk_wb_exit(q);
++	wbt_exit(q->rq_wb);
++	q->rq_wb = NULL;
+ 
+ 	blk_mq_del_queue_tag_set(q);
+ 
+diff --git a/block/blk-settings.c b/block/blk-settings.c
+index 84bcfc2..746dc9f 100644
+--- a/block/blk-settings.c
++++ b/block/blk-settings.c
+@@ -13,7 +13,6 @@
+ #include <linux/gfp.h>
+ 
+ #include "blk.h"
+-#include "blk-wb.h"
+ 
+ unsigned long blk_max_low_pfn;
+ EXPORT_SYMBOL(blk_max_low_pfn);
+@@ -841,9 +840,7 @@ EXPORT_SYMBOL_GPL(blk_queue_flush_queueable);
+ void blk_set_queue_depth(struct request_queue *q, unsigned int depth)
+ {
+ 	q->queue_depth = depth;
+-
+-	if (q->rq_wb)
+-		blk_wb_update_limits(q->rq_wb);
++	wbt_set_queue_depth(q->rq_wb, depth);
+ }
+ EXPORT_SYMBOL(blk_set_queue_depth);
+ 
+@@ -867,6 +864,8 @@ void blk_queue_write_cache(struct request_queue *q, bool wc, bool fua)
+ 	else
+ 		queue_flag_clear(QUEUE_FLAG_FUA, q);
+ 	spin_unlock_irq(q->queue_lock);
++
++	wbt_set_write_cache(q->rq_wb, test_bit(QUEUE_FLAG_WC, &q->queue_flags));
+ }
+ EXPORT_SYMBOL_GPL(blk_queue_write_cache);
+ 
+diff --git a/block/blk-stat.c b/block/blk-stat.c
+index b38776a..8e3974d 100644
+--- a/block/blk-stat.c
++++ b/block/blk-stat.c
+@@ -143,15 +143,16 @@ void blk_stat_init(struct blk_rq_stat *stat)
+ void blk_stat_add(struct blk_rq_stat *stat, struct request *rq)
+ {
+ 	s64 delta, now, value;
++	u64 rq_time = wbt_issue_stat_get_time(&rq->wb_stat);
+ 
+ 	now = ktime_to_ns(ktime_get());
+-	if (now < rq->issue_time)
++	if (now < rq_time)
+ 		return;
+ 
+ 	if ((now & BLK_STAT_MASK) != (stat->time & BLK_STAT_MASK))
+ 		__blk_stat_init(stat, now);
+ 
+-	value = now - rq->issue_time;
++	value = now - rq_time;
+ 	if (value > stat->max)
+ 		stat->max = value;
+ 	if (value < stat->min)
+diff --git a/block/blk-sysfs.c b/block/blk-sysfs.c
+index 9ddce5e..01f9afa 100644
+--- a/block/blk-sysfs.c
++++ b/block/blk-sysfs.c
+@@ -10,10 +10,10 @@
+ #include <linux/blktrace_api.h>
+ #include <linux/blk-mq.h>
+ #include <linux/blk-cgroup.h>
++#include <linux/wb-throttle.h>
+ 
+ #include "blk.h"
+ #include "blk-mq.h"
+-#include "blk-wb.h"
+ 
+ struct queue_sysfs_entry {
+ 	struct attribute attr;
+@@ -398,7 +398,7 @@ static ssize_t queue_wb_win_store(struct request_queue *q, const char *page,
+ 		return ret;
+ 
+ 	q->rq_wb->win_nsec = val * 1000ULL;
+-	blk_wb_update_limits(q->rq_wb);
++	wbt_update_limits(q->rq_wb);
+ 	return count;
+ }
+ 
+@@ -424,7 +424,7 @@ static ssize_t queue_wb_lat_store(struct request_queue *q, const char *page,
+ 		return ret;
+ 
+ 	q->rq_wb->min_lat_nsec = val * 1000ULL;
+-	blk_wb_update_limits(q->rq_wb);
++	wbt_update_limits(q->rq_wb);
+ 	return count;
+ }
+ 
+@@ -783,6 +783,43 @@ struct kobj_type blk_queue_ktype = {
+ 	.release	= blk_release_queue,
+ };
+ 
++static void blk_wb_stat_get(void *data, struct blk_rq_stat *stat)
++{
++	blk_queue_stat_get(data, stat);
++}
++
++static void blk_wb_stat_clear(void *data)
++{
++	blk_stat_clear(data);
++}
++
++static struct wb_stat_ops wb_stat_ops = {
++	.get	= blk_wb_stat_get,
++	.clear	= blk_wb_stat_clear,
++};
++
++static void blk_wb_init(struct request_queue *q)
++{
++	struct rq_wb *rwb;
++
++	rwb = wbt_init(&q->backing_dev_info, &wb_stat_ops, q);
++
++	/*
++	 * If this fails, we don't get throttling
++	 */
++	if (IS_ERR(rwb))
++		return;
++
++	if (blk_queue_nonrot(q))
++		rwb->min_lat_nsec = 2000000ULL;
++	else
++		rwb->min_lat_nsec = 75000000ULL;
++
++	wbt_set_queue_depth(rwb, blk_queue_depth(q));
++	wbt_set_write_cache(rwb, test_bit(QUEUE_FLAG_WC, &q->queue_flags));
++	q->rq_wb = rwb;
++}
++
+ int blk_register_queue(struct gendisk *disk)
+ {
+ 	int ret;
+diff --git a/block/blk-wb.c b/block/blk-wb.c
+index 859cbb2..bfe49d3 100644
+--- a/block/blk-wb.c
++++ b/block/blk-wb.c
+@@ -21,11 +21,9 @@
+  */
+ #include <linux/kernel.h>
+ #include <linux/bio.h>
+-#include <linux/blkdev.h>
++#include <linux/wb-throttle.h>
+ #include <trace/events/block.h>
+ 
+-#include "blk.h"
+-#include "blk-wb.h"
+ #include "blk-stat.h"
+ 
+ enum {
+@@ -46,12 +44,6 @@ enum {
+ 	RWB_MIN_READ_SAMPLES	= 1,
+ 
+ 	RWB_UNKNOWN_BUMP	= 5,
+-
+-	/*
+-	 * Target min latencies, in nsecs
+-	 */
+-	RWB_ROT_LAT	= 75000000ULL,	/* 75 msec */
+-	RWB_NONROT_LAT	= 2000000ULL,	/*   2 msec */
+ };
+ 
+ static inline bool rwb_enabled(struct rq_wb *rwb)
+@@ -91,7 +83,7 @@ static void wb_timestamp(struct rq_wb *rwb, unsigned long *var)
+ 	}
+ }
+ 
+-void __blk_wb_done(struct rq_wb *rwb)
++void __wbt_done(struct rq_wb *rwb)
+ {
+ 	int inflight, limit = rwb->wb_normal;
+ 
+@@ -99,8 +91,7 @@ void __blk_wb_done(struct rq_wb *rwb)
+ 	 * If the device does write back caching, drop further down
+ 	 * before we wake people up.
+ 	 */
+-	if (test_bit(QUEUE_FLAG_WC, &rwb->q->queue_flags) &&
+-	    !atomic_read(rwb->bdp_wait))
++	if (rwb->wc && !atomic_read(rwb->bdp_wait))
+ 		limit = 0;
+ 	else
+ 		limit = rwb->wb_normal;
+@@ -129,22 +120,22 @@ void __blk_wb_done(struct rq_wb *rwb)
+  * Called on completion of a request. Note that it's also called when
+  * a request is merged, when the request gets freed.
+  */
+-void blk_wb_done(struct rq_wb *rwb, struct request *rq)
++void wbt_done(struct rq_wb *rwb, struct wb_issue_stat *stat)
+ {
+ 	if (!rwb)
+ 		return;
+ 
+-	if (!(rq->cmd_flags & REQ_BUF_INFLIGHT)) {
+-		if (rwb->sync_cookie == rq) {
++	if (!wbt_tracked(stat)) {
++		if (rwb->sync_cookie == stat) {
+ 			rwb->sync_issue = 0;
+ 			rwb->sync_cookie = NULL;
+ 		}
+ 
+ 		wb_timestamp(rwb, &rwb->last_comp);
+ 	} else {
+-		WARN_ON_ONCE(rq == rwb->sync_cookie);
+-		__blk_wb_done(rwb);
+-		rq->cmd_flags &= ~REQ_BUF_INFLIGHT;
++		WARN_ON_ONCE(stat == rwb->sync_cookie);
++		__wbt_done(rwb);
++		wbt_clear_tracked(stat);
+ 	}
+ }
+ 
+@@ -157,7 +148,7 @@ static void calc_wb_limits(struct rq_wb *rwb)
+ 		return;
+ 	}
+ 
+-	depth = min_t(unsigned int, RWB_MAX_DEPTH, blk_queue_depth(rwb->q));
++	depth = min_t(unsigned int, RWB_MAX_DEPTH, rwb->queue_depth);
+ 
+ 	/*
+ 	 * Reduce max depth by 50%, and re-calculate normal/bg based on that
+@@ -234,8 +225,7 @@ static int latency_exceeded(struct rq_wb *rwb)
+ {
+ 	struct blk_rq_stat stat[2];
+ 
+-	blk_queue_stat_get(rwb->q, stat);
+-
++	rwb->stat_ops->get(rwb->ops_data, stat);
+ 	return __latency_exceeded(rwb, stat);
+ }
+ 
+@@ -255,7 +245,7 @@ static void scale_up(struct rq_wb *rwb)
+ 
+ 	rwb->scale_step--;
+ 	rwb->unknown_cnt = 0;
+-	blk_stat_clear(rwb->q);
++	rwb->stat_ops->clear(rwb->ops_data);
+ 	calc_wb_limits(rwb);
+ 
+ 	if (waitqueue_active(&rwb->wait))
+@@ -276,7 +266,7 @@ static void scale_down(struct rq_wb *rwb)
+ 
+ 	rwb->scale_step++;
+ 	rwb->unknown_cnt = 0;
+-	blk_stat_clear(rwb->q);
++	rwb->stat_ops->clear(rwb->ops_data);
+ 	calc_wb_limits(rwb);
+ 	rwb_trace_step(rwb, "step down");
+ }
+@@ -296,7 +286,7 @@ static void rwb_arm_timer(struct rq_wb *rwb)
+ 	mod_timer(&rwb->window_timer, expires);
+ }
+ 
+-static void blk_wb_timer_fn(unsigned long data)
++static void wb_timer_fn(unsigned long data)
+ {
+ 	struct rq_wb *rwb = (struct rq_wb *) data;
+ 	int status;
+@@ -333,7 +323,7 @@ static void blk_wb_timer_fn(unsigned long data)
+ 		rwb_arm_timer(rwb);
+ }
+ 
+-void blk_wb_update_limits(struct rq_wb *rwb)
++void wbt_update_limits(struct rq_wb *rwb)
+ {
+ 	rwb->scale_step = 0;
+ 	calc_wb_limits(rwb);
+@@ -381,7 +371,7 @@ static inline bool may_queue(struct rq_wb *rwb, unsigned long rw)
+ {
+ 	/*
+ 	 * inc it here even if disabled, since we'll dec it at completion.
+-	 * this only happens if the task was sleeping in __blk_wb_wait(),
++	 * this only happens if the task was sleeping in __wbt_wait(),
+ 	 * and someone turned it off at the same time.
+ 	 */
+ 	if (!rwb_enabled(rwb)) {
+@@ -396,7 +386,7 @@ static inline bool may_queue(struct rq_wb *rwb, unsigned long rw)
+  * Block if we will exceed our limit, or if we are currently waiting for
+  * the timer to kick off queuing again.
+  */
+-static void __blk_wb_wait(struct rq_wb *rwb, unsigned long rw, spinlock_t *lock)
++static void __wbt_wait(struct rq_wb *rwb, unsigned long rw, spinlock_t *lock)
+ {
+ 	DEFINE_WAIT(wait);
+ 
+@@ -428,22 +418,21 @@ static void __blk_wb_wait(struct rq_wb *rwb, unsigned long rw, spinlock_t *lock)
+  * in an irq held spinlock, if it holds one when calling this function.
+  * If we do sleep, we'll release and re-grab it.
+  */
+-bool blk_wb_wait(struct rq_wb *rwb, struct bio *bio, spinlock_t *lock)
++bool wbt_wait(struct rq_wb *rwb, unsigned int rw, spinlock_t *lock)
+ {
+ 	/*
+ 	 * If disabled, or not a WRITE (or a discard), do nothing
+ 	 */
+-	if (!rwb_enabled(rwb) || !(bio->bi_rw & REQ_WRITE) ||
+-	    (bio->bi_rw & REQ_DISCARD))
++	if (!rwb_enabled(rwb) || !(rw & REQ_WRITE) || (rw & REQ_DISCARD))
+ 		goto no_q;
+ 
+ 	/*
+ 	 * Don't throttle WRITE_ODIRECT
+ 	 */
+-	if ((bio->bi_rw & (REQ_SYNC | REQ_NOIDLE)) == REQ_SYNC)
++	if ((rw & (REQ_SYNC | REQ_NOIDLE)) == REQ_SYNC)
+ 		goto no_q;
+ 
+-	__blk_wb_wait(rwb, bio->bi_rw, lock);
++	__wbt_wait(rwb, rw, lock);
+ 
+ 	if (!timer_pending(&rwb->window_timer))
+ 		rwb_arm_timer(rwb);
+@@ -455,61 +444,70 @@ no_q:
+ 	return false;
+ }
+ 
+-void blk_wb_issue(struct rq_wb *rwb, struct request *rq)
++void wbt_issue(struct rq_wb *rwb, struct wb_issue_stat *stat)
+ {
+ 	if (!rwb_enabled(rwb))
+ 		return;
+-	if (!(rq->cmd_flags & REQ_BUF_INFLIGHT) && !rwb->sync_issue) {
+-		rwb->sync_cookie = rq;
+-		rwb->sync_issue = rq->issue_time;
++
++	wbt_issue_stat_set_time(stat);
++
++	if (!wbt_tracked(stat) && !rwb->sync_issue) {
++		rwb->sync_cookie = stat;
++		rwb->sync_issue = wbt_issue_stat_get_time(stat);
+ 	}
+ }
+ 
+-void blk_wb_requeue(struct rq_wb *rwb, struct request *rq)
++void wbt_requeue(struct rq_wb *rwb, struct wb_issue_stat *stat)
+ {
+ 	if (!rwb_enabled(rwb))
+ 		return;
+-	if (rq == rwb->sync_cookie) {
++	if (stat == rwb->sync_cookie) {
+ 		rwb->sync_issue = 0;
+ 		rwb->sync_cookie = NULL;
+ 	}
+ }
+ 
+-void blk_wb_init(struct request_queue *q)
++void wbt_set_queue_depth(struct rq_wb *rwb, unsigned int depth)
++{
++	if (rwb) {
++		rwb->queue_depth = depth;
++		wbt_update_limits(rwb);
++	}
++}
++
++void wbt_set_write_cache(struct rq_wb *rwb, bool write_cache_on)
++{
++	if (rwb)
++		rwb->wc = write_cache_on;
++}
++
++struct rq_wb *wbt_init(struct backing_dev_info *bdi, struct wb_stat_ops *ops,
++		       void *ops_data)
+ {
+ 	struct rq_wb *rwb;
+ 
+-	/*
+-	 * If this fails, we don't get throttling
+-	 */
+ 	rwb = kzalloc(sizeof(*rwb), GFP_KERNEL);
+ 	if (!rwb)
+-		return;
++		return ERR_PTR(-ENOMEM);
+ 
+ 	atomic_set(&rwb->inflight, 0);
+ 	init_waitqueue_head(&rwb->wait);
+-	setup_timer(&rwb->window_timer, blk_wb_timer_fn, (unsigned long) rwb);
++	setup_timer(&rwb->window_timer, wb_timer_fn, (unsigned long) rwb);
++	rwb->wc = 1;
++	rwb->queue_depth = RWB_MAX_DEPTH;
+ 	rwb->last_comp = rwb->last_issue = jiffies;
+-	rwb->bdp_wait = &q->backing_dev_info.wb.dirty_sleeping;
+-	rwb->q = q;
+-
+-	if (blk_queue_nonrot(q))
+-		rwb->min_lat_nsec = RWB_NONROT_LAT;
+-	else
+-		rwb->min_lat_nsec = RWB_ROT_LAT;
+-
++	rwb->bdp_wait = &bdi->wb.dirty_sleeping;
+ 	rwb->win_nsec = RWB_WINDOW_NSEC;
+-	blk_wb_update_limits(rwb);
+-	q->rq_wb = rwb;
++	rwb->stat_ops = ops,
++	rwb->ops_data = ops_data;
++	wbt_update_limits(rwb);
++	return rwb;
+ }
+ 
+-void blk_wb_exit(struct request_queue *q)
++void wbt_exit(struct rq_wb *rwb)
+ {
+-	struct rq_wb *rwb = q->rq_wb;
+-
+ 	if (rwb) {
+ 		del_timer_sync(&rwb->window_timer);
+-		kfree(q->rq_wb);
+-		q->rq_wb = NULL;
++		kfree(rwb);
+ 	}
+ }
+diff --git a/block/blk-wb.h b/block/blk-wb.h
+deleted file mode 100644
+index 222d9ef..0000000
+--- a/block/blk-wb.h
++++ /dev/null
+@@ -1,45 +0,0 @@
+-#ifndef BLK_WB_H
+-#define BLK_WB_H
+-
+-#include <linux/atomic.h>
+-#include <linux/wait.h>
+-#include <linux/timer.h>
+-
+-struct rq_wb {
+-	/*
+-	 * Settings that govern how we throttle
+-	 */
+-	unsigned int wb_background;		/* background writeback */
+-	unsigned int wb_normal;			/* normal writeback */
+-	unsigned int wb_max;			/* max throughput writeback */
+-	unsigned int scale_step;
+-
+-	u64 win_nsec;				/* default window size */
+-	u64 cur_win_nsec;			/* current window size */
+-
+-	unsigned int unknown_cnt;
+-
+-	struct timer_list window_timer;
+-
+-	s64 sync_issue;
+-	void *sync_cookie;
+-
+-	unsigned long last_issue;		/* last non-throttled issue */
+-	unsigned long last_comp;		/* last non-throttled comp */
+-	unsigned long min_lat_nsec;
+-	atomic_t *bdp_wait;
+-	struct request_queue *q;
+-	wait_queue_head_t wait;
+-	atomic_t inflight;
+-};
+-
+-void __blk_wb_done(struct rq_wb *);
+-void blk_wb_done(struct rq_wb *, struct request *);
+-bool blk_wb_wait(struct rq_wb *, struct bio *, spinlock_t *);
+-void blk_wb_init(struct request_queue *);
+-void blk_wb_exit(struct request_queue *);
+-void blk_wb_update_limits(struct rq_wb *);
+-void blk_wb_requeue(struct rq_wb *, struct request *);
+-void blk_wb_issue(struct rq_wb *, struct request *);
+-
+-#endif
+diff --git a/include/linux/blk_types.h b/include/linux/blk_types.h
+index c41f8a3..2b4414f 100644
+--- a/include/linux/blk_types.h
++++ b/include/linux/blk_types.h
+@@ -189,7 +189,6 @@ enum rq_flag_bits {
+ 	__REQ_HASHED,		/* on IO scheduler merge hash */
+ 	__REQ_MQ_INFLIGHT,	/* track inflight for MQ */
+ 	__REQ_NO_TIMEOUT,	/* requests may never expire */
+-	__REQ_BUF_INFLIGHT,	/* track inflight for buffered */
+ 	__REQ_NR_BITS,		/* stops here */
+ };
+ 
+@@ -244,7 +243,6 @@ enum rq_flag_bits {
+ #define REQ_HASHED		(1ULL << __REQ_HASHED)
+ #define REQ_MQ_INFLIGHT		(1ULL << __REQ_MQ_INFLIGHT)
+ #define REQ_NO_TIMEOUT		(1ULL << __REQ_NO_TIMEOUT)
+-#define REQ_BUF_INFLIGHT	(1ULL << __REQ_BUF_INFLIGHT)
+ 
+ typedef unsigned int blk_qc_t;
+ #define BLK_QC_T_NONE	-1U
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index 230c55d..f0cfcb7 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -24,6 +24,7 @@
+ #include <linux/rcupdate.h>
+ #include <linux/percpu-refcount.h>
+ #include <linux/scatterlist.h>
++#include <linux/wb-throttle.h>
+ 
+ struct module;
+ struct scsi_ioctl_command;
+@@ -154,7 +155,7 @@ struct request {
+ 	struct gendisk *rq_disk;
+ 	struct hd_struct *part;
+ 	unsigned long start_time;
+-	s64 issue_time;
++	struct wb_issue_stat wb_stat;
+ #ifdef CONFIG_BLK_CGROUP
+ 	struct request_list *rl;		/* rl this rq is alloced from */
+ 	unsigned long long start_time_ns;
+diff --git a/include/linux/wb-throttle.h b/include/linux/wb-throttle.h
+new file mode 100644
+index 0000000..3a19649
+--- /dev/null
++++ b/include/linux/wb-throttle.h
+@@ -0,0 +1,93 @@
++#ifndef WB_THROTTLE_H
++#define WB_THROTTLE_H
++
++#include <linux/atomic.h>
++#include <linux/wait.h>
++#include <linux/timer.h>
++#include <linux/ktime.h>
++
++#define ISSUE_STAT_MASK		(1ULL << 63)
++#define ISSUE_STAT_TIME_MASK	~ISSUE_STAT_MASK
++
++struct wb_issue_stat {
++	u64 time;
++};
++
++static inline void wbt_issue_stat_set_time(struct wb_issue_stat *stat)
++{
++	stat->time = (stat->time & ISSUE_STAT_MASK) |
++			(ktime_to_ns(ktime_get()) & ISSUE_STAT_TIME_MASK);
++}
++
++static inline u64 wbt_issue_stat_get_time(struct wb_issue_stat *stat)
++{
++	return stat->time & ISSUE_STAT_TIME_MASK;
++}
++
++static inline void wbt_mark_tracked(struct wb_issue_stat *stat)
++{
++	stat->time |= ISSUE_STAT_MASK;
++}
++
++static inline void wbt_clear_tracked(struct wb_issue_stat *stat)
++{
++	stat->time &= ~ISSUE_STAT_MASK;
++}
++
++static inline bool wbt_tracked(struct wb_issue_stat *stat)
++{
++	return (stat->time & ISSUE_STAT_MASK) != 0;
++}
++
++struct wb_stat_ops {
++	void (*get)(void *, struct blk_rq_stat *);
++	void (*clear)(void *);
++};
++
++struct rq_wb {
++	/*
++	 * Settings that govern how we throttle
++	 */
++	unsigned int wb_background;		/* background writeback */
++	unsigned int wb_normal;			/* normal writeback */
++	unsigned int wb_max;			/* max throughput writeback */
++	unsigned int scale_step;
++
++	u64 win_nsec;				/* default window size */
++	u64 cur_win_nsec;			/* current window size */
++
++	unsigned int unknown_cnt;
++
++	struct timer_list window_timer;
++
++	s64 sync_issue;
++	void *sync_cookie;
++
++	unsigned int wc;
++	unsigned int queue_depth;
++
++	unsigned long last_issue;		/* last non-throttled issue */
++	unsigned long last_comp;		/* last non-throttled comp */
++	unsigned long min_lat_nsec;
++	atomic_t *bdp_wait;
++	struct request_queue *q;
++	wait_queue_head_t wait;
++	atomic_t inflight;
++
++	struct wb_stat_ops *stat_ops;
++	void *ops_data;
++};
++
++void __wbt_done(struct rq_wb *);
++void wbt_done(struct rq_wb *, struct wb_issue_stat *);
++bool wbt_wait(struct rq_wb *, unsigned int, spinlock_t *);
++struct rq_wb *wbt_init(struct backing_dev_info *, struct wb_stat_ops *, void *);
++void wbt_exit(struct rq_wb *);
++void wbt_update_limits(struct rq_wb *);
++void wbt_requeue(struct rq_wb *, struct wb_issue_stat *);
++void wbt_issue(struct rq_wb *, struct wb_issue_stat *);
++
++void wbt_set_queue_depth(struct rq_wb *, unsigned int);
++void wbt_set_write_cache(struct rq_wb *, bool);
++
++#endif
+-- 
+cgit v0.11.2
+
