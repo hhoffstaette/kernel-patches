@@ -1,0 +1,100 @@
+From 3ff0e769c249b079d0b94d445e4e148ebff4bd19 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Mon, 25 Apr 2016 08:40:25 -0600
+Subject: blk-wb: fix and cleanup
+
+- Split out should-track into a helper
+- Only timestamp non-throttled IO if throttling is enabled
+- Fix double complete in blk-core
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ block/blk-core.c |  6 +++---
+ block/blk-wb.c   | 37 +++++++++++++++++++++++--------------
+ 2 files changed, 26 insertions(+), 17 deletions(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index b380818..777f344 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -2765,11 +2765,11 @@ void blk_finish_request(struct request *req, int error)
+ 		blk_unprep_request(req);
+ 
+ 	blk_account_io_done(req);
+-	wbt_done(req->q->rq_wb, &req->wb_stat);
+ 
+-	if (req->end_io)
++	if (req->end_io) {
++		wbt_done(req->q->rq_wb, &req->wb_stat);
+ 		req->end_io(req, error);
+-	else {
++	} else {
+ 		if (blk_bidi_rq(req))
+ 			__blk_put_request(req->next_rq->q, req->next_rq);
+ 
+diff --git a/block/blk-wb.c b/block/blk-wb.c
+index bfe49d3..a88cc56 100644
+--- a/block/blk-wb.c
++++ b/block/blk-wb.c
+@@ -412,6 +412,23 @@ static void __wbt_wait(struct rq_wb *rwb, unsigned long rw, spinlock_t *lock)
+ 	finish_wait(&rwb->wait, &wait);
+ }
+ 
++static inline bool wbt_should_throttle(struct rq_wb *rwb, unsigned int rw)
++{
++	/*
++	 * If not a WRITE (or a discard), do nothing
++	 */
++	if (!(rw & REQ_WRITE) || (rw & REQ_DISCARD))
++		return false;
++
++	/*
++	 * Don't throttle WRITE_ODIRECT
++	 */
++	if ((rw & (REQ_SYNC | REQ_NOIDLE)) == REQ_SYNC)
++		return false;
++
++	return true;
++}
++
+ /*
+  * Returns true if the IO request should be accounted, false if not.
+  * May sleep, if we have exceeded the writeback limits. Caller can pass
+@@ -420,17 +437,13 @@ static void __wbt_wait(struct rq_wb *rwb, unsigned long rw, spinlock_t *lock)
+  */
+ bool wbt_wait(struct rq_wb *rwb, unsigned int rw, spinlock_t *lock)
+ {
+-	/*
+-	 * If disabled, or not a WRITE (or a discard), do nothing
+-	 */
+-	if (!rwb_enabled(rwb) || !(rw & REQ_WRITE) || (rw & REQ_DISCARD))
+-		goto no_q;
++	if (!rwb_enabled(rwb))
++		return false;
+ 
+-	/*
+-	 * Don't throttle WRITE_ODIRECT
+-	 */
+-	if ((rw & (REQ_SYNC | REQ_NOIDLE)) == REQ_SYNC)
+-		goto no_q;
++	if (!wbt_should_throttle(rwb, rw)) {
++		wb_timestamp(rwb, &rwb->last_issue);
++		return false;
++	}
+ 
+ 	__wbt_wait(rwb, rw, lock);
+ 
+@@ -438,10 +451,6 @@ bool wbt_wait(struct rq_wb *rwb, unsigned int rw, spinlock_t *lock)
+ 		rwb_arm_timer(rwb);
+ 
+ 	return true;
+-
+-no_q:
+-	wb_timestamp(rwb, &rwb->last_issue);
+-	return false;
+ }
+ 
+ void wbt_issue(struct rq_wb *rwb, struct wb_issue_stat *stat)
+-- 
+cgit v0.11.2
+
