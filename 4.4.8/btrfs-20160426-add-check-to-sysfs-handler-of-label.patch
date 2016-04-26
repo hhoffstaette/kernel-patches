@@ -1,0 +1,30 @@
+From:	David Sterba <dsterba@suse.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	David Sterba <dsterba@suse.com>
+Subject: [PATCH 2/3] btrfs: add check to sysfs handler of label
+Date:	Tue, 26 Apr 2016 16:32:52 +0200
+
+Add a sanity check for the fs_info as we will dereference it, similar to
+what the 'store features' handler does.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/sysfs.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 6a6bb600b1ff..3d14618ce54b 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -377,6 +377,9 @@ static ssize_t btrfs_label_store(struct kobject *kobj,
+ 	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
+ 	size_t p_len;
+ 
++	if (!fs_info)
++		return -EPERM;
++
+ 	if (fs_info->sb->s_flags & MS_RDONLY)
+ 		return -EROFS;
+ 
+-- 
+2.7.1
