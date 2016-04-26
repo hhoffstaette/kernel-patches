@@ -1,0 +1,37 @@
+From:	David Sterba <dsterba@suse.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	David Sterba <dsterba@suse.com>
+Subject: [PATCH 3/3] btrfs: sysfs: protect reading label by lock
+Date:	Tue, 26 Apr 2016 16:32:55 +0200
+
+If the label setting ioctl races with sysfs label handler, we could get
+mixed result in the output, part old part new. We should either get the
+old or new label. The chances to hit this race are low.
+
+[HH: fixed return value]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/sysfs.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 3d14618ce54b..7b0da1dcb6df 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -367,7 +367,13 @@ static ssize_t btrfs_label_show(struct kobject *kobj,
+ {
+ 	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
+ 	char *label = fs_info->super_copy->label;
++	ssize_t len;
+-	return snprintf(buf, PAGE_SIZE, label[0] ? "%s\n" : "%s", label);
++
++	spin_lock(&fs_info->super_lock);
++	len = snprintf(buf, PAGE_SIZE, label[0] ? "%s\n" : "%s", label);
++	spin_unlock(&fs_info->super_lock);
++
++	return len;
+ }
+ 
+ static ssize_t btrfs_label_store(struct kobject *kobj,
+-- 
+2.7.1
