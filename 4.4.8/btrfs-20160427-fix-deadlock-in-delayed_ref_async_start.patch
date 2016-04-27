@@ -1,0 +1,62 @@
+From:	Chris Mason <clm@fb.com>
+To:	Josef Bacik <jbacik@fb.com>
+CC:	<linux-btrfs@vger.kernel.org>, <kernel-team@fb.com>
+Subject: [PATCH] btrfs: fix deadlock in delayed_ref_async_start
+Date:	Wed, 27 Apr 2016 09:59:38 -0400
+
+"Btrfs: track transid for delayed ref flushing" was deadlocking on
+btrfs_attach_transaction because its not safe to call from the async
+delayed ref start code.  This commit brings back btrfs_join_transaction
+instead and checks for a blocked commit.
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+---
+ fs/btrfs/extent-tree.c | 20 +++++++++++---------
+ 1 file changed, 11 insertions(+), 9 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 6ce5b6c..44da4ac 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -2845,16 +2845,13 @@ static void delayed_ref_async_start(struct btrfs_work *work)
+ 
+ 	async = container_of(work, struct async_delayed_refs, work);
+ 
+-	trans = btrfs_attach_transaction(async->root);
+-	if (IS_ERR(trans)) {
+-		if (PTR_ERR(trans) != -ENOENT)
+-			async->error = PTR_ERR(trans);
++	/* if the commit is already started, we don't need to wait here */
++	if (btrfs_transaction_blocked(async->root->fs_info))
+ 		goto done;
+-	}
+ 
+-	/* Don't bother flushing if we got into a different transaction */
+-	if (trans->transid != async->transid) {
+-		btrfs_end_transaction(trans, async->root);
++	trans = btrfs_join_transaction(async->root);
++	if (IS_ERR(trans)) {
++		async->error = PTR_ERR(trans);
+ 		goto done;
+ 	}
+ 
+@@ -2863,10 +2860,15 @@ static void delayed_ref_async_start(struct btrfs_work *work)
+ 	 * wait on delayed refs
+ 	 */
+ 	trans->sync = true;
++
++	/* Don't bother flushing if we got into a different transaction */
++	if (trans->transid > async->transid)
++		goto end;
++
+ 	ret = btrfs_run_delayed_refs(trans, async->root, async->count);
+ 	if (ret)
+ 		async->error = ret;
+-
++end:
+ 	ret = btrfs_end_transaction(trans, async->root);
+ 	if (ret && !async->error)
+ 		async->error = ret;
+-- 
+2.8.0.rc2
