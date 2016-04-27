@@ -1,0 +1,51 @@
+From:	Liu Bo <bo.li.liu@oracle.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	dsterba@suse.com
+Subject: [PATCH] Btrfs: fix divide error upon chunk's stripe_len
+Date:	Tue, 26 Apr 2016 17:53:31 -0700
+
+The struct 'map_lookup' uses type int for @stripe_len, while
+btrfs_chunk_stripe_len() can return a u64 value, and it may end up with
+@stripe_len being undefined value and it can lead to 'divide error' in
+ __btrfs_map_block().
+
+This changes 'map_lookup' to use type u64 for stripe_len, also right now
+we only use BTRFS_STRIPE_LEN for stripe_len, so this adds a valid checker for
+BTRFS_STRIPE_LEN.
+
+Reported-by: Vegard Nossum <vegard.nossum@oracle.com>
+Reported-by: Quentin Casasnovas <quentin.casasnovas@oracle.com>
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/volumes.c | 2 +-
+ fs/btrfs/volumes.h | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index e2b54d5..b5cb859 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6242,7 +6242,7 @@ static int read_one_chunk(struct btrfs_root *root, struct btrfs_key *key,
+ 			"invalid chunk length %llu", length);
+ 		return -EIO;
+ 	}
+-	if (!is_power_of_2(stripe_len)) {
++	if (!is_power_of_2(stripe_len) || stripe_len != BTRFS_STRIPE_LEN) {
+ 		btrfs_err(root->fs_info, "invalid chunk stripe length: %llu",
+ 			  stripe_len);
+ 		return -EIO;
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 1939ebd..7507be7 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -347,7 +347,7 @@ struct map_lookup {
+ 	u64 type;
+ 	int io_align;
+ 	int io_width;
+-	int stripe_len;
++	u64 stripe_len;
+ 	int sector_size;
+ 	int num_stripes;
+ 	int sub_stripes;
+-- 
+2.5.0
