@@ -1,0 +1,41 @@
+From: "Gaurav Jindal (Gaurav Jindal)" <Gaurav.Jindal@spreadtrum.com>
+Subject: [PATCH]sched: cpuidle: Do not fetch current cpu in loop in idle thread
+Date: Wed, 27 Apr 2016 09:54:41 +0000
+Cc: "linux-kernel@vger.kernel.org" <linux-kernel@vger.kernel.org>
+To: "mingo@redhat.com" <mingo@redhat.com>, "peterz@infradead.com"
+	<peterz@infradead.com>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2209192>
+
+Currently in idle thread loop, smp_processor_id() fetches the cpu id
+every time it runs thus taking more cpu cycles.
+
+Instead, save the cpu id as local varaible while entering the idle
+thread and use it in the loop. Since it is local variable, it will be
+correct for each core. It will also save cycles consumed while fetching cpu
+id using smp_proceesor_id() in loop.
+
+Signed-off-by: Gaurav Jindal<gaurav.jindal@spreadtrum.com>
+
+diff --git a/kernel/sched/idle.c b/kernel/sched/idle.c
+index 1214f0a..9696f9e 100644
+--- a/kernel/sched/idle.c
++++ b/kernel/sched/idle.c
+@@ -212,6 +212,9 @@ exit_idle:
+  */
+ static void cpu_idle_loop(void)
+ {
++       int cpu_id;
++
++       cpu_id = smp_processor_id();
+ 	while (1) {
+ 		/*
+ 		 * If the arch has a polling bit, we maintain an invariant:
+@@ -230,7 +230,7 @@ static void cpu_idle_loop(void)
+			check_pgt_cache();
+			rmb();
+
+-			if (cpu_is_offline(smp_processor_id())) {
++			if(cpu_is_offline(cpu_id)) {
+ 				rcu_cpu_notify(NULL, CPU_DYING_IDLE,
+ 					       (void *)(long)smp_processor_id());
+ 				smp_mb(); /* all activity before dead. */
