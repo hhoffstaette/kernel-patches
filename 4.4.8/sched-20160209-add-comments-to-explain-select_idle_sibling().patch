@@ -1,0 +1,68 @@
+From d4335581dc30ec6545999c7443bb9fead274a980 Mon Sep 17 00:00:00 2001
+From: Matt Fleming <matt@codeblueprint.co.uk>
+Date: Wed, 9 Mar 2016 14:59:08 +0000
+Subject: sched/fair: Add comments to explain select_idle_sibling()
+
+It's not entirely obvious how the main loop in select_idle_sibling()
+works on first glance. Sprinkle a few comments to explain the design
+and intention behind the loop based on some conversations with Mike
+and Peter.
+
+Signed-off-by: Matt Fleming <matt@codeblueprint.co.uk>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mel Gorman <mgorman@suse.com>
+Cc: Mike Galbraith <mgalbraith@suse.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Link: http://lkml.kernel.org/r/1457535548-15329-1-git-send-email-matt@codeblueprint.co.uk
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/fair.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 3c114d9..303d639 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5055,7 +5055,19 @@ static int select_idle_sibling(struct task_struct *p, int target)
+ 		return i;
+ 
+ 	/*
+-	 * Otherwise, iterate the domains and find an elegible idle cpu.
++	 * Otherwise, iterate the domains and find an eligible idle cpu.
++	 *
++	 * A completely idle sched group at higher domains is more
++	 * desirable than an idle group at a lower level, because lower
++	 * domains have smaller groups and usually share hardware
++	 * resources which causes tasks to contend on them, e.g. x86
++	 * hyperthread siblings in the lowest domain (SMT) can contend
++	 * on the shared cpu pipeline.
++	 *
++	 * However, while we prefer idle groups at higher domains
++	 * finding an idle cpu at the lowest domain is still better than
++	 * returning 'target', which we've already established, isn't
++	 * idle.
+ 	 */
+ 	sd = rcu_dereference(per_cpu(sd_llc, target));
+ 	for_each_lower_domain(sd) {
+@@ -5065,11 +5077,16 @@ static int select_idle_sibling(struct task_struct *p, int target)
+ 						tsk_cpus_allowed(p)))
+ 				goto next;
+ 
++			/* Ensure the entire group is idle */
+ 			for_each_cpu(i, sched_group_cpus(sg)) {
+ 				if (i == target || !idle_cpu(i))
+ 					goto next;
+ 			}
+ 
++			/*
++			 * It doesn't matter which cpu we pick, the
++			 * whole group is idle.
++			 */
+ 			target = cpumask_first_and(sched_group_cpus(sg),
+ 					tsk_cpus_allowed(p));
+ 			goto done;
+-- 
+cgit v0.12
+
