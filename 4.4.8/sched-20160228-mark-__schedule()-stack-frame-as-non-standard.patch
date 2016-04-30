@@ -1,0 +1,78 @@
+From 8e05e96ac949c80704d0a38420bf60dcf18c938f Mon Sep 17 00:00:00 2001
+From: Josh Poimboeuf <jpoimboe@redhat.com>
+Date: Sun, 28 Feb 2016 22:22:38 -0600
+Subject: sched: Mark __schedule() stack frame as non-standard
+
+objtool reports the following warnings for __schedule():
+
+  kernel/sched/core.o: warning: objtool:__schedule()+0x3c0: duplicate frame pointer save
+  kernel/sched/core.o: warning: objtool:__schedule()+0x3fd: sibling call from callable instruction with changed frame pointer
+  kernel/sched/core.o: warning: objtool:__schedule()+0x40a: call without frame pointer save/setup
+  kernel/sched/core.o: warning: objtool:__schedule()+0x7fd: frame pointer state mismatch
+  kernel/sched/core.o: warning: objtool:__schedule()+0x421: frame pointer state mismatch
+
+Basically it's confused by two unusual attributes of the switch_to()
+macro:
+
+1. It saves prev's frame pointer to the old stack and restores next's
+   frame pointer from the new stack.
+
+2. For new tasks it jumps directly to ret_from_fork.
+
+Eventually it would probably be a good idea to clean up the
+ret_from_fork hack so that new tasks are created with a valid initial
+stack, as suggested by Andy:
+
+  https://lkml.kernel.org/r/CALCETrWsqCw4L1qKO9j9L5F+4ED4viuLQTFc=n1pKBZfFPQUFg@mail.gmail.com
+
+Then __schedule() could return normally into the new code and objtool
+hopefully wouldn't have a problem anymore.
+
+In the meantime, mark its stack frame as non-standard so we can have a
+baseline with no objtool warnings.  The marker also serves as a reminder
+that this code could be improved a bit.
+
+Signed-off-by: Josh Poimboeuf <jpoimboe@redhat.com>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Andy Lutomirski <luto@kernel.org>
+Cc: Arnaldo Carvalho de Melo <acme@kernel.org>
+Cc: Bernd Petrovitsch <bernd@petrovitsch.priv.at>
+Cc: Borislav Petkov <bp@alien8.de>
+Cc: Chris J Arges <chris.j.arges@canonical.com>
+Cc: Jiri Slaby <jslaby@suse.cz>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Michal Marek <mmarek@suse.cz>
+Cc: Namhyung Kim <namhyung@gmail.com>
+Cc: Pedro Alves <palves@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: live-patching@vger.kernel.org
+Link: http://lkml.kernel.org/r/91190e324ebd7fcd01748d508d0dfd4693e84d91.1456719558.git.jpoimboe@redhat.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/core.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 9503d59..641043d 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -74,6 +74,7 @@
+ #include <linux/binfmts.h>
+ #include <linux/context_tracking.h>
+ #include <linux/compiler.h>
++#include <linux/frame.h>
+ 
+ #include <asm/switch_to.h>
+ #include <asm/tlb.h>
+@@ -3288,6 +3289,7 @@ static void __sched notrace __schedule(bool preempt)
+ 
+ 	balance_callback(rq);
+ }
++STACK_FRAME_NON_STANDARD(__schedule); /* switch_to() */
+ 
+ static inline void sched_submit_work(struct task_struct *tsk)
+ {
+-- 
+cgit v0.12
+
