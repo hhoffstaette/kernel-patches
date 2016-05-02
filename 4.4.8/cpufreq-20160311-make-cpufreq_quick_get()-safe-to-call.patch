@@ -1,0 +1,46 @@
+From c75361c0b08a59d3c9863a5a673ae039d5118c35 Mon Sep 17 00:00:00 2001
+From: Richard Cochran <rcochran@linutronix.de>
+Date: Fri, 11 Mar 2016 09:43:07 +0100
+Subject: cpufreq: Make cpufreq_quick_get() safe to call
+
+The function, cpufreq_quick_get, accesses the global 'cpufreq_driver' and
+its fields without taking the associated lock, cpufreq_driver_lock.
+
+Without the locking, nothing guarantees that 'cpufreq_driver' remains
+consistent during the call.  This patch fixes the issue by taking the lock
+before accessing the data structure.
+
+Signed-off-by: Richard Cochran <rcochran@linutronix.de>
+Acked-by: Viresh Kumar <viresh.kumar@linaro.org>
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+---
+ drivers/cpufreq/cpufreq.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+index 4c78258..f870399 100644
+--- a/drivers/cpufreq/cpufreq.c
++++ b/drivers/cpufreq/cpufreq.c
+@@ -1401,9 +1401,17 @@ unsigned int cpufreq_quick_get(unsigned int cpu)
+ {
+ 	struct cpufreq_policy *policy;
+ 	unsigned int ret_freq = 0;
++	unsigned long flags;
+ 
+-	if (cpufreq_driver && cpufreq_driver->setpolicy && cpufreq_driver->get)
+-		return cpufreq_driver->get(cpu);
++	read_lock_irqsave(&cpufreq_driver_lock, flags);
++
++	if (cpufreq_driver && cpufreq_driver->setpolicy && cpufreq_driver->get) {
++		ret_freq = cpufreq_driver->get(cpu);
++		read_unlock_irqrestore(&cpufreq_driver_lock, flags);
++		return ret_freq;
++	}
++
++	read_unlock_irqrestore(&cpufreq_driver_lock, flags);
+ 
+ 	policy = cpufreq_cpu_get(cpu);
+ 	if (policy) {
+-- 
+cgit v0.12
+

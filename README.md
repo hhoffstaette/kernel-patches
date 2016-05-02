@@ -26,6 +26,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - bfs: [BFS v467](http://ck-hack.blogspot.de/2015/12/bfs-467-linux-43-ck3.html) (*not* enabled by default)
 - block: [latency-sensitive writeback](http://marc.info/?l=linux-block&m=146168622002151&w=2), CFQ & deadline scheduler fixes
 - btrfs: fixes up to 4.6+ (block allocator, cleanups, data loss, performance, recovery etc.)
+- cpufreq: CPU frequency/power management fixes (mostly intel_pstate)
 - ext4: corruption/crash consistency fixes, performance
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device

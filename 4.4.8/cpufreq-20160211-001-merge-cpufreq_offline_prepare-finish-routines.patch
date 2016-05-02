@@ -1,0 +1,127 @@
+From 69cee7147b4a4ea02085d571cd2d9974d4a4d8d5 Mon Sep 17 00:00:00 2001
+From: Viresh Kumar <viresh.kumar@linaro.org>
+Date: Thu, 11 Feb 2016 17:31:11 +0530
+Subject: cpufreq: Merge cpufreq_offline_prepare/finish routines
+
+Commit 1aee40ac9c86 (cpufreq: Invoke __cpufreq_remove_dev_finish()
+after releasing cpu_hotplug.lock) split the cpufreq's CPU offline
+routine in two pieces, one of them to be run with CPU offline/online
+locked and the other to be called later.  The reason for that split
+was a possible deadlock scenario involving cpufreq sysfs attributes
+and CPU offline.
+
+However, the handling of CPU offline in cpufreq has changed since
+then.  Policy sysfs attributes are never removed during CPU offline,
+so there's no need to worry about accessing them during CPU offline,
+because that can't lead to any deadlocks now.  Governor sysfs
+attributes are still removed in __cpufreq_governor(_EXIT), but
+there is a new kobject type for them now and its show/store
+callbacks don't lock CPU offline/online (they don't need to do
+that).
+
+This means that the CPU offline code in cpufreq doesn't need to
+be split any more, so combine cpufreq_offline_prepare() with
+cpufreq_offline_finish().
+
+Signed-off-by: Viresh Kumar <viresh.kumar@linaro.org>
+[ rjw: Changelog ]
+Tested-by: Juri Lelli <juri.lelli@arm.com>
+Tested-by: Shilpasri G Bhat <shilpa.bhat@linux.vnet.ibm.com>
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+---
+ drivers/cpufreq/cpufreq.c | 36 ++++++++++--------------------------
+ 1 file changed, 10 insertions(+), 26 deletions(-)
+
+diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+index e92e9ea..f65553d 100644
+--- a/drivers/cpufreq/cpufreq.c
++++ b/drivers/cpufreq/cpufreq.c
+@@ -1362,9 +1362,10 @@ static int cpufreq_add_dev(struct device *dev, struct subsys_interface *sif)
+ 	return ret;
+ }
+ 
+-static void cpufreq_offline_prepare(unsigned int cpu)
++static void cpufreq_offline(unsigned int cpu)
+ {
+ 	struct cpufreq_policy *policy;
++	int ret;
+ 
+ 	pr_debug("%s: unregistering CPU %u\n", __func__, cpu);
+ 
+@@ -1375,7 +1376,7 @@ static void cpufreq_offline_prepare(unsigned int cpu)
+ 	}
+ 
+ 	if (has_target()) {
+-		int ret = __cpufreq_governor(policy, CPUFREQ_GOV_STOP);
++		ret = __cpufreq_governor(policy, CPUFREQ_GOV_STOP);
+ 		if (ret)
+ 			pr_err("%s: Failed to stop governor\n", __func__);
+ 	}
+@@ -1398,34 +1399,23 @@ static void cpufreq_offline_prepare(unsigned int cpu)
+ 	/* Start governor again for active policy */
+ 	if (!policy_is_inactive(policy)) {
+ 		if (has_target()) {
+-			int ret = __cpufreq_governor(policy, CPUFREQ_GOV_START);
++			ret = __cpufreq_governor(policy, CPUFREQ_GOV_START);
+ 			if (!ret)
+ 				ret = __cpufreq_governor(policy, CPUFREQ_GOV_LIMITS);
+ 
+ 			if (ret)
+ 				pr_err("%s: Failed to start governor\n", __func__);
+ 		}
+-	} else if (cpufreq_driver->stop_cpu) {
+-		cpufreq_driver->stop_cpu(policy);
+-	}
+-}
+ 
+-static void cpufreq_offline_finish(unsigned int cpu)
+-{
+-	struct cpufreq_policy *policy = per_cpu(cpufreq_cpu_data, cpu);
+-
+-	if (!policy) {
+-		pr_debug("%s: No cpu_data found\n", __func__);
+ 		return;
+ 	}
+ 
+-	/* Only proceed for inactive policies */
+-	if (!policy_is_inactive(policy))
+-		return;
++	if (cpufreq_driver->stop_cpu)
++		cpufreq_driver->stop_cpu(policy);
+ 
+ 	/* If cpu is last user of policy, free policy */
+ 	if (has_target()) {
+-		int ret = __cpufreq_governor(policy, CPUFREQ_GOV_POLICY_EXIT);
++		ret = __cpufreq_governor(policy, CPUFREQ_GOV_POLICY_EXIT);
+ 		if (ret)
+ 			pr_err("%s: Failed to exit governor\n", __func__);
+ 	}
+@@ -1454,10 +1444,8 @@ static void cpufreq_remove_dev(struct device *dev, struct subsys_interface *sif)
+ 	if (!policy)
+ 		return;
+ 
+-	if (cpu_online(cpu)) {
+-		cpufreq_offline_prepare(cpu);
+-		cpufreq_offline_finish(cpu);
+-	}
++	if (cpu_online(cpu))
++		cpufreq_offline(cpu);
+ 
+ 	cpumask_clear_cpu(cpu, policy->real_cpus);
+ 	remove_cpu_dev_symlink(policy, cpu);
+@@ -2305,11 +2293,7 @@ static int cpufreq_cpu_callback(struct notifier_block *nfb,
+ 		break;
+ 
+ 	case CPU_DOWN_PREPARE:
+-		cpufreq_offline_prepare(cpu);
+-		break;
+-
+-	case CPU_POST_DEAD:
+-		cpufreq_offline_finish(cpu);
++		cpufreq_offline(cpu);
+ 		break;
+ 
+ 	case CPU_DOWN_FAILED:
+-- 
+cgit v0.12
+

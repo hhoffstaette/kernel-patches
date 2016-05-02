@@ -1,0 +1,61 @@
+From 11eb69b984aae216ae43c79d2d43441ee68a63ca Mon Sep 17 00:00:00 2001
+From: Viresh Kumar <viresh.kumar@linaro.org>
+Date: Mon, 22 Feb 2016 16:36:42 +0530
+Subject: cpufreq: Relocate handle_update() to kill its declaration
+
+handle_update() is declared at the top of the file as its user appear
+before its definition. Relocate the routine to get rid of this.
+
+Signed-off-by: Viresh Kumar <viresh.kumar@linaro.org>
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+---
+ drivers/cpufreq/cpufreq.c | 19 +++++++++----------
+ 1 file changed, 9 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+index bc93272..316beff 100644
+--- a/drivers/cpufreq/cpufreq.c
++++ b/drivers/cpufreq/cpufreq.c
+@@ -159,7 +159,6 @@ static inline bool has_target(void)
+ static int __cpufreq_governor(struct cpufreq_policy *policy,
+ 		unsigned int event);
+ static unsigned int __cpufreq_get(struct cpufreq_policy *policy);
+-static void handle_update(struct work_struct *work);
+ 
+ /**
+  * Two notifier lists: the "policy" list is involved in the
+@@ -1072,6 +1071,15 @@ unlock:
+ 	return ret;
+ }
+ 
++static void handle_update(struct work_struct *work)
++{
++	struct cpufreq_policy *policy =
++		container_of(work, struct cpufreq_policy, update);
++	unsigned int cpu = policy->cpu;
++	pr_debug("handle_update for cpu %u called\n", cpu);
++	cpufreq_update_policy(cpu);
++}
++
+ static struct cpufreq_policy *cpufreq_policy_alloc(unsigned int cpu)
+ {
+ 	struct device *dev = get_cpu_device(cpu);
+@@ -1453,15 +1461,6 @@ static void cpufreq_remove_dev(struct device *dev, struct subsys_interface *sif)
+ 		cpufreq_policy_free(policy, true);
+ }
+ 
+-static void handle_update(struct work_struct *work)
+-{
+-	struct cpufreq_policy *policy =
+-		container_of(work, struct cpufreq_policy, update);
+-	unsigned int cpu = policy->cpu;
+-	pr_debug("handle_update for cpu %u called\n", cpu);
+-	cpufreq_update_policy(cpu);
+-}
+-
+ /**
+  *	cpufreq_out_of_sync - If actual and saved CPU frequency differs, we're
+  *	in deep trouble.
+-- 
+cgit v0.12
+
