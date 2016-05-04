@@ -1,0 +1,103 @@
+From 8be0eb7e0d53bc2dbe6e9ad6e96a2d5b89d148a8 Mon Sep 17 00:00:00 2001
+From: Josh Poimboeuf <jpoimboe@redhat.com>
+Date: Thu, 21 Jan 2016 16:49:11 -0600
+Subject: x86/asm/xen: Create stack frames in xen-asm.S
+
+xen_irq_enable_direct(), xen_restore_fl_direct(), and check_events() are
+callable non-leaf functions which don't honor CONFIG_FRAME_POINTER,
+which can result in bad stack traces.
+
+Create stack frames for them when CONFIG_FRAME_POINTER is enabled.
+
+Signed-off-by: Josh Poimboeuf <jpoimboe@redhat.com>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Andy Lutomirski <luto@amacapital.net>
+Cc: Andy Lutomirski <luto@kernel.org>
+Cc: Arnaldo Carvalho de Melo <acme@kernel.org>
+Cc: Bernd Petrovitsch <bernd@petrovitsch.priv.at>
+Cc: Boris Ostrovsky <boris.ostrovsky@oracle.com>
+Cc: Borislav Petkov <bp@alien8.de>
+Cc: Brian Gerst <brgerst@gmail.com>
+Cc: Chris J Arges <chris.j.arges@canonical.com>
+Cc: David Vrabel <david.vrabel@citrix.com>
+Cc: Denys Vlasenko <dvlasenk@redhat.com>
+Cc: H. Peter Anvin <hpa@zytor.com>
+Cc: Jiri Slaby <jslaby@suse.cz>
+Cc: Konrad Rzeszutek Wilk <konrad.wilk@oracle.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Michal Marek <mmarek@suse.cz>
+Cc: Namhyung Kim <namhyung@gmail.com>
+Cc: Pedro Alves <palves@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: live-patching@vger.kernel.org
+Link: http://lkml.kernel.org/r/a8340ad3fc72ba9ed34da9b3af9cdd6f1a896e17.1453405861.git.jpoimboe@redhat.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ arch/x86/xen/xen-asm.S | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/arch/x86/xen/xen-asm.S b/arch/x86/xen/xen-asm.S
+index 3e45aa0..eff224d 100644
+--- a/arch/x86/xen/xen-asm.S
++++ b/arch/x86/xen/xen-asm.S
+@@ -14,6 +14,7 @@
+ #include <asm/asm-offsets.h>
+ #include <asm/percpu.h>
+ #include <asm/processor-flags.h>
++#include <asm/frame.h>
+ 
+ #include "xen-asm.h"
+ 
+@@ -23,6 +24,7 @@
+  * then enter the hypervisor to get them handled.
+  */
+ ENTRY(xen_irq_enable_direct)
++	FRAME_BEGIN
+ 	/* Unmask events */
+ 	movb $0, PER_CPU_VAR(xen_vcpu_info) + XEN_vcpu_info_mask
+ 
+@@ -39,6 +41,7 @@ ENTRY(xen_irq_enable_direct)
+ 2:	call check_events
+ 1:
+ ENDPATCH(xen_irq_enable_direct)
++	FRAME_END
+ 	ret
+ 	ENDPROC(xen_irq_enable_direct)
+ 	RELOC(xen_irq_enable_direct, 2b+1)
+@@ -82,6 +85,7 @@ ENDPATCH(xen_save_fl_direct)
+  * enters the hypervisor to get them delivered if so.
+  */
+ ENTRY(xen_restore_fl_direct)
++	FRAME_BEGIN
+ #ifdef CONFIG_X86_64
+ 	testw $X86_EFLAGS_IF, %di
+ #else
+@@ -100,6 +104,7 @@ ENTRY(xen_restore_fl_direct)
+ 2:	call check_events
+ 1:
+ ENDPATCH(xen_restore_fl_direct)
++	FRAME_END
+ 	ret
+ 	ENDPROC(xen_restore_fl_direct)
+ 	RELOC(xen_restore_fl_direct, 2b+1)
+@@ -109,7 +114,8 @@ ENDPATCH(xen_restore_fl_direct)
+  * Force an event check by making a hypercall, but preserve regs
+  * before making the call.
+  */
+-check_events:
++ENTRY(check_events)
++	FRAME_BEGIN
+ #ifdef CONFIG_X86_32
+ 	push %eax
+ 	push %ecx
+@@ -139,4 +145,6 @@ check_events:
+ 	pop %rcx
+ 	pop %rax
+ #endif
++	FRAME_END
+ 	ret
++ENDPROC(check_events)
+-- 
+cgit v0.12
+

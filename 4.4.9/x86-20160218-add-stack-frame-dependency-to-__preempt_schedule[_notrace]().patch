@@ -1,0 +1,126 @@
+From 821eae7d14f0bbf69df1cc4656c54900b2672928 Mon Sep 17 00:00:00 2001
+From: Josh Poimboeuf <jpoimboe@redhat.com>
+Date: Thu, 18 Feb 2016 11:41:58 -0600
+Subject: sched/x86: Add stack frame dependency to __preempt_schedule[_notrace]()
+
+If __preempt_schedule() or __preempt_schedule_notrace() is referenced at
+the beginning of a function, gcc can insert the asm inline "call
+___preempt_schedule[_notrace]" instruction before setting up a stack
+frame, which breaks frame pointer convention if CONFIG_FRAME_POINTER is
+enabled and can result in bad stack traces.
+
+Force a stack frame to be created if CONFIG_FRAME_POINTER is enabled by
+listing the stack pointer as an output operand for the inline asm
+statements.
+
+Specifically this fixes the following stacktool warnings:
+
+  stacktool: drivers/scsi/hpsa.o: hpsa_scsi_do_simple_cmd.constprop.106()+0x79: call without frame pointer save/setup
+  stacktool: fs/mbcache.o: mb_cache_entry_find_first()+0x70: call without frame pointer save/setup
+  stacktool: fs/mbcache.o: mb_cache_entry_find_first()+0x92: call without frame pointer save/setup
+  stacktool: fs/mbcache.o: mb_cache_entry_free()+0xff: call without frame pointer save/setup
+  stacktool: fs/mbcache.o: mb_cache_entry_free()+0xf5: call without frame pointer save/setup
+  stacktool: fs/mbcache.o: mb_cache_entry_free()+0x11a: call without frame pointer save/setup
+  stacktool: fs/mbcache.o: mb_cache_entry_get()+0x225: call without frame pointer save/setup
+  stacktool: kernel/locking/percpu-rwsem.o: percpu_up_read()+0x27: call without frame pointer save/setup
+  stacktool: kernel/profile.o: do_profile_hits.isra.5()+0x139: call without frame pointer save/setup
+  stacktool: lib/nmi_backtrace.o: nmi_trigger_all_cpu_backtrace()+0x2b6: call without frame pointer save/setup
+  stacktool: net/rds/ib_cm.o: rds_ib_cq_comp_handler_recv()+0x58: call without frame pointer save/setup
+  stacktool: net/rds/ib_cm.o: rds_ib_cq_comp_handler_send()+0x58: call without frame pointer save/setup
+  stacktool: net/rds/ib_recv.o: rds_ib_attempt_ack()+0xc1: call without frame pointer save/setup
+  stacktool: net/rds/iw_recv.o: rds_iw_attempt_ack()+0xc1: call without frame pointer save/setup
+  stacktool: net/rds/iw_recv.o: rds_iw_recv_cq_comp_handler()+0x55: call without frame pointer save/setup
+
+So it only adds a stack frame to 15 call sites out of ~5000 calls to
+___preempt_schedule[_notrace]().  All the others already had stack frames.
+
+Oddly, this change actually seems to make things faster in a lot of
+cases.  For many smaller functions it causes the stack frame creation to
+get moved out of the common path and into the unlikely path.
+
+For example, here's the original cyc2ns_read_end():
+
+  ffffffff8101f8c0 <cyc2ns_read_end>:
+  ffffffff8101f8c0:	55                   	push   %rbp
+  ffffffff8101f8c1:	48 89 e5             	mov    %rsp,%rbp
+  ffffffff8101f8c4:	83 6f 10 01          	subl   $0x1,0x10(%rdi)
+  ffffffff8101f8c8:	75 08                	jne    ffffffff8101f8d2 <cyc2ns_read_end+0x12>
+  ffffffff8101f8ca:	65 48 89 3d e6 5a ff 	mov    %rdi,%gs:0x7eff5ae6(%rip)        # 153b8 <cyc2ns+0x38>
+  ffffffff8101f8d1:	7e
+  ffffffff8101f8d2:	65 ff 0d 77 c4 fe 7e 	decl   %gs:0x7efec477(%rip)        # bd50 <__preempt_count>
+  ffffffff8101f8d9:	74 02                	je     ffffffff8101f8dd <cyc2ns_read_end+0x1d>
+  ffffffff8101f8db:	5d                   	pop    %rbp
+  ffffffff8101f8dc:	c3                   	retq
+  ffffffff8101f8dd:	e8 1e 37 fe ff       	callq  ffffffff81003000 <___preempt_schedule>
+  ffffffff8101f8e2:	5d                   	pop    %rbp
+  ffffffff8101f8e3:	c3                   	retq
+  ffffffff8101f8e4:	66 66 66 2e 0f 1f 84 	data16 data16 nopw %cs:0x0(%rax,%rax,1)
+  ffffffff8101f8eb:	00 00 00 00 00
+
+And here's the same function with the patch:
+
+  ffffffff8101f8c0 <cyc2ns_read_end>:
+  ffffffff8101f8c0:	83 6f 10 01          	subl   $0x1,0x10(%rdi)
+  ffffffff8101f8c4:	75 08                	jne    ffffffff8101f8ce <cyc2ns_read_end+0xe>
+  ffffffff8101f8c6:	65 48 89 3d ea 5a ff 	mov    %rdi,%gs:0x7eff5aea(%rip)        # 153b8 <cyc2ns+0x38>
+  ffffffff8101f8cd:	7e
+  ffffffff8101f8ce:	65 ff 0d 7b c4 fe 7e 	decl   %gs:0x7efec47b(%rip)        # bd50 <__preempt_count>
+  ffffffff8101f8d5:	74 01                	je     ffffffff8101f8d8 <cyc2ns_read_end+0x18>
+  ffffffff8101f8d7:	c3                   	retq
+  ffffffff8101f8d8:	55                   	push   %rbp
+  ffffffff8101f8d9:	48 89 e5             	mov    %rsp,%rbp
+  ffffffff8101f8dc:	e8 1f 37 fe ff       	callq  ffffffff81003000 <___preempt_schedule>
+  ffffffff8101f8e1:	5d                   	pop    %rbp
+  ffffffff8101f8e2:	c3                   	retq
+  ffffffff8101f8e3:	66 66 66 66 2e 0f 1f 	data16 data16 data16 nopw %cs:0x0(%rax,%rax,1)
+  ffffffff8101f8ea:	84 00 00 00 00 00
+
+Notice that it moved the frame pointer setup code to the unlikely
+___preempt_schedule() call path.  Going through a sampling of the
+differences in the asm, that's the most common change I see.
+
+Otherwise it has no real effect on callers which already have stack
+frames (though it does result in the reordering of some 'mov's).
+
+Reported-by: Jiri Slaby <jslaby@suse.cz>
+Tested-by: Jiri Slaby <jslaby@suse.cz>
+Signed-off-by: Josh Poimboeuf <jpoimboe@redhat.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: live-patching@vger.kernel.org
+Link: http://lkml.kernel.org/r/20160218174158.GA28230@treble.redhat.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ arch/x86/include/asm/preempt.h | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/arch/x86/include/asm/preempt.h b/arch/x86/include/asm/preempt.h
+index 01bcde8..d397deb 100644
+--- a/arch/x86/include/asm/preempt.h
++++ b/arch/x86/include/asm/preempt.h
+@@ -94,10 +94,19 @@ static __always_inline bool should_resched(int preempt_offset)
+ 
+ #ifdef CONFIG_PREEMPT
+   extern asmlinkage void ___preempt_schedule(void);
+-# define __preempt_schedule() asm ("call ___preempt_schedule")
++# define __preempt_schedule()					\
++({								\
++	register void *__sp asm(_ASM_SP);			\
++	asm volatile ("call ___preempt_schedule" : "+r"(__sp));	\
++})
++
+   extern asmlinkage void preempt_schedule(void);
+   extern asmlinkage void ___preempt_schedule_notrace(void);
+-# define __preempt_schedule_notrace() asm ("call ___preempt_schedule_notrace")
++# define __preempt_schedule_notrace()					\
++({									\
++	register void *__sp asm(_ASM_SP);				\
++	asm volatile ("call ___preempt_schedule_notrace" : "+r"(__sp));	\
++})
+   extern asmlinkage void preempt_schedule_notrace(void);
+ #endif
+ 
+-- 
+cgit v0.12
+

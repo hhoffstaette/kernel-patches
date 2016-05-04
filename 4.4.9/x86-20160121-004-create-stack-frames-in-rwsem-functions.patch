@@ -1,0 +1,101 @@
+From 3387a535ce629906d849864ef6a3c3437a645cb5 Mon Sep 17 00:00:00 2001
+From: Josh Poimboeuf <jpoimboe@redhat.com>
+Date: Thu, 21 Jan 2016 16:49:22 -0600
+Subject: x86/asm: Create stack frames in rwsem functions
+
+rwsem.S has several callable non-leaf functions which don't honor
+CONFIG_FRAME_POINTER, which can result in bad stack traces.
+
+Create stack frames for them when CONFIG_FRAME_POINTER is enabled.
+
+Signed-off-by: Josh Poimboeuf <jpoimboe@redhat.com>
+Reviewed-by: Borislav Petkov <bp@suse.de>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Andy Lutomirski <luto@amacapital.net>
+Cc: Andy Lutomirski <luto@kernel.org>
+Cc: Arnaldo Carvalho de Melo <acme@kernel.org>
+Cc: Bernd Petrovitsch <bernd@petrovitsch.priv.at>
+Cc: Borislav Petkov <bp@alien8.de>
+Cc: Brian Gerst <brgerst@gmail.com>
+Cc: Chris J Arges <chris.j.arges@canonical.com>
+Cc: Denys Vlasenko <dvlasenk@redhat.com>
+Cc: H. Peter Anvin <hpa@zytor.com>
+Cc: Jiri Slaby <jslaby@suse.cz>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Michal Marek <mmarek@suse.cz>
+Cc: Namhyung Kim <namhyung@gmail.com>
+Cc: Pedro Alves <palves@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: live-patching@vger.kernel.org
+Link: http://lkml.kernel.org/r/ad0932bbead975b15f9578e4f2cf2ee5961eb840.1453405861.git.jpoimboe@redhat.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ arch/x86/lib/rwsem.S | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/arch/x86/lib/rwsem.S b/arch/x86/lib/rwsem.S
+index 40027db..be110ef 100644
+--- a/arch/x86/lib/rwsem.S
++++ b/arch/x86/lib/rwsem.S
+@@ -15,6 +15,7 @@
+ 
+ #include <linux/linkage.h>
+ #include <asm/alternative-asm.h>
++#include <asm/frame.h>
+ 
+ #define __ASM_HALF_REG(reg)	__ASM_SEL(reg, e##reg)
+ #define __ASM_HALF_SIZE(inst)	__ASM_SEL(inst##w, inst##l)
+@@ -84,24 +85,29 @@
+ 
+ /* Fix up special calling conventions */
+ ENTRY(call_rwsem_down_read_failed)
++	FRAME_BEGIN
+ 	save_common_regs
+ 	__ASM_SIZE(push,) %__ASM_REG(dx)
+ 	movq %rax,%rdi
+ 	call rwsem_down_read_failed
+ 	__ASM_SIZE(pop,) %__ASM_REG(dx)
+ 	restore_common_regs
++	FRAME_END
+ 	ret
+ ENDPROC(call_rwsem_down_read_failed)
+ 
+ ENTRY(call_rwsem_down_write_failed)
++	FRAME_BEGIN
+ 	save_common_regs
+ 	movq %rax,%rdi
+ 	call rwsem_down_write_failed
+ 	restore_common_regs
++	FRAME_END
+ 	ret
+ ENDPROC(call_rwsem_down_write_failed)
+ 
+ ENTRY(call_rwsem_wake)
++	FRAME_BEGIN
+ 	/* do nothing if still outstanding active readers */
+ 	__ASM_HALF_SIZE(dec) %__ASM_HALF_REG(dx)
+ 	jnz 1f
+@@ -109,15 +115,18 @@ ENTRY(call_rwsem_wake)
+ 	movq %rax,%rdi
+ 	call rwsem_wake
+ 	restore_common_regs
+-1:	ret
++1:	FRAME_END
++	ret
+ ENDPROC(call_rwsem_wake)
+ 
+ ENTRY(call_rwsem_downgrade_wake)
++	FRAME_BEGIN
+ 	save_common_regs
+ 	__ASM_SIZE(push,) %__ASM_REG(dx)
+ 	movq %rax,%rdi
+ 	call rwsem_downgrade_wake
+ 	__ASM_SIZE(pop,) %__ASM_REG(dx)
+ 	restore_common_regs
++	FRAME_END
+ 	ret
+ ENDPROC(call_rwsem_downgrade_wake)
+-- 
+cgit v0.12
+
