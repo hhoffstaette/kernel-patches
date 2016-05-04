@@ -1,0 +1,56 @@
+From 0cac682ff683bac968c24a4774c69c3a9ff35013 Mon Sep 17 00:00:00 2001
+From: Dave Chinner <dchinner@redhat.com>
+Date: Wed, 10 Feb 2016 15:01:11 +1100
+Subject: xfs: remove XBF_READ flag wrapper macros
+
+They only set/clear/check a flag, no need for obfuscating this
+with a macro.
+
+Signed-off-by: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/xfs_buf.h         | 4 ----
+ fs/xfs/xfs_log_recover.c | 4 ++--
+ 2 files changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/fs/xfs/xfs_buf.h b/fs/xfs/xfs_buf.h
+index 2a28d1c..329e612 100644
+--- a/fs/xfs/xfs_buf.h
++++ b/fs/xfs/xfs_buf.h
+@@ -321,10 +321,6 @@ void xfs_buf_stale(struct xfs_buf *bp);
+ #define XFS_BUF_UNSTALE(bp)	((bp)->b_flags &= ~XBF_STALE)
+ #define XFS_BUF_ISSTALE(bp)	((bp)->b_flags & XBF_STALE)
+ 
+-#define XFS_BUF_READ(bp)	((bp)->b_flags |= XBF_READ)
+-#define XFS_BUF_UNREAD(bp)	((bp)->b_flags &= ~XBF_READ)
+-#define XFS_BUF_ISREAD(bp)	((bp)->b_flags & XBF_READ)
+-
+ #define XFS_BUF_WRITE(bp)	((bp)->b_flags |= XBF_WRITE)
+ #define XFS_BUF_UNWRITE(bp)	((bp)->b_flags &= ~XBF_WRITE)
+ #define XFS_BUF_ISWRITE(bp)	((bp)->b_flags & XBF_WRITE)
+diff --git a/fs/xfs/xfs_log_recover.c b/fs/xfs/xfs_log_recover.c
+index f00cce9..e747bad 100644
+--- a/fs/xfs/xfs_log_recover.c
++++ b/fs/xfs/xfs_log_recover.c
+@@ -190,7 +190,7 @@ xlog_bread_noalign(
+ 	ASSERT(nbblks <= bp->b_length);
+ 
+ 	XFS_BUF_SET_ADDR(bp, log->l_logBBstart + blk_no);
+-	XFS_BUF_READ(bp);
++	bp->b_flags |= XBF_READ;
+ 	bp->b_io_length = nbblks;
+ 	bp->b_error = 0;
+ 
+@@ -4928,7 +4928,7 @@ xlog_do_recover(
+ 	bp = xfs_getsb(log->l_mp, 0);
+ 	bp->b_flags &= ~(XBF_DONE | XBF_ASYNC);
+ 	ASSERT(!(XFS_BUF_ISWRITE(bp)));
+-	XFS_BUF_READ(bp);
++	bp->b_flags |= XBF_READ;
+ 	bp->b_ops = &xfs_sb_buf_ops;
+ 
+ 	error = xfs_buf_submit_wait(bp);
+-- 
+cgit v0.12
+

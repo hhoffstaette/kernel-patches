@@ -1,0 +1,92 @@
+From b68c08219a6726fb68dca2d56e024d2e2c1654f5 Mon Sep 17 00:00:00 2001
+From: Dave Chinner <dchinner@redhat.com>
+Date: Wed, 10 Feb 2016 15:01:11 +1100
+Subject: xfs: remove XBF_WRITE flag wrapper macros
+
+They only set/clear/check a flag, no need for obfuscating this
+with a macro.
+
+Signed-off-by: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/xfs_buf.h         | 4 ----
+ fs/xfs/xfs_log.c         | 8 +++-----
+ fs/xfs/xfs_log_recover.c | 2 +-
+ 3 files changed, 4 insertions(+), 10 deletions(-)
+
+diff --git a/fs/xfs/xfs_buf.h b/fs/xfs/xfs_buf.h
+index 329e612..a118962 100644
+--- a/fs/xfs/xfs_buf.h
++++ b/fs/xfs/xfs_buf.h
+@@ -321,10 +321,6 @@ void xfs_buf_stale(struct xfs_buf *bp);
+ #define XFS_BUF_UNSTALE(bp)	((bp)->b_flags &= ~XBF_STALE)
+ #define XFS_BUF_ISSTALE(bp)	((bp)->b_flags & XBF_STALE)
+ 
+-#define XFS_BUF_WRITE(bp)	((bp)->b_flags |= XBF_WRITE)
+-#define XFS_BUF_UNWRITE(bp)	((bp)->b_flags &= ~XBF_WRITE)
+-#define XFS_BUF_ISWRITE(bp)	((bp)->b_flags & XBF_WRITE)
+-
+ /*
+  * These macros use the IO block map rather than b_bn. b_bn is now really
+  * just for the buffer cache index for cached buffers. As IO does not use b_bn
+diff --git a/fs/xfs/xfs_log.c b/fs/xfs/xfs_log.c
+index 19db3da..edf20b2 100644
+--- a/fs/xfs/xfs_log.c
++++ b/fs/xfs/xfs_log.c
+@@ -1865,7 +1865,7 @@ xlog_sync(
+ 	bp->b_io_length = BTOBB(count);
+ 	bp->b_fspriv = iclog;
+ 	XFS_BUF_ZEROFLAGS(bp);
+-	bp->b_flags |= (XBF_ASYNC | XBF_SYNCIO);
++	bp->b_flags |= (XBF_ASYNC | XBF_SYNCIO | XBF_WRITE);
+ 
+ 	if (log->l_mp->m_flags & XFS_MOUNT_BARRIER) {
+ 		bp->b_flags |= XBF_FUA;
+@@ -1892,12 +1892,11 @@ xlog_sync(
+ 
+ 	/* account for log which doesn't start at block #0 */
+ 	XFS_BUF_SET_ADDR(bp, XFS_BUF_ADDR(bp) + log->l_logBBstart);
++
+ 	/*
+ 	 * Don't call xfs_bwrite here. We do log-syncs even when the filesystem
+ 	 * is shutting down.
+ 	 */
+-	XFS_BUF_WRITE(bp);
+-
+ 	error = xlog_bdstrat(bp);
+ 	if (error) {
+ 		xfs_buf_ioerror_alert(bp, "xlog_sync");
+@@ -1910,7 +1909,7 @@ xlog_sync(
+ 				(char *)&iclog->ic_header + count, split);
+ 		bp->b_fspriv = iclog;
+ 		XFS_BUF_ZEROFLAGS(bp);
+-		bp->b_flags |= (XBF_ASYNC | XBF_SYNCIO);
++		bp->b_flags |= (XBF_ASYNC | XBF_SYNCIO | XBF_WRITE);
+ 		if (log->l_mp->m_flags & XFS_MOUNT_BARRIER)
+ 			bp->b_flags |= XBF_FUA;
+ 
+@@ -1919,7 +1918,6 @@ xlog_sync(
+ 
+ 		/* account for internal log which doesn't start at block #0 */
+ 		XFS_BUF_SET_ADDR(bp, XFS_BUF_ADDR(bp) + log->l_logBBstart);
+-		XFS_BUF_WRITE(bp);
+ 		error = xlog_bdstrat(bp);
+ 		if (error) {
+ 			xfs_buf_ioerror_alert(bp, "xlog_sync (split)");
+diff --git a/fs/xfs/xfs_log_recover.c b/fs/xfs/xfs_log_recover.c
+index e747bad..50a75ec 100644
+--- a/fs/xfs/xfs_log_recover.c
++++ b/fs/xfs/xfs_log_recover.c
+@@ -4927,7 +4927,7 @@ xlog_do_recover(
+ 	 */
+ 	bp = xfs_getsb(log->l_mp, 0);
+ 	bp->b_flags &= ~(XBF_DONE | XBF_ASYNC);
+-	ASSERT(!(XFS_BUF_ISWRITE(bp)));
++	ASSERT(!(bp->b_flags & XBF_WRITE));
+ 	bp->b_flags |= XBF_READ;
+ 	bp->b_ops = &xfs_sb_buf_ops;
+ 
+-- 
+cgit v0.12
+
