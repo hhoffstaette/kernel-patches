@@ -1,0 +1,52 @@
+From:	David Sterba <dsterba@suse.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	David Sterba <dsterba@suse.cz>, David Sterba <dsterba@suse.com>
+Subject: [PATCH] btrfs: add write protection to SET_FEATURES ioctl
+Date:	Wed,  4 May 2016 11:32:00 +0200
+
+From: David Sterba <dsterba@suse.cz>
+
+Perform the want_write check if we get far enough to do any writes.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ioctl.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 5a23806ae418..e3239272fa61 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -5394,9 +5394,15 @@ static int btrfs_ioctl_set_features(struct file *file, void __user *arg)
+ 	if (ret)
+ 		return ret;
+ 
++	ret = mnt_want_write_file(file);
++	if (ret)
++		return ret;
++
+ 	trans = btrfs_start_transaction(root, 0);
+-	if (IS_ERR(trans))
+-		return PTR_ERR(trans);
++	if (IS_ERR(trans)) {
++		ret = PTR_ERR(trans);
++		goto out_drop_write;
++	}
+ 
+ 	spin_lock(&root->fs_info->super_lock);
+ 	newflags = btrfs_super_compat_flags(super_block);
+@@ -5415,7 +5421,11 @@ static int btrfs_ioctl_set_features(struct file *file, void __user *arg)
+ 	btrfs_set_super_incompat_flags(super_block, newflags);
+ 	spin_unlock(&root->fs_info->super_lock);
+ 
+-	return btrfs_commit_transaction(trans, root);
++	ret = btrfs_commit_transaction(trans, root);
++out_drop_write:
++	mnt_drop_write_file(file);
++
++	return ret;
+ }
+ 
+ long btrfs_ioctl(struct file *file, unsigned int
+-- 
+2.7.1
