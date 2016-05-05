@@ -1,0 +1,49 @@
+From 00e3e33bc910d383cd2b2f98d3816580fe1a936c Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Thu, 5 May 2016 01:41:57 +0100
+Subject: Btrfs: fix inode leak on failure to setup whiteout inode in rename
+
+If we failed to fully setup the whiteout inode during a rename operation
+with the whiteout flag, we ended up leaking the inode, not decrementing
+its link count nor removing all its items from the fs/subvol tree.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/inode.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 09947cb..ab64721 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -9526,21 +9526,21 @@ static int btrfs_whiteout_for_rename(struct btrfs_trans_handle *trans,
+ 	ret = btrfs_init_inode_security(trans, inode, dir,
+ 				&dentry->d_name);
+ 	if (ret)
+-		return ret;
++		goto out;
+ 
+ 	ret = btrfs_add_nondir(trans, dir, dentry,
+ 				inode, 0, index);
+ 	if (ret)
+-		return ret;
++		goto out;
+ 
+ 	ret = btrfs_update_inode(trans, root, inode);
+-	if (ret)
+-		return ret;
+-
++out:
+ 	unlock_new_inode(inode);
++	if (ret)
++		inode_dec_link_count(inode);
+ 	iput(inode);
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+-- 
+cgit v0.12
+
