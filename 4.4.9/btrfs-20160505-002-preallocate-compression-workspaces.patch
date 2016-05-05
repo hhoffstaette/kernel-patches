@@ -1,0 +1,51 @@
+From:	David Sterba <dsterba@suse.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	David Sterba <dsterba@suse.com>
+Subject: [PATCH 2/4] btrfs: preallocate compression workspaces
+Date:	Thu,  5 May 2016 18:36:17 +0200
+
+Preallocate one workspace for each compression type so we can guarantee
+forward progress in the worst case. A failure cannot be a hard error as
+we might not use compression at all on the filesystem. If we can't
+allocate the workspaces later when need them, it might actually
+deadlock, but in such situation the system has effectively not enough
+memory to operate properly.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/compression.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/fs/btrfs/compression.c b/fs/btrfs/compression.c
+index 4d5cd9624bb3..38c058bcf359 100644
+--- a/fs/btrfs/compression.c
++++ b/fs/btrfs/compression.c
+@@ -761,10 +761,26 @@ void __init btrfs_init_compress(void)
+ 	int i;
+ 
+ 	for (i = 0; i < BTRFS_COMPRESS_TYPES; i++) {
++		struct list_head *workspace;
++
+ 		INIT_LIST_HEAD(&btrfs_comp_ws[i].idle_ws);
+ 		spin_lock_init(&btrfs_comp_ws[i].ws_lock);
+ 		atomic_set(&btrfs_comp_ws[i].total_ws, 0);
+ 		init_waitqueue_head(&btrfs_comp_ws[i].ws_wait);
++
++		/*
++		 * Preallocate one workspace for each compression type so
++		 * we can guarantee forward progress in the worst case
++		 */
++		workspace = btrfs_compress_op[i]->alloc_workspace();
++		if (IS_ERR(workspace)) {
++			printk(KERN_WARNING
++	"BTRFS: cannot preallocate compression workspace, will try later");
++		} else {
++			atomic_set(&btrfs_comp_ws[i].total_ws, 1);
++			btrfs_comp_ws[i].free_ws = 1;
++			list_add(workspace, &btrfs_comp_ws[i].idle_ws);
++		}
+ 	}
+ }
+ 
+-- 
+2.7.1
