@@ -1,0 +1,82 @@
+From a08ee40a79653d082911cab9fbeff94baa7714cb Mon Sep 17 00:00:00 2001
+From: Eric Sandeen <sandeen@sandeen.net>
+Date: Wed, 2 Mar 2016 09:56:31 +1100
+Subject: xfs: sanitize remount options
+
+Perform basic sanitization of remount options by
+passing the option string and a dummy mount structure
+through xfs_parseargs and returning the result.
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/xfs_super.c | 32 +++++++++++++++++++++++++++++++-
+ 1 file changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_super.c b/fs/xfs/xfs_super.c
+index 9e1538d..8dd7d16 100644
+--- a/fs/xfs/xfs_super.c
++++ b/fs/xfs/xfs_super.c
+@@ -172,13 +172,17 @@ suffix_kstrtoint(const substring_t *s, unsigned int base, int *res)
+  *
+  * Note that this function leaks the various device name allocations on
+  * failure.  The caller takes care of them.
++ *
++ * *sb is const because this is also used to test options on the remount
++ * path, and we don't want this to have any side effects at remount time.
++ * Today this function does not change *sb, but just to future-proof...
+  */
+ STATIC int
+ xfs_parseargs(
+ 	struct xfs_mount	*mp,
+ 	char			*options)
+ {
+-	struct super_block	*sb = mp->m_super;
++	const struct super_block *sb = mp->m_super;
+ 	char			*p;
+ 	substring_t		args[MAX_OPT_ARGS];
+ 	int			dsunit = 0;
+@@ -1170,6 +1174,27 @@ xfs_quiesce_attr(
+ }
+ 
+ STATIC int
++xfs_test_remount_options(
++	struct super_block	*sb,
++	struct xfs_mount	*mp,
++	char			*options)
++{
++	int			error = 0;
++	struct xfs_mount	*tmp_mp;
++
++	tmp_mp = kmem_zalloc(sizeof(*tmp_mp), KM_MAYFAIL);
++	if (!tmp_mp)
++		return -ENOMEM;
++
++	tmp_mp->m_super = sb;
++	error = xfs_parseargs(tmp_mp, options);
++	xfs_free_fsname(tmp_mp);
++	kfree(tmp_mp);
++
++	return error;
++}
++
++STATIC int
+ xfs_fs_remount(
+ 	struct super_block	*sb,
+ 	int			*flags,
+@@ -1181,6 +1206,11 @@ xfs_fs_remount(
+ 	char			*p;
+ 	int			error;
+ 
++	/* First, check for complete junk; i.e. invalid options */
++	error = xfs_test_remount_options(sb, mp, options);
++	if (error)
++		return error;
++
+ 	sync_filesystem(sb);
+ 	while ((p = strsep(&options, ",")) != NULL) {
+ 		int token;
+-- 
+cgit v0.12
+
