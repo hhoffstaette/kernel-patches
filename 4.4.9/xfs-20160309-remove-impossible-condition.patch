@@ -1,0 +1,37 @@
+From a5fd276bdc4fb71b06d100a6abc77ad682f77de4 Mon Sep 17 00:00:00 2001
+From: Luis de Bethencourt <luisbg@osg.samsung.com>
+Date: Wed, 9 Mar 2016 08:17:56 +1100
+Subject: xfs: remove impossible condition
+
+bp_release is set to 0 just before the breakpoint of the for loop before
+the conditional check (in line 458). The other breakpoint is a goto that
+skips the dead code.
+
+Addresses-Coverity-Id: 102338
+
+Signed-off-by: Luis de Bethencourt <luisbg@osg.samsung.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/libxfs/xfs_bmap.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
+index ef00156..9054c50 100644
+--- a/fs/xfs/libxfs/xfs_bmap.c
++++ b/fs/xfs/libxfs/xfs_bmap.c
+@@ -477,10 +477,7 @@ xfs_bmap_check_leaf_extents(
+ 		}
+ 		block = XFS_BUF_TO_BLOCK(bp);
+ 	}
+-	if (bp_release) {
+-		bp_release = 0;
+-		xfs_trans_brelse(NULL, bp);
+-	}
++
+ 	return;
+ 
+ error0:
+-- 
+cgit v0.12
+
