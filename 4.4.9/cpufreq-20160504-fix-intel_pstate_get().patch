@@ -64,12 +64,6 @@ Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
 drivers/cpufreq/intel_pstate.c |   14 ++++++++------
  1 file changed, 8 insertions(+), 6 deletions(-)
 
-
---
-To unsubscribe from this list: send the line "unsubscribe linux-pm" in
-the body of a message to majordomo@vger.kernel.org
-More majordomo info at  http://vger.kernel.org/majordomo-info.html
-
 Index: linux-pm/drivers/cpufreq/intel_pstate.c
 ===================================================================
 --- linux-pm.orig/drivers/cpufreq/intel_pstate.c
@@ -104,7 +98,7 @@ Index: linux-pm/drivers/cpufreq/intel_pstate.c
 +	if (sample_taken) {
 +		intel_pstate_calc_busy(cpu);
 +		if (!hwp_active)
-+		intel_pstate_adjust_busy_pstate(cpu);
++			intel_pstate_adjust_busy_pstate(cpu);
 +	}
  
  	intel_pstate_set_sample_time(cpu);
