@@ -1,0 +1,87 @@
+From: "Rafael J. Wysocki" <rjw@rjwysocki.net>
+Subject: [PATCH 3/3] intel_pstate: Clean up get_target_pstate_use_performance()
+Date: Sat, 07 May 2016 01:47:08 +0200
+Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>,
+	Linux Kernel Mailing List <linux-kernel@vger.kernel.org>
+To: Linux PM list <linux-pm@vger.kernel.org>
+Archived-At: <http://permalink.gmane.org/gmane.linux.power-management.general/75882>
+
+From: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+
+The way the code in get_target_pstate_use_performance() is arranged
+and the comments in there are totally confusing, so modify them to
+reflect what's going on.
+
+The results of the computations should be the same as before.
+
+[HH: backported to 4.4.x]
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+---
+ drivers/cpufreq/intel_pstate.c |   32 +++++++++++++-------------------
+ 1 file changed, 13 insertions(+), 19 deletions(-)
+
+Index: linux-pm/drivers/cpufreq/intel_pstate.c
+===================================================================
+--- linux-pm.orig/drivers/cpufreq/intel_pstate.c
++++ linux-pm/drivers/cpufreq/intel_pstate.c
+@@ -1125,47 +1125,41 @@ static inline int32_t get_target_pstate_
+ 
+ static inline int32_t get_target_pstate_use_performance(struct cpudata *cpu)
+ {
+-	int32_t core_busy, max_pstate, current_pstate, sample_ratio;
++	int32_t perf_scaled, sample_ratio;
+ 	s64 duration_us;
+ 	u32 sample_time;
+ 
+ 	/*
+-	 * core_busy is the ratio of actual performance to max
+-	 * max_pstate is the max non turbo pstate available
+-	 * current_pstate was the pstate that was requested during
+-	 * 	the last sample period.
+-	 *
+-	 * We normalize core_busy, which was our actual percent
+-	 * performance to what we requested during the last sample
+-	 * period. The result will be a percentage of busy at a
+-	 * specified pstate.
++	 * perf_scaled is the average performance during the last sampling
++	 * period (in percent) scaled by the ratio of the P-state requested
++	 * last time to the maximum P-state.  That measures the system's
++	 * response to the previous P-state selection.
+ 	 */
+-	core_busy = cpu->sample.core_pct_busy;
+-	max_pstate = cpu->pstate.max_pstate_physical;
+-	current_pstate = cpu->pstate.current_pstate;
+-	core_busy = mul_fp(core_busy, div_fp(max_pstate, current_pstate));
++	perf_scaled = div_fp(cpu->pstate.max_pstate_physical,
++			     cpu->pstate.current_pstate);
++	perf_scaled = mul_fp(perf_scaled, 100 * cpu->sample.core_pct_busy);
+ 
+ 	/*
+	 * Since we have a deferred timer, it will not fire unless
+	 * we are in C0.  So, determine if the actual elapsed time
+	 * is significantly greater (3x) than our sample interval.  If it
+	 * is, then we were idle for a long enough period of time
+-	 * to adjust our busyness.
++	 * to adjust our performance metric.
+ 	 */
+	sample_time = pid_params.sample_rate_ms  * USEC_PER_MSEC;
+	duration_us = ktime_us_delta(cpu->sample.time,
+				     cpu->last_sample_time);
+	if (duration_us > sample_time * 3) {
+		sample_ratio = div_fp(sample_time, duration_us);
+-		core_busy = mul_fp(core_busy, sample_ratio);
++		perf_scaled = mul_fp(perf_scaled, sample_ratio);
+ 	} else {
+ 		sample_ratio = div_fp(100 * cpu->sample.mperf, cpu->sample.tsc);
+ 		if (sample_ratio < int_tofp(1))
+-			core_busy = 0;
++			perf_scaled = 0;
+ 	}
+ 
+-	cpu->sample.busy_scaled = core_busy;
+-	return cpu->pstate.current_pstate - pid_calc(&cpu->pid, core_busy);
++	cpu->sample.busy_scaled = perf_scaled;
++	return cpu->pstate.current_pstate - pid_calc(&cpu->pid, perf_scaled);
+ }
+ 
+ static inline void intel_pstate_adjust_busy_pstate(struct cpudata *cpu)
