@@ -1,0 +1,50 @@
+From: Xunlei Pang <xlpang@redhat.com>
+Subject: [PATCH] sched/fair: Fix the wrong throttled clock time for cfs_rq_clock_task()
+Date: Tue, 10 May 2016 21:03:18 +0800
+Cc: Peter Zijlstra <peterz@infradead.org>,
+	Juri Lelli <juri.lelli@arm.com>,
+	Ingo Molnar <mingo@redhat.com>,
+	Steven Rostedt <rostedt@goodmis.org>,
+	Xunlei Pang <xlpang@redhat.com>
+To: linux-kernel@vger.kernel.org
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2218652>
+
+Two minor fixes for cfs_rq_clock_task().
+1) If cfs_rq is currently being throttled, we need to subtract the cfs
+   throttled clock time.
+
+2) Make "throttled_clock_task_time" update SMP unrelated. Now UP cases
+   need it as well.
+
+Signed-off-by: Xunlei Pang <xlpang@redhat.com>
+---
+ kernel/sched/fair.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 1708729e..fb80a12 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -3591,7 +3591,7 @@ static inline struct cfs_bandwidth *tg_cfs_bandwidth(struct task_group *tg)
+ static inline u64 cfs_rq_clock_task(struct cfs_rq *cfs_rq)
+ {
+ 	if (unlikely(cfs_rq->throttle_count))
+-		return cfs_rq->throttled_clock_task;
++		return cfs_rq->throttled_clock_task - cfs_rq->throttled_clock_task_time;
+ 
+ 	return rq_clock_task(rq_of(cfs_rq)) - cfs_rq->throttled_clock_task_time;
+ }
+@@ -3729,13 +3729,11 @@ static int tg_unthrottle_up(struct task_group *tg, void *data)
+ 	struct cfs_rq *cfs_rq = tg->cfs_rq[cpu_of(rq)];
+ 
+ 	cfs_rq->throttle_count--;
+-#ifdef CONFIG_SMP
+ 	if (!cfs_rq->throttle_count) {
+ 		/* adjust cfs_rq_clock_task() */
+ 		cfs_rq->throttled_clock_task_time += rq_clock_task(rq) -
+ 					     cfs_rq->throttled_clock_task;
+ 	}
+-#endif
+ 
+ 	return 0;
+ }
