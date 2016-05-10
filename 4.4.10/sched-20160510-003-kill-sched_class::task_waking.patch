@@ -1,0 +1,176 @@
+From: Peter Zijlstra <peterz@infradead.org>
+Subject: [PATCH 3/3] sched: Kill sched_class::task_waking
+Date: Tue, 10 May 2016 19:43:17 +0200
+Cc: peterz@infradead.org, Pavan Kondeti <pkondeti@codeaurora.org>,
+	Ben Segall <bsegall@google.com>, Matt Fleming <matt@codeblueprint.co.uk>,
+	Mike Galbraith <umgwanakikbuti@gmail.com>, Morten Rasmussen
+	<morten.rasmussen@arm.com>, Paul Turner <pjt@google.com>, Thomas Gleixner
+	<tglx@linutronix.de>, byungchul.park@lge.com, Andrew Hunter
+	<ahh@google.com>
+To: mingo@kernel.org, linux-kernel@vger.kernel.org
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2218949>
+
+With sched_class::task_waking being called only when we do
+set_task_cpu(), we can make sched_class::migrate_task_rq() do the work
+and eliminate sched_class::task_waking entirely.
+
+[HH: backported to 4.4.x]
+Cc: Pavan Kondeti <pkondeti@codeaurora.org>
+Cc: Ben Segall <bsegall@google.com>
+Cc: Matt Fleming <matt@codeblueprint.co.uk>
+Cc: Mike Galbraith <umgwanakikbuti@gmail.com>
+Cc: Morten Rasmussen <morten.rasmussen@arm.com>
+Cc: Paul Turner <pjt@google.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: byungchul.park@lge.com
+Cc: Andrew Hunter <ahh@google.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+---
+ kernel/sched/core.c  |    9 -------
+ kernel/sched/fair.c  |   58 ++++++++++++++++++++++++---------------------------
+ kernel/sched/sched.h |    7 ++----
+ 3 files changed, 32 insertions(+), 42 deletions(-)
+
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -1768,11 +1768,8 @@ ttwu_do_activate(struct rq *rq, struct t
+ 	if (p->sched_contributes_to_load)
+ 		rq->nr_uninterruptible--;
+ 
+-	/*
+-	 * If we migrated; we must have called sched_class::task_waking().
+-	 */
+ 	if (wake_flags & WF_MIGRATED)
+-		en_flags |= ENQUEUE_WAKING;
++		en_flags |= ENQUEUE_MIGRATED;
+ #endif
+ 
+ 	ttwu_activate(rq, p, en_flags);
+@@ -2012,10 +2012,6 @@ try_to_wake_up(struct task_struct *p, un
+ 	cpu = select_task_rq(p, p->wake_cpu, SD_BALANCE_WAKE, wake_flags);
+ 	if (task_cpu(p) != cpu) {
+ 		wake_flags |= WF_MIGRATED;
+-
+-		if (p->sched_class->task_waking)
+-			p->sched_class->task_waking(p);
+-
+ 		set_task_cpu(p, cpu);
+ 	}
+ #endif /* CONFIG_SMP */
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -3176,7 +3176,7 @@ static inline void check_schedstat_requi
+  *
+  * WAKEUP (remote)
+  *
+- *	->task_waking_fair()
++ *	->migrate_task_rq_fair() (p->state == TASK_WAKING)
+  *	  vruntime -= min_vruntime
+  *
+  *	enqueue
+@@ -3191,7 +3191,7 @@ static inline void check_schedstat_requi
+ static void
+ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ {
+-	bool renorm = !(flags & ENQUEUE_WAKEUP) || (flags & ENQUEUE_WAKING);
++	bool renorm = !(flags & ENQUEUE_WAKEUP) || (flags & ENQUEUE_MIGRATED);
+ 	bool curr = cfs_rq->curr == se;
+ 
+ 	/*
+@@ -4715,33 +4715,6 @@ static unsigned long cpu_avg_load_per_ta
+ 	return 0;
+ }
+ 
+-/*
+- * Called to migrate a waking task; as blocked tasks retain absolute vruntime
+- * the migration needs to deal with this by subtracting the old and adding the
+- * new min_vruntime -- the latter is done by enqueue_entity() when placing
+- * the task on the new runqueue.
+- */
+-static void task_waking_fair(struct task_struct *p)
+-{
+-	struct sched_entity *se = &p->se;
+-	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+-	u64 min_vruntime;
+-
+-#ifndef CONFIG_64BIT
+-	u64 min_vruntime_copy;
+-
+-	do {
+-		min_vruntime_copy = cfs_rq->min_vruntime_copy;
+-		smp_rmb();
+-		min_vruntime = cfs_rq->min_vruntime;
+-	} while (min_vruntime != min_vruntime_copy);
+-#else
+-	min_vruntime = cfs_rq->min_vruntime;
+-#endif
+-
+-	se->vruntime -= min_vruntime;
+-}
+-
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ /*
+  * effective_load() calculates the load change as seen from the root_task_group
+@@ -5278,6 +5278,32 @@ select_task_rq_fair(struct task_struct *
+ static void migrate_task_rq_fair(struct task_struct *p)
+ {
+ 	/*
++	 * As blocked tasks retain absolute vruntime the migration needs to
++	 * deal with this by subtracting the old and adding the new
++	 * min_vruntime -- the latter is done by enqueue_entity() when placing
++	 * the task on the new runqueue.
++	 */
++	if (p->state == TASK_WAKING) {
++		struct sched_entity *se = &p->se;
++		struct cfs_rq *cfs_rq = cfs_rq_of(se);
++		u64 min_vruntime;
++
++#ifndef CONFIG_64BIT
++		u64 min_vruntime_copy;
++
++		do {
++			min_vruntime_copy = cfs_rq->min_vruntime_copy;
++			smp_rmb();
++			min_vruntime = cfs_rq->min_vruntime;
++		} while (min_vruntime != min_vruntime_copy);
++#else
++		min_vruntime = cfs_rq->min_vruntime;
++#endif
++
++		se->vruntime -= min_vruntime;
++	}
++
++	/*
+ 	 * We are supposed to update the task to "current" time, then its up to date
+ 	 * and ready to go to new CPU/cfs_rq. But we have difficulty in getting
+ 	 * what current time is, so simply throw away the out-of-date time. This
+@@ -8562,7 +8562,6 @@ const struct sched_class fair_sched_clas
+ 	.rq_online		= rq_online_fair,
+ 	.rq_offline		= rq_offline_fair,
+ 
+-	.task_waking		= task_waking_fair,
+ 	.task_dead		= task_dead_fair,
+ 	.set_cpus_allowed	= set_cpus_allowed_common,
+ #endif
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1172,9 +1172,9 @@ extern const u32 prio_to_wmult[40]
+ #define ENQUEUE_WAKEUP		0x01
+ #define ENQUEUE_HEAD		0x02
+ #ifdef CONFIG_SMP
+-#define ENQUEUE_WAKING		0x04	/* sched_class::task_waking was called */
++#define ENQUEUE_MIGRATED	0x20
+ #else
+-#define ENQUEUE_WAKING		0x00
++#define ENQUEUE_MIGRATED	0x00
+ #endif
+ #define ENQUEUE_REPLENISH	0x08
+ #define ENQUEUE_RESTORE	0x10
+@@ -1210,7 +1210,6 @@ struct sched_class {
+ 	int  (*select_task_rq)(struct task_struct *p, int task_cpu, int sd_flag, int flags);
+ 	void (*migrate_task_rq)(struct task_struct *p);
+ 
+-	void (*task_waking) (struct task_struct *task);
+ 	void (*task_woken) (struct rq *this_rq, struct task_struct *task);
+ 
+ 	void (*set_cpus_allowed)(struct task_struct *p,
