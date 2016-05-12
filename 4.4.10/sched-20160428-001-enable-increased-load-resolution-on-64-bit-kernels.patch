@@ -1,0 +1,49 @@
+From 2159197d66770ec01f75c93fb11dc66df81fd45b Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Thu, 28 Apr 2016 12:49:38 +0200
+Subject: sched/core: Enable increased load resolution on 64-bit kernels
+
+Mike ran into the low load resolution limitation on his big machine.
+
+So reenable these bits; nobody could ever reproduce/analyze the
+reported power usage claim and Google has been running with this for
+years as well.
+
+Reported-by: Mike Galbraith <umgwanakikbuti@gmail.com>
+Tested-by: Mike Galbraith <umgwanakikbuti@gmail.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: linux-kernel@vger.kernel.org
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/sched.h | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 0b6a838..066a4c2 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -49,11 +49,13 @@ static inline void cpu_load_update_active(struct rq *this_rq) { }
+  * and does not change the user-interface for setting shares/weights.
+  *
+  * We increase resolution only if we have enough bits to allow this increased
+- * resolution (i.e. BITS_PER_LONG > 32). The costs for increasing resolution
+- * when BITS_PER_LONG <= 32 are pretty high and the returns do not justify the
+- * increased costs.
++ * resolution (i.e. 64bit). The costs for increasing resolution when 32bit are
++ * pretty high and the returns do not justify the increased costs.
++ *
++ * Really only required when CONFIG_FAIR_GROUP_SCHED is also set, but to
++ * increase coverage and consistency always enable it on 64bit platforms.
+  */
+-#if 0 /* BITS_PER_LONG > 32 -- currently broken: it increases power usage under light load  */
++#ifdef CONFIG_64BIT
+ # define SCHED_LOAD_RESOLUTION	10
+ # define scale_load(w)		((w) << SCHED_LOAD_RESOLUTION)
+ # define scale_load_down(w)	((w) >> SCHED_LOAD_RESOLUTION)
+-- 
+cgit v0.12
+
