@@ -1,0 +1,129 @@
+From 6ecdd74962f246dfe8750b7bea481a1c0816315d Mon Sep 17 00:00:00 2001
+From: Yuyang Du <yuyang.du@intel.com>
+Date: Tue, 5 Apr 2016 12:12:26 +0800
+Subject: sched/fair: Generalize the load/util averages resolution definition
+
+Integer metric needs fixed point arithmetic. In sched/fair, a few
+metrics, e.g., weight, load, load_avg, util_avg, freq, and capacity,
+may have different fixed point ranges, which makes their update and
+usage error-prone.
+
+In order to avoid the errors relating to the fixed point range, we
+definie a basic fixed point range, and then formalize all metrics to
+base on the basic range.
+
+The basic range is 1024 or (1 << 10). Further, one can recursively
+apply the basic range to have larger range.
+
+Pointed out by Ben Segall, weight (visible to user, e.g., NICE-0 has
+1024) and load (e.g., NICE_0_LOAD) have independent ranges, but they
+must be well calibrated.
+
+Signed-off-by: Yuyang Du <yuyang.du@intel.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: bsegall@google.com
+Cc: dietmar.eggemann@arm.com
+Cc: lizefan@huawei.com
+Cc: morten.rasmussen@arm.com
+Cc: pjt@google.com
+Cc: umgwanakikbuti@gmail.com
+Cc: vincent.guittot@linaro.org
+Link: http://lkml.kernel.org/r/1459829551-21625-2-git-send-email-yuyang.du@intel.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ include/linux/sched.h | 16 +++++++++++++---
+ kernel/sched/fair.c   |  4 ----
+ kernel/sched/sched.h  | 15 ++++++++++-----
+ 3 files changed, 23 insertions(+), 12 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index d894f2d..7d779d7 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -937,9 +937,19 @@ enum cpu_idle_type {
+ };
+ 
+ /*
++ * Integer metrics need fixed point arithmetic, e.g., sched/fair
++ * has a few: load, load_avg, util_avg, freq, and capacity.
++ *
++ * We define a basic fixed point arithmetic range, and then formalize
++ * all these metrics based on that basic range.
++ */
++# define SCHED_FIXEDPOINT_SHIFT	10
++# define SCHED_FIXEDPOINT_SCALE	(1L << SCHED_FIXEDPOINT_SHIFT)
++
++/*
+  * Increase resolution of cpu_capacity calculations
+  */
+-#define SCHED_CAPACITY_SHIFT	10
++#define SCHED_CAPACITY_SHIFT	SCHED_FIXEDPOINT_SHIFT
+ #define SCHED_CAPACITY_SCALE	(1L << SCHED_CAPACITY_SHIFT)
+ 
+ /*
+@@ -1205,8 +1215,8 @@ struct load_weight {
+  * 1) load_avg factors frequency scaling into the amount of time that a
+  * sched_entity is runnable on a rq into its weight. For cfs_rq, it is the
+  * aggregated such weights of all runnable and blocked sched_entities.
+- * 2) util_avg factors frequency and cpu scaling into the amount of time
+- * that a sched_entity is running on a CPU, in the range [0..SCHED_LOAD_SCALE].
++ * 2) util_avg factors frequency and cpu capacity scaling into the amount of time
++ * that a sched_entity is running on a CPU, in the range [0..SCHED_CAPACITY_SCALE].
+  * For cfs_rq, it is the aggregated such times of all runnable and
+  * blocked sched_entities.
+  * The 64 bit load_sum can:
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 91395e1..76ca86e 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -2662,10 +2662,6 @@ static u32 __compute_runnable_contrib(u64 n)
+ 	return contrib + runnable_avg_yN_sum[n];
+ }
+ 
+-#if (SCHED_LOAD_SHIFT - SCHED_LOAD_RESOLUTION) != 10 || SCHED_CAPACITY_SHIFT != 10
+-#error "load tracking assumes 2^10 as unit"
+-#endif
+-
+ #define cap_scale(v, s) ((v)*(s) >> SCHED_CAPACITY_SHIFT)
+ 
+ /*
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 066a4c2..ad83361 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -56,18 +56,23 @@ static inline void cpu_load_update_active(struct rq *this_rq) { }
+  * increase coverage and consistency always enable it on 64bit platforms.
+  */
+ #ifdef CONFIG_64BIT
+-# define SCHED_LOAD_RESOLUTION	10
+-# define scale_load(w)		((w) << SCHED_LOAD_RESOLUTION)
+-# define scale_load_down(w)	((w) >> SCHED_LOAD_RESOLUTION)
++# define SCHED_LOAD_SHIFT	(SCHED_FIXEDPOINT_SHIFT + SCHED_FIXEDPOINT_SHIFT)
++# define scale_load(w)		((w) << SCHED_FIXEDPOINT_SHIFT)
++# define scale_load_down(w)	((w) >> SCHED_FIXEDPOINT_SHIFT)
+ #else
+-# define SCHED_LOAD_RESOLUTION	0
++# define SCHED_LOAD_SHIFT	(SCHED_FIXEDPOINT_SHIFT)
+ # define scale_load(w)		(w)
+ # define scale_load_down(w)	(w)
+ #endif
+ 
+-#define SCHED_LOAD_SHIFT	(10 + SCHED_LOAD_RESOLUTION)
+ #define SCHED_LOAD_SCALE	(1L << SCHED_LOAD_SHIFT)
+ 
++/*
++ * NICE_0's weight (visible to users) and its load (invisible to users) have
++ * independent ranges, but they should be well calibrated. We use scale_load()
++ * and scale_load_down(w) to convert between them, and the following must be true:
++ * scale_load(sched_prio_to_weight[20]) == NICE_0_LOAD
++ */
+ #define NICE_0_LOAD		SCHED_LOAD_SCALE
+ #define NICE_0_SHIFT		SCHED_LOAD_SHIFT
+ 
+-- 
+cgit v0.12
+
