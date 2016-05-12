@@ -1,0 +1,110 @@
+From 172895e6b5216eba3e0880460829a8baeefd55f3 Mon Sep 17 00:00:00 2001
+From: Yuyang Du <yuyang.du@intel.com>
+Date: Tue, 5 Apr 2016 12:12:27 +0800
+Subject: sched/fair: Rename SCHED_LOAD_SHIFT to NICE_0_LOAD_SHIFT and remove SCHED_LOAD_SCALE
+
+After cleaning up the sched metrics, there are two definitions that are
+ambiguous and confusing: SCHED_LOAD_SHIFT and SCHED_LOAD_SHIFT.
+
+Resolve this:
+
+ - Rename SCHED_LOAD_SHIFT to NICE_0_LOAD_SHIFT, which better reflects what
+   it is.
+
+ - Replace SCHED_LOAD_SCALE use with SCHED_CAPACITY_SCALE and remove SCHED_LOAD_SCALE.
+
+Suggested-by: Ben Segall <bsegall@google.com>
+Signed-off-by: Yuyang Du <yuyang.du@intel.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: dietmar.eggemann@arm.com
+Cc: lizefan@huawei.com
+Cc: morten.rasmussen@arm.com
+Cc: pjt@google.com
+Cc: umgwanakikbuti@gmail.com
+Cc: vincent.guittot@linaro.org
+Link: http://lkml.kernel.org/r/1459829551-21625-3-git-send-email-yuyang.du@intel.com
+[ Rewrote the changelog and fixed the build on 32-bit kernels. ]
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/fair.c  |  4 ++--
+ kernel/sched/sched.h | 22 +++++++++++-----------
+ 2 files changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 76ca86e..e148571 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -719,7 +719,7 @@ void post_init_entity_util_avg(struct sched_entity *se)
+ {
+ 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+ 	struct sched_avg *sa = &se->avg;
+-	long cap = (long)(scale_load_down(SCHED_LOAD_SCALE) - cfs_rq->avg.util_avg) / 2;
++	long cap = (long)(SCHED_CAPACITY_SCALE - cfs_rq->avg.util_avg) / 2;
+ 
+ 	if (cap > 0) {
+ 		if (cfs_rq->avg.util_avg != 0) {
+@@ -7010,7 +7010,7 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
+ 	if (busiest->group_type == group_overloaded &&
+ 	    local->group_type   == group_overloaded) {
+ 		load_above_capacity = busiest->sum_nr_running *
+-					SCHED_LOAD_SCALE;
++				      scale_load_down(NICE_0_LOAD);
+ 		if (load_above_capacity > busiest->group_capacity)
+ 			load_above_capacity -= busiest->group_capacity;
+ 		else
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index ad83361..d24e91b 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -56,25 +56,25 @@ static inline void cpu_load_update_active(struct rq *this_rq) { }
+  * increase coverage and consistency always enable it on 64bit platforms.
+  */
+ #ifdef CONFIG_64BIT
+-# define SCHED_LOAD_SHIFT	(SCHED_FIXEDPOINT_SHIFT + SCHED_FIXEDPOINT_SHIFT)
++# define NICE_0_LOAD_SHIFT	(SCHED_FIXEDPOINT_SHIFT + SCHED_FIXEDPOINT_SHIFT)
+ # define scale_load(w)		((w) << SCHED_FIXEDPOINT_SHIFT)
+ # define scale_load_down(w)	((w) >> SCHED_FIXEDPOINT_SHIFT)
+ #else
+-# define SCHED_LOAD_SHIFT	(SCHED_FIXEDPOINT_SHIFT)
++# define NICE_0_LOAD_SHIFT	(SCHED_FIXEDPOINT_SHIFT)
+ # define scale_load(w)		(w)
+ # define scale_load_down(w)	(w)
+ #endif
+ 
+-#define SCHED_LOAD_SCALE	(1L << SCHED_LOAD_SHIFT)
+-
+ /*
+- * NICE_0's weight (visible to users) and its load (invisible to users) have
+- * independent ranges, but they should be well calibrated. We use scale_load()
+- * and scale_load_down(w) to convert between them, and the following must be true:
+- * scale_load(sched_prio_to_weight[20]) == NICE_0_LOAD
++ * Task weight (visible to users) and its load (invisible to users) have
++ * independent resolution, but they should be well calibrated. We use
++ * scale_load() and scale_load_down(w) to convert between them. The
++ * following must be true:
++ *
++ *  scale_load(sched_prio_to_weight[USER_PRIO(NICE_TO_PRIO(0))]) == NICE_0_LOAD
++ *
+  */
+-#define NICE_0_LOAD		SCHED_LOAD_SCALE
+-#define NICE_0_SHIFT		SCHED_LOAD_SHIFT
++#define NICE_0_LOAD		(1L << NICE_0_LOAD_SHIFT)
+ 
+ /*
+  * Single value that decides SCHED_DEADLINE internal math precision.
+@@ -863,7 +863,7 @@ DECLARE_PER_CPU(struct sched_domain *, sd_asym);
+ struct sched_group_capacity {
+ 	atomic_t ref;
+ 	/*
+-	 * CPU capacity of this group, SCHED_LOAD_SCALE being max capacity
++	 * CPU capacity of this group, SCHED_CAPACITY_SCALE being max capacity
+ 	 * for a single CPU.
+ 	 */
+ 	unsigned int capacity;
+-- 
+cgit v0.12
+
