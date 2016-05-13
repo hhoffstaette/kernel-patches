@@ -1,0 +1,96 @@
+Return-Path: <root@tux>
+Received: from deliver ([unix socket])
+	 by tux (Cyrus 2.5.7) with LMTPA;
+	 Fri, 13 May 2016 02:00:01 +0200
+X-Sieve: CMU Sieve 2.4
+Path: news.gmane.org!not-for-mail
+From: Waiman Long <Waiman.Long@hpe.com>
+Newsgroups: gmane.linux.kernel
+Subject: [PATCH v3 3/4] locking/rwsem: Improve reader wakeup code
+Date: Thu, 12 May 2016 18:56:50 -0400
+Lines: 39
+Approved: news@gmane.org
+Message-ID: <1463093811-10684-4-git-send-email-Waiman.Long@hpe.com>
+References: <1463093811-10684-1-git-send-email-Waiman.Long@hpe.com>
+NNTP-Posting-Host: plane.gmane.org
+X-Trace: ger.gmane.org 1463093871 19593 80.91.229.3 (12 May 2016 22:57:51 GMT)
+X-Complaints-To: usenet@ger.gmane.org
+NNTP-Posting-Date: Thu, 12 May 2016 22:57:51 +0000 (UTC)
+Cc: linux-kernel@vger.kernel.org, Davidlohr Bueso <dave@stgolabs.net>,
+	Jason Low <jason.low2@hp.com>,
+	Dave Chinner <david@fromorbit.com>,
+	Peter Hurley <peter@hurleysoftware.com>,
+	Scott J Norton <scott.norton@hpe.com>,
+	Douglas Hatch <doug.hatch@hpe.com>,
+	Waiman Long <Waiman.Long@hpe.com>
+To: Peter Zijlstra <peterz@infradead.org>,
+	Ingo Molnar <mingo@redhat.com>
+Original-X-From: linux-kernel-owner@vger.kernel.org Fri May 13 00:57:40 2016
+Envelope-to: glk-linux-kernel-3@plane.gmane.org
+Original-Received: from vger.kernel.org ([209.132.180.67])
+	by plane.gmane.org with esmtp (Exim 4.69)
+	(envelope-from <linux-kernel-owner@vger.kernel.org>)
+	id 1b0zY0-0000sj-IT
+	for glk-linux-kernel-3@plane.gmane.org; Fri, 13 May 2016 00:57:36 +0200
+Original-Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+	id S1752943AbcELW5Q (ORCPT <rfc822;glk-linux-kernel-3@m.gmane.org>);
+	Thu, 12 May 2016 18:57:16 -0400
+Original-Received: from g2t4622.austin.hp.com ([15.73.212.79]:42951 "EHLO
+	g2t4622.austin.hp.com" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+	with ESMTP id S1752239AbcELW5N (ORCPT
+	<rfc822;linux-kernel@vger.kernel.org>);
+	Thu, 12 May 2016 18:57:13 -0400
+Original-Received: from g2t4688.austin.hpicorp.net (g2t4688.austin.hpicorp.net [15.94.10.174])
+	by g2t4622.austin.hp.com (Postfix) with ESMTP id 55B1861;
+	Thu, 12 May 2016 22:57:12 +0000 (UTC)
+Original-Received: from RHEL65.localdomain (longwa3.americas.hpqcorp.net [16.214.133.32])
+	by g2t4688.austin.hpicorp.net (Postfix) with ESMTP id 7294962;
+	Thu, 12 May 2016 22:57:11 +0000 (UTC)
+X-Mailer: git-send-email 1.7.1
+In-Reply-To: <1463093811-10684-1-git-send-email-Waiman.Long@hpe.com>
+Original-Sender: linux-kernel-owner@vger.kernel.org
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+Xref: news.gmane.org gmane.linux.kernel:2221056
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2221056>
+
+In __rwsem_do_wake(), the reader wakeup code will assume a writer
+has stolen the lock if the active reader/writer count is not 0.
+However, this is not as reliable an indicator as the original
+"< RWSEM_WAITING_BIAS" check. If another reader is present, the code
+will still break out and exit even if the writer is gone. This patch
+changes it to check the same "< RWSEM_WAITING_BIAS" condition to
+reduce the chance of false positive.
+
+Signed-off-by: Waiman Long <Waiman.Long@hpe.com>
+---
+ kernel/locking/rwsem-xadd.c |   11 ++++++++---
+ 1 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/locking/rwsem-xadd.c b/kernel/locking/rwsem-xadd.c
+index 22f7d58..6c08ad9 100644
+--- a/kernel/locking/rwsem-xadd.c
++++ b/kernel/locking/rwsem-xadd.c
+@@ -148,9 +148,14 @@ __rwsem_do_wake(struct rw_semaphore *sem, enum rwsem_wake_type wake_type)
+  try_reader_grant:
+ 		oldcount = rwsem_atomic_update(adjustment, sem) - adjustment;
+ 		if (unlikely(oldcount < RWSEM_WAITING_BIAS)) {
+-			/* A writer stole the lock. Undo our reader grant. */
+-			if (rwsem_atomic_update(-adjustment, sem) &
+-						RWSEM_ACTIVE_MASK)
++			/*
++			 * If the count is still less than RWSEM_WAITING_BIAS
++			 * after removing the adjustment, it is assumed that
++			 * a writer has stolen the lock. We have to undo our
++			 * reader grant.
++			 */
++			if (rwsem_atomic_update(-adjustment, sem)
++			    < RWSEM_WAITING_BIAS)
+ 				goto out;
+ 			/* Last active locker left. Retry waking readers. */
+ 			goto try_reader_grant;
+-- 
+1.7.1
+
+

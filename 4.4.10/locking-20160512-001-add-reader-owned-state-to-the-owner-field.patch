@@ -1,15 +1,59 @@
+Return-Path: <root@tux>
+Received: from deliver ([unix socket])
+	 by tux (Cyrus 2.5.7) with LMTPA;
+	 Fri, 13 May 2016 02:00:01 +0200
+X-Sieve: CMU Sieve 2.4
+Path: news.gmane.org!not-for-mail
 From: Waiman Long <Waiman.Long@hpe.com>
-Subject: [PATCH v2] locking/rwsem: Add reader-owned state to the owner field
-Date: Fri,  6 May 2016 20:20:24 -0400
+Newsgroups: gmane.linux.kernel
+Subject: [PATCH v3 1/4] locking/rwsem: Add reader-owned state to the owner field
+Date: Thu, 12 May 2016 18:56:48 -0400
+Lines: 240
+Approved: news@gmane.org
+Message-ID: <1463093811-10684-2-git-send-email-Waiman.Long@hpe.com>
+References: <1463093811-10684-1-git-send-email-Waiman.Long@hpe.com>
+NNTP-Posting-Host: plane.gmane.org
+X-Trace: ger.gmane.org 1463093884 19768 80.91.229.3 (12 May 2016 22:58:04 GMT)
+X-Complaints-To: usenet@ger.gmane.org
+NNTP-Posting-Date: Thu, 12 May 2016 22:58:04 +0000 (UTC)
 Cc: linux-kernel@vger.kernel.org, Davidlohr Bueso <dave@stgolabs.net>,
 	Jason Low <jason.low2@hp.com>,
 	Dave Chinner <david@fromorbit.com>,
+	Peter Hurley <peter@hurleysoftware.com>,
 	Scott J Norton <scott.norton@hpe.com>,
 	Douglas Hatch <doug.hatch@hpe.com>,
 	Waiman Long <Waiman.Long@hpe.com>
 To: Peter Zijlstra <peterz@infradead.org>,
 	Ingo Molnar <mingo@redhat.com>
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2216743>
+Original-X-From: linux-kernel-owner@vger.kernel.org Fri May 13 00:57:53 2016
+Envelope-to: glk-linux-kernel-3@plane.gmane.org
+Original-Received: from vger.kernel.org ([209.132.180.67])
+	by plane.gmane.org with esmtp (Exim 4.69)
+	(envelope-from <linux-kernel-owner@vger.kernel.org>)
+	id 1b0zYG-0001I5-UC
+	for glk-linux-kernel-3@plane.gmane.org; Fri, 13 May 2016 00:57:53 +0200
+Original-Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+	id S1752748AbcELW5O (ORCPT <rfc822;glk-linux-kernel-3@m.gmane.org>);
+	Thu, 12 May 2016 18:57:14 -0400
+Original-Received: from g1t6213.austin.hp.com ([15.73.96.121]:51197 "EHLO
+	g1t6213.austin.hp.com" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+	with ESMTP id S1751729AbcELW5M (ORCPT
+	<rfc822;linux-kernel@vger.kernel.org>);
+	Thu, 12 May 2016 18:57:12 -0400
+Original-Received: from g2t4688.austin.hpicorp.net (g2t4688.austin.hpicorp.net [15.94.10.174])
+	by g1t6213.austin.hp.com (Postfix) with ESMTP id 6FD91DA;
+	Thu, 12 May 2016 22:57:10 +0000 (UTC)
+Original-Received: from RHEL65.localdomain (longwa3.americas.hpqcorp.net [16.214.133.32])
+	by g2t4688.austin.hpicorp.net (Postfix) with ESMTP id 751B562;
+	Thu, 12 May 2016 22:57:09 +0000 (UTC)
+X-Mailer: git-send-email 1.7.1
+In-Reply-To: <1463093811-10684-1-git-send-email-Waiman.Long@hpe.com>
+Original-Sender: linux-kernel-owner@vger.kernel.org
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+Xref: news.gmane.org gmane.linux.kernel:2221058
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2221058>
 
 Currently, it is not possible to determine for sure if a reader
 owns a rwsem by looking at the content of the rwsem data structure.
@@ -22,9 +66,10 @@ address the following 2 issues in the rwsem optimistic spinning code:
     the lock or the owning writer hasn't set the owner field yet.
     In the latter case, we miss the chance to do optimistic spinning.
 
- 2) While a writer is spinning and a reader takes the lock, the writer
-    will continue to spin in the main rwsem_optimistic_spin() loop as
-    the owner is NULL.
+ 2) While a writer is waiting in the OSQ and a reader takes the lock,
+    the writer will continue to spin when out of the OSQ in the main
+    rwsem_optimistic_spin() loop as the owner field is NULL wasting
+    CPU cycles if some of readers are sleeping.
 
 Adding the new state will allow optimistic spinning to go forward as
 long as the owner field is not RWSEM_READER_OWNED and the owner is
@@ -52,20 +97,16 @@ The actual CPU cycles spend in rwsem_down_write_failed() dropped from
 The xfstests was also run and no regression was observed.
 
 Signed-off-by: Waiman Long <Waiman.Long@hpe.com>
+Acked-by: Jason Low <jason.low2@hp.com>
+Acked-by: Davidlohr Bueso <dave@stgolabs.net>
 ---
- v1->v2:
-  - Add rwsem_is_reader_owned() helper & rename rwsem_reader_owned()
-    to rwsem_set_reader_owned().
-  - Add more comments to clarify the purpose of some of the code
-    changes.
-
- kernel/locking/rwsem-xadd.c |   39 ++++++++++++++++++---------------------
+ kernel/locking/rwsem-xadd.c |   41 ++++++++++++++++++++++-------------------
  kernel/locking/rwsem.c      |    8 ++++++--
  kernel/locking/rwsem.h      |   41 +++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 65 insertions(+), 23 deletions(-)
+ 3 files changed, 69 insertions(+), 21 deletions(-)
 
 diff --git a/kernel/locking/rwsem-xadd.c b/kernel/locking/rwsem-xadd.c
-index df4dcb8..620a286 100644
+index 09e30c6..7ccab5c 100644
 --- a/kernel/locking/rwsem-xadd.c
 +++ b/kernel/locking/rwsem-xadd.c
 @@ -155,6 +155,12 @@ __rwsem_do_wake(struct rw_semaphore *sem, enum rwsem_wake_type wake_type)
@@ -87,7 +128,7 @@ index df4dcb8..620a286 100644
  	owner = READ_ONCE(sem->owner);
 -	if (!owner) {
 -		long count = READ_ONCE(sem->count);
-+	if (!rwsem_is_writer_owned(owner)) {
++	if (!rwsem_owner_is_writer(owner)) {
  		/*
 -		 * If sem->owner is not set, yet we have just recently entered the
 -		 * slowpath with the lock being active, then there is a possibility
@@ -97,7 +138,7 @@ index df4dcb8..620a286 100644
  		 */
 -		if (count & RWSEM_ACTIVE_MASK)
 -			ret = false;
-+		ret = !rwsem_is_reader_owned(owner);
++		ret = !rwsem_owner_is_reader(owner);
  		goto done;
  	}
  
@@ -126,34 +167,28 @@ index df4dcb8..620a286 100644
  	 */
 -	count = READ_ONCE(sem->count);
 -	return (count == 0 || count == RWSEM_WAITING_BIAS);
-+	return !rwsem_is_reader_owned(READ_ONCE(sem->owner));
++	return !rwsem_owner_is_reader(sem->owner);
  }
  
  static bool rwsem_optimistic_spin(struct rw_semaphore *sem)
-@@ -378,7 +372,8 @@ static bool rwsem_optimistic_spin(struct rw_semaphore *sem)
+@@ -378,7 +372,16 @@ static bool rwsem_optimistic_spin(struct rw_semaphore *sem)
  
  	while (true) {
  		owner = READ_ONCE(sem->owner);
 -		if (owner && !rwsem_spin_on_owner(sem, owner))
-+		if (rwsem_is_writer_owned(owner) &&
-+		   !rwsem_spin_on_owner(sem, owner))
++		/*
++		 * Don't spin if
++		 * 1) the owner is a reader as we we can't determine if the
++		 *    reader is actively running or not.
++		 * 2) The rwsem_spin_on_owner() returns false which means
++		 *    the owner isn't running.
++		 */
++		if (rwsem_owner_is_reader(owner) ||
++		   (rwsem_owner_is_writer(owner) &&
++		   !rwsem_spin_on_owner(sem, owner)))
  			break;
  
  		/* wait_lock will be acquired if write_lock is obtained */
-@@ -391,9 +386,11 @@ static bool rwsem_optimistic_spin(struct rw_semaphore *sem)
- 		 * When there's no owner, we might have preempted between the
- 		 * owner acquiring the lock and setting the owner field. If
- 		 * we're an RT task that will live-lock because we won't let
--		 * the owner complete.
-+		 * the owner complete. We also quit if the lock is owned by
-+		 * readers.
- 		 */
--		if (!owner && (need_resched() || rt_task(current)))
-+		if (rwsem_is_reader_owned(owner) ||
-+		   (!owner && (need_resched() || rt_task(current))))
- 			break;
- 
- 		/*
 diff --git a/kernel/locking/rwsem.c b/kernel/locking/rwsem.c
 index c817216..5838f56 100644
 --- a/kernel/locking/rwsem.c
@@ -178,7 +213,7 @@ index c817216..5838f56 100644
  	return ret;
  }
  
-@@ -105,7 +105,7 @@ void downgrade_write(struct rw_semaphore *sem)
+@@ -124,7 +127,7 @@ void downgrade_write(struct rw_semaphore *sem)
  	 * lockdep: a downgraded write will live on as a write
  	 * dependency.
  	 */
@@ -187,7 +222,7 @@ index c817216..5838f56 100644
  	__downgrade_write(sem);
  }
  
-@@ -119,6 +119,7 @@ void down_read_nested(struct rw_semaphore *sem, int subclass)
+@@ -138,6 +141,7 @@ void down_read_nested(struct rw_semaphore *sem, int subclass)
  	rwsem_acquire_read(&sem->dep_map, subclass, 0, _RET_IP_);
  
  	LOCK_CONTENDED(sem, __down_read_trylock, __down_read);
@@ -196,7 +231,7 @@ index c817216..5838f56 100644
  
  EXPORT_SYMBOL(down_read_nested);
 diff --git a/kernel/locking/rwsem.h b/kernel/locking/rwsem.h
-index 870ed9a..d7fea18 100644
+index 870ed9a..8f43ba2 100644
 --- a/kernel/locking/rwsem.h
 +++ b/kernel/locking/rwsem.h
 @@ -1,3 +1,20 @@
@@ -215,7 +250,7 @@ index 870ed9a..d7fea18 100644
 + *  3) Other non-zero value
 + *     - a writer owns the lock
 + */
-+#define RWSEM_READER_OWNED	1UL
++#define RWSEM_READER_OWNED	((struct task_struct *)1UL)
 +
  #ifdef CONFIG_RWSEM_SPIN_ON_OWNER
  static inline void rwsem_set_owner(struct rw_semaphore *sem)
@@ -231,18 +266,18 @@ index 870ed9a..d7fea18 100644
 +	 * do a write to the rwsem cacheline when it is really necessary
 +	 * to minimize cacheline contention.
 +	 */
-+	if (sem->owner != (struct task_struct *)RWSEM_READER_OWNED)
-+		sem->owner = (struct task_struct *)RWSEM_READER_OWNED;
++	if (sem->owner != RWSEM_READER_OWNED)
++		sem->owner = RWSEM_READER_OWNED;
 +}
 +
-+static inline bool rwsem_is_writer_owned(struct task_struct *owner)
++static inline bool rwsem_owner_is_writer(struct task_struct *owner)
 +{
-+	return (unsigned long)owner > RWSEM_READER_OWNED;
++	return owner && owner != RWSEM_READER_OWNED;
 +}
 +
-+static inline bool rwsem_is_reader_owned(struct task_struct *owner)
++static inline bool rwsem_owner_is_reader(struct task_struct *owner)
 +{
-+	return owner == (struct task_struct *)RWSEM_READER_OWNED;
++	return owner == RWSEM_READER_OWNED;
 +}
  #else
  static inline void rwsem_set_owner(struct rw_semaphore *sem)
@@ -258,3 +293,5 @@ index 870ed9a..d7fea18 100644
  #endif
 -- 
 1.7.1
+
+
