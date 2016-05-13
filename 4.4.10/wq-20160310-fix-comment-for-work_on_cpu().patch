@@ -1,0 +1,33 @@
+From 22aceb317678057dced5f1d6e3ac15acdb863e7b Mon Sep 17 00:00:00 2001
+From: Anna-Maria Gleixner <anna-maria@linutronix.de>
+Date: Thu, 10 Mar 2016 12:07:38 +0100
+Subject: workqueue: Fix comment for work_on_cpu()
+
+Function is processed in thread context, not in user context.
+
+Cc: Tejun Heo <tj@kernel.org>
+Cc: Lai Jiangshan <jiangshanlai@gmail.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Signed-off-by: Anna-Maria Gleixner <anna-maria@linutronix.de>
+Signed-off-by: Tejun Heo <tj@kernel.org>
+---
+ kernel/workqueue.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/workqueue.c b/kernel/workqueue.c
+index 16f4986..c3692d9 100644
+--- a/kernel/workqueue.c
++++ b/kernel/workqueue.c
+@@ -4695,7 +4695,7 @@ static void work_for_cpu_fn(struct work_struct *work)
+ }
+ 
+ /**
+- * work_on_cpu - run a function in user context on a particular cpu
++ * work_on_cpu - run a function in thread context on a particular cpu
+  * @cpu: the cpu to run on
+  * @fn: the function to run
+  * @arg: the function arg
+-- 
+cgit v0.12
+
