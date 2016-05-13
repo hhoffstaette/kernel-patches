@@ -1,0 +1,15 @@
+
+Fix BFS for change in 9b7f6597f0
+("wq-20160302-get-rid-of-'cpu'-argument-in-wq_worker_sleeping()")
+
+--- a/kernel/sched/bfs.c~	2016-05-13 13:24:52.000000000 +0200
++++ b/kernel/sched/bfs.c	2016-05-13 14:00:53.037404332 +0200
+@@ -3547,7 +3547,7 @@ static void notrace __sched __schedule(b
+ 			if (prev->flags & PF_WQ_WORKER) {
+ 				struct task_struct *to_wakeup;
+ 
+-				to_wakeup = wq_worker_sleeping(prev, cpu);
++				to_wakeup = wq_worker_sleeping(prev);
+ 				if (to_wakeup) {
+ 					/* This shouldn't happen, but does */
+ 					if (unlikely(to_wakeup == prev))

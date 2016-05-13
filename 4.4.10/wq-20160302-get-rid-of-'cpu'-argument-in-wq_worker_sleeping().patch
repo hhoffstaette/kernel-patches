@@ -1,0 +1,78 @@
+From 9b7f6597f013d449d6700d11820faf91ee0ec985 Mon Sep 17 00:00:00 2001
+From: Alexander Gordeev <agordeev@redhat.com>
+Date: Wed, 2 Mar 2016 12:53:31 +0100
+Subject: sched/core: Get rid of 'cpu' argument in wq_worker_sleeping()
+
+Given that wq_worker_sleeping() could only be called for a
+CPU it is running on, we do not need passing a CPU ID as an
+argument.
+
+Suggested-by: Oleg Nesterov <oleg@redhat.com>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Signed-off-by: Alexander Gordeev <agordeev@redhat.com>
+Signed-off-by: Tejun Heo <tj@kernel.org>
+---
+ kernel/sched/core.c         | 2 +-
+ kernel/workqueue.c          | 5 ++---
+ kernel/workqueue_internal.h | 2 +-
+ 3 files changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 63d3a24..81ff7f2 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -3257,7 +3257,7 @@ static void __sched notrace __schedule(bool preempt)
+ 			if (prev->flags & PF_WQ_WORKER) {
+ 				struct task_struct *to_wakeup;
+ 
+-				to_wakeup = wq_worker_sleeping(prev, cpu);
++				to_wakeup = wq_worker_sleeping(prev);
+ 				if (to_wakeup)
+ 					try_to_wake_up_local(to_wakeup);
+ 			}
+diff --git a/kernel/workqueue.c b/kernel/workqueue.c
+index 3a1c99b..16f4986 100644
+--- a/kernel/workqueue.c
++++ b/kernel/workqueue.c
+@@ -858,7 +858,6 @@ void wq_worker_waking_up(struct task_struct *task, int cpu)
+ /**
+  * wq_worker_sleeping - a worker is going to sleep
+  * @task: task going to sleep
+- * @cpu: CPU in question, must be the current CPU number
+  *
+  * This function is called during schedule() when a busy worker is
+  * going to sleep.  Worker on the same cpu can be woken up by
+@@ -870,7 +869,7 @@ void wq_worker_waking_up(struct task_struct *task, int cpu)
+  * Return:
+  * Worker task on @cpu to wake up, %NULL if none.
+  */
+-struct task_struct *wq_worker_sleeping(struct task_struct *task, int cpu)
++struct task_struct *wq_worker_sleeping(struct task_struct *task)
+ {
+ 	struct worker *worker = kthread_data(task), *to_wakeup = NULL;
+ 	struct worker_pool *pool;
+@@ -886,7 +885,7 @@ struct task_struct *wq_worker_sleeping(struct task_struct *task, int cpu)
+ 	pool = worker->pool;
+ 
+ 	/* this can only happen on the local cpu */
+-	if (WARN_ON_ONCE(cpu != raw_smp_processor_id() || pool->cpu != cpu))
++	if (WARN_ON_ONCE(pool->cpu != raw_smp_processor_id()))
+ 		return NULL;
+ 
+ 	/*
+diff --git a/kernel/workqueue_internal.h b/kernel/workqueue_internal.h
+index 4521587..8635417 100644
+--- a/kernel/workqueue_internal.h
++++ b/kernel/workqueue_internal.h
+@@ -69,6 +69,6 @@ static inline struct worker *current_wq_worker(void)
+  * sched/core.c and workqueue.c.
+  */
+ void wq_worker_waking_up(struct task_struct *task, int cpu);
+-struct task_struct *wq_worker_sleeping(struct task_struct *task, int cpu);
++struct task_struct *wq_worker_sleeping(struct task_struct *task);
+ 
+ #endif /* _KERNEL_WORKQUEUE_INTERNAL_H */
+-- 
+cgit v0.12
+
