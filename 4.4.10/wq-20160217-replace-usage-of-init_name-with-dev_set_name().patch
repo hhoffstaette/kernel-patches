@@ -1,0 +1,33 @@
+From 23217b443b4b0439c8b55d3be0482d3cd7fbc5ac Mon Sep 17 00:00:00 2001
+From: Lars-Peter Clausen <lars@metafoo.de>
+Date: Wed, 17 Feb 2016 21:04:41 +0100
+Subject: workqueue: Replace usage of init_name with dev_set_name()
+
+The init_name property of the device struct is sort of a hack and should
+only be used for statically allocated devices. Since the device is
+dynamically allocated here it is safe to use the proper way to set a
+devices name by calling dev_set_name().
+
+Signed-off-by: Lars-Peter Clausen <lars@metafoo.de>
+Signed-off-by: Tejun Heo <tj@kernel.org>
+---
+ kernel/workqueue.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/workqueue.c b/kernel/workqueue.c
+index 7ff5dc7..3a1c99b 100644
+--- a/kernel/workqueue.c
++++ b/kernel/workqueue.c
+@@ -5222,8 +5222,8 @@ int workqueue_sysfs_register(struct workqueue_struct *wq)
+ 
+ 	wq_dev->wq = wq;
+ 	wq_dev->dev.bus = &wq_subsys;
+-	wq_dev->dev.init_name = wq->name;
+ 	wq_dev->dev.release = wq_device_release;
++	dev_set_name(&wq_dev->dev, "%s", wq->name);
+ 
+ 	/*
+ 	 * unbound_attrs are created separately.  Suppress uevent until
+-- 
+cgit v0.12
+
