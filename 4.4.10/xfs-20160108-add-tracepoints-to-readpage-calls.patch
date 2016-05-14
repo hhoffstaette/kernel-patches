@@ -1,0 +1,78 @@
+From 121e213eabad66c0453904d76e3eda193958acbd Mon Sep 17 00:00:00 2001
+From: Dave Chinner <dchinner@redhat.com>
+Date: Fri, 8 Jan 2016 11:28:35 +1100
+Subject: xfs: add tracepoints to readpage calls
+
+This allows us to see page cache driven readahead in action as it
+passes through XFS. This helps to understand buffered read
+throughput problems such as readahead IO IO sizes being too small
+for the underlying device to reach max throughput.
+
+Signed-off-by: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/xfs_aops.c  |  2 ++
+ fs/xfs/xfs_trace.h | 26 ++++++++++++++++++++++++++
+ 2 files changed, 28 insertions(+)
+
+diff --git a/fs/xfs/xfs_aops.c b/fs/xfs/xfs_aops.c
+index 29e7e5d..379c089 100644
+--- a/fs/xfs/xfs_aops.c
++++ b/fs/xfs/xfs_aops.c
+@@ -1917,6 +1917,7 @@ xfs_vm_readpage(
+ 	struct file		*unused,
+ 	struct page		*page)
+ {
++	trace_xfs_vm_readpage(page->mapping->host, 1);
+ 	return mpage_readpage(page, xfs_get_blocks);
+ }
+ 
+@@ -1927,6 +1928,7 @@ xfs_vm_readpages(
+ 	struct list_head	*pages,
+ 	unsigned		nr_pages)
+ {
++	trace_xfs_vm_readpages(mapping->host, nr_pages);
+ 	return mpage_readpages(mapping, pages, nr_pages, xfs_get_blocks);
+ }
+ 
+diff --git a/fs/xfs/xfs_trace.h b/fs/xfs/xfs_trace.h
+index 877079eb..391d797 100644
+--- a/fs/xfs/xfs_trace.h
++++ b/fs/xfs/xfs_trace.h
+@@ -1222,6 +1222,32 @@ DEFINE_PAGE_EVENT(xfs_writepage);
+ DEFINE_PAGE_EVENT(xfs_releasepage);
+ DEFINE_PAGE_EVENT(xfs_invalidatepage);
+ 
++DECLARE_EVENT_CLASS(xfs_readpage_class,
++	TP_PROTO(struct inode *inode, int nr_pages),
++	TP_ARGS(inode, nr_pages),
++	TP_STRUCT__entry(
++		__field(dev_t, dev)
++		__field(xfs_ino_t, ino)
++		__field(int, nr_pages)
++	),
++	TP_fast_assign(
++		__entry->dev = inode->i_sb->s_dev;
++		__entry->ino = inode->i_ino;
++		__entry->nr_pages = nr_pages;
++	),
++	TP_printk("dev %d:%d ino 0x%llx nr_pages %d",
++		  MAJOR(__entry->dev), MINOR(__entry->dev),
++		  __entry->ino,
++		  __entry->nr_pages)
++)
++
++#define DEFINE_READPAGE_EVENT(name)		\
++DEFINE_EVENT(xfs_readpage_class, name,	\
++	TP_PROTO(struct inode *inode, int nr_pages), \
++	TP_ARGS(inode, nr_pages))
++DEFINE_READPAGE_EVENT(xfs_vm_readpage);
++DEFINE_READPAGE_EVENT(xfs_vm_readpages);
++
+ DECLARE_EVENT_CLASS(xfs_imap_class,
+ 	TP_PROTO(struct xfs_inode *ip, xfs_off_t offset, ssize_t count,
+ 		 int type, struct xfs_bmbt_irec *irec),
+-- 
+cgit v0.12
+
