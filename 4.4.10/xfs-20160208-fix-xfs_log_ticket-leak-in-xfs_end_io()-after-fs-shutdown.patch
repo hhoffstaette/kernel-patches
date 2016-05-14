@@ -1,0 +1,54 @@
+From af055e37a91d215d7174d0b84c86795ca81086a7 Mon Sep 17 00:00:00 2001
+From: Brian Foster <bfoster@redhat.com>
+Date: Mon, 8 Feb 2016 15:00:02 +1100
+Subject: xfs: fix xfs_log_ticket leak in xfs_end_io() after fs shutdown
+
+If the filesystem has shut down, xfs_end_io() currently sets an
+error on the ioend and proceeds to ioend destruction. The ioend
+might contain a truncate transaction if the I/O extended the size of
+the file. This transaction is only cleaned up in
+xfs_setfilesize_ioend(), however, which is skipped in this case.
+This results in an xfs_log_ticket leak message when the associate
+cache slab is destroyed (e.g., on rmmod).
+
+This was originally reproduced by xfs/141 on a distro kernel. The
+problem is reproducible on an upstream kernel, but not easily
+detected in current upstream if the xfs_log_ticket cache happens to
+be merged with another cache. This can be reproduced more
+deterministically with the 'slab_nomerge' kernel boot option.
+
+Update xfs_end_io() to proceed with normal end I/O processing after
+an error is set on an ioend due to fs shutdown. The I/O type-based
+processing is already designed to handle an I/O error and ensure
+that the ioend is cleaned up correctly.
+
+Signed-off-by: Brian Foster <bfoster@redhat.com>
+Reviewed-by: Dave Chinner <dchinner@redhat.com>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/xfs_aops.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/fs/xfs/xfs_aops.c b/fs/xfs/xfs_aops.c
+index 4a13f53..0c8dace 100644
+--- a/fs/xfs/xfs_aops.c
++++ b/fs/xfs/xfs_aops.c
+@@ -214,10 +214,12 @@ xfs_end_io(
+ 	struct xfs_inode *ip = XFS_I(ioend->io_inode);
+ 	int		error = 0;
+ 
+-	if (XFS_FORCED_SHUTDOWN(ip->i_mount)) {
++	/*
++	 * Set an error if the mount has shut down and proceed with end I/O
++	 * processing so it can perform whatever cleanups are necessary.
++	 */
++	if (XFS_FORCED_SHUTDOWN(ip->i_mount))
+ 		ioend->io_error = -EIO;
+-		goto done;
+-	}
+ 
+ 	/*
+ 	 * For unwritten extents we need to issue transactions to convert a
+-- 
+cgit v0.12
+
