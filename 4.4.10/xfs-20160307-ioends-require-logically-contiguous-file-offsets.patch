@@ -1,0 +1,33 @@
+From 0df61da8ac5b7acb1db6cee142822ebe4724c739 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Mon, 7 Mar 2016 09:32:14 +1100
+Subject: xfs: ioends require logically contiguous file offsets
+
+We need to create a new ioend if the current writepage call isn't
+logically contiguous with the range contained in the previous ioend.
+Hopefully writepage gets called in order of increasing file offset.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Dave Chinner <dchinner@redhat.com>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/xfs_aops.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_aops.c b/fs/xfs/xfs_aops.c
+index 46dc921..b125f90 100644
+--- a/fs/xfs/xfs_aops.c
++++ b/fs/xfs/xfs_aops.c
+@@ -520,7 +520,8 @@ xfs_add_to_ioend(
+ 	struct list_head	*iolist)
+ {
+ 	if (!wpc->ioend || wpc->io_type != wpc->ioend->io_type ||
+-	    bh->b_blocknr != wpc->last_block + 1) {
++	    bh->b_blocknr != wpc->last_block + 1 ||
++	    offset != wpc->ioend->io_offset + wpc->ioend->io_size) {
+ 		struct xfs_ioend	*new;
+ 
+ 		if (wpc->ioend)
+-- 
+cgit v0.12
+
