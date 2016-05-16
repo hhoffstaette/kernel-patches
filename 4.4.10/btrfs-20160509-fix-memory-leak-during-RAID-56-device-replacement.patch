@@ -1,0 +1,26 @@
+From: Scott Talbert <scott.talbert@hgst.com>
+Subject: [PATCH] btrfs: fix memory leak during RAID 5/6 device replacement
+Date: Mon, 9 May 2016 09:14:28 -0400
+To: linux-btrfs@vger.kernel.org
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/56116>
+
+A 'struct bio' is allocated in scrub_missing_raid56_pages(), but it was never
+freed anywhere.
+
+Signed-off-by: Scott Talbert <scott.talbert@hgst.com>
+---
+ fs/btrfs/scrub.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index 82bedf9..607cc6e 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -1815,6 +1815,8 @@ static void scrub_missing_raid56_end_io(struct bio *bio)
+ 	if (bio->bi_error)
+ 		sblock->no_io_error_seen = 0;
+ 
++	bio_put(bio);
++
+ 	btrfs_queue_work(fs_info->scrub_workers, &sblock->work);
+ }
