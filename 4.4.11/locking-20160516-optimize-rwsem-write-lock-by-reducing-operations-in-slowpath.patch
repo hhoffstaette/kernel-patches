@@ -1,11 +1,12 @@
 From: Jason Low <jason.low2@hp.com>
-Subject: [PATCH] locking/rwsem: Optimize write lock slowpath
-Date: Mon, 09 May 2016 12:16:37 -0700
-Cc: linux-kernel@vger.kernel.org, Davidlohr Bueso <dave@stgolabs.net>,
-	Scott J Norton <scott.norton@hpe.com>, Waiman Long <Waiman.Long@hpe.com>,
-	peter@hurleysoftware.com, Jason Low <jason.low2@hpe.com>
-To: Peter Zijlstra <peterz@infradead.org>, Ingo Molnar <mingo@redhat.com>
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2217817>
+Subject: [PATCH v2] locking/rwsem: Optimize write lock by reducing operations in slowpath
+Date: Mon, 16 May 2016 13:10:13 -0700
+Cc: paulmck@linux.vnet.ibm.com, Waiman Long <Waiman.Long@hpe.com>,
+	terry.rudd@hpe.com, Ingo Molnar <mingo@redhat.com>,
+	linux-kernel@vger.kernel.org, Davidlohr Bueso <dave@stgolabs.net>,
+	Jason Low <jason.low2@hpe.com>, Peter Hurley <peter@hurleysoftware.com>
+To: Peter Zijlstra <peterz@infradead.org>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2222432>
 
 When acquiring the rwsem write lock in the slowpath, we first try
 to set count to RWSEM_WAITING_BIAS. When that is successful,
@@ -19,15 +20,25 @@ operation when acquiring the write lock and reduce unnecessary
 cacheline contention.
 
 Signed-off-by: Jason Low <jason.low2@hp.com>
+Acked-by: Waiman Long<Waiman.Long@hpe.com>
+Acked-by: Davidlohr Bueso <dave@stgolabs.net>
 ---
- kernel/locking/rwsem-xadd.c | 20 +++++++++++++-------
- 1 file changed, 13 insertions(+), 7 deletions(-)
+ kernel/locking/rwsem-xadd.c | 25 ++++++++++++++++++-------
+ 1 file changed, 18 insertions(+), 7 deletions(-)
 
 diff --git a/kernel/locking/rwsem-xadd.c b/kernel/locking/rwsem-xadd.c
-index df4dcb8..23c33e6 100644
+index df4dcb8..956f088 100644
 --- a/kernel/locking/rwsem-xadd.c
 +++ b/kernel/locking/rwsem-xadd.c
-@@ -264,14 +264,20 @@ EXPORT_SYMBOL(rwsem_down_read_failed);
+@@ -255,17 +255,28 @@ struct rw_semaphore __sched *rwsem_down_read_failed(struct rw_semaphore *sem)
+ }
+ EXPORT_SYMBOL(rwsem_down_read_failed);
+ 
++/*
++ * This function must be called with the sem->wait_lock held to prevent
++ * race conditions between checking the rwsem wait list and setting the
++ * sem->count accordingly.
++ */
  static inline bool rwsem_try_write_lock(long count, struct rw_semaphore *sem)
  {
  	/*
@@ -55,3 +66,4 @@ index df4dcb8..23c33e6 100644
  		rwsem_set_owner(sem);
  		return true;
  	}
+
