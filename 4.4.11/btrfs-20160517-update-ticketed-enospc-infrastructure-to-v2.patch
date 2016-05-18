@@ -1,0 +1,58 @@
+From:	Josef Bacik <jbacik@fb.com>
+To:	<linux-btrfs@vger.kernel.org>
+Subject: [PATCH V2] Btrfs: introduce ticketed enospc infrastructure
+Date:	Tue, 17 May 2016 13:30:55 -0400
+
+[HH: only the diff to v1]
+
+V1->V2:
+-fixed a check in space_info_add_old_bytes where we didn't take into account
+ bytes_may_used for the space used.
+-don't count ticket->bytes when checking overcommit.
+
+--- a/fs/btrfs/extent-tree.c	2016-05-18 14:55:49.202018172 +0200
++++ b/fs/btrfs/extent-tree.c	2016-05-18 15:02:14.688487125 +0200
+@@ -5257,13 +5257,35 @@
+ {
+ 	struct reserve_ticket *ticket;
+ 	struct list_head *head;
++	u64 used;
++	enum btrfs_reserve_flush_enum flush = BTRFS_RESERVE_NO_FLUSH;
++	bool check_overcommit = false;
+ 
+ 	spin_lock(&space_info->lock);
+ 	head = &space_info->priority_tickets;
++
++	/*
++	 * If we are over our limit then we need to check and see if we can
++	 * overcommit, and if we can't then we just need to free up our space
++	 * and not satisfy any requests.
++	 */
++	used = space_info->bytes_used + space_info->bytes_reserved +
++		space_info->bytes_pinned + space_info->bytes_readonly +
++		space_info->bytes_may_use;
++	if (used - num_bytes >= space_info->total_bytes)
++		check_overcommit = true;
+ again:
+ 	while (!list_empty(head) && num_bytes) {
+ 		ticket = list_first_entry(head, struct reserve_ticket,
+ 					  list);
++		/*
++		 * We use 0 bytes because this space is already reserved, so
++		 * adding the ticket space would be a double count.
++		 */
++		if (check_overcommit &&
++		    !can_overcommit(fs_info->extent_root, space_info, 0,
++				    flush))
++			break;
+ 		if (num_bytes >= ticket->bytes) {
+ 			list_del_init(&ticket->list);
+ 			num_bytes -= ticket->bytes;
+@@ -5277,6 +5299,7 @@
+ 
+ 	if (num_bytes && head == &space_info->priority_tickets) {
+ 		head = &space_info->tickets;
++		flush = BTRFS_RESERVE_FLUSH_ALL;
+ 		goto again;
+ 	}
+ 	space_info->bytes_may_use -= num_bytes;
