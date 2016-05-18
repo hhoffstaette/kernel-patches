@@ -33,7 +33,7 @@ index c278f5a..007814f 100644
  		smp_mb();
  		waiter->task = NULL;
 -		wake_up_process(tsk);
-+		if (tsk != current)
++		if (likely(tsk != current))
 +			wake_up_process(tsk);
  		put_task_struct(tsk);
  	} while (--loop);
