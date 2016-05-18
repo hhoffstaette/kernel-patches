@@ -1731,7 +1731,7 @@ new file mode 100644
 index 000000000000..c8a12795416b
 --- /dev/null
 +++ b/include/linux/wbt.h
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,96 @@
 +#ifndef WB_THROTTLE_H
 +#define WB_THROTTLE_H
 +
@@ -1822,6 +1822,7 @@ index 000000000000..c8a12795416b
 +void wbt_update_limits(struct rq_wb *);
 +void wbt_requeue(struct rq_wb *, struct wb_issue_stat *);
 +void wbt_issue(struct rq_wb *, struct wb_issue_stat *);
++void wbt_disable(struct rq_wb *);
 +
 +void wbt_set_queue_depth(struct rq_wb *, unsigned int);
 +void wbt_set_write_cache(struct rq_wb *, bool);
@@ -2005,7 +2006,7 @@ new file mode 100644
 index 000000000000..650da911f24f
 --- /dev/null
 +++ b/lib/wbt.c
-@@ -0,0 +1,524 @@
+@@ -0,0 +1,532 @@
 +/*
 + * buffered writeback throttling. losely based on CoDel. We can't drop
 + * packets for IO scheduling, so the logic is something like this:
@@ -2499,6 +2500,14 @@ index 000000000000..650da911f24f
 +	if (rwb)
 +		rwb->wc = write_cache_on;
 +}
++
++void wbt_disable(struct rq_wb *rwb)
++{
++	del_timer_sync(&rwb->window_timer);
++	rwb->win_nsec = rwb->min_lat_nsec = 0;
++	wbt_update_limits(rwb);
++}
++EXPORT_SYMBOL_GPL(wbt_disable);
 +
 +struct rq_wb *wbt_init(struct backing_dev_info *bdi, struct wb_stat_ops *ops,
 +		       void *ops_data)
