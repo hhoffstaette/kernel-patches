@@ -1,0 +1,44 @@
+From: Arnd Bergmann <arnd@arndb.de>
+To: Dave Chinner <david@fromorbit.com>,
+	xfs@oss.sgi.com
+Subject: [PATCH v2] xfs: hide unused variable
+Date: Thu, 19 May 2016 10:25:15 +0200
+Cc: Brian Foster <bfoster@redhat.com>, linux-kernel@vger.kernel.org,
+	Arnd Bergmann <arnd@arndb.de>
+
+The newly added xfs_finish_page_writeback() function causes
+a harmless gcc warning when debugging is disabled:
+
+fs/xfs/xfs_aops.c: In function 'xfs_finish_page_writeback':
+fs/xfs/xfs_aops.c:97:16: error: unused variable 'blockmask' [-Werror=unused-variable]
+  unsigned int  blockmask = (1 << inode->i_blkbits) - 1;
+                ^~~~~~~~~
+
+This adds an #ifdef around the variable declaration to hide
+it whenever the ASSERT macro is defined as a stub, following
+the same style as used elsewhere in xfs.
+
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+Fixes: 37992c18bba3 ("xfs: don't release bios on completion immediately")
+---
+I originally sent this on April 16 when the warning first showed up
+but got no reply. Sending it again now as the warning is still present
+in linux-next.
+
+ fs/xfs/xfs_aops.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/xfs/xfs_aops.c b/fs/xfs/xfs_aops.c
+index 8a5244e4c2e9..62d938c46f31 100644
+--- a/fs/xfs/xfs_aops.c
++++ b/fs/xfs/xfs_aops.c
+@@ -94,7 +94,9 @@ xfs_finish_page_writeback(
+ 	struct bio_vec		*bvec,
+ 	int			error)
+ {
++#if defined(DEBUG) || defined(XFS_WARN)
+ 	unsigned int		blockmask = (1 << inode->i_blkbits) - 1;
++#endif
+ 	unsigned int		end = bvec->bv_offset + bvec->bv_len - 1;
+ 	struct buffer_head	*head, *bh;
+ 	unsigned int		off = 0;
