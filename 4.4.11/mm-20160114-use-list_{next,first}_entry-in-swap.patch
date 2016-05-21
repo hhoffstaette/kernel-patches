@@ -1,0 +1,79 @@
+From a8ae49917077facbe4ed7b3a89bf025b1cefa0ed Mon Sep 17 00:00:00 2001
+From: Geliang Tang <geliangtang@163.com>
+Date: Thu, 14 Jan 2016 15:20:45 -0800
+Subject: mm/swapfile.c: use list_{next,first}_entry
+
+To make the intention clearer, use list_{next,first}_entry instead of
+list_entry().
+
+Signed-off-by: Geliang Tang <geliangtang@163.com>
+Cc: "Kirill A. Shutemov" <kirill.shutemov@linux.intel.com>
+Cc: Jerome Marchand <jmarchan@redhat.com>
+Cc: Vlastimil Babka <vbabka@suse.cz>
+Cc: Hugh Dickins <hughd@google.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/swapfile.c | 14 ++++----------
+ 1 file changed, 4 insertions(+), 10 deletions(-)
+
+diff --git a/mm/swapfile.c b/mm/swapfile.c
+index 5887731..77551a5 100644
+--- a/mm/swapfile.c
++++ b/mm/swapfile.c
+@@ -165,8 +165,6 @@ static void discard_swap_cluster(struct swap_info_struct *si,
+ 	int found_extent = 0;
+ 
+ 	while (nr_pages) {
+-		struct list_head *lh;
+-
+ 		if (se->start_page <= start_page &&
+ 		    start_page < se->start_page + se->nr_pages) {
+ 			pgoff_t offset = start_page - se->start_page;
+@@ -188,8 +186,7 @@ static void discard_swap_cluster(struct swap_info_struct *si,
+ 				break;
+ 		}
+ 
+-		lh = se->list.next;
+-		se = list_entry(lh, struct swap_extent, list);
++		se = list_next_entry(se, list);
+ 	}
+ }
+ 
+@@ -903,7 +900,7 @@ int swp_swapcount(swp_entry_t entry)
+ 	VM_BUG_ON(page_private(page) != SWP_CONTINUED);
+ 
+ 	do {
+-		page = list_entry(page->lru.next, struct page, lru);
++		page = list_next_entry(page, lru);
+ 		map = kmap_atomic(page);
+ 		tmp_count = map[offset];
+ 		kunmap_atomic(map);
+@@ -1633,14 +1630,11 @@ static sector_t map_swap_entry(swp_entry_t entry, struct block_device **bdev)
+ 	se = start_se;
+ 
+ 	for ( ; ; ) {
+-		struct list_head *lh;
+-
+ 		if (se->start_page <= offset &&
+ 				offset < (se->start_page + se->nr_pages)) {
+ 			return se->start_block + (offset - se->start_page);
+ 		}
+-		lh = se->list.next;
+-		se = list_entry(lh, struct swap_extent, list);
++		se = list_next_entry(se, list);
+ 		sis->curr_swap_extent = se;
+ 		BUG_ON(se == start_se);		/* It *must* be present */
+ 	}
+@@ -1664,7 +1658,7 @@ static void destroy_swap_extents(struct swap_info_struct *sis)
+ 	while (!list_empty(&sis->first_swap_extent.list)) {
+ 		struct swap_extent *se;
+ 
+-		se = list_entry(sis->first_swap_extent.list.next,
++		se = list_first_entry(&sis->first_swap_extent.list,
+ 				struct swap_extent, list);
+ 		list_del(&se->list);
+ 		kfree(se);
+-- 
+cgit v0.12
+
