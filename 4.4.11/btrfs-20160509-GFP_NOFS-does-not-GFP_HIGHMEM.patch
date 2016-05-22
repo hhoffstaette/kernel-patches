@@ -1,0 +1,65 @@
+From e1860a7724828a341037b010b3f4ff58bad53f95 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Mon, 9 May 2016 14:11:38 +0200
+Subject: btrfs: GFP_NOFS does not GFP_HIGHMEM
+
+Masking HIGHMEM out of NOFS does not make sense.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/delayed-inode.c | 2 +-
+ fs/btrfs/disk-io.c       | 2 +-
+ fs/btrfs/extent_io.c     | 4 ++--
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/delayed-inode.c b/fs/btrfs/delayed-inode.c
+index 6cef006..61561c2 100644
+--- a/fs/btrfs/delayed-inode.c
++++ b/fs/btrfs/delayed-inode.c
+@@ -134,7 +134,7 @@ again:
+ 	/* cached in the btrfs inode and can be accessed */
+ 	atomic_add(2, &node->refs);
+ 
+-	ret = radix_tree_preload(GFP_NOFS & ~__GFP_HIGHMEM);
++	ret = radix_tree_preload(GFP_NOFS);
+ 	if (ret) {
+ 		kmem_cache_free(delayed_node_cache, node);
+ 		return ERR_PTR(ret);
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 123fab5..4931d38 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1640,7 +1640,7 @@ int btrfs_insert_fs_root(struct btrfs_fs_info *fs_info,
+ {
+ 	int ret;
+ 
+-	ret = radix_tree_preload(GFP_NOFS & ~__GFP_HIGHMEM);
++	ret = radix_tree_preload(GFP_NOFS);
+ 	if (ret)
+ 		return ret;
+ 
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index d22b077..d02a637 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4815,7 +4815,7 @@ struct extent_buffer *alloc_test_extent_buffer(struct btrfs_fs_info *fs_info,
+ 		return NULL;
+ 	eb->fs_info = fs_info;
+ again:
+-	ret = radix_tree_preload(GFP_NOFS & ~__GFP_HIGHMEM);
++	ret = radix_tree_preload(GFP_NOFS);
+ 	if (ret)
+ 		goto free_eb;
+ 	spin_lock(&fs_info->buffer_lock);
+@@ -4916,7 +4916,7 @@ struct extent_buffer *alloc_extent_buffer(struct btrfs_fs_info *fs_info,
+ 	if (uptodate)
+ 		set_bit(EXTENT_BUFFER_UPTODATE, &eb->bflags);
+ again:
+-	ret = radix_tree_preload(GFP_NOFS & ~__GFP_HIGHMEM);
++	ret = radix_tree_preload(GFP_NOFS);
+ 	if (ret)
+ 		goto free_eb;
+ 
+-- 
+cgit v0.12
+
