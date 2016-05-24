@@ -1,0 +1,121 @@
+From ee0876bc69ee8d24d524fb2e9e41e3682aaebb11 Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.cz>
+Date: Sun, 24 Apr 2016 00:56:08 -0400
+Subject: ext4: do not ask jbd2 to write data for delalloc buffers
+
+Currently we ask jbd2 to write all dirty allocated buffers before
+committing a transaction when doing writeback of delay allocated blocks.
+However this is unnecessary since we move all pages to writeback state
+before dropping a transaction handle and then submit all the necessary
+IO. We still need the transaction commit to wait for all the outstanding
+writeback before flushing disk caches during transaction commit to avoid
+data exposure issues though. Use the new jbd2 capability and ask it to
+only wait for outstanding writeback during transaction commit when
+writing back data in ext4_writepages().
+
+[HH: small merge fix in ext4.h for 4.4+]
+Tested-by: "HUANG Weller (CM/ESW12-CN)" <Weller.Huang@cn.bosch.com>
+Signed-off-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ fs/ext4/ext4.h        |  3 +++
+ fs/ext4/ext4_jbd2.h   | 12 +++++++++++-
+ fs/ext4/inode.c       | 10 +++++++---
+ fs/ext4/move_extent.c |  2 +-
+ 4 files changed, 22 insertions(+), 5 deletions(-)
+
+diff --git a/fs/ext4/ext4.h b/fs/ext4/ext4.h
+index f75e9eb..cb00b11 100644
+--- a/fs/ext4/ext4.h
++++ b/fs/ext4/ext4.h
+@@ -581,6 +581,9 @@ enum {
+ #define EXT4_GET_BLOCKS_NO_LOCK			0x0100
+ 	/* Convert written extents to unwritten */
+ #define EXT4_GET_BLOCKS_CONVERT_UNWRITTEN	0x0200
++	/* Caller will submit data before dropping transaction handle. This
++	 * allows jbd2 to avoid submitting data before commit. */
++#define EXT4_GET_BLOCKS_IO_SUBMIT		0x0400
+ 
+ /*
+  * The bit position of these flags must not overlap with any of the
+diff --git a/fs/ext4/ext4_jbd2.h b/fs/ext4/ext4_jbd2.h
+index f1c940b..09c1ef3 100644
+--- a/fs/ext4/ext4_jbd2.h
++++ b/fs/ext4/ext4_jbd2.h
+@@ -359,7 +359,8 @@ static inline int ext4_journal_force_commit(journal_t *journal)
+ 	return 0;
+ }
+ 
+-static inline int ext4_jbd2_file_inode(handle_t *handle, struct inode *inode)
++static inline int ext4_jbd2_inode_add_write(handle_t *handle,
++					    struct inode *inode)
+ {
+ 	if (ext4_handle_valid(handle))
+ 		return jbd2_journal_inode_add_write(handle,
+@@ -367,6 +368,15 @@ static inline int ext4_jbd2_file_inode(handle_t *handle, struct inode *inode)
+ 	return 0;
+ }
+ 
++static inline int ext4_jbd2_inode_add_wait(handle_t *handle,
++					   struct inode *inode)
++{
++	if (ext4_handle_valid(handle))
++		return jbd2_journal_inode_add_wait(handle,
++						   EXT4_I(inode)->jinode);
++	return 0;
++}
++
+ static inline void ext4_update_inode_fsync_trans(handle_t *handle,
+ 						 struct inode *inode,
+ 						 int datasync)
+diff --git a/fs/ext4/inode.c b/fs/ext4/inode.c
+index 8ba46ad..17bfa42 100644
+--- a/fs/ext4/inode.c
++++ b/fs/ext4/inode.c
+@@ -695,7 +695,10 @@ out_sem:
+ 		    !(flags & EXT4_GET_BLOCKS_ZERO) &&
+ 		    !IS_NOQUOTA(inode) &&
+ 		    ext4_should_order_data(inode)) {
+-			ret = ext4_jbd2_file_inode(handle, inode);
++			if (flags & EXT4_GET_BLOCKS_IO_SUBMIT)
++				ret = ext4_jbd2_inode_add_wait(handle, inode);
++			else
++				ret = ext4_jbd2_inode_add_write(handle, inode);
+ 			if (ret)
+ 				return ret;
+ 		}
+@@ -2319,7 +2322,8 @@ static int mpage_map_one_extent(handle_t *handle, struct mpage_da_data *mpd)
+ 	 * the data was copied into the page cache.
+ 	 */
+ 	get_blocks_flags = EXT4_GET_BLOCKS_CREATE |
+-			   EXT4_GET_BLOCKS_METADATA_NOFAIL;
++			   EXT4_GET_BLOCKS_METADATA_NOFAIL |
++			   EXT4_GET_BLOCKS_IO_SUBMIT;
+ 	dioread_nolock = ext4_should_dioread_nolock(inode);
+ 	if (dioread_nolock)
+ 		get_blocks_flags |= EXT4_GET_BLOCKS_IO_CREATE_EXT;
+@@ -3634,7 +3638,7 @@ static int __ext4_block_zero_page_range(handle_t *handle,
+ 		err = 0;
+ 		mark_buffer_dirty(bh);
+ 		if (ext4_should_order_data(inode))
+-			err = ext4_jbd2_file_inode(handle, inode);
++			err = ext4_jbd2_inode_add_write(handle, inode);
+ 	}
+ 
+ unlock:
+diff --git a/fs/ext4/move_extent.c b/fs/ext4/move_extent.c
+index 325cef4..a920c5d 100644
+--- a/fs/ext4/move_extent.c
++++ b/fs/ext4/move_extent.c
+@@ -400,7 +400,7 @@ data_copy:
+ 
+ 	/* Even in case of data=writeback it is reasonable to pin
+ 	 * inode to transaction, to prevent unexpected data loss */
+-	*err = ext4_jbd2_file_inode(handle, orig_inode);
++	*err = ext4_jbd2_inode_add_write(handle, orig_inode);
+ 
+ unlock_pages:
+ 	unlock_page(pagep[0]);
+-- 
+cgit v0.12
+
