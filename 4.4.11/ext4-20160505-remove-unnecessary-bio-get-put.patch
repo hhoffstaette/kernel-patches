@@ -1,0 +1,35 @@
+From 32157de29a3140bfaa74c6e0fae18c78fe84a5df Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Thu, 5 May 2016 22:09:49 -0400
+Subject: ext4: remove unnecessary bio get/put
+
+ext4_io_submit() used to check for EOPNOTSUPP after bio submission,
+which is why it had to get an extra reference to the bio before
+submitting it. But since we no longer touch the bio after submission,
+get rid of the redundant get/put of the bio. If we do get the extra
+reference, we enter the slower path of having to flag this bio as now
+having external references.
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ fs/ext4/page-io.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/fs/ext4/page-io.c b/fs/ext4/page-io.c
+index e4fc8ea..2a01df9 100644
+--- a/fs/ext4/page-io.c
++++ b/fs/ext4/page-io.c
+@@ -342,9 +342,7 @@ void ext4_io_submit(struct ext4_io_submit *io)
+ 	if (bio) {
+ 		int io_op = io->io_wbc->sync_mode == WB_SYNC_ALL ?
+ 			    WRITE_SYNC : WRITE;
+-		bio_get(io->io_bio);
+ 		submit_bio(io_op, io->io_bio);
+-		bio_put(io->io_bio);
+ 	}
+ 	io->io_bio = NULL;
+ }
+-- 
+cgit v0.12
+
