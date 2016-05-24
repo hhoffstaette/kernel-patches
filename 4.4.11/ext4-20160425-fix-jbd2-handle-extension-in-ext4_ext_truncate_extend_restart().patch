@@ -1,0 +1,57 @@
+From 7b8081912d75df1d910d6969f0a374b66ef242bf Mon Sep 17 00:00:00 2001
+From: Theodore Ts'o <tytso@mit.edu>
+Date: Mon, 25 Apr 2016 23:13:17 -0400
+Subject: ext4: fix jbd2 handle extension in ext4_ext_truncate_extend_restart()
+
+The function jbd2_journal_extend() takes as its argument the number of
+new credits to be added to the handle.  We weren't taking into account
+the currently unused handle credits; worse, we would try to extend the
+handle by N credits when it had N credits available.
+
+In the case where jbd2_journal_extend() fails because the transaction
+is too large, when jbd2_journal_restart() gets called, the N credits
+owned by the handle gets returned to the transaction, and the
+transaction commit is asynchronously requested, and then
+start_this_handle() will be able to successfully attach the handle to
+the current transaction since the required credits are now available.
+
+This is mostly harmless, but since ext4_ext_truncate_extend_restart()
+returns EAGAIN, the truncate machinery will once again try to call
+ext4_ext_truncate_extend_restart(), which will do the above sequence
+over and over again until the transaction has committed.
+
+This was found while I was debugging a lockup in caused by running
+xfstests generic/074 in the data=journal case.  I'm still not sure why
+we ended up looping forever, which suggests there may still be another
+bug hiding in the transaction accounting machinery, but this commit
+prevents us from looping in the first place.
+
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ fs/ext4/extents.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/fs/ext4/extents.c b/fs/ext4/extents.c
+index 95bf467..ba2be53 100644
+--- a/fs/ext4/extents.c
++++ b/fs/ext4/extents.c
+@@ -120,9 +120,14 @@ static int ext4_ext_truncate_extend_restart(handle_t *handle,
+ 
+ 	if (!ext4_handle_valid(handle))
+ 		return 0;
+-	if (handle->h_buffer_credits > needed)
++	if (handle->h_buffer_credits >= needed)
+ 		return 0;
+-	err = ext4_journal_extend(handle, needed);
++	/*
++	 * If we need to extend the journal get a few extra blocks
++	 * while we're at it for efficiency's sake.
++	 */
++	needed += 3;
++	err = ext4_journal_extend(handle, needed - handle->h_buffer_credits);
+ 	if (err <= 0)
+ 		return err;
+ 	err = ext4_truncate_restart_trans(handle, inode, needed);
+-- 
+cgit v0.12
+
