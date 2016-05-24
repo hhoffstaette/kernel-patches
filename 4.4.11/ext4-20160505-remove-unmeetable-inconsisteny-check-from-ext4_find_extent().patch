@@ -1,0 +1,51 @@
+From 816cd71b0c723a7296d14aadb8ff1ba42f6181d2 Mon Sep 17 00:00:00 2001
+From: Nicolai Stange <nicstange@gmail.com>
+Date: Thu, 5 May 2016 22:43:04 -0400
+Subject: ext4: remove unmeetable inconsisteny check from ext4_find_extent()
+
+ext4_find_extent(), stripped down to the parts relevant to this patch,
+reads as
+
+  ppos = 0;
+  i = depth;
+  while (i) {
+    --i;
+    ++ppos;
+    if (unlikely(ppos > depth)) {
+      ...
+      ret = -EFSCORRUPTED;
+      goto err;
+    }
+  }
+
+Due to the loop's bounds, the condition ppos > depth can never be met.
+
+Remove this dead code.
+
+Signed-off-by: Nicolai Stange <nicstange@gmail.com>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ fs/ext4/extents.c | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/fs/ext4/extents.c b/fs/ext4/extents.c
+index c53d5a8..2a2eef9 100644
+--- a/fs/ext4/extents.c
++++ b/fs/ext4/extents.c
+@@ -912,13 +912,6 @@ ext4_find_extent(struct inode *inode, ext4_lblk_t block,
+ 
+ 		eh = ext_block_hdr(bh);
+ 		ppos++;
+-		if (unlikely(ppos > depth)) {
+-			put_bh(bh);
+-			EXT4_ERROR_INODE(inode,
+-					 "ppos %d > depth %d", ppos, depth);
+-			ret = -EFSCORRUPTED;
+-			goto err;
+-		}
+ 		path[ppos].p_bh = bh;
+ 		path[ppos].p_hdr = eh;
+ 	}
+-- 
+cgit v0.12
+
