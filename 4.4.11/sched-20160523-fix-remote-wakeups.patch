@@ -1,0 +1,117 @@
+From b7e7ade34e6188bee2e3b0d42b51d25137d9e2a5 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Mon, 23 May 2016 11:19:07 +0200
+Subject: sched/core: Fix remote wakeups
+
+Commit:
+
+  b5179ac70de8 ("sched/fair: Prepare to fix fairness problems on migration")
+
+... introduced a bug: Mike Galbraith found that it introduced a
+performance regression, while Paul E. McKenney reported lost
+wakeups and bisected it to this commit.
+
+The reason is that I mis-read ttwu_queue() such that I assumed any
+wakeup that got a remote queue must have had the task migrated.
+
+Since this is not so; we need to transfer this information between
+queueing the wakeup and actually doing the wakeup. Use a new
+task_struct::sched_flag for this, we already write to
+sched_contributes_to_load in the wakeup path so this is a hot and
+modified cacheline.
+
+[HH: backported to 4.4+]
+Reported-by: Paul E. McKenney <paulmck@linux.vnet.ibm.com>
+Reported-by: Mike Galbraith <umgwanakikbuti@gmail.com>
+Tested-by: Mike Galbraith <umgwanakikbuti@gmail.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Andrew Hunter <ahh@google.com>
+Cc: Andy Lutomirski <luto@amacapital.net>
+Cc: Ben Segall <bsegall@google.com>
+Cc: Borislav Petkov <bp@alien8.de>
+Cc: Brian Gerst <brgerst@gmail.com>
+Cc: Dave Hansen <dave.hansen@linux.intel.com>
+Cc: Denys Vlasenko <dvlasenk@redhat.com>
+Cc: Fenghua Yu <fenghua.yu@intel.com>
+Cc: H. Peter Anvin <hpa@zytor.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Matt Fleming <matt@codeblueprint.co.uk>
+Cc: Morten Rasmussen <morten.rasmussen@arm.com>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Paul Turner <pjt@google.com>
+Cc: Pavan Kondeti <pkondeti@codeaurora.org>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Quentin Casasnovas <quentin.casasnovas@oracle.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: byungchul.park@lge.com
+Fixes: b5179ac70de8 ("sched/fair: Prepare to fix fairness problems on migration")
+Link: http://lkml.kernel.org/r/20160523091907.GD15728@worktop.ger.corp.intel.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ include/linux/sched.h |  1 +
+ kernel/sched/core.c   | 18 +++++++++++-------
+ 2 files changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 6cc0df9..e053517 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1491,6 +1491,7 @@ struct task_struct {
+ 	unsigned sched_reset_on_fork:1;
+ 	unsigned sched_contributes_to_load:1;
+ 	unsigned sched_migrated:1;
++	unsigned sched_remote_wakeup:1;
+ 	unsigned :0; /* force alignment to the next boundary */
+ 
+ 	/* unserialized, strictly 'current' */
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 404c078..7f2cae4 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -1814,13 +1814,15 @@ void sched_ttwu_pending(void)
+ 	lockdep_pin_lock(&rq->lock);
+ 
+ 	while (llist) {
++		int wake_flags = 0;
++
+ 		p = llist_entry(llist, struct task_struct, wake_entry);
+ 		llist = llist_next(llist);
+-		/*
+-		 * See ttwu_queue(); we only call ttwu_queue_remote() when
+-		 * its a x-cpu wakeup.
+-		 */
+-		ttwu_do_activate(rq, p, WF_MIGRATED);
++
++		if (p->sched_remote_wakeup)
++			wake_flags = WF_MIGRATED;
++
++		ttwu_do_activate(rq, p, wake_flags);
+ 	}
+ 
+ 	lockdep_unpin_lock(&rq->lock);
+@@ -1865,10 +1865,12 @@ void scheduler_ipi(void)
+ 	irq_exit();
+ }
+ 
+-static void ttwu_queue_remote(struct task_struct *p, int cpu)
++static void ttwu_queue_remote(struct task_struct *p, int cpu, int wake_flags)
+ {
+ 	struct rq *rq = cpu_rq(cpu);
+ 
++	p->sched_remote_wakeup = !!(wake_flags & WF_MIGRATED);
++
+ 	if (llist_add(&p->wake_entry, &cpu_rq(cpu)->wake_list)) {
+ 		if (!set_nr_if_polling(rq->idle))
+ 			smp_send_reschedule(cpu);
+@@ -1914,7 +1914,7 @@ static void ttwu_queue(struct task_struct *p, int cpu, int wake_flags)
+ #if defined(CONFIG_SMP)
+ 	if (sched_feat(TTWU_QUEUE) && !cpus_share_cache(smp_processor_id(), cpu)) {
+ 		sched_clock_cpu(cpu); /* sync clocks x-cpu */
+-		ttwu_queue_remote(p, cpu);
++		ttwu_queue_remote(p, cpu, wake_flags);
+ 		return;
+ 	}
+ #endif
+-- 
+cgit v0.12
+
