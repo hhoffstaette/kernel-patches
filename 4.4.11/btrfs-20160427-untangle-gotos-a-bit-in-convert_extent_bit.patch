@@ -1,0 +1,47 @@
+From 03bf5387708069194fbe5072fb57f9542e7a8b82 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Wed, 27 Apr 2016 01:02:15 +0200
+Subject: btrfs: untangle gotos a bit in convert_extent_bit
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent_io.c | 16 +++++++---------
+ 1 file changed, 7 insertions(+), 9 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 3ecd8b1..d39e224 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -1262,15 +1262,6 @@ hit_next:
+ 		goto out;
+ 	}
+ 
+-	goto search_again;
+-
+-out:
+-	spin_unlock(&tree->lock);
+-	if (prealloc)
+-		free_extent_state(prealloc);
+-
+-	return err;
+-
+ search_again:
+ 	if (start > end)
+ 		goto out;
+@@ -1279,6 +1270,13 @@ search_again:
+ 		cond_resched();
+ 	first_iteration = false;
+ 	goto again;
++
++out:
++	spin_unlock(&tree->lock);
++	if (prealloc)
++		free_extent_state(prealloc);
++
++	return err;
+ }
+ 
+ /* wrappers around set/clear extent bit */
+-- 
+cgit v0.12
+
