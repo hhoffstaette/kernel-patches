@@ -1,0 +1,40 @@
+From:	Josef Bacik <jbacik@fb.com>
+To:	<linux-btrfs@vger.kernel.org>, <kernel-team@fb.com>
+Subject: [PATCH] Btrfs: fill relocation block rsv after allocation
+Date:	Fri, 27 May 2016 13:08:26 -0400
+
+Since we set the reloc control before we've reserved our space for relocation we
+could race with a root being dirtied and not actually have space to do our init
+reloc root.  So once we've allocated it and set it up go ahead and make our
+reservation before setting the relocate control, that way anybody who tries to
+do the reloc root init has space to use.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+---
+ fs/btrfs/relocation.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 61efa5f..959cb4e 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -3870,6 +3870,7 @@ static noinline_for_stack
+ int prepare_to_relocate(struct reloc_control *rc)
+ {
+ 	struct btrfs_trans_handle *trans;
++	int ret;
+ 
+ 	rc->block_rsv = btrfs_alloc_block_rsv(rc->extent_root,
+ 					      BTRFS_BLOCK_RSV_TEMP);
+@@ -3884,6 +3885,11 @@ int prepare_to_relocate(struct reloc_control *rc)
+ 	rc->reserved_bytes = 0;
+ 	rc->block_rsv->size = rc->extent_root->nodesize *
+ 			      RELOCATION_RESERVED_NODES;
++	ret = btrfs_block_rsv_refill(rc->extent_root,
++				     rc->block_rsv, rc->block_rsv->size,
++				     BTRFS_RESERVE_FLUSH_ALL);
++	if (ret)
++		return ret;
+ 
+ 	rc->create_reloc_tree = 1;
+ 	set_reloc_control(rc);
