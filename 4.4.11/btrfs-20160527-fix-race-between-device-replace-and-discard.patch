@@ -1,0 +1,158 @@
+From 3b7c0943e52379754820f47c3fc1c7bc8bcd31d0 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Fri, 27 May 2016 17:42:05 +0100
+Subject: Btrfs: fix race between device replace and discard
+
+While we are finishing a device replace operation, we can make a discard
+operation (fs mounted with -o discard) do an invalid memory access like
+the one reported by the following trace:
+
+[ 3206.384654] general protection fault: 0000 [#1] PREEMPT SMP
+[ 3206.387520] Modules linked in: dm_mod btrfs crc32c_generic xor raid6_pq acpi_cpufreq tpm_tis psmouse tpm ppdev sg parport_pc evdev i2c_piix4 parport
+processor serio_raw i2c_core pcspkr button loop autofs4 ext4 crc16 jbd2 mbcache sr_mod cdrom ata_generic sd_mod virtio_scsi ata_piix libata virtio_pci
+virtio_ring scsi_mod e1000 virtio floppy [last unloaded: btrfs]
+[ 3206.388595] CPU: 14 PID: 29194 Comm: fsstress Not tainted 4.6.0-rc7-btrfs-next-29+ #1
+[ 3206.388595] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS by qemu-project.org 04/01/2014
+[ 3206.388595] task: ffff88017ace0100 ti: ffff880171b98000 task.ti: ffff880171b98000
+[ 3206.388595] RIP: 0010:[<ffffffff8124d233>]  [<ffffffff8124d233>] blkdev_issue_discard+0x5c/0x2a7
+[ 3206.388595] RSP: 0018:ffff880171b9bb80  EFLAGS: 00010246
+[ 3206.388595] RAX: ffff880171b9bc28 RBX: 000000000090d000 RCX: 0000000000000000
+[ 3206.388595] RDX: ffffffff82fa1b48 RSI: ffffffff8179f46c RDI: ffffffff82fa1b48
+[ 3206.388595] RBP: ffff880171b9bcc0 R08: 0000000000000000 R09: 0000000000000001
+[ 3206.388595] R10: ffff880171b9bce0 R11: 000000000090f000 R12: ffff880171b9bbe8
+[ 3206.388595] R13: 0000000000000010 R14: 0000000000004868 R15: 6b6b6b6b6b6b6b6b
+[ 3206.388595] FS:  00007f6182e4e700(0000) GS:ffff88023fdc0000(0000) knlGS:0000000000000000
+[ 3206.388595] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[ 3206.388595] CR2: 00007f617c2bbb18 CR3: 000000017ad9c000 CR4: 00000000000006e0
+[ 3206.388595] Stack:
+[ 3206.388595]  0000000000004878 0000000000000000 0000000002400040 0000000000000000
+[ 3206.388595]  0000000000000000 ffff880171b9bbe8 ffff880171b9bbb0 ffff880171b9bbb0
+[ 3206.388595]  ffff880171b9bbc0 ffff880171b9bbc0 ffff880171b9bbd0 ffff880171b9bbd0
+[ 3206.388595] Call Trace:
+[ 3206.388595]  [<ffffffffa042899e>] btrfs_issue_discard+0x12f/0x143 [btrfs]
+[ 3206.388595]  [<ffffffffa042899e>] ? btrfs_issue_discard+0x12f/0x143 [btrfs]
+[ 3206.388595]  [<ffffffffa042e862>] btrfs_discard_extent+0x87/0xde [btrfs]
+[ 3206.388595]  [<ffffffffa04303b5>] btrfs_finish_extent_commit+0xb2/0x1df [btrfs]
+[ 3206.388595]  [<ffffffff8149c246>] ? __mutex_unlock_slowpath+0x150/0x15b
+[ 3206.388595]  [<ffffffffa04464c4>] btrfs_commit_transaction+0x7fc/0x980 [btrfs]
+[ 3206.388595]  [<ffffffff8149c246>] ? __mutex_unlock_slowpath+0x150/0x15b
+[ 3206.388595]  [<ffffffffa0459af6>] btrfs_sync_file+0x38f/0x428 [btrfs]
+[ 3206.388595]  [<ffffffff811a8292>] vfs_fsync_range+0x8c/0x9e
+[ 3206.388595]  [<ffffffff811a82c0>] vfs_fsync+0x1c/0x1e
+[ 3206.388595]  [<ffffffff811a8417>] do_fsync+0x31/0x4a
+[ 3206.388595]  [<ffffffff811a8637>] SyS_fsync+0x10/0x14
+[ 3206.388595]  [<ffffffff8149e025>] entry_SYSCALL_64_fastpath+0x18/0xa8
+[ 3206.388595]  [<ffffffff81100c6b>] ? time_hardirqs_off+0x9/0x14
+[ 3206.388595]  [<ffffffff8108e87d>] ? trace_hardirqs_off_caller+0x1f/0xaa
+
+This happens because when we call btrfs_map_block() from
+btrfs_discard_extent() to get a btrfs_bio structure, the device replace
+operation has not finished yet, but before we use the device of one of the
+stripes from the returned btrfs_bio structure, the device object is freed.
+
+This is illustrated by the following diagram.
+
+            CPU 1                                                  CPU 2
+
+ btrfs_dev_replace_start()
+
+ (...)
+
+ btrfs_dev_replace_finishing()
+
+   btrfs_start_transaction()
+   btrfs_commit_transaction()
+
+   (...)
+
+                                                            btrfs_sync_file()
+                                                              btrfs_start_transaction()
+
+                                                              (...)
+
+                                                              btrfs_commit_transaction()
+                                                                btrfs_finish_extent_commit()
+                                                                  btrfs_discard_extent()
+                                                                    btrfs_map_block()
+                                                                      --> returns a struct btrfs_bio
+                                                                          with a stripe that has a
+                                                                          device field pointing to
+                                                                          source device of the replace
+                                                                          operation (the device that
+                                                                          is being replaced)
+
+   mutex_lock(&uuid_mutex)
+   mutex_lock(&fs_info->fs_devices->device_list_mutex)
+   mutex_lock(&fs_info->chunk_mutex)
+
+   btrfs_dev_replace_update_device_in_mapping_tree()
+     --> iterates the mapping tree and for each
+         extent map that has a stripe pointing to
+         the source device, it updates the stripe
+         to point to the target device instead
+
+   btrfs_rm_dev_replace_blocked()
+     --> waits for fs_info->bio_counter to go down to 0
+
+   btrfs_rm_dev_replace_remove_srcdev()
+     --> removes source device from the list of devices
+
+   mutex_unlock(&fs_info->chunk_mutex)
+   mutex_unlock(&fs_info->fs_devices->device_list_mutex)
+   mutex_unlock(&uuid_mutex)
+
+   btrfs_rm_dev_replace_free_srcdev()
+     --> frees the source device
+
+                                                                    --> iterates over all stripes
+                                                                        of the returned struct
+                                                                        btrfs_bio
+                                                                    --> for each stripe it
+                                                                        dereferences its device
+                                                                        pointer
+                                                                        --> it ends up finding a
+                                                                            pointer to the device
+                                                                            used as the source
+                                                                            device for the replace
+                                                                            operation and that was
+                                                                            already freed
+
+So fix this by surrounding the call to btrfs_map_block(), and the code
+that uses the returned struct btrfs_bio, with calls to
+btrfs_bio_counter_inc_blocked() and btrfs_bio_counter_dec(), so that
+the finishing phase of the device replace operation blocks until the
+the bio counter decreases to zero before it frees the source device.
+This is the same approach we do at btrfs_map_bio() for example.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/extent-tree.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index a400951..689d25a 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -2042,6 +2042,11 @@ int btrfs_discard_extent(struct btrfs_root *root, u64 bytenr,
+ 	struct btrfs_bio *bbio = NULL;
+ 
+ 
++	/*
++	 * Avoid races with device replace and make sure our bbio has devices
++	 * associated to its stripes that don't go away while we are discarding.
++	 */
++	btrfs_bio_counter_inc_blocked(root->fs_info);
+ 	/* Tell the block device(s) that the sectors can be discarded */
+ 	ret = btrfs_map_block(root->fs_info, REQ_DISCARD,
+ 			      bytenr, &num_bytes, &bbio, 0);
+@@ -2074,6 +2079,7 @@ int btrfs_discard_extent(struct btrfs_root *root, u64 bytenr,
+ 		}
+ 		btrfs_put_bbio(bbio);
+ 	}
++	btrfs_bio_counter_dec(root->fs_info);
+ 
+ 	if (actual_bytes)
+ 		*actual_bytes = discarded_bytes;
+-- 
+cgit v0.12
+
