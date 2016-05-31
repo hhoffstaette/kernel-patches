@@ -1,0 +1,53 @@
+From 9f6c399ddc369856d787bd43ccd43b19ed1e4e32 Mon Sep 17 00:00:00 2001
+From: Michal Hocko <mhocko@suse.com>
+Date: Thu, 14 Jan 2016 15:19:47 -0800
+Subject: mm, vmscan: consider isolated pages in zone_reclaimable_pages
+
+zone_reclaimable_pages counts how many pages are reclaimable in the
+given zone.  This currently includes all pages on file lrus and anon
+lrus if there is an available swap storage.  We do not consider
+NR_ISOLATED_{ANON,FILE} counters though which is not correct because
+these counters reflect temporarily isolated pages which are still
+reclaimable because they either get back to their LRU or get freed
+either by the page reclaim or page migration.
+
+The number of these pages might be sufficiently high to confuse users of
+zone_reclaimable_pages (e.g.  mbind can migrate large ranges of memory
+at once).
+
+Signed-off-by: Michal Hocko <mhocko@suse.com>
+Suggested-by: Johannes Weiner <hannes@cmpxchg.org>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Reviewed-by: Vladimir Davydov <vdavydov@virtuozzo.com>
+Acked-by: David Rientjes <rientjes@google.com>
+Cc: Vlastimil Babka <vbabka@suse.cz>
+Cc: Mel Gorman <mgorman@suse.de>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/vmscan.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 1dab3a3..1bbfd62 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -197,11 +197,13 @@ static unsigned long zone_reclaimable_pages(struct zone *zone)
+ 	unsigned long nr;
+ 
+ 	nr = zone_page_state(zone, NR_ACTIVE_FILE) +
+-	     zone_page_state(zone, NR_INACTIVE_FILE);
++	     zone_page_state(zone, NR_INACTIVE_FILE) +
++	     zone_page_state(zone, NR_ISOLATED_FILE);
+ 
+ 	if (get_nr_swap_pages() > 0)
+ 		nr += zone_page_state(zone, NR_ACTIVE_ANON) +
+-		      zone_page_state(zone, NR_INACTIVE_ANON);
++		      zone_page_state(zone, NR_INACTIVE_ANON) +
++		      zone_page_state(zone, NR_ISOLATED_ANON);
+ 
+ 	return nr;
+ }
+-- 
+cgit v0.12
+
