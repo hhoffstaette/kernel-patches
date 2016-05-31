@@ -1,0 +1,55 @@
+From bbddabe2e436aa7869b3ac5248df5c14ddde0cbf Mon Sep 17 00:00:00 2001
+From: Johannes Weiner <hannes@cmpxchg.org>
+Date: Fri, 20 May 2016 16:56:28 -0700
+Subject: mm: filemap: only do access activations on reads
+
+Andres observed that his database workload is struggling with the
+transaction journal creating pressure on frequently read pages.
+
+Access patterns like transaction journals frequently write the same
+pages over and over, but in the majority of cases those pages are never
+read back.  There are no caching benefits to be had for those pages, so
+activating them and having them put pressure on pages that do benefit
+from caching is a bad choice.
+
+Leave page activations to read accesses and don't promote pages based on
+writes alone.
+
+It could be said that partially written pages do contain cache-worthy
+data, because even if *userspace* does not access the unwritten part,
+the kernel still has to read it from the filesystem for correctness.
+However, a counter argument is that these pages enjoy at least *some*
+protection over other inactive file pages through the writeback cache,
+in the sense that dirty pages are written back with a delay and cache
+reclaim leaves them alone until they have been written back to disk.
+Should that turn out to be insufficient and we see increased read IO
+from partial writes under memory pressure, we can always go back and
+update grab_cache_page_write_begin() to take (pos, len) so that it can
+tell partial writes from pages that don't need partial reads.  But for
+now, keep it simple.
+
+Signed-off-by: Johannes Weiner <hannes@cmpxchg.org>
+Reported-by: Andres Freund <andres@anarazel.de>
+Cc: Rik van Riel <riel@redhat.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/filemap.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/filemap.c b/mm/filemap.c
+index beba6bd..8f48599 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -2578,7 +2578,7 @@ struct page *grab_cache_page_write_begin(struct address_space *mapping,
+ 					pgoff_t index, unsigned flags)
+ {
+ 	struct page *page;
+-	int fgp_flags = FGP_LOCK|FGP_ACCESSED|FGP_WRITE|FGP_CREAT;
++	int fgp_flags = FGP_LOCK|FGP_WRITE|FGP_CREAT;
+ 
+ 	if (flags & AOP_FLAG_NOFS)
+ 		fgp_flags |= FGP_NOFS;
+-- 
+cgit v0.12
+
