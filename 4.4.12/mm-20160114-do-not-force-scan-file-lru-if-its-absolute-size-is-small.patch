@@ -1,0 +1,61 @@
+From 316bda0e6cc5f36f94b4af8bded16d642c90ad75 Mon Sep 17 00:00:00 2001
+From: Vladimir Davydov <vdavydov@virtuozzo.com>
+Date: Thu, 14 Jan 2016 15:19:38 -0800
+Subject: vmscan: do not force-scan file lru if its absolute size is small
+
+We assume there is enough inactive page cache if the size of inactive
+file lru is greater than the size of active file lru, in which case we
+force-scan file lru ignoring anonymous pages.  While this logic works
+fine when there are plenty of page cache pages, it fails if the size of
+file lru is small (several MB): in this case (lru_size >> prio) will be
+0 for normal scan priorities, as a result, if inactive file lru happens
+to be larger than active file lru, anonymous pages of a cgroup will
+never get evicted unless the system experiences severe memory pressure,
+even if there are gigabytes of unused anonymous memory there, which is
+unfair in respect to other cgroups, whose workloads might be page cache
+oriented.
+
+This patch attempts to fix this by elaborating the "enough inactive page
+cache" check: it makes it not only check that inactive lru size > active
+lru size, but also that we will scan something from the cgroup at the
+current scan priority.  If these conditions do not hold, we proceed to
+SCAN_FRACT as usual.
+
+Signed-off-by: Vladimir Davydov <vdavydov@virtuozzo.com>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Acked-by: Michal Hocko <mhocko@suse.com>
+Cc: Vlastimil Babka <vbabka@suse.cz>
+Cc: Mel Gorman <mgorman@techsingularity.net>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/vmscan.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 35dd57e..1dab3a3 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -2043,10 +2043,16 @@ static void get_scan_count(struct lruvec *lruvec, int swappiness,
+ 	}
+ 
+ 	/*
+-	 * There is enough inactive page cache, do not reclaim
+-	 * anything from the anonymous working set right now.
++	 * If there is enough inactive page cache, i.e. if the size of the
++	 * inactive list is greater than that of the active list *and* the
++	 * inactive list actually has some pages to scan on this priority, we
++	 * do not reclaim anything from the anonymous working set right now.
++	 * Without the second condition we could end up never scanning an
++	 * lruvec even if it has plenty of old anonymous pages unless the
++	 * system is under heavy pressure.
+ 	 */
+-	if (!inactive_file_is_low(lruvec)) {
++	if (!inactive_file_is_low(lruvec) &&
++	    get_lru_size(lruvec, LRU_INACTIVE_FILE) >> sc->priority) {
+ 		scan_balance = SCAN_FILE;
+ 		goto out;
+ 	}
+-- 
+cgit v0.12
+
