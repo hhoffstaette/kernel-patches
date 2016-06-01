@@ -1,0 +1,26 @@
+From: Jun He <jhe@cs.wisc.edu>
+Subject: [PATCH] Allow extents equal to max_zeroout to be zero-ed
+Date: Mon, 30 May 2016 13:23:47 -0500
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.ext4/53363>
+
+Just to be consistent with the rest of the code: if size == max_zeroout,
+then allow it to be zero-ed.
+
+Signed-off-by: Jun He <jhe@cs.wisc.edu>
+---
+ fs/ext4/extents.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/ext4/extents.c b/fs/ext4/extents.c
+index 2a2eef9..dc0b04c 100644
+--- a/fs/ext4/extents.c
++++ b/fs/ext4/extents.c
+@@ -3601,7 +3601,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
+ 				goto out;
+ 			split_map.m_lblk = map->m_lblk;
+ 			split_map.m_len = allocated;
+-		} else if (map->m_lblk - ee_block + map->m_len < max_zeroout) {
++		} else if (map->m_lblk - ee_block + map->m_len <= max_zeroout) {
+ 			/* case 2 */
+ 			if (map->m_lblk != ee_block) {
+ 				zero_ex.ee_block = ex->ee_block;
