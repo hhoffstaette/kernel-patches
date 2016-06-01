@@ -267,31 +267,6 @@ index e52d7c7..a521bf7 100644
  
  
  /* from xfs_iops.c */
-diff --git a/fs/xfs/xfs_iops.c b/fs/xfs/xfs_iops.c
-index c5d4eba..04afe38 100644
---- a/fs/xfs/xfs_iops.c
-+++ b/fs/xfs/xfs_iops.c
-@@ -524,7 +524,7 @@ xfs_setattr_mode(
- 	inode->i_mode |= mode & ~S_IFMT;
- }
- 
--void
-+static void
- xfs_setattr_time(
- 	struct xfs_inode	*ip,
- 	struct iattr		*iattr)
-diff --git a/fs/xfs/xfs_iops.h b/fs/xfs/xfs_iops.h
-index a0f84ab..d4bcc29 100644
---- a/fs/xfs/xfs_iops.h
-+++ b/fs/xfs/xfs_iops.h
-@@ -30,7 +30,6 @@ extern ssize_t xfs_vn_listxattr(struct dentry *, char *data, size_t size);
-  */
- #define XFS_ATTR_NOACL		0x01	/* Don't call posix_acl_chmod */
- 
--extern void xfs_setattr_time(struct xfs_inode *ip, struct iattr *iattr);
- extern int xfs_setattr_nonsize(struct xfs_inode *ip, struct iattr *vap,
- 			       int flags);
- extern int xfs_setattr_size(struct xfs_inode *ip, struct iattr *vap);
 diff --git a/fs/xfs/xfs_log.c b/fs/xfs/xfs_log.c
 index bde02f1..63dad9e 100644
 --- a/fs/xfs/xfs_log.c
