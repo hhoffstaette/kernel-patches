@@ -1,0 +1,78 @@
+From:	David Sterba <dsterba@suse.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	Jeff Mahoney <jeffm@suse.com>, David Sterba <dsterba@suse.com>
+Subject: [PATCH] btrfs: advertise which crc32c implementation is being used at module load
+Date:	Wed,  1 Jun 2016 01:57:49 +0200
+
+From: Jeff Mahoney <jeffm@suse.com>
+
+Since several architectures support hardware-accelerated crc32c
+calculation, it would be nice to confirm that btrfs is actually using it.
+
+We can see an elevated use count for the module, but it doesn't actually
+show who the users are.  This patch simply prints the name of the driver
+after successfully initializing the shash.
+
+Signed-off-by: Jeff Mahoney <jeffm@suse.com>
+[ added a helper and used in module load-time message ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+
+Slightly modified version of Jeff's patch.
+
+ fs/btrfs/hash.c  | 5 +++++
+ fs/btrfs/hash.h  | 1 +
+ fs/btrfs/super.c | 5 +++--
+ 3 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/hash.c b/fs/btrfs/hash.c
+index aae520b2aee5..a97fdc156a03 100644
+--- a/fs/btrfs/hash.c
++++ b/fs/btrfs/hash.c
+@@ -24,6 +24,11 @@ int __init btrfs_hash_init(void)
+ 	return PTR_ERR_OR_ZERO(tfm);
+ }
+ 
++const char* btrfs_crc32c_impl(void)
++{
++	return crypto_tfm_alg_driver_name(crypto_shash_tfm(tfm));
++}
++
+ void btrfs_hash_exit(void)
+ {
+ 	crypto_free_shash(tfm);
+diff --git a/fs/btrfs/hash.h b/fs/btrfs/hash.h
+index 118a2316e5d3..c3a2ec554361 100644
+--- a/fs/btrfs/hash.h
++++ b/fs/btrfs/hash.h
+@@ -22,6 +22,7 @@
+ int __init btrfs_hash_init(void);
+ 
+ void btrfs_hash_exit(void);
++const char* btrfs_crc32c_impl(void);
+ 
+ u32 btrfs_crc32c(u32 crc, const void *address, unsigned int length);
+ 
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 4e59a91a11e0..4397a303fc6c 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -2303,7 +2303,7 @@ static void btrfs_interface_exit(void)
+ 
+ static void btrfs_print_mod_info(void)
+ {
+-	printk(KERN_INFO "Btrfs loaded"
++	printk(KERN_INFO "Btrfs loaded, crc32c=%s"
+ #ifdef CONFIG_BTRFS_DEBUG
+ 			", debug=on"
+ #endif
+@@ -2313,7 +2313,8 @@ static void btrfs_print_mod_info(void)
+ #ifdef CONFIG_BTRFS_FS_CHECK_INTEGRITY
+ 			", integrity-checker=on"
+ #endif
+-			"\n");
++			"\n",
++			btrfs_crc32c_impl());
+ }
+ 
+ static int btrfs_run_sanity_tests(void)
