@@ -1,0 +1,73 @@
+From:	Feifei Xu <xufeifei@linux.vnet.ibm.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	steve.capper@linaro.org, chandan@mykolab.com, jbacik@fb.com,
+	dsterba@suse.com, chandan@linux.vnet.ibm.com,
+	feifeixu.sh@gmail.com, Feifei Xu <xufeifei@linux.vnet.ibm.com>
+Subject: [PATCH V2 2/8] Btrfs: Fix integer overflow when calculating bytes_per_bitmap
+Date:	Wed,  1 Jun 2016 19:18:24 +0800
+
+On ppc64, bytes_per_bitmap will be (65536*8*65536). Hence append UL to
+fix integer overflow.
+
+[HH: slightly backported to 4.4]
+Reviewed-by: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+Signed-off-by: Feifei Xu <xufeifei@linux.vnet.ibm.com>
+---
+ fs/btrfs/free-space-cache.c       | 12 ++++++------
+ fs/btrfs/tests/free-space-tests.c |  2 +-
+ 2 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index fa62335..2813ef0 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -29,7 +29,7 @@
+ #include "inode-map.h"
+ #include "volumes.h"
+ 
+-#define BITS_PER_BITMAP		(PAGE_CACHE_SIZE * 8)
++#define BITS_PER_BITMAP		(PAGE_CACHE_SIZE * 8UL)
+ #define MAX_CACHE_BYTES_PER_GIG	SZ_32K
+ 
+ struct btrfs_trim_range {
+@@ -1415,11 +1415,11 @@ static inline u64 offset_to_bitmap(struct btrfs_free_space_ctl *ctl,
+ 				   u64 offset)
+ {
+ 	u64 bitmap_start;
+-	u32 bytes_per_bitmap;
++	u64 bytes_per_bitmap;
+ 
+ 	bytes_per_bitmap = BITS_PER_BITMAP * ctl->unit;
+ 	bitmap_start = offset - ctl->start;
+-	bitmap_start = div_u64(bitmap_start, bytes_per_bitmap);
++	bitmap_start = div64_u64(bitmap_start, bytes_per_bitmap);
+ 	bitmap_start *= bytes_per_bitmap;
+ 	bitmap_start += ctl->start;
+ 
+@@ -1638,10 +1638,10 @@ static void recalculate_thresholds(struct btrfs_free_space_ctl *ctl)
+ 	u64 bitmap_bytes;
+ 	u64 extent_bytes;
+ 	u64 size = block_group->key.offset;
+-	u32 bytes_per_bg = BITS_PER_BITMAP * ctl->unit;
+-	u32 max_bitmaps = div_u64(size + bytes_per_bg - 1, bytes_per_bg);
++	u64 bytes_per_bg = BITS_PER_BITMAP * ctl->unit;
++	u64 max_bitmaps = div64_u64(size + bytes_per_bg - 1, bytes_per_bg);
+ 
+-	max_bitmaps = max_t(u32, max_bitmaps, 1);
++	max_bitmaps = max_t(u64, max_bitmaps, 1);
+ 
+ 	ASSERT(ctl->total_bitmaps <= max_bitmaps);
+ 
+diff --git a/fs/btrfs/tests/free-space-tests.c b/fs/btrfs/tests/free-space-tests.c
+index 0eeb8f3..f3756d6 100644
+--- a/fs/btrfs/tests/free-space-tests.c
++++ b/fs/btrfs/tests/free-space-tests.c
+@@ -22,7 +22,7 @@
+ #include "../disk-io.h"
+ #include "../free-space-cache.h"
+ 
+-#define BITS_PER_BITMAP		(PAGE_CACHE_SIZE * 8)
++#define BITS_PER_BITMAP		(PAGE_CACHE_SIZE * 8UL)
+ 
+ /*
+  * This test just does basic sanity checking, making sure we can add an extent
