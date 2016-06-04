@@ -1,0 +1,46 @@
+From: Dave Chinner <david@fromorbit.com>
+Subject: [PATCH 1/4] xfs: Don't wrap growfs AGFL indexes
+Date: Tue,  5 Apr 2016 16:05:07 +1000
+To: xfs@oss.sgi.com
+Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.xfs.general/74222>
+
+From: Dave Chinner <dchinner@redhat.com>
+
+Commit 96f859d ("libxfs: pack the agfl header structure so
+XFS_AGFL_SIZE is correct") allowed the freelist to use the empty
+slot at the end of the freelist on 64 bit systems that was not
+being used due to sizeof() rounding up the structure size.
+
+This has caused versions of xfs_repair prior to 4.5.0 (which also
+has the fix) to report this as a corruption once the filesystem has
+been grown. Older kernels can also have problems (seen from a whacky
+container/vm management environment) mounting filesystems grown on a
+system with a newer kernel than the vm/container it is deployed on.
+
+To avoid this problem, change the initial free list indexes not to
+wrap across the end of the AGFL, hence avoiding the initialisation
+of agf_fllast to the last index in the AGFL.
+
+cc: <stable@vger.kernel.org> # 4.4-4.5
+Signed-off-by: Dave Chinner <dchinner@redhat.com>
+---
+ fs/xfs/xfs_fsops.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/xfs/xfs_fsops.c b/fs/xfs/xfs_fsops.c
+index ee3aaa0a..ca0d3eb 100644
+--- a/fs/xfs/xfs_fsops.c
++++ b/fs/xfs/xfs_fsops.c
+@@ -243,8 +243,8 @@ xfs_growfs_data_private(
+ 		agf->agf_roots[XFS_BTNUM_CNTi] = cpu_to_be32(XFS_CNT_BLOCK(mp));
+ 		agf->agf_levels[XFS_BTNUM_BNOi] = cpu_to_be32(1);
+ 		agf->agf_levels[XFS_BTNUM_CNTi] = cpu_to_be32(1);
+-		agf->agf_flfirst = 0;
+-		agf->agf_fllast = cpu_to_be32(XFS_AGFL_SIZE(mp) - 1);
++		agf->agf_flfirst = cpu_to_be32(1);
++		agf->agf_fllast = 0;
+ 		agf->agf_flcount = 0;
+ 		tmpsize = agsize - XFS_PREALLOC_BLOCKS(mp);
+ 		agf->agf_freeblks = cpu_to_be32(tmpsize);
+-- 
+2.7.0
