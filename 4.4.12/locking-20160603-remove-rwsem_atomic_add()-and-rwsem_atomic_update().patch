@@ -1,65 +1,43 @@
 From: Jason Low <jason.low2@hpe.com>
-Subject: locking,rwsem: Remove rwsem_atomic_add() and rwsem_atomic_update()
-Date: Mon, 16 May 2016 17:38:02 -0700
-Cc: Jason Low <jason.low2@hpe.com>, Ingo Molnar <mingo@redhat.com>,
-	Linux Kernel Mailing List <linux-kernel@vger.kernel.org>,
+Subject: [PATCH v2 2/2] Remove rwsem_atomic_add() and rwsem_atomic_update()
+Date: Fri,  3 Jun 2016 22:26:03 -0700
+Cc: linux-kernel@vger.kernel.org,
 	Andrew Morton <akpm@linux-foundation.org>,
-	Richard Henderson <rth@twiddle.net>,
-	Ivan Kokshaysky <ink@jurassic.park.msu.ru>,
-	Matt Turner <mattst88@gmail.com>,
+	Linus Torvalds <torvalds@linux-foundation.org>,
 	Tony Luck <tony.luck@intel.com>,
 	Fenghua Yu <fenghua.yu@intel.com>,
 	Martin Schwidefsky <schwidefsky@de.ibm.com>,
 	Terry Rudd <terry.rudd@hpe.com>,
 	Heiko Carstens <heiko.carstens@de.ibm.com>,
 	Thomas Gleixner <tglx@linutronix.de>,
-	Arnd Bergmann <arnd@arndb.de>,
-	Christoph Lameter <cl@linux.com>,
 	Davidlohr Bueso <dave@stgolabs.net>,
 	Waiman Long <Waiman.Long@hpe.com>,
 	Tim Chen <tim.c.chen@linux.intel.com>,
 	Peter Hurley <peter@hurleysoftware.com>,
-	Jason Low <jason.low2@hp.com>
-To: Linus Torvalds <torvalds@linux-foundation.org>
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2222997>
+	Jason Low <jason.low2@hp.com>, Jason Low <jason.low2@hpe.com>
+To: Peter Zijlstra <peterz@infradead.org>,
+	Ingo Molnar <mingo@redhat.com>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2234868>
 
 The rwsem-xadd count has been converted to an atomic variable and the
 rwsem code now directly uses atomic_long_add() and
 atomic_long_add_return(), so we can remove the arch implementations of
 rwsem_atomic_add() and rwsem_atomic_update().
 
-Cc: Waiman Long <Waiman.Long@hpe.com>
-Cc: Heiko Carstens <heiko.carstens@de.ibm.com>
-Cc: Jason Low <jason.low2@hp.com>
-Cc: Richard Henderson <rth@twiddle.net>
-Cc: Ingo Molnar <mingo@redhat.com>
-Cc: Fenghua Yu <fenghua.yu@intel.com>
-Cc: Andrew Morton <akpm@linux-foundation.org>
-Cc: Martin Schwidefsky <schwidefsky@de.ibm.com>
-Cc: Linus Torvalds <torvalds@linux-foundation.org>
-Cc: Tim Chen <tim.c.chen@linux.intel.com>
-Cc: Christoph Lameter <cl@linux.com>
-Cc: Thomas Gleixner <tglx@linutronix.de>
-Cc: Arnd Bergmann <arnd@arndb.de>
-Cc: Terry Rudd <terry.rudd@hpe.com>
-Cc: Peter Hurley <peter@hurleysoftware.com>
-Cc: Davidlohr Bueso <dave@stgolabs.net>
-Cc: Ivan Kokshaysky <ink@jurassic.park.msu.ru>
-Cc: Tony Luck <tony.luck@intel.com>
-Cc: Matt Turner <mattst88@gmail.com>
 Signed-off-by: Jason Low <jason.low2@hpe.com>
-Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
 ---
- arch/alpha/include/asm/rwsem.h |   42 -----------------------------------------
- arch/ia64/include/asm/rwsem.h  |    7 ------
- arch/s390/include/asm/rwsem.h  |   37 ------------------------------------
- arch/x86/include/asm/rwsem.h   |   18 -----------------
- include/asm-generic/rwsem.h    |   16 ---------------
+ arch/alpha/include/asm/rwsem.h | 42 ------------------------------------------
+ arch/ia64/include/asm/rwsem.h  |  7 -------
+ arch/s390/include/asm/rwsem.h  | 37 -------------------------------------
+ arch/x86/include/asm/rwsem.h   | 18 ------------------
+ include/asm-generic/rwsem.h    | 16 ----------------
  5 files changed, 120 deletions(-)
 
+diff --git a/arch/alpha/include/asm/rwsem.h b/arch/alpha/include/asm/rwsem.h
+index b40021a..77873d0 100644
 --- a/arch/alpha/include/asm/rwsem.h
 +++ b/arch/alpha/include/asm/rwsem.h
-@@ -191,47 +191,5 @@ static inline void __downgrade_write(str
+@@ -191,47 +191,5 @@ static inline void __downgrade_write(struct rw_semaphore *sem)
  		rwsem_downgrade_wake(sem);
  }
  
@@ -107,9 +85,11 @@ Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
 -
  #endif /* __KERNEL__ */
  #endif /* _ALPHA_RWSEM_H */
+diff --git a/arch/ia64/include/asm/rwsem.h b/arch/ia64/include/asm/rwsem.h
+index c5d544f..8fa98dd 100644
 --- a/arch/ia64/include/asm/rwsem.h
 +++ b/arch/ia64/include/asm/rwsem.h
-@@ -151,11 +151,4 @@ __downgrade_write (struct rw_semaphore *
+@@ -151,11 +151,4 @@ __downgrade_write (struct rw_semaphore *sem)
  		rwsem_downgrade_wake(sem);
  }
  
@@ -121,9 +101,11 @@ Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
 -#define rwsem_atomic_update(delta, sem)	atomic64_add_return(delta, (atomic64_t *)(&(sem)->count))
 -
  #endif /* _ASM_IA64_RWSEM_H */
+diff --git a/arch/s390/include/asm/rwsem.h b/arch/s390/include/asm/rwsem.h
+index c75e447..597e7e9 100644
 --- a/arch/s390/include/asm/rwsem.h
 +++ b/arch/s390/include/asm/rwsem.h
-@@ -207,41 +207,4 @@ static inline void __downgrade_write(str
+@@ -207,41 +207,4 @@ static inline void __downgrade_write(struct rw_semaphore *sem)
  		rwsem_downgrade_wake(sem);
  }
  
@@ -165,9 +147,11 @@ Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
 -}
 -
  #endif /* _S390_RWSEM_H */
+diff --git a/arch/x86/include/asm/rwsem.h b/arch/x86/include/asm/rwsem.h
+index 453744c..089ced4 100644
 --- a/arch/x86/include/asm/rwsem.h
 +++ b/arch/x86/include/asm/rwsem.h
-@@ -215,23 +215,5 @@ static inline void __downgrade_write(str
+@@ -213,23 +213,5 @@ static inline void __downgrade_write(struct rw_semaphore *sem)
  		     : "memory", "cc");
  }
  
@@ -191,9 +175,11 @@ Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
 -
  #endif /* __KERNEL__ */
  #endif /* _ASM_X86_RWSEM_H */
+diff --git a/include/asm-generic/rwsem.h b/include/asm-generic/rwsem.h
+index a3a93ec..5be122e 100644
 --- a/include/asm-generic/rwsem.h
 +++ b/include/asm-generic/rwsem.h
-@@ -107,14 +107,6 @@ static inline void __up_write(struct rw_
+@@ -107,14 +107,6 @@ static inline void __up_write(struct rw_semaphore *sem)
  }
  
  /*
@@ -208,7 +194,7 @@ Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
   * downgrade write lock to read lock
   */
  static inline void __downgrade_write(struct rw_semaphore *sem)
-@@ -134,13 +126,5 @@ static inline void __downgrade_write(str
+@@ -134,13 +126,5 @@ static inline void __downgrade_write(struct rw_semaphore *sem)
  		rwsem_downgrade_wake(sem);
  }
  
@@ -222,4 +208,3 @@ Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
 -
  #endif	/* __KERNEL__ */
  #endif	/* _ASM_GENERIC_RWSEM_H */
-
