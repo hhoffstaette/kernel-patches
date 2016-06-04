@@ -1,0 +1,34 @@
+From: Josh Poimboeuf <jpoimboe@redhat.com>
+Subject: [PATCH v2 2/2] sched/debug: always show nr_migrations
+Date: Fri,  3 Jun 2016 17:58:41 -0500
+Cc: linux-kernel@vger.kernel.org,
+	Mel Gorman <mgorman@techsingularity.net>,
+	Matt Fleming <matt@codeblueprint.co.uk>,
+	Srikar Dronamraju <srikar@linux.vnet.ibm.com>
+To: Ingo Molnar <mingo@redhat.com>,
+	Peter Zijlstra <peterz@infradead.org>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2234772>
+
+The nr_migrations field is updated independently of CONFIG_SCHEDSTATS,
+so it can be displayed regardless.
+
+Signed-off-by: Josh Poimboeuf <jpoimboe@redhat.com>
+---
+ kernel/sched/debug.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
+index 0368c39..2a0a999 100644
+--- a/kernel/sched/debug.c
++++ b/kernel/sched/debug.c
+@@ -573,9 +573,9 @@ void proc_sched_show_task(struct task_struct *p, struct seq_file *m)
+ 
+ 	nr_switches = p->nvcsw + p->nivcsw;
+ 
+-#ifdef CONFIG_SCHEDSTATS
+ 	P(se.nr_migrations);
+ 
++#ifdef CONFIG_SCHEDSTATS
+ 	if (schedstat_enabled()) {
+ 		u64 avg_atom, avg_per_cpu;
+ 
