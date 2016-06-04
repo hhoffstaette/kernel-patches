@@ -1,0 +1,21 @@
+
+Don't WARN_ON when shrink_active_list() calls xfs_vm_releasepage()
+on a dirty page; return quietly instead.
+
+See:
+http://oss.sgi.com/pipermail/xfs/2016-May/049071.html
+http://oss.sgi.com/pipermail/xfs/2016-June/049211.html
+
+--- linux-4.4.12/fs/xfs/xfs_aops.c~	2016-06-04 03:26:02.000000000 +0200
++++ linux-4.4.12/fs/xfs/xfs_aops.c	2016-06-04 03:26:54.866125804 +0200
+@@ -1045,9 +1045,7 @@ xfs_vm_releasepage(
+ 
+ 	xfs_count_page_state(page, &delalloc, &unwritten);
+ 
+-	if (WARN_ON_ONCE(delalloc))
+-		return 0;
+-	if (WARN_ON_ONCE(unwritten))
++	if (unlikely(delalloc || unwritten))
+ 		return 0;
+ 
+ 	return try_to_free_buffers(page);
