@@ -1,8 +1,7 @@
-From:	David Sterba <dsterba@suse.com>
-To:	linux-btrfs@vger.kernel.org
-Cc:	David Sterba <dsterba@suse.com>
+From 0de270fa83d5a45664e3f2428d432145037ac432 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Tue, 1 Dec 2015 18:09:12 +0100
 Subject: [PATCH] btrfs: drop duplicate prefix from scrub workqueues
-Date:	Tue,  1 Dec 2015 18:09:12 +0100
 
 The helper btrfs_alloc_workqueue will add the "btrfs-" prefix.
 
@@ -12,10 +11,10 @@ Signed-off-by: David Sterba <dsterba@suse.com>
  1 file changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
-index 2907a77fb1f6..f8f52a61e329 100644
+index b091d94..1d1f639 100644
 --- a/fs/btrfs/scrub.c
 +++ b/fs/btrfs/scrub.c
-@@ -3685,23 +3685,23 @@ static noinline_for_stack int scrub_workers_get(struct btrfs_fs_info *fs_info,
+@@ -3735,27 +3735,27 @@ static noinline_for_stack int scrub_workers_get(struct btrfs_fs_info *fs_info,
  	if (fs_info->scrub_workers_refcnt == 0) {
  		if (is_dev_replace)
  			fs_info->scrub_workers =
@@ -37,11 +36,14 @@ index 2907a77fb1f6..f8f52a61e329 100644
  		if (!fs_info->scrub_wr_completion_workers)
  			goto fail_scrub_wr_completion_workers;
  
+ 		fs_info->scrub_nocow_workers =
+-			btrfs_alloc_workqueue("btrfs-scrubnc", flags, 1, 0);
++			btrfs_alloc_workqueue("scrubnc", flags, 1, 0);
+ 		if (!fs_info->scrub_nocow_workers)
+ 			goto fail_scrub_nocow_workers;
  		fs_info->scrub_parity_workers =
 -			btrfs_alloc_workqueue("btrfs-scrubparity", flags,
 +			btrfs_alloc_workqueue("scrubparity", flags,
  					      max_active, 2);
  		if (!fs_info->scrub_parity_workers)
  			goto fail_scrub_parity_workers;
--- 
-1.8.4.5
