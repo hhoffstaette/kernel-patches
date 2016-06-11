@@ -1,0 +1,29 @@
+From:	Heinrich Schuchardt <xypron.glpk@gmx.de>
+To:	Chris Mason <clm@fb.com>, Josef Bacik <jbacik@fb.com>,
+	David Sterba <dsterba@suse.com>
+Cc:	linux-btrfs@vger.kernel.org, linux-kernel@vger.kernel.org,
+	Heinrich Schuchardt <xypron.glpk@gmx.de>
+Subject: [PATCH 1/1] btrfs: Use correct format specifier
+Date:	Sat, 11 Jun 2016 18:11:10 +0200
+
+Component mirror_num of struct btrfsic_block is defined
+as unsigned int. Use %u as format specifier.
+
+Signed-off-by: Heinrich Schuchardt <xypron.glpk@gmx.de>
+---
+ fs/btrfs/check-integrity.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/check-integrity.c b/fs/btrfs/check-integrity.c
+index ca70bc7..5d5cae0 100644
+--- a/fs/btrfs/check-integrity.c
++++ b/fs/btrfs/check-integrity.c
+@@ -2646,7 +2646,7 @@ static void btrfsic_dump_tree_sub(const struct btrfsic_state *state,
+ 	 * This algorithm is recursive because the amount of used stack space
+ 	 * is very small and the max recursion depth is limited.
+ 	 */
+-	indent_add = sprintf(buf, "%c-%llu(%s/%llu/%d)",
++	indent_add = sprintf(buf, "%c-%llu(%s/%llu/%u)",
+ 			     btrfsic_get_block_type(state, block),
+ 			     block->logical_bytenr, block->dev_state->name,
+ 			     block->dev_bytenr, block->mirror_num);
