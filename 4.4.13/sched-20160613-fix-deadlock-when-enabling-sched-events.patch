@@ -1,0 +1,96 @@
+From: Josh Poimboeuf <jpoimboe@redhat.com>
+Subject: [PATCH v2] sched/debug: fix deadlock when enabling sched events
+Date: Mon, 13 Jun 2016 02:32:09 -0500
+Cc: Ingo Molnar <mingo@redhat.com>,
+	Peter Zijlstra <peterz@infradead.org>,
+	linux-kernel@vger.kernel.org,
+	Mel Gorman <mgorman@techsingularity.net>,
+	Matt Fleming <matt@codeblueprint.co.uk>,
+	Srikar Dronamraju <srikar@linux.vnet.ibm.com>
+To: Ingo Molnar <mingo@kernel.org>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2242039>
+
+[..snip..]
+
+I see a hang when enabling sched events:
+
+  echo 1 > /sys/kernel/debug/tracing/events/sched/enable
+
+The printk buffer shows:
+
+  BUG: spinlock recursion on CPU#1, swapper/1/0
+   lock: 0xffff88007d5d8c00, .magic: dead4ead, .owner: swapper/1/0, .owner_cpu: 1
+  CPU: 1 PID: 0 Comm: swapper/1 Not tainted 4.7.0-rc2+ #1
+  Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.8.1-20150318_183358- 04/01/2014
+   0000000000000086 3a8e170cf69ad23f ffff88007d403898 ffffffff8143d663
+   ffff88007c535480 ffff88007d5d8c00 ffff88007d4038b8 ffffffff81115948
+   ffff88007d5d8c00 ffff88007d5d8c00 ffff88007d4038e8 ffffffff81115aea
+  Call Trace:
+   <IRQ>  [<ffffffff8143d663>] dump_stack+0x85/0xc2
+   [<ffffffff81115948>] spin_dump+0x78/0xc0
+   [<ffffffff81115aea>] do_raw_spin_lock+0x11a/0x150
+   [<ffffffff81891471>] _raw_spin_lock+0x61/0x80
+   [<ffffffff810e5466>] ? try_to_wake_up+0x256/0x4e0
+   [<ffffffff810e5466>] try_to_wake_up+0x256/0x4e0
+   [<ffffffff81891a0a>] ? _raw_spin_unlock_irqrestore+0x4a/0x80
+   [<ffffffff810e5705>] wake_up_process+0x15/0x20
+   [<ffffffff810cebb4>] insert_work+0x84/0xc0
+   [<ffffffff810ced7f>] __queue_work+0x18f/0x660
+   [<ffffffff810cf9a6>] queue_work_on+0x46/0x90
+   [<ffffffffa00cd95b>] drm_fb_helper_dirty.isra.11+0xcb/0xe0 [drm_kms_helper]
+   [<ffffffffa00cdac0>] drm_fb_helper_sys_imageblit+0x30/0x40 [drm_kms_helper]
+   [<ffffffff814babcd>] soft_cursor+0x1ad/0x230
+   [<ffffffff814ba379>] bit_cursor+0x649/0x680
+   [<ffffffff814b9d30>] ? update_attr.isra.2+0x90/0x90
+   [<ffffffff814b5e6a>] fbcon_cursor+0x14a/0x1c0
+   [<ffffffff81555ef8>] hide_cursor+0x28/0x90
+   [<ffffffff81558b6f>] vt_console_print+0x3bf/0x3f0
+   [<ffffffff81122c63>] call_console_drivers.constprop.24+0x183/0x200
+   [<ffffffff811241f4>] console_unlock+0x3d4/0x610
+   [<ffffffff811247f5>] vprintk_emit+0x3c5/0x610
+   [<ffffffff81124bc9>] vprintk_default+0x29/0x40
+   [<ffffffff811e965b>] printk+0x57/0x73
+   [<ffffffff810f7a9e>] enqueue_entity+0xc2e/0xc70
+   [<ffffffff810f7b39>] enqueue_task_fair+0x59/0xab0
+   [<ffffffff8106dcd9>] ? kvm_sched_clock_read+0x9/0x20
+   [<ffffffff8103fb39>] ? sched_clock+0x9/0x10
+   [<ffffffff810e3fcc>] activate_task+0x5c/0xa0
+   [<ffffffff810e4514>] ttwu_do_activate+0x54/0xb0
+   [<ffffffff810e5cea>] sched_ttwu_pending+0x7a/0xb0
+   [<ffffffff810e5e51>] scheduler_ipi+0x61/0x170
+   [<ffffffff81059e7f>] smp_trace_reschedule_interrupt+0x4f/0x2a0
+   [<ffffffff81893ba6>] trace_reschedule_interrupt+0x96/0xa0
+   <EOI>  [<ffffffff8106e0d6>] ? native_safe_halt+0x6/0x10
+   [<ffffffff8110fb1d>] ? trace_hardirqs_on+0xd/0x10
+   [<ffffffff81040ac0>] default_idle+0x20/0x1a0
+   [<ffffffff8104147f>] arch_cpu_idle+0xf/0x20
+   [<ffffffff81102f8f>] default_idle_call+0x2f/0x50
+   [<ffffffff8110332e>] cpu_startup_entry+0x37e/0x450
+   [<ffffffff8105af70>] start_secondary+0x160/0x1a0
+
+Note the hang only occurs when echoing the above from a physical serial
+console, not from an ssh session.
+
+The bug is caused by a deadlock where the task is trying to grab the rq
+lock twice because printk()'s aren't safe in sched code.
+
+Fixes: cb2517653fcc ("sched/debug: Make schedstats a runtime tunable that is disabled by default")
+Cc: stable@vger.kernel.org
+Signed-off-by: Josh Poimboeuf <jpoimboe@redhat.com>
+---
+ kernel/sched/fair.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index c6dd8ba..52d9b37 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -3220,7 +3220,7 @@ static inline void check_schedstat_required(void)
+ 			trace_sched_stat_iowait_enabled()  ||
+ 			trace_sched_stat_blocked_enabled() ||
+ 			trace_sched_stat_runtime_enabled())  {
+-		pr_warn_once("Scheduler tracepoints stat_sleep, stat_iowait, "
++		printk_deferred_once("Scheduler tracepoints stat_sleep, stat_iowait, "
+ 			     "stat_blocked and stat_runtime require the "
+ 			     "kernel parameter schedstats=enabled or "
+ 			     "kernel.sched_schedstats=1\n");
