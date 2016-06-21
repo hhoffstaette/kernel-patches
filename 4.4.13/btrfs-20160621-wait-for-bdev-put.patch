@@ -1,0 +1,141 @@
+From:	Anand Jain <anand.jain@oracle.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	holger@applied-asynchrony.com, clm@fb.com, dsterba@suse.com, xiaolong.ye@intel.com
+Subject: [PATCH v2 2/2] btrfs: wait for bdev put
+Date:	Tue, 21 Jun 2016 18:24:08 +0800
+
+From: Anand Jain <Anand.Jain@oracle.com>
+
+Further to the commit
+     bc178622d40d87e75abc131007342429c9b03351
+     btrfs: use rcu_barrier() to wait for bdev puts at unmount
+
+This patch implements a method to time wait on the __free_device()
+which actually does the bdev put. This is needed as the user space
+running 'btrfs fi show -d' immediately after the replace and
+unmount, is still reading older information from the device.
+
+ mail-archive.com/linux-btrfs@vger.kernel.org/msg54188.html
+
+[HH: fixed up #include context for 4.4]
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+[updates: bc178622d40d87e75abc131007342429c9b03351]
+---
+v2: Also to make sure bdev_closing is set it needs rcu_barrier(),
+    restored rcu_barrier().
+
+ fs/btrfs/volumes.c | 45 +++++++++++++++++++++++++++++++++++++++++++--
+ fs/btrfs/volumes.h |  1 +
+ 2 files changed, 44 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 604daf315669..ef61c34cafbf 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -27,6 +27,7 @@
+ #include <linux/kthread.h>
+ #include <linux/raid/pq.h>
+ #include <linux/semaphore.h>
++#include <linux/delay.h>
+ #include <asm/div64.h>
+ #include "ctree.h"
+ #include "extent_map.h"
+@@ -254,6 +255,17 @@ static struct btrfs_device *__alloc_device(void)
+ 	return dev;
+ }
+ 
++static int is_device_closing(struct list_head *head)
++{
++	struct btrfs_device *dev;
++
++	list_for_each_entry(dev, head, dev_list) {
++		if (dev->bdev_closing)
++			return 1;
++	}
++	return 0;
++}
++
+ static noinline struct btrfs_device *__find_device(struct list_head *head,
+ 						   u64 devid, u8 *uuid)
+ {
+@@ -832,12 +844,22 @@ again:
+ static void __free_device(struct work_struct *work)
+ {
+ 	struct btrfs_device *device;
++	struct btrfs_device *new_device_addr;
+ 
+ 	device = container_of(work, struct btrfs_device, rcu_work);
+ 
+ 	if (device->bdev)
+ 		blkdev_put(device->bdev, device->mode);
+ 
++	/*
++	 * If we are coming here from btrfs_close_one_device()
++	 * then it allocates a new device structure for the same
++	 * devid, so find device again with the devid
++	 */
++	new_device_addr = __find_device(&device->fs_devices->devices,
++						device->devid, NULL);
++
++	new_device_addr->bdev_closing = 0;
+ 	rcu_string_free(device->name);
+ 	kfree(device);
+ }
+@@ -884,6 +906,12 @@ static void btrfs_close_one_device(struct btrfs_device *device)
+ 	list_replace_rcu(&device->dev_list, &new_device->dev_list);
+ 	new_device->fs_devices = device->fs_devices;
+ 
++	/*
++	 * So to wait for kworkers to finish all blkdev_puts,
++	 * so device is really free when umount is done.
++	 */
++	new_device->bdev_closing = 1;
++
+ 	call_rcu(&device->rcu, free_device);
+ }
+ 
+@@ -912,6 +940,7 @@ int btrfs_close_devices(struct btrfs_fs_devices *fs_devices)
+ {
+ 	struct btrfs_fs_devices *seed_devices = NULL;
+ 	int ret;
++	int retry_cnt = 5;
+ 
+ 	mutex_lock(&uuid_mutex);
+ 	ret = __btrfs_close_devices(fs_devices);
+@@ -929,10 +958,22 @@ int btrfs_close_devices(struct btrfs_fs_devices *fs_devices)
+ 	}
+ 	/*
+ 	 * Wait for rcu kworkers under __btrfs_close_devices
+-	 * to finish all blkdev_puts so device is really
+-	 * free when umount is done.
++	 * to finish all free_device()
+ 	 */
+ 	rcu_barrier();
++
++	/*
++	 * Wait for a grace period so that __free_device()
++	 * will actaully do the device close.
++	 */
++	while (is_device_closing(&fs_devices->devices) &&
++						--retry_cnt) {
++		mdelay(1000); //1 sec
++	}
++
++	if (!(retry_cnt > 0))
++		printk(KERN_WARNING "BTRFS: %pU bdev_put didn't complete, giving up\n",
++			fs_devices->fsid);
+ 	return ret;
+ }
+ 
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 0ac90f8d85bd..945e49f5e17d 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -150,6 +150,7 @@ struct btrfs_device {
+ 	/* Counter to record the change of device stats */
+ 	atomic_t dev_stats_ccnt;
+ 	atomic_t dev_stat_values[BTRFS_DEV_STAT_VALUES_MAX];
++	int bdev_closing;
+ };
+ 
+ /*
