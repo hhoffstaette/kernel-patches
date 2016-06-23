@@ -1,0 +1,114 @@
+From 59bad075bd135979b2a484c30f6bcf28d17b8689 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Tue, 21 Jun 2016 11:53:28 +1000
+Subject: xfs: rearrange xfs_bmap_add_free parameters
+
+This is already in xfsprogs' libxfs, so port it to the kernel.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/libxfs/xfs_bmap.c       | 12 ++++++------
+ fs/xfs/libxfs/xfs_bmap.h       |  4 ++--
+ fs/xfs/libxfs/xfs_bmap_btree.c |  2 +-
+ fs/xfs/libxfs/xfs_ialloc.c     |  9 ++++-----
+ 4 files changed, 13 insertions(+), 14 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
+index 932381c..8847496 100644
+--- a/fs/xfs/libxfs/xfs_bmap.c
++++ b/fs/xfs/libxfs/xfs_bmap.c
+@@ -570,10 +570,10 @@ xfs_bmap_validate_ret(
+  */
+ void
+ xfs_bmap_add_free(
++	struct xfs_mount	*mp,		/* mount point structure */
++	struct xfs_bmap_free	*flist,		/* list of extents */
+ 	xfs_fsblock_t		bno,		/* fs block number of extent */
+-	xfs_filblks_t		len,		/* length of extent */
+-	xfs_bmap_free_t		*flist,		/* list of extents */
+-	xfs_mount_t		*mp)		/* mount point structure */
++	xfs_filblks_t		len)		/* length of extent */
+ {
+ 	xfs_bmap_free_item_t	*cur;		/* current (next) element */
+ 	xfs_bmap_free_item_t	*new;		/* new element */
+@@ -699,7 +699,7 @@ xfs_bmap_btree_to_extents(
+ 	cblock = XFS_BUF_TO_BLOCK(cbp);
+ 	if ((error = xfs_btree_check_block(cur, cblock, 0, cbp)))
+ 		return error;
+-	xfs_bmap_add_free(cbno, 1, cur->bc_private.b.flist, mp);
++	xfs_bmap_add_free(mp, cur->bc_private.b.flist, cbno, 1);
+ 	ip->i_d.di_nblocks--;
+ 	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT, -1L);
+ 	xfs_trans_binval(tp, cbp);
+@@ -5073,8 +5073,8 @@ xfs_bmap_del_extent(
+ 	 * If we need to, add to list of extents to delete.
+ 	 */
+ 	if (do_fx)
+-		xfs_bmap_add_free(del->br_startblock, del->br_blockcount, flist,
+-			mp);
++		xfs_bmap_add_free(mp, flist, del->br_startblock,
++			del->br_blockcount);
+ 	/*
+ 	 * Adjust inode # blocks in the file.
+ 	 */
+diff --git a/fs/xfs/libxfs/xfs_bmap.h b/fs/xfs/libxfs/xfs_bmap.h
+index 423a34e..e081c76 100644
+--- a/fs/xfs/libxfs/xfs_bmap.h
++++ b/fs/xfs/libxfs/xfs_bmap.h
+@@ -191,8 +191,8 @@ void	xfs_bmap_trace_exlist(struct xfs_inode *ip, xfs_extnum_t cnt,
+ 
+ int	xfs_bmap_add_attrfork(struct xfs_inode *ip, int size, int rsvd);
+ void	xfs_bmap_local_to_extents_empty(struct xfs_inode *ip, int whichfork);
+-void	xfs_bmap_add_free(xfs_fsblock_t bno, xfs_filblks_t len,
+-		struct xfs_bmap_free *flist, struct xfs_mount *mp);
++void	xfs_bmap_add_free(struct xfs_mount *mp, struct xfs_bmap_free *flist,
++			  xfs_fsblock_t bno, xfs_filblks_t len);
+ void	xfs_bmap_cancel(struct xfs_bmap_free *flist);
+ int	xfs_bmap_finish(struct xfs_trans **tp, struct xfs_bmap_free *flist,
+ 			struct xfs_inode *ip);
+diff --git a/fs/xfs/libxfs/xfs_bmap_btree.c b/fs/xfs/libxfs/xfs_bmap_btree.c
+index 6282f6e..db0c71e 100644
+--- a/fs/xfs/libxfs/xfs_bmap_btree.c
++++ b/fs/xfs/libxfs/xfs_bmap_btree.c
+@@ -526,7 +526,7 @@ xfs_bmbt_free_block(
+ 	struct xfs_trans	*tp = cur->bc_tp;
+ 	xfs_fsblock_t		fsbno = XFS_DADDR_TO_FSB(mp, XFS_BUF_ADDR(bp));
+ 
+-	xfs_bmap_add_free(fsbno, 1, cur->bc_private.b.flist, mp);
++	xfs_bmap_add_free(mp, cur->bc_private.b.flist, fsbno, 1);
+ 	ip->i_d.di_nblocks--;
+ 
+ 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+diff --git a/fs/xfs/libxfs/xfs_ialloc.c b/fs/xfs/libxfs/xfs_ialloc.c
+index 22297f9..e3c0af7 100644
+--- a/fs/xfs/libxfs/xfs_ialloc.c
++++ b/fs/xfs/libxfs/xfs_ialloc.c
+@@ -1828,9 +1828,8 @@ xfs_difree_inode_chunk(
+ 
+ 	if (!xfs_inobt_issparse(rec->ir_holemask)) {
+ 		/* not sparse, calculate extent info directly */
+-		xfs_bmap_add_free(XFS_AGB_TO_FSB(mp, agno,
+-				  XFS_AGINO_TO_AGBNO(mp, rec->ir_startino)),
+-				  mp->m_ialloc_blks, flist, mp);
++		xfs_bmap_add_free(mp, flist, XFS_AGB_TO_FSB(mp, agno, sagbno),
++				  mp->m_ialloc_blks);
+ 		return;
+ 	}
+ 
+@@ -1873,8 +1872,8 @@ xfs_difree_inode_chunk(
+ 
+ 		ASSERT(agbno % mp->m_sb.sb_spino_align == 0);
+ 		ASSERT(contigblk % mp->m_sb.sb_spino_align == 0);
+-		xfs_bmap_add_free(XFS_AGB_TO_FSB(mp, agno, agbno), contigblk,
+-				  flist, mp);
++		xfs_bmap_add_free(mp, flist, XFS_AGB_TO_FSB(mp, agno, agbno),
++				  contigblk);
+ 
+ 		/* reset range to current bit and carry on... */
+ 		startidx = endidx = nextbit;
+-- 
+cgit v0.12
+
