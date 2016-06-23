@@ -1,0 +1,43 @@
+From: Anand Jain <anand.jain@oracle.com>
+To: linux-btrfs@vger.kernel.org
+Cc: dsterba@suse.cz, holger@applied-asynchrony.com, clm@fb.com,
+        xiaolong.ye@intel.com
+Subject: [PATCH v3 2/2] btrfs: make sure device is synced before return
+Date: Thu, 23 Jun 2016 20:54:07 +0800
+
+An inconsistent behavior due to stale reads from the
+disk was reported
+
+  mail-archive.com/linux-btrfs@vger.kernel.org/msg54188.html
+
+This patch will make sure devices are synced before
+return in the unmount thread.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+---
+ v2: Also to make sure bdev_closing is set it needs rcu_barrier(),
+     restored rcu_barrier().
+ v3: Removed the complicated timed-wait on blkdev_put code,
+     but make synced and invalidated before umount is returned.
+     So sorry that I have to change the title of this patch
+     as well (was: btrfs: wait for bdev put).
+
+ fs/btrfs/volumes.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 604daf315669..f741ade130a4 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -870,6 +870,11 @@ static void btrfs_close_one_device(struct btrfs_device *device)
+ 	if (device->missing)
+ 		fs_devices->missing_devices--;
+ 
++	if (device->bdev && device->writeable) {
++		sync_blockdev(device->bdev);
++		invalidate_bdev(device->bdev);
++	}
++
+ 	new_device = btrfs_alloc_device(NULL, &device->devid,
+ 					device->uuid);
+ 	BUG_ON(IS_ERR(new_device)); /* -ENOMEM */
