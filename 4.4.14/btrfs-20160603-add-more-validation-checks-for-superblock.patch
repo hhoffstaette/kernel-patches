@@ -1,0 +1,92 @@
+From 99e3ecfcb9f4ca35192d20a5bea158b81f600062 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Fri, 3 Jun 2016 12:05:14 -0700
+Subject: Btrfs: add more validation checks for superblock
+
+This adds validation checks for super_total_bytes, super_bytes_used and
+super_stripesize, super_num_devices.
+
+Reported-by: Vegard Nossum <vegard.nossum@oracle.com>
+Reported-by: Quentin Casasnovas <quentin.casasnovas@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c | 11 +++++++++++
+ fs/btrfs/volumes.c | 24 ++++++++++++++++++++++++
+ 2 files changed, 35 insertions(+)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 6628fca..2bd5f5e97 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -4130,6 +4130,17 @@ static int btrfs_check_super_valid(struct btrfs_fs_info *fs_info,
+ 	 * Hint to catch really bogus numbers, bitflips or so, more exact checks are
+ 	 * done later
+ 	 */
++	if (btrfs_super_bytes_used(sb) < 6 * btrfs_super_nodesize(sb)) {
++		btrfs_err(fs_info, "bytes_used is too small %llu",
++		       btrfs_super_bytes_used(sb));
++		ret = -EINVAL;
++	}
++	if (!is_power_of_2(btrfs_super_stripesize(sb)) ||
++	    btrfs_super_stripesize(sb) != sectorsize) {
++		btrfs_err(fs_info, "invalid stripesize %u",
++		       btrfs_super_stripesize(sb));
++		ret = -EINVAL;
++	}
+ 	if (btrfs_super_num_devices(sb) > (1UL << 31))
+ 		printk(KERN_WARNING "BTRFS: suspicious number of devices: %llu\n",
+ 				btrfs_super_num_devices(sb));
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 42ccde4..fd5c9e6 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6651,6 +6651,7 @@ int btrfs_read_chunk_tree(struct btrfs_root *root)
+ 	struct btrfs_key found_key;
+ 	int ret;
+ 	int slot;
++	u64 total_dev = 0;
+ 
+ 	root = root->fs_info->chunk_root;
+ 
+@@ -6692,6 +6693,7 @@ int btrfs_read_chunk_tree(struct btrfs_root *root)
+ 			ret = read_one_dev(root, leaf, dev_item);
+ 			if (ret)
+ 				goto error;
++			total_dev++;
+ 		} else if (found_key.type == BTRFS_CHUNK_ITEM_KEY) {
+ 			struct btrfs_chunk *chunk;
+ 			chunk = btrfs_item_ptr(leaf, slot, struct btrfs_chunk);
+@@ -6701,6 +6703,28 @@ int btrfs_read_chunk_tree(struct btrfs_root *root)
+ 		}
+ 		path->slots[0]++;
+ 	}
++
++	/*
++	 * After loading chunk tree, we've got all device information,
++	 * do another round of validation checks.
++	 */
++	if (total_dev != root->fs_info->fs_devices->total_devices) {
++		btrfs_err(root->fs_info,
++	   "super_num_devices %llu mismatch with num_devices %llu found here",
++			  btrfs_super_num_devices(root->fs_info->super_copy),
++			  total_dev);
++		ret = -EINVAL;
++		goto error;
++	}
++	if (btrfs_super_total_bytes(root->fs_info->super_copy) <
++	    root->fs_info->fs_devices->total_rw_bytes) {
++		btrfs_err(root->fs_info,
++	"super_total_bytes %llu mismatch with fs_devices total_rw_bytes %llu",
++			  btrfs_super_total_bytes(root->fs_info->super_copy),
++			  root->fs_info->fs_devices->total_rw_bytes);
++		ret = -EINVAL;
++		goto error;
++	}
+ 	ret = 0;
+ error:
+ 	unlock_chunks(root);
+-- 
+cgit v0.12
+
