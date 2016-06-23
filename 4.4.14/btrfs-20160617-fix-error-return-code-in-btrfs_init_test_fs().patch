@@ -1,0 +1,32 @@
+From f5761ca6f442b998d245d6e04dc35cbfba38e5b7 Mon Sep 17 00:00:00 2001
+From: Wei Yongjun <yongjun_wei@trendmicro.com.cn>
+Date: Fri, 17 Jun 2016 17:20:40 +0000
+Subject: Btrfs: fix error return code in btrfs_init_test_fs()
+
+Fix to return a negative error code from the kern_mount() error handling
+case instead of 0(ret is set to 0 by register_filesystem), as done
+elsewhere in this function.
+
+Signed-off-by: Wei Yongjun <yongjun_wei@trendmicro.com.cn>
+Reviewed-by: Omar Sandoval <osandov@fb.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/tests/btrfs-tests.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/tests/btrfs-tests.c b/fs/btrfs/tests/btrfs-tests.c
+index 10eb249..02223f3 100644
+--- a/fs/btrfs/tests/btrfs-tests.c
++++ b/fs/btrfs/tests/btrfs-tests.c
+@@ -68,7 +68,7 @@ int btrfs_init_test_fs(void)
+ 	if (IS_ERR(test_mnt)) {
+ 		printk(KERN_ERR "btrfs: cannot mount test file system\n");
+ 		unregister_filesystem(&test_type);
+-		return ret;
++		return PTR_ERR(test_mnt);
+ 	}
+ 	return 0;
+ }
+-- 
+cgit v0.12
+
