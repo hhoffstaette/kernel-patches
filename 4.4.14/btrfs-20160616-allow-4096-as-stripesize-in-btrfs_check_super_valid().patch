@@ -1,0 +1,36 @@
+From dd5c93111dc9d26e038ac437f7a403d617e82c62 Mon Sep 17 00:00:00 2001
+From: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+Date: Thu, 16 Jun 2016 22:07:58 +0530
+Subject: Btrfs: btrfs_check_super_valid: Allow 4096 as stripesize
+
+Older btrfs-progs/mkfs.btrfs sets 4096 as the stripesize. Hence
+restricting stripesize to be equal to sectorsize would cause super block
+validation to return an error on architectures where PAGE_SIZE is not
+equal to 4096.
+
+Hence as a workaround, this commit allows stripesize to be set to 4096
+bytes.
+
+Signed-off-by: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 789f5f2..54cca7a 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -4134,7 +4134,8 @@ static int btrfs_check_super_valid(struct btrfs_fs_info *fs_info,
+ 		ret = -EINVAL;
+ 	}
+ 	if (!is_power_of_2(btrfs_super_stripesize(sb)) ||
+-	    btrfs_super_stripesize(sb) != sectorsize) {
++		((btrfs_super_stripesize(sb) != sectorsize) &&
++			(btrfs_super_stripesize(sb) != 4096))) {
+ 		btrfs_err(fs_info, "invalid stripesize %u",
+ 		       btrfs_super_stripesize(sb));
+ 		ret = -EINVAL;
+-- 
+cgit v0.12
+
