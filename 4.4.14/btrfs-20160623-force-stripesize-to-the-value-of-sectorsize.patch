@@ -1,0 +1,68 @@
+From 917b187d467d87ed8d75b3d2084d906845ed126a Mon Sep 17 00:00:00 2001
+From: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+Date: Thu, 23 Jun 2016 15:16:44 +0530
+Subject: Btrfs: Force stripesize to the value of sectorsize
+
+Btrfs code currently assumes stripesize to be same as
+sectorsize. However Btrfs-progs (until commit
+df05c7ed455f519e6e15e46196392e4757257305) has been setting
+btrfs_super_block->stripesize to a value of 4096.
+
+This commit makes sure that the value of btrfs_super_block->stripesize
+is a power of 2. Later, it unconditionally sets btrfs_root->stripesize
+to sectorsize.
+
+Signed-off-by: Chandan Rajendra <chandan@linux.vnet.ibm.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c | 6 ++----
+ fs/btrfs/volumes.c | 4 ++--
+ 2 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 54cca7a..60ce119 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -2806,7 +2806,7 @@ int open_ctree(struct super_block *sb,
+ 
+ 	nodesize = btrfs_super_nodesize(disk_super);
+ 	sectorsize = btrfs_super_sectorsize(disk_super);
+-	stripesize = btrfs_super_stripesize(disk_super);
++	stripesize = sectorsize;
+ 	fs_info->dirty_metadata_batch = nodesize * (1 + ilog2(nr_cpu_ids));
+ 	fs_info->delalloc_batch = sectorsize * 512 * (1 + ilog2(nr_cpu_ids));
+ 
+@@ -4133,9 +4133,7 @@ static int btrfs_check_super_valid(struct btrfs_fs_info *fs_info,
+ 		       btrfs_super_bytes_used(sb));
+ 		ret = -EINVAL;
+ 	}
+-	if (!is_power_of_2(btrfs_super_stripesize(sb)) ||
+-		((btrfs_super_stripesize(sb) != sectorsize) &&
+-			(btrfs_super_stripesize(sb) != 4096))) {
++	if (!is_power_of_2(btrfs_super_stripesize(sb))) {
+ 		btrfs_err(fs_info, "invalid stripesize %u",
+ 		       btrfs_super_stripesize(sb));
+ 		ret = -EINVAL;
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 2f631b5..589f128 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -4694,12 +4694,12 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
+ 
+ 	if (type & BTRFS_BLOCK_GROUP_RAID5) {
+ 		raid_stripe_len = find_raid56_stripe_len(ndevs - 1,
+-				 btrfs_super_stripesize(info->super_copy));
++						extent_root->stripesize);
+ 		data_stripes = num_stripes - 1;
+ 	}
+ 	if (type & BTRFS_BLOCK_GROUP_RAID6) {
+ 		raid_stripe_len = find_raid56_stripe_len(ndevs - 2,
+-				 btrfs_super_stripesize(info->super_copy));
++						extent_root->stripesize);
+ 		data_stripes = num_stripes - 2;
+ 	}
+ 
+-- 
+cgit v0.12
+
