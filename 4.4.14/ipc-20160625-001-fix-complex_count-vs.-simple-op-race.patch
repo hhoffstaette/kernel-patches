@@ -1,14 +1,20 @@
 From: Manfred Spraul <manfred@colorfullife.com>
-Subject: [PATCH] ipc/sem.c: Fix complex_count vs. simple op race
-Date: Sat,  2 Jan 2016 13:04:51 +0100
-Cc: LKML <linux-kernel@vger.kernel.org>, 1vier1@web.de, Ingo Molnar
-	<mingo@redhat.com>, Davidlohr Bueso <dave@stgolabs.net>,
-	felixh@informatik.uni-bremen.de, Manfred Spraul <manfred@colorfullife.com>,
-	stable@vger.kernel.org
-To: Andrew Morton <akpm@linux-foundation.org>
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/159218>
+Subject: [PATCH 1/2] ipc/sem.c: Fix complex_count vs. simple op race
+Date: Sat, 25 Jun 2016 19:37:51 +0200
+Cc: LKML <linux-kernel@vger.kernel.org>,
+	Thomas Gleixner <tglx@linutronix.de>,
+	Ingo Molnar <mingo@elte.hu>, 1vier1@web.de,
+	felixh@informatik.uni-bremen.de,
+	Manfred Spraul <manfred@colorfullife.com>,
+	<stable@vger.kernel.org>
+To: "H. Peter Anvin" <hpa@zytor.com>,
+	Peter Zijlstra <peterz@infradead.org>,
+	Andrew Morton <akpm@linux-foundation.org>,
+	Davidlohr Bueso <dave@stgolabs.net>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/182911>
 
-Commit 6d07b68ce16a ("ipc/sem.c: optimize sem_lock()") introduced a race:
+Commit 6d07b68ce16a ("ipc/sem.c: optimize sem_lock()") introduced a
+race:
 
 sem_lock has a fast path that allows parallel simple operations.
 There are two reasons why a simple operation cannot run in parallel:
@@ -25,8 +31,8 @@ that tracks both reasons why parallel operations are not possible.
 The patch also updates stale documentation regarding the locking.
 
 With regards to stable kernels:
-The patch is required for all kernels that include the commit 6d07b68ce16a
-("ipc/sem.c: optimize sem_lock()") (3.10?)
+The patch is required for all kernels that include the
+commit 6d07b68ce16a ("ipc/sem.c: optimize sem_lock()") (3.10?)
 
 The alternative is to revert the patch that introduced the race.
 
@@ -58,13 +64,18 @@ Bug:
 Now both thread A and thread C operate on the same array, without
 any synchronization.
 
+Full memory barrier are required to synchronize changes of
+complex_mode and the lock operations.
+
+[HH: slightly backported for 4.4.x]
+Fixes: 6d07b68ce16a ("ipc/sem.c: optimize sem_lock()")
 Reported-by: felixh@informatik.uni-bremen.de
 Signed-off-by: Manfred Spraul <manfred@colorfullife.com>
 Cc: <stable@vger.kernel.org>
 ---
  include/linux/sem.h |   1 +
- ipc/sem.c           | 124 ++++++++++++++++++++++++++++++----------------------
- 2 files changed, 72 insertions(+), 53 deletions(-)
+ ipc/sem.c           | 122 ++++++++++++++++++++++++++++++----------------------
+ 2 files changed, 71 insertions(+), 52 deletions(-)
 
 diff --git a/include/linux/sem.h b/include/linux/sem.h
 index 976ce3a..d0efd6e 100644
@@ -79,10 +90,10 @@ index 976ce3a..d0efd6e 100644
  
  #ifdef CONFIG_SYSVIPC
 diff --git a/ipc/sem.c b/ipc/sem.c
-index b471e5a..87e1f5d 100644
+index ae72b3c..538f43a 100644
 --- a/ipc/sem.c
 +++ b/ipc/sem.c
-@@ -155,14 +155,21 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it);
+@@ -162,14 +162,21 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it);
  
  /*
   * Locking:
@@ -108,7 +119,7 @@ index b471e5a..87e1f5d 100644
   */
  
  #define sc_semmsl	sem_ctls[0]
-@@ -263,23 +270,25 @@ static void sem_rcu_free(struct rcu_head *head)
+@@ -260,23 +267,25 @@ static void sem_rcu_free(struct rcu_head *head)
  #define ipc_smp_acquire__after_spin_is_unlocked()	smp_rmb()
  
  /*
@@ -143,7 +154,7 @@ index b471e5a..87e1f5d 100644
  
  	for (i = 0; i < sma->sem_nsems; i++) {
  		sem = sma->sem_base + i;
-@@ -289,6 +298,29 @@ static void sem_wait_array(struct sem_array *sma)
+@@ -285,6 +294,27 @@ static void sem_wait_array(struct sem_array *sma)
  }
  
  /*
@@ -164,16 +175,14 @@ index b471e5a..87e1f5d 100644
 +	 * performed by the current operation must be visible
 +	 * before we set complex_mode to false.
 +	 */
-+	smp_wmb();
-+
-+	WRITE_ONCE(sma->complex_mode, false);
++	smp_store_release(&sma->complex_mode, false);
 +}
 +
 +/*
   * If the request contains only one semaphore operation, and there are
   * no complex transactions pending, lock only the semaphore involved.
   * Otherwise, lock the entire semaphore array, since we either have
-@@ -304,56 +336,38 @@ static inline int sem_lock(struct sem_array *sma, struct sembuf *sops,
+@@ -300,56 +330,40 @@ static inline int sem_lock(struct sem_array *sma, struct sembuf *sops,
  		/* Complex operation - acquire a full lock */
  		ipc_lock_object(&sma->sem_perm);
  
@@ -228,7 +237,12 @@ index b471e5a..87e1f5d 100644
 -			 *	spin_unlock(sem_perm.lock);
 -			 */
 -			ipc_smp_acquire__after_spin_is_unlocked();
--
++		/*
++		 * A full barrier is required: the write of sem->lock
++		 * must be visible before the read is executed
++		 */
++		smp_mb();
+ 
 -			/*
 -			 * Now repeat the test of complex_count:
 -			 * It can't change anymore until we drop sem->lock.
@@ -238,17 +252,13 @@ index b471e5a..87e1f5d 100644
 -				/* fast path successful! */
 -				return sops->sem_num;
 -			}
-+		/* Now repeat the test for complex_mode.
-+		 * A memory barrier is provided by the spin_lock()
-+		 * above.
-+		 */
 +		if (!READ_ONCE(sma->complex_mode)) {
 +			/* fast path successful! */
 +			return sops->sem_num;
  		}
  		spin_unlock(&sem->lock);
  	}
-@@ -373,7 +387,7 @@ static inline int sem_lock(struct sem_array *sma, struct sembuf *sops,
+@@ -369,7 +383,7 @@ static inline int sem_lock(struct sem_array *sma, struct sembuf *sops,
  		/* Not a false alarm, thus complete the sequence for a
  		 * full lock.
  		 */
@@ -257,7 +267,7 @@ index b471e5a..87e1f5d 100644
  		return -1;
  	}
  }
-@@ -382,6 +396,7 @@ static inline void sem_unlock(struct sem_array *sma, int locknum)
+@@ -378,6 +392,7 @@ static inline void sem_unlock(struct sem_array *sma, int locknum)
  {
  	if (locknum == -1) {
  		unmerge_queues(sma);
@@ -265,7 +275,7 @@ index b471e5a..87e1f5d 100644
  		ipc_unlock_object(&sma->sem_perm);
  	} else {
  		struct sem *sem = sma->sem_base + locknum;
-@@ -533,6 +548,7 @@ static int newary(struct ipc_namespace *ns, struct ipc_params *params)
+@@ -529,6 +544,7 @@ static int newary(struct ipc_namespace *ns, struct ipc_params *params)
  	}
  
  	sma->complex_count = 0;
@@ -273,7 +283,7 @@ index b471e5a..87e1f5d 100644
  	INIT_LIST_HEAD(&sma->pending_alter);
  	INIT_LIST_HEAD(&sma->pending_const);
  	INIT_LIST_HEAD(&sma->list_id);
-@@ -2186,10 +2202,10 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it)
+@@ -2184,10 +2200,10 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it)
  	/*
  	 * The proc interface isn't aware of sem_lock(), it calls
  	 * ipc_lock_object() directly (in sysvipc_find_ipc).
@@ -287,7 +297,7 @@ index b471e5a..87e1f5d 100644
  
  	sem_otime = get_semotime(sma);
  
-@@ -2206,6 +2222,8 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it)
+@@ -2204,6 +2220,8 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it)
  		   sem_otime,
  		   sma->sem_ctime);
  
