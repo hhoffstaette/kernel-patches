@@ -1,0 +1,277 @@
+From: Tahsin Erdogan <tahsin@google.com>
+Subject: [PATCH] block: do not merge requests without consulting with io scheduler
+Date: Fri,  1 Jul 2016 20:26:31 -0700
+Cc: linux-block@vger.kernel.org, linux-kernel@vger.kernel.org,
+	Tahsin Erdogan <tahsin@google.com>
+To: Jens Axboe <axboe@kernel.dk>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2258135>
+
+Before merging a bio into an existing request, io scheduler is called to
+get its approval first. However, the requests that come from a plug
+flush may get merged by block layer without consulting with io
+scheduler.
+
+In case of CFQ, this can cause fairness problems. For instance, if a
+request gets merged into a low weight cgroup's request, high weight cgroup
+now will depend on low weight cgroup to get scheduled. If high weigt cgroup
+needs that io request to complete before submitting more requests, then it
+will also lose its timeslice.
+
+Following script demonstrates the problem. Group g1 has a low weight, g2
+and g3 have equal high weights but g2's requests are adjacent to g1's
+requests so they are subject to merging. Due to these merges, g2 gets
+poor disk time allocation.
+
+cat > cfq-merge-repro.sh << "EOF"
+#!/bin/bash
+set -e
+
+IO_ROOT=/mnt-cgroup/io
+
+mkdir -p $IO_ROOT
+
+if ! mount | grep -qw $IO_ROOT; then
+  mount -t cgroup none -oblkio $IO_ROOT
+fi
+
+cd $IO_ROOT
+
+for i in g1 g2 g3; do
+  if [ -d $i ]; then
+    rmdir $i
+  fi
+done
+
+mkdir g1 && echo 10 > g1/blkio.weight
+mkdir g2 && echo 495 > g2/blkio.weight
+mkdir g3 && echo 495 > g3/blkio.weight
+
+RUNTIME=10
+
+(echo $BASHPID > g1/cgroup.procs &&
+ fio --readonly --name name1 --filename /dev/sdb \
+     --rw read --size 64k --bs 64k --time_based \
+     --runtime=$RUNTIME --offset=0k &> /dev/null)&
+
+(echo $BASHPID > g2/cgroup.procs &&
+ fio --readonly --name name1 --filename /dev/sdb \
+     --rw read --size 64k --bs 64k --time_based \
+     --runtime=$RUNTIME --offset=64k &> /dev/null)&
+
+(echo $BASHPID > g3/cgroup.procs &&
+ fio --readonly --name name1 --filename /dev/sdb \
+     --rw read --size 64k --bs 64k --time_based \
+     --runtime=$RUNTIME --offset=256k &> /dev/null)&
+
+sleep $((RUNTIME+1))
+
+for i in g1 g2 g3; do
+  echo ---- $i ----
+  cat $i/blkio.time
+done
+
+EOF
+# ./cfq-merge-repro.sh
+---- g1 ----
+8:16 162
+---- g2 ----
+8:16 165
+---- g3 ----
+8:16 686
+
+After applying the patch:
+
+# ./cfq-merge-repro.sh
+---- g1 ----
+8:16 90
+---- g2 ----
+8:16 445
+---- g3 ----
+8:16 471
+
+[HH: fixed up bool return values in elv_bio_merge_ok()]
+Signed-off-by: Tahsin Erdogan <tahsin@google.com>
+---
+ block/blk-merge.c        |  6 ++++++
+ block/cfq-iosched.c      | 15 +++++++++++----
+ block/deadline-iosched.c |  2 +-
+ block/elevator.c         | 16 ++++++++--------
+ include/linux/elevator.h | 11 ++++++++---
+ 5 files changed, 34 insertions(+), 16 deletions(-)
+
+diff --git a/block/blk-merge.c b/block/blk-merge.c
+index 261353166dcf..624171db0942 100644
+--- a/block/blk-merge.c
++++ b/block/blk-merge.c
+@@ -743,6 +743,12 @@ int attempt_front_merge(struct request_queue *q, struct request *rq)
+ int blk_attempt_req_merge(struct request_queue *q, struct request *rq,
+ 			  struct request *next)
+ {
++	struct elevator_queue *e = q->elevator;
++
++	if (e->type->ops.elevator_allow_rq_merge_fn)
++		if (!e->type->ops.elevator_allow_rq_merge_fn(q, rq, next))
++			return 0;
++
+ 	return attempt_merge(q, rq, next);
+ }
+ 
+diff --git a/block/cfq-iosched.c b/block/cfq-iosched.c
+index 4a349787bc62..2209e2bf9636 100644
+--- a/block/cfq-iosched.c
++++ b/block/cfq-iosched.c
+@@ -2531,7 +2531,7 @@ static int cfq_merge(struct request_queue *q, struct request **req,
+ 	struct request *__rq;
+ 
+ 	__rq = cfq_find_rq_fmerge(cfqd, bio);
+-	if (__rq && elv_rq_merge_ok(__rq, bio)) {
++	if (__rq && elv_bio_merge_ok(__rq, bio)) {
+ 		*req = __rq;
+ 		return ELEVATOR_FRONT_MERGE;
+ 	}
+@@ -2588,8 +2588,8 @@ cfq_merged_requests(struct request_queue *q, struct request *rq,
+ 		cfq_del_cfqq_rr(cfqd, cfqq);
+ }
+ 
+-static int cfq_allow_merge(struct request_queue *q, struct request *rq,
+-			   struct bio *bio)
++static int cfq_allow_bio_merge(struct request_queue *q, struct request *rq,
++			       struct bio *bio)
+ {
+ 	struct cfq_data *cfqd = q->elevator->elevator_data;
+ 	struct cfq_io_cq *cic;
+@@ -2613,6 +2613,12 @@ static int cfq_allow_merge(struct request_queue *q, struct request *rq,
+ 	return cfqq == RQ_CFQQ(rq);
+ }
+ 
++static int cfq_allow_rq_merge(struct request_queue *q, struct request *rq,
++			      struct request *next)
++{
++	return RQ_CFQQ(rq) == RQ_CFQQ(next);
++}
++
+ static inline void cfq_del_timer(struct cfq_data *cfqd, struct cfq_queue *cfqq)
+ {
+ 	del_timer(&cfqd->idle_slice_timer);
+@@ -4729,7 +4735,8 @@ static struct elevator_type iosched_cfq = {
+ 		.elevator_merge_fn = 		cfq_merge,
+ 		.elevator_merged_fn =		cfq_merged_request,
+ 		.elevator_merge_req_fn =	cfq_merged_requests,
+-		.elevator_allow_merge_fn =	cfq_allow_merge,
++		.elevator_allow_bio_merge_fn =	cfq_allow_bio_merge,
++		.elevator_allow_rq_merge_fn =	cfq_allow_rq_merge,
+ 		.elevator_bio_merged_fn =	cfq_bio_merged,
+ 		.elevator_dispatch_fn =		cfq_dispatch_requests,
+ 		.elevator_add_req_fn =		cfq_insert_request,
+diff --git a/block/deadline-iosched.c b/block/deadline-iosched.c
+index d0dd7882d8c7..408213844175 100644
+--- a/block/deadline-iosched.c
++++ b/block/deadline-iosched.c
+@@ -137,7 +137,7 @@ deadline_merge(struct request_queue *q, struct request **req, struct bio *bio)
+ 		if (__rq) {
+ 			BUG_ON(sector != blk_rq_pos(__rq));
+ 
+-			if (elv_rq_merge_ok(__rq, bio)) {
++			if (elv_bio_merge_ok(__rq, bio)) {
+ 				ret = ELEVATOR_FRONT_MERGE;
+ 				goto out;
+ 			}
+diff --git a/block/elevator.c b/block/elevator.c
+index c3555c9c672f..57a42590a48f 100644
+--- a/block/elevator.c
++++ b/block/elevator.c
+@@ -53,13 +53,13 @@ static LIST_HEAD(elv_list);
+  * Query io scheduler to see if the current process issuing bio may be
+  * merged with rq.
+  */
+-static int elv_iosched_allow_merge(struct request *rq, struct bio *bio)
++static int elv_iosched_allow_bio_merge(struct request *rq, struct bio *bio)
+ {
+ 	struct request_queue *q = rq->q;
+ 	struct elevator_queue *e = q->elevator;
+ 
+-	if (e->type->ops.elevator_allow_merge_fn)
+-		return e->type->ops.elevator_allow_merge_fn(q, rq, bio);
++	if (e->type->ops.elevator_allow_bio_merge_fn)
++		return e->type->ops.elevator_allow_bio_merge_fn(q, rq, bio);
+ 
+ 	return 1;
+ }
+@@ -67,17 +67,17 @@ static int elv_iosched_allow_merge(struct request *rq, struct bio *bio)
+ /*
+  * can we safely merge with this request?
+  */
+-bool elv_rq_merge_ok(struct request *rq, struct bio *bio)
++bool elv_bio_merge_ok(struct request *rq, struct bio *bio)
+ {
+ 	if (!blk_rq_merge_ok(rq, bio))
+-		return 0;
++		return false;
+ 
+-	if (!elv_iosched_allow_merge(rq, bio))
+-		return 0;
++	if (!elv_iosched_allow_bio_merge(rq, bio))
++		return false;
+ 
+-	return 1;
++	return true;
+ }
+-EXPORT_SYMBOL(elv_rq_merge_ok);
++EXPORT_SYMBOL(elv_bio_merge_ok);
+ 
+ static struct elevator_type *elevator_find(const char *name)
+ {
+@@ -426,7 +426,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
+ 	/*
+ 	 * First try one-hit cache.
+ 	 */
+-	if (q->last_merge && elv_rq_merge_ok(q->last_merge, bio)) {
++	if (q->last_merge && elv_bio_merge_ok(q->last_merge, bio)) {
+ 		ret = blk_try_merge(q->last_merge, bio);
+ 		if (ret != ELEVATOR_NO_MERGE) {
+ 			*req = q->last_merge;
+@@ -441,7 +441,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
+ 	 * See if our hash lookup can find a potential backmerge.
+ 	 */
+ 	__rq = elv_rqhash_find(q, bio->bi_iter.bi_sector);
+-	if (__rq && elv_rq_merge_ok(__rq, bio)) {
++	if (__rq && elv_bio_merge_ok(__rq, bio)) {
+ 		*req = __rq;
+ 		return ELEVATOR_BACK_MERGE;
+ 	}
+diff --git a/include/linux/elevator.h b/include/linux/elevator.h
+index 638b324f0291..29f35f8eed1d 100644
+--- a/include/linux/elevator.h
++++ b/include/linux/elevator.h
+@@ -16,7 +16,11 @@ typedef void (elevator_merge_req_fn) (struct request_queue *, struct request *,
+ 
+ typedef void (elevator_merged_fn) (struct request_queue *, struct request *, int);
+ 
+-typedef int (elevator_allow_merge_fn) (struct request_queue *, struct request *, struct bio *);
++typedef int (elevator_allow_bio_merge_fn) (struct request_queue *,
++					   struct request *, struct bio *);
++
++typedef int (elevator_allow_rq_merge_fn) (struct request_queue *,
++					  struct request *, struct request *);
+ 
+ typedef void (elevator_bio_merged_fn) (struct request_queue *,
+ 						struct request *, struct bio *);
+@@ -46,7 +50,8 @@ struct elevator_ops
+ 	elevator_merge_fn *elevator_merge_fn;
+ 	elevator_merged_fn *elevator_merged_fn;
+ 	elevator_merge_req_fn *elevator_merge_req_fn;
+-	elevator_allow_merge_fn *elevator_allow_merge_fn;
++	elevator_allow_bio_merge_fn *elevator_allow_bio_merge_fn;
++	elevator_allow_rq_merge_fn *elevator_allow_rq_merge_fn;
+ 	elevator_bio_merged_fn *elevator_bio_merged_fn;
+ 
+ 	elevator_dispatch_fn *elevator_dispatch_fn;
+@@ -157,7 +162,7 @@ extern ssize_t elv_iosched_store(struct request_queue *, const char *, size_t);
+ extern int elevator_init(struct request_queue *, char *);
+ extern void elevator_exit(struct elevator_queue *);
+ extern int elevator_change(struct request_queue *, const char *);
+-extern bool elv_rq_merge_ok(struct request *, struct bio *);
++extern bool elv_bio_merge_ok(struct request *, struct bio *);
+ extern struct elevator_queue *elevator_alloc(struct request_queue *,
+ 					struct elevator_type *);
+ 
