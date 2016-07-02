@@ -1,0 +1,34 @@
+From aafddbf0cffeb790f919436285328c762279b5d4 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Mon, 6 Jun 2016 09:12:39 -0700
+Subject: fq_codel: return non zero qlen in class dumps
+
+We properly scan the flow list to count number of packets,
+but John passed 0 to gnet_stats_copy_queue() so we report
+a zero value to user space instead of the result.
+
+Fixes: 640158536632 ("net: sched: restrict use of qstats qlen")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Cc: John Fastabend <john.r.fastabend@intel.com>
+Acked-by: John Fastabend <john.r.fastabend@intel.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/sched/sch_fq_codel.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/sched/sch_fq_codel.c b/net/sched/sch_fq_codel.c
+index fff7867..da250b2 100644
+--- a/net/sched/sch_fq_codel.c
++++ b/net/sched/sch_fq_codel.c
+@@ -661,7 +661,7 @@ static int fq_codel_dump_class_stats(struct Qdisc *sch, unsigned long cl,
+ 		qs.backlog = q->backlogs[idx];
+ 		qs.drops = flow->dropped;
+ 	}
+-	if (gnet_stats_copy_queue(d, NULL, &qs, 0) < 0)
++	if (gnet_stats_copy_queue(d, NULL, &qs, qs.qlen) < 0)
+ 		return -1;
+ 	if (idx < q->flows_cnt)
+ 		return gnet_stats_copy_app(d, &xstats, sizeof(xstats));
+-- 
+cgit v0.12
+
