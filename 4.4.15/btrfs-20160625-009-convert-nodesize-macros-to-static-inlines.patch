@@ -1,0 +1,84 @@
+From 1ed27ad78f36acc81ed86b583796f79042a468a1 Mon Sep 17 00:00:00 2001
+From: Jeff Mahoney <jeffm@suse.com>
+Date: Wed, 15 Jun 2016 10:33:06 -0400
+Subject: btrfs: convert nodesize macros to static inlines
+
+This patch converts the macros used to calculate various node
+size limits to static inlines.  That way we get type checking for free.
+
+[HH: adjusted offset of hunk#2 for 4.4++]
+Signed-off-by: Jeff Mahoney <jeffm@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 48 +++++++++++++++++++++++++++++++++---------------
+ 1 file changed, 33 insertions(+), 15 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 269e2c9..457ed01 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -392,21 +392,6 @@ struct btrfs_header {
+ 	u8 level;
+ } __attribute__ ((__packed__));
+ 
+-#define BTRFS_NODEPTRS_PER_BLOCK(r) (((r)->nodesize - \
+-				      sizeof(struct btrfs_header)) / \
+-				     sizeof(struct btrfs_key_ptr))
+-#define __BTRFS_LEAF_DATA_SIZE(bs) ((bs) - sizeof(struct btrfs_header))
+-#define BTRFS_LEAF_DATA_SIZE(r) (__BTRFS_LEAF_DATA_SIZE(r->nodesize))
+-#define BTRFS_MAX_ITEM_SIZE(r) \
+-	(BTRFS_LEAF_DATA_SIZE(r) - sizeof(struct btrfs_item))
+-#define BTRFS_FILE_EXTENT_INLINE_DATA_START		\
+-		(offsetof(struct btrfs_file_extent_item, disk_bytenr))
+-#define BTRFS_MAX_INLINE_DATA_SIZE(r) (BTRFS_MAX_ITEM_SIZE(r) - \
+-					BTRFS_FILE_EXTENT_INLINE_DATA_START)
+-#define BTRFS_MAX_XATTR_SIZE(r)	(BTRFS_MAX_ITEM_SIZE(r) - \
+-				 sizeof(struct btrfs_dir_item))
+-
+-
+ /*
+  * this is a very generous portion of the super block, giving us
+  * room to translate 14 chunks with 3 stripes each.
+@@ -2050,6 +2050,39 @@ struct btrfs_root {
+ 	atomic_t qgroup_meta_rsv;
+ };
+ 
++static inline u32 __BTRFS_LEAF_DATA_SIZE(u32 blocksize)
++{
++	return blocksize - sizeof(struct btrfs_header);
++}
++
++static inline u32 BTRFS_LEAF_DATA_SIZE(const struct btrfs_root *root)
++{
++	return __BTRFS_LEAF_DATA_SIZE(root->nodesize);
++}
++
++static inline u32 BTRFS_MAX_ITEM_SIZE(const struct btrfs_root *root)
++{
++	return BTRFS_LEAF_DATA_SIZE(root) - sizeof(struct btrfs_item);
++}
++
++static inline u32 BTRFS_NODEPTRS_PER_BLOCK(const struct btrfs_root *root)
++{
++	return BTRFS_LEAF_DATA_SIZE(root) / sizeof(struct btrfs_key_ptr);
++}
++
++#define BTRFS_FILE_EXTENT_INLINE_DATA_START		\
++		(offsetof(struct btrfs_file_extent_item, disk_bytenr))
++static inline u32 BTRFS_MAX_INLINE_DATA_SIZE(const struct btrfs_root *root)
++{
++	return BTRFS_MAX_ITEM_SIZE(root) -
++	       BTRFS_FILE_EXTENT_INLINE_DATA_START;
++}
++
++static inline u32 BTRFS_MAX_XATTR_SIZE(const struct btrfs_root *root)
++{
++	return BTRFS_MAX_ITEM_SIZE(root) - sizeof(struct btrfs_dir_item);
++}
++
+ struct btrfs_ioctl_defrag_range_args {
+ 	/* start of the defrag operation */
+ 	__u64 start;
+-- 
+cgit v0.12
+

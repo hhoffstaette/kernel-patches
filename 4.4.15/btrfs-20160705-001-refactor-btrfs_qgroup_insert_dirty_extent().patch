@@ -87,7 +87,7 @@ index 82b912a..cf63150 100644
 -
 -	delayed_refs = &trans->transaction->delayed_refs;
 -	spin_lock(&delayed_refs->lock);
--	if (btrfs_qgroup_insert_dirty_extent(trans->root->fs_info,
+-	if (btrfs_qgroup_insert_dirty_extent(trans->fs_info,
 -					     delayed_refs, qrecord))
 -		kfree(qrecord);
 -	spin_unlock(&delayed_refs->lock);

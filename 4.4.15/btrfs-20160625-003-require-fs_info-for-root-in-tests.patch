@@ -1,0 +1,483 @@
+From b436df4402ea3612225a98ecb295a832e8fcc03b Mon Sep 17 00:00:00 2001
+From: Jeff Mahoney <jeffm@suse.com>
+Date: Mon, 20 Jun 2016 14:14:09 -0400
+Subject: btrfs: tests, require fs_info for root
+
+This allows the upcoming patchset to push nodesize and sectorsize into
+fs_info.
+
+[HH: backported for lack of nodesize/sectorsize changes in 4.4++]
+Signed-off-by: Jeff Mahoney <jeffm@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h                       |  1 +
+ fs/btrfs/disk-io.c                     | 15 +++++++----
+ fs/btrfs/disk-io.h                     |  3 ++-
+ fs/btrfs/tests/btrfs-tests.c           | 20 ++++++++++++---
+ fs/btrfs/tests/btrfs-tests.h           |  1 +
+ fs/btrfs/tests/extent-buffer-tests.c   | 23 +++++++++++------
+ fs/btrfs/tests/free-space-tests.c      | 14 +++++++----
+ fs/btrfs/tests/free-space-tree-tests.c | 18 +++++++------
+ fs/btrfs/tests/inode-tests.c           | 46 ++++++++++++++++++----------------
+ fs/btrfs/tests/qgroup-tests.c          | 23 +++++++++--------
+ 10 files changed, 103 insertions(+), 61 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 9c2103b..8310735 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -117,6 +117,7 @@ static inline unsigned long btrfs_chunk_item_size(int num_stripes)
+ #define BTRFS_FS_STATE_REMOUNTING	1
+ #define BTRFS_FS_STATE_TRANS_ABORTED	2
+ #define BTRFS_FS_STATE_DEV_REPLACING	3
++#define BTRFS_FS_STATE_DUMMY_FS_INFO	4
+ 
+ #define BTRFS_BACKREF_REV_MAX		256
+ #define BTRFS_BACKREF_REV_SHIFT		56
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 802a311..8e838b1 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1233,6 +1233,7 @@ static void __setup_root(u32 nodesize, u32 sectorsize, u32 stripesize,
+ 			 struct btrfs_root *root, struct btrfs_fs_info *fs_info,
+ 			 u64 objectid)
+ {
++	bool dummy = test_bit(BTRFS_FS_STATE_DUMMY_FS_INFO, &fs_info->fs_state);
+ 	root->node = NULL;
+ 	root->commit_root = NULL;
+ 	root->sectorsize = sectorsize;
+@@ -1287,14 +1288,14 @@ static void __setup_root(u32 nodesize, u32 sectorsize, u32 stripesize,
+ 	root->log_transid = 0;
+ 	root->log_transid_committed = -1;
+ 	root->last_log_commit = 0;
+-	if (fs_info)
++	if (!dummy)
+ 		extent_io_tree_init(&root->dirty_log_pages,
+ 				     fs_info->btree_inode->i_mapping);
+ 
+ 	memset(&root->root_key, 0, sizeof(root->root_key));
+ 	memset(&root->root_item, 0, sizeof(root->root_item));
+ 	memset(&root->defrag_progress, 0, sizeof(root->defrag_progress));
+-	if (fs_info)
++	if (!dummy)
+ 		root->defrag_trans_start = fs_info->generation;
+ 	else
+ 		root->defrag_trans_start = 0;
+@@ -1315,13 +1316,16 @@ static struct btrfs_root *btrfs_alloc_root(struct btrfs_fs_info *fs_info,
+ 
+ #ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+ /* Should only be used by the testing infrastructure */
+-struct btrfs_root *btrfs_alloc_dummy_root(void)
++struct btrfs_root *btrfs_alloc_dummy_root(struct btrfs_fs_info *fs_info)
+ {
+ 	struct btrfs_root *root;
+ 
+-	root = btrfs_alloc_root(NULL, GFP_KERNEL);
++	if (!fs_info)
++		return ERR_PTR(-EINVAL);
++
++	root = btrfs_alloc_root(fs_info, GFP_KERNEL);
+ 	if (!root)
+ 		return ERR_PTR(-ENOMEM);
+-	__setup_root(4096, 4096, 4096, root, NULL, 1);
++	__setup_root(4096, 4096, 4096, root, fs_info, BTRFS_ROOT_TREE_OBJECTID);
+ 	set_bit(BTRFS_ROOT_DUMMY_ROOT, &root->state);
+ 	root->alloc_bytenr = 0;
+diff --git a/fs/btrfs/disk-io.h b/fs/btrfs/disk-io.h
+index acba821..c9d42c9 100644
+--- a/fs/btrfs/disk-io.h
++++ b/fs/btrfs/disk-io.h
+@@ -90,7 +90,7 @@ void btrfs_drop_and_free_fs_root(struct btrfs_fs_info *fs_info,
+ void btrfs_free_fs_root(struct btrfs_root *root);
+ 
+ #ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+-struct btrfs_root *btrfs_alloc_dummy_root(void);
++struct btrfs_root *btrfs_alloc_dummy_root(struct btrfs_fs_info *fs_info);
+ #endif
+ 
+ /*
+diff --git a/fs/btrfs/tests/btrfs-tests.c b/fs/btrfs/tests/btrfs-tests.c
+index 71d9a01..bf62ad9 100644
+--- a/fs/btrfs/tests/btrfs-tests.c
++++ b/fs/btrfs/tests/btrfs-tests.c
+@@ -128,14 +128,27 @@ struct btrfs_fs_info *btrfs_alloc_dummy_fs_info(void)
+ 	extent_io_tree_init(&fs_info->freed_extents[0], NULL);
+ 	extent_io_tree_init(&fs_info->freed_extents[1], NULL);
+ 	fs_info->pinned_extents = &fs_info->freed_extents[0];
++	set_bit(BTRFS_FS_STATE_DUMMY_FS_INFO, &fs_info->fs_state);
++
++	test_mnt->mnt_sb->s_fs_info = fs_info;
++
+ 	return fs_info;
+ }
+ 
+-static void btrfs_free_dummy_fs_info(struct btrfs_fs_info *fs_info)
++void btrfs_free_dummy_fs_info(struct btrfs_fs_info *fs_info)
+ {
+ 	struct radix_tree_iter iter;
+ 	void **slot;
+ 
++	if (!fs_info)
++		return;
++
++	if (WARN_ON(!test_bit(BTRFS_FS_STATE_DUMMY_FS_INFO,
++			      &fs_info->fs_state)))
++		return;
++
++	test_mnt->mnt_sb->s_fs_info = NULL;
++
+ 	spin_lock(&fs_info->buffer_lock);
+ 	radix_tree_for_each_slot(slot, &fs_info->buffer_radix, &iter, 0) {
+ 		struct extent_buffer *eb;
+@@ -167,10 +180,11 @@ void btrfs_free_dummy_root(struct btrfs_root *root)
+ {
+ 	if (!root)
+ 		return;
++	/* Will be freed by btrfs_free_fs_roots */
++	if (WARN_ON(test_bit(BTRFS_ROOT_IN_RADIX, &root->state)))
++		return;
+ 	if (root->node)
+ 		free_extent_buffer(root->node);
+-	if (root->fs_info)
+-		btrfs_free_dummy_fs_info(root->fs_info);
+ 	kfree(root);
+ }
+ 
+diff --git a/fs/btrfs/tests/btrfs-tests.h b/fs/btrfs/tests/btrfs-tests.h
+index e7d364f..b17ffbe 100644
+--- a/fs/btrfs/tests/btrfs-tests.h
++++ b/fs/btrfs/tests/btrfs-tests.h
+@@ -35,6 +35,7 @@ int btrfs_test_qgroups(void);
+ int btrfs_test_free_space_tree(void);
+ struct inode *btrfs_new_test_inode(void);
+ struct btrfs_fs_info *btrfs_alloc_dummy_fs_info(void);
++void btrfs_free_dummy_fs_info(struct btrfs_fs_info *fs_info);
+ void btrfs_free_dummy_root(struct btrfs_root *root);
+ struct btrfs_block_group_cache *
+ btrfs_alloc_dummy_block_group(unsigned long length, u32 sectorsize);
+diff --git a/fs/btrfs/tests/extent-buffer-tests.c b/fs/btrfs/tests/extent-buffer-tests.c
+index 4f8cbd1..1995691 100644
+--- a/fs/btrfs/tests/extent-buffer-tests.c
++++ b/fs/btrfs/tests/extent-buffer-tests.c
+@@ -24,8 +24,9 @@
+ 
+ static int test_btrfs_split_item(void)
+ {
+-	struct btrfs_path *path;
+-	struct btrfs_root *root;
++	struct btrfs_fs_info *fs_info;
++	struct btrfs_path *path = NULL;
++	struct btrfs_root *root = NULL;
+ 	struct extent_buffer *eb;
+ 	struct btrfs_item *item;
+ 	char *value = "mary had a little lamb";
+@@ -40,17 +41,24 @@ static int test_btrfs_split_item(void)
+ 
+ 	test_msg("Running btrfs_split_item tests\n");
+ 
+-	root = btrfs_alloc_dummy_root();
++	fs_info = btrfs_alloc_dummy_fs_info();
++	if (!fs_info) {
++		test_msg("Could not allocate fs_info\n");
++		return -ENOMEM;
++	}
++
++	root = btrfs_alloc_dummy_root(fs_info);
+ 	if (IS_ERR(root)) {
+ 		test_msg("Could not allocate root\n");
+-		return PTR_ERR(root);
++		ret = PTR_ERR(root);
++		goto out;
+ 	}
+ 
+ 	path = btrfs_alloc_path();
+ 	if (!path) {
+ 		test_msg("Could not allocate path\n");
+-		kfree(root);
+-		return -ENOMEM;
++		ret = -ENOMEM;
++		goto out;
+ 	}
+ 
+ 	path->nodes[0] = eb = alloc_dummy_extent_buffer(NULL, 4096,
+@@ -219,7 +227,8 @@ static int test_btrfs_split_item(void)
+ 	}
+ out:
+ 	btrfs_free_path(path);
+-	kfree(root);
++	btrfs_free_dummy_root(root);
++	btrfs_free_dummy_fs_info(fs_info);
+ 	return ret;
+ }
+ 
+diff --git a/fs/btrfs/tests/free-space-tests.c b/fs/btrfs/tests/free-space-tests.c
+index 3956bb2..3221c8d 100644
+--- a/fs/btrfs/tests/free-space-tests.c
++++ b/fs/btrfs/tests/free-space-tests.c
+@@ -837,6 +837,7 @@ test_steal_space_from_bitmap_to_extent(struct btrfs_block_group_cache *cache,
+ 
+ int btrfs_test_free_space_cache(void)
+ {
++	struct btrfs_fs_info *fs_info;
+ 	struct btrfs_block_group_cache *cache;
+ 	struct btrfs_root *root = NULL;
+ 	int ret = -ENOMEM;
+@@ -855,15 +856,17 @@ int btrfs_test_free_space_cache(void)
+ 		return 0;
+ 	}
+ 
+-	root = btrfs_alloc_dummy_root();
+-	if (IS_ERR(root)) {
+-		ret = PTR_ERR(root);
++	fs_info = btrfs_alloc_dummy_fs_info();
++	if (!fs_info) {
++		ret = -ENOMEM;
+ 		goto out;
+ 	}
+ 
+-	root->fs_info = btrfs_alloc_dummy_fs_info();
+-	if (!root->fs_info)
++	root = btrfs_alloc_dummy_root(fs_info);
++	if (IS_ERR(root)) {
++		ret = PTR_ERR(root);
+ 		goto out;
++	}
+ 
+ 	root->fs_info->extent_root = root;
+ 	cache->fs_info = root->fs_info;
+@@ -882,6 +885,7 @@ int btrfs_test_free_space_cache(void)
+ out:
+ 	btrfs_free_dummy_block_group(cache);
+ 	btrfs_free_dummy_root(root);
++	btrfs_free_dummy_fs_info(fs_info);
+ 	test_msg("Free space cache tests finished\n");
+ 	return ret;
+ }
+diff --git a/fs/btrfs/tests/free-space-tree-tests.c b/fs/btrfs/tests/free-space-tree-tests.c
+index aac5070..7508d3b 100644
+--- a/fs/btrfs/tests/free-space-tree-tests.c
++++ b/fs/btrfs/tests/free-space-tree-tests.c
+@@ -443,23 +443,24 @@ typedef int (*test_func_t)(struct btrfs_trans_handle *,
+ static int run_test(test_func_t test_func, int bitmaps,
+ 		void)
+ {
++	struct btrfs_fs_info *fs_info;
+ 	struct btrfs_root *root = NULL;
+ 	struct btrfs_block_group_cache *cache = NULL;
+ 	struct btrfs_trans_handle trans;
+ 	struct btrfs_path *path = NULL;
+ 	int ret;
+ 
+-	root = btrfs_alloc_dummy_root();
+-	if (IS_ERR(root)) {
+-		test_msg("Couldn't allocate dummy root\n");
+-		ret = PTR_ERR(root);
++	fs_info = btrfs_alloc_dummy_fs_info();
++	if (!fs_info) {
++		test_msg("Couldn't allocate dummy fs info\n");
++		ret = -ENOMEM;
+ 		goto out;
+ 	}
+ 
+-	root->fs_info = btrfs_alloc_dummy_fs_info();
+-	if (!root->fs_info) {
+-		test_msg("Couldn't allocate dummy fs info\n");
+-		ret = -ENOMEM;
++	root = btrfs_alloc_dummy_root(fs_info);
++	if (IS_ERR(root)) {
++		test_msg("Couldn't allocate dummy root\n");
++		ret = PTR_ERR(root);
+ 		goto out;
+ 	}
+ 
+@@ -534,6 +535,7 @@ out:
+ 	btrfs_free_path(path);
+ 	btrfs_free_dummy_block_group(cache);
+ 	btrfs_free_dummy_root(root);
++	btrfs_free_dummy_fs_info(fs_info);
+ 	return ret;
+ }
+ 
+diff --git a/fs/btrfs/tests/inode-tests.c b/fs/btrfs/tests/inode-tests.c
+index 29648c0..9f72aed 100644
+--- a/fs/btrfs/tests/inode-tests.c
++++ b/fs/btrfs/tests/inode-tests.c
+@@ -230,6 +230,7 @@ static unsigned long vacancy_only = 0;
+ 
+ static noinline int test_btrfs_get_extent(void)
+ {
++	struct btrfs_fs_info *fs_info = NULL;
+ 	struct inode *inode = NULL;
+ 	struct btrfs_root *root = NULL;
+ 	struct extent_map *em = NULL;
+@@ -248,19 +249,15 @@ static noinline int test_btrfs_get_extent(void)
+ 	BTRFS_I(inode)->location.objectid = BTRFS_FIRST_FREE_OBJECTID;
+ 	BTRFS_I(inode)->location.offset = 0;
+ 
+-	root = btrfs_alloc_dummy_root();
+-	if (IS_ERR(root)) {
+-		test_msg("Couldn't allocate root\n");
++	fs_info = btrfs_alloc_dummy_fs_info();
++	if (!fs_info) {
++		test_msg("Couldn't allocate dummy fs info\n");
+ 		goto out;
+ 	}
+ 
+-	/*
+-	 * We do this since btrfs_get_extent wants to assign em->bdev to
+-	 * root->fs_info->fs_devices->latest_bdev.
+-	 */
+-	root->fs_info = btrfs_alloc_dummy_fs_info();
+-	if (!root->fs_info) {
+-		test_msg("Couldn't allocate dummy fs info\n");
++	root = btrfs_alloc_dummy_root(fs_info);
++	if (IS_ERR(root)) {
++		test_msg("Couldn't allocate root\n");
+ 		goto out;
+ 	}
+ 
+@@ -835,11 +832,13 @@ out:
+ 		free_extent_map(em);
+ 	iput(inode);
+ 	btrfs_free_dummy_root(root);
++	btrfs_free_dummy_fs_info(fs_info);
+ 	return ret;
+ }
+ 
+ static int test_hole_first(void)
+ {
++	struct btrfs_fs_info *fs_info = NULL;
+ 	struct inode *inode = NULL;
+ 	struct btrfs_root *root = NULL;
+ 	struct extent_map *em = NULL;
+@@ -855,15 +854,15 @@ static int test_hole_first(void)
+ 	BTRFS_I(inode)->location.objectid = BTRFS_FIRST_FREE_OBJECTID;
+ 	BTRFS_I(inode)->location.offset = 0;
+ 
+-	root = btrfs_alloc_dummy_root();
+-	if (IS_ERR(root)) {
+-		test_msg("Couldn't allocate root\n");
++	fs_info = btrfs_alloc_dummy_fs_info();
++	if (!fs_info) {
++		test_msg("Couldn't allocate dummy fs info\n");
+ 		goto out;
+ 	}
+ 
+-	root->fs_info = btrfs_alloc_dummy_fs_info();
+-	if (!root->fs_info) {
+-		test_msg("Couldn't allocate dummy fs info\n");
++	root = btrfs_alloc_dummy_root(fs_info);
++	if (IS_ERR(root)) {
++		test_msg("Couldn't allocate root\n");
+ 		goto out;
+ 	}
+ 
+@@ -934,11 +933,13 @@ out:
+ 		free_extent_map(em);
+ 	iput(inode);
+ 	btrfs_free_dummy_root(root);
++	btrfs_free_dummy_fs_info(fs_info);
+ 	return ret;
+ }
+ 
+ static int test_extent_accounting(void)
+ {
++	struct btrfs_fs_info *fs_info = NULL;
+ 	struct inode *inode = NULL;
+ 	struct btrfs_root *root = NULL;
+ 	int ret = -ENOMEM;
+@@ -949,15 +950,15 @@ static int test_extent_accounting(void)
+ 		return ret;
+ 	}
+ 
+-	root = btrfs_alloc_dummy_root();
+-	if (IS_ERR(root)) {
+-		test_msg("Couldn't allocate root\n");
++	fs_info = btrfs_alloc_dummy_fs_info();
++	if (!fs_info) {
++		test_msg("Couldn't allocate dummy fs info\n");
+ 		goto out;
+ 	}
+ 
+-	root->fs_info = btrfs_alloc_dummy_fs_info();
+-	if (!root->fs_info) {
+-		test_msg("Couldn't allocate dummy fs info\n");
++	root = btrfs_alloc_dummy_root(fs_info);
++	if (IS_ERR(root)) {
++		test_msg("Couldn't allocate root\n");
+ 		goto out;
+ 	}
+ 
+@@ -1132,6 +1133,7 @@ out:
+ 				 NULL, GFP_KERNEL);
+ 	iput(inode);
+ 	btrfs_free_dummy_root(root);
++	btrfs_free_dummy_fs_info(fs_info);
+ 	return ret;
+ }
+ 
+diff --git a/fs/btrfs/tests/qgroup-tests.c b/fs/btrfs/tests/qgroup-tests.c
+index 57a12c0..4407fef 100644
+--- a/fs/btrfs/tests/qgroup-tests.c
++++ b/fs/btrfs/tests/qgroup-tests.c
+@@ -453,22 +453,24 @@ static int test_multiple_refs(struct btrfs_root *root,
+ 
+ int btrfs_test_qgroups(void)
+ {
++	struct btrfs_fs_info *fs_info = NULL;
+ 	struct btrfs_root *root;
+ 	struct btrfs_root *tmp_root;
+ 	int ret = 0;
+ 
+-	root = btrfs_alloc_dummy_root();
+-	if (IS_ERR(root)) {
+-		test_msg("Couldn't allocate root\n");
+-		return PTR_ERR(root);
++	fs_info = btrfs_alloc_dummy_fs_info();
++	if (!fs_info) {
++		test_msg("Couldn't allocate dummy fs info\n");
++		return -ENOMEM;
+ 	}
+ 
+-	root->fs_info = btrfs_alloc_dummy_fs_info();
+-	if (!root->fs_info) {
+-		test_msg("Couldn't allocate dummy fs info\n");
+-		ret = -ENOMEM;
++	root = btrfs_alloc_dummy_root(fs_info);
++	if (IS_ERR(root)) {
++		test_msg("Couldn't allocate root\n");
++		ret = PTR_ERR(root);
+ 		goto out;
+ 	}
++
+ 	/* We are using this root as our extent root */
+ 	root->fs_info->extent_root = root;
+ 
+@@ -495,7 +497,7 @@ int btrfs_test_qgroups(void)
+ 	btrfs_set_header_nritems(root->node, 0);
+ 	root->alloc_bytenr += 2 * nodesize;
+ 
+-	tmp_root = btrfs_alloc_dummy_root();
++	tmp_root = btrfs_alloc_dummy_root(fs_info);
+ 	if (IS_ERR(tmp_root)) {
+ 		test_msg("Couldn't allocate a fs root\n");
+ 		ret = PTR_ERR(tmp_root);
+@@ -510,7 +512,7 @@ int btrfs_test_qgroups(void)
+ 		goto out;
+ 	}
+ 
+-	tmp_root = btrfs_alloc_dummy_root();
++	tmp_root = btrfs_alloc_dummy_root(fs_info);
+ 	if (IS_ERR(tmp_root)) {
+ 		test_msg("Couldn't allocate a fs root\n");
+ 		ret = PTR_ERR(tmp_root);
+@@ -531,5 +533,6 @@ int btrfs_test_qgroups(void)
+ 	ret = test_multiple_refs(root);
+ out:
+ 	btrfs_free_dummy_root(root);
++	btrfs_free_dummy_fs_info(fs_info);
+ 	return ret;
+ }
+-- 
+cgit v0.12
+
