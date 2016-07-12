@@ -48,7 +48,7 @@ index 589f128..348a183 100644
 +		if (IS_ERR(trans)) {
 +			ret = PTR_ERR(trans);
 +			btrfs_info(fs_info,
-+		 "%s:%d fails on btrfs_start_transaction() right after shrinking devivce %s (original size is %llu new size is %llu",
++		 "%s:%d fails on btrfs_start_transaction() right after shrinking device %s (original size is %llu new size is %llu",
 +				   __func__, __LINE__,
 +				   rcu_str_deref(device->name), old_size,
 +				   old_size - size_to_free);
@@ -62,7 +62,7 @@ index 589f128..348a183 100644
 +			/* btrfs_grow_device never returns ret > 0 */
 +			WARN_ON(ret > 0);
 +			btrfs_info(fs_info,
-+		 "%s:%d fails on btrfs_grow_device() right after shrinking devivce %s (original size is %llu new size is %llu",
++		 "%s:%d fails on btrfs_grow_device() right after shrinking device %s (original size is %llu new size is %llu",
 +				   __func__, __LINE__,
 +				   rcu_str_deref(device->name), old_size,
 +				   old_size - size_to_free);
