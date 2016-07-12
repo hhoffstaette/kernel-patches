@@ -1,8 +1,9 @@
 From:	Liu Bo <bo.li.liu@oracle.com>
 To:	linux-btrfs@vger.kernel.org
-Cc:	David Sterba <dsterba@suse.cz>
-Subject: [PATCH v2] Btrfs: fix unexpected balance crash due to BUG_ON
-Date:	Mon, 11 Jul 2016 10:21:35 -0700
+Cc:	David Sterba <dsterba@suse.cz>, Chris Mason <clm@fb.com>,
+	Filipe Manana <fdmanana@gmail.com>
+Subject: [PATCH v3] Btrfs: fix unexpected balance crash due to BUG_ON
+Date:	Tue, 12 Jul 2016 11:24:21 -0700
 
 Mounting a btrfs can resume previous balance operations asynchronously.
 An user got a crash when one drive has some corrupt sectors.
@@ -16,11 +17,15 @@ Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 v2: - Initialize path with NULL.
     - Show more information when we bail out.
 
- fs/btrfs/volumes.c | 30 ++++++++++++++++++++++++++----
- 1 file changed, 26 insertions(+), 4 deletions(-)
+v3: - Fix typo
+    - Use rcu version btrfs_info
+    - Remove __func__ and __LINE__
+
+ fs/btrfs/volumes.c | 28 ++++++++++++++++++++++++----
+ 1 file changed, 24 insertions(+), 4 deletions(-)
 
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 589f128..348a183 100644
+index 589f128..6040c26 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
 @@ -3421,7 +3421,7 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
@@ -32,7 +37,7 @@ index 589f128..348a183 100644
  	struct btrfs_key key;
  	struct btrfs_key found_key;
  	struct btrfs_trans_handle *trans;
-@@ -3455,13 +3455,35 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
+@@ -3455,13 +3455,33 @@ static int __btrfs_balance(struct btrfs_fs_info *fs_info)
  		ret = btrfs_shrink_device(device, old_size - size_to_free);
  		if (ret == -ENOSPC)
  			break;
@@ -47,11 +52,10 @@ index 589f128..348a183 100644
 -		BUG_ON(IS_ERR(trans));
 +		if (IS_ERR(trans)) {
 +			ret = PTR_ERR(trans);
-+			btrfs_info(fs_info,
-+		 "%s:%d fails on btrfs_start_transaction() right after shrinking device %s (original size is %llu new size is %llu",
-+				   __func__, __LINE__,
-+				   rcu_str_deref(device->name), old_size,
-+				   old_size - size_to_free);
++			btrfs_info_in_rcu(fs_info,
++		 "resize: unable to start transaction after shrinking device %s (error %d), old size %llu, new size %llu",
++					  rcu_str_deref(device->name), ret,
++					  old_size, old_size - size_to_free);
 +			goto error;
 +		}
  
@@ -61,11 +65,10 @@ index 589f128..348a183 100644
 +			btrfs_end_transaction(trans, dev_root);
 +			/* btrfs_grow_device never returns ret > 0 */
 +			WARN_ON(ret > 0);
-+			btrfs_info(fs_info,
-+		 "%s:%d fails on btrfs_grow_device() right after shrinking device %s (original size is %llu new size is %llu",
-+				   __func__, __LINE__,
-+				   rcu_str_deref(device->name), old_size,
-+				   old_size - size_to_free);
++			btrfs_info_in_rcu(fs_info,
++		 "resize: unable to grow device after shrinking device %s (error %d), old size %llu, new size %llu",
++					  rcu_str_deref(device->name), ret,
++					  old_size, old_size - size_to_free);
 +			goto error;
 +		}
  
