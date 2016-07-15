@@ -1,0 +1,73 @@
+From 9ae3623a0f53696bfce8aea03c7e28af6e26e3c1 Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <kernel@kyup.com>
+Date: Wed, 13 Jul 2016 16:19:15 +0300
+Subject: [PATCH] btrfs: Add ratelimit to btrfs printing
+
+This patch adds ratelimiting to all messages which are not using the _rl
+version of the various printing APIs in btrfs. This is designed to be
+used as a safety net, since a flood messages might cause the softlockup
+detector to trigger. To reduce interference between different classes of
+messages use a separate ratelimit state for every class of message.
+
+Signed-off-by: Nikolay Borisov <kernel@kyup.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/super.c | 26 ++++++++++++++++++++++++--
+ 1 file changed, 24 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 60e7179..8766d56 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -184,6 +184,22 @@ static const char * const logtypes[] = {
+ 	"debug",
+ };
+ 
++
++/*
++ * Use one ratelimit state per log level so that a flood of less important
++ * messages doesn't cause more important ones to be dropped.
++ */
++static struct ratelimit_state printk_limits[] = {
++	RATELIMIT_STATE_INIT(printk_limits[0], DEFAULT_RATELIMIT_INTERVAL, 100),
++	RATELIMIT_STATE_INIT(printk_limits[1], DEFAULT_RATELIMIT_INTERVAL, 100),
++	RATELIMIT_STATE_INIT(printk_limits[2], DEFAULT_RATELIMIT_INTERVAL, 100),
++	RATELIMIT_STATE_INIT(printk_limits[3], DEFAULT_RATELIMIT_INTERVAL, 100),
++	RATELIMIT_STATE_INIT(printk_limits[4], DEFAULT_RATELIMIT_INTERVAL, 100),
++	RATELIMIT_STATE_INIT(printk_limits[5], DEFAULT_RATELIMIT_INTERVAL, 100),
++	RATELIMIT_STATE_INIT(printk_limits[6], DEFAULT_RATELIMIT_INTERVAL, 100),
++	RATELIMIT_STATE_INIT(printk_limits[7], DEFAULT_RATELIMIT_INTERVAL, 100),
++};
++
+ void btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...)
+ {
+ 	struct super_block *sb = fs_info->sb;
+@@ -192,6 +208,7 @@ void btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...)
+ 	va_list args;
+ 	const char *type = logtypes[4];
+ 	int kern_level;
++	struct ratelimit_state *ratelimit;
+ 
+ 	va_start(args, fmt);
+ 
+@@ -202,13 +219,18 @@ void btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...)
+ 		lvl[size] = '\0';
+ 		fmt += size;
+ 		type = logtypes[kern_level - '0'];
+-	} else
++		ratelimit = &printk_limits[kern_level - '0'];
++	} else {
+ 		*lvl = '\0';
++		/* Default to debug output */
++		ratelimit = &printk_limits[7];
++	}
+ 
+ 	vaf.fmt = fmt;
+ 	vaf.va = &args;
+ 
+-	printk("%sBTRFS %s (device %s): %pV\n", lvl, type, sb->s_id, &vaf);
++	if (__ratelimit(ratelimit))
++		printk("%sBTRFS %s (device %s): %pV\n", lvl, type, sb->s_id, &vaf);
+ 
+ 	va_end(args);
+ }
