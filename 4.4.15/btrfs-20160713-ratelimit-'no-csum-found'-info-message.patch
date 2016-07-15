@@ -1,0 +1,28 @@
+From 400175e8e4294b3e69f575accb90e110e8784fab Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <kernel@kyup.com>
+Date: Wed, 13 Jul 2016 16:19:14 +0300
+Subject: [PATCH] btrfs: Ratelimit "no csum found" info message
+
+Recently during a crash it became apparent that this particular message
+can be printed so many times that it causes the softlockup detector to
+trigger. Fix it by ratelimiting it.
+
+Signed-off-by: Nikolay Borisov <kernel@kyup.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/file-item.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/file-item.c b/fs/btrfs/file-item.c
+index 62a81ee..6b58d06 100644
+--- a/fs/btrfs/file-item.c
++++ b/fs/btrfs/file-item.c
+@@ -250,7 +250,7 @@ static int __btrfs_lookup_bio_sums(struct btrfs_root *root,
+ 						offset + root->sectorsize - 1,
+ 						EXTENT_NODATASUM);
+ 				} else {
+-					btrfs_info(BTRFS_I(inode)->root->fs_info,
++					btrfs_info_rl(BTRFS_I(inode)->root->fs_info,
+ 						   "no csum found for inode %llu start %llu",
+ 					       btrfs_ino(inode), offset);
+ 				}
