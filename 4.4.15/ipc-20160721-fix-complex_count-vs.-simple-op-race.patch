@@ -1,6 +1,6 @@
 From: Manfred Spraul <manfred@colorfullife.com>
-Subject: [PATCH 1/2] ipc/sem.c: Fix complex_count vs. simple op race
-Date: Sat, 25 Jun 2016 19:37:51 +0200
+Subject: [PATCH] ipc/sem.c: Fix complex_count vs. simple op race
+Date: Thu, 21 Jul 2016 19:54:55 +0200
 Cc: LKML <linux-kernel@vger.kernel.org>,
 	Thomas Gleixner <tglx@linutronix.de>,
 	Ingo Molnar <mingo@elte.hu>, 1vier1@web.de,
@@ -11,7 +11,14 @@ To: "H. Peter Anvin" <hpa@zytor.com>,
 	Peter Zijlstra <peterz@infradead.org>,
 	Andrew Morton <akpm@linux-foundation.org>,
 	Davidlohr Bueso <dave@stgolabs.net>
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/182911>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel.stable/184623>
+
+Next update:
+- switch to smp_store_mb() instead of WRITE_ONCE();smp_mb();
+- introduce SEM_GLOBAL_LOCK instead of magic -1.
+- do not use READ_ONCE() for the unlocked&unordered test:
+  READ_ONCE doesn't make sense for unlocked&unordered code.
+- document why smp_mb() is required after spin_lock().
 
 Commit 6d07b68ce16a ("ipc/sem.c: optimize sem_lock()") introduced a
 race:
@@ -35,6 +42,9 @@ The patch is required for all kernels that include the
 commit 6d07b68ce16a ("ipc/sem.c: optimize sem_lock()") (3.10?)
 
 The alternative is to revert the patch that introduced the race.
+
+The patch is safe for backporting, i.e. it makes no assumptions
+about memory barriers in spin_unlock_wait().
 
 Background:
 Here is the race of the current implementation:
@@ -64,18 +74,15 @@ Bug:
 Now both thread A and thread C operate on the same array, without
 any synchronization.
 
-Full memory barrier are required to synchronize changes of
-complex_mode and the lock operations.
-
-[HH: slightly backported for 4.4.x]
+[HH: backported to 4.4.x]
 Fixes: 6d07b68ce16a ("ipc/sem.c: optimize sem_lock()")
 Reported-by: felixh@informatik.uni-bremen.de
 Signed-off-by: Manfred Spraul <manfred@colorfullife.com>
 Cc: <stable@vger.kernel.org>
 ---
  include/linux/sem.h |   1 +
- ipc/sem.c           | 122 ++++++++++++++++++++++++++++++----------------------
- 2 files changed, 71 insertions(+), 52 deletions(-)
+ ipc/sem.c           | 138 +++++++++++++++++++++++++++++++---------------------
+ 2 files changed, 84 insertions(+), 55 deletions(-)
 
 diff --git a/include/linux/sem.h b/include/linux/sem.h
 index 976ce3a..d0efd6e 100644
@@ -90,7 +97,7 @@ index 976ce3a..d0efd6e 100644
  
  #ifdef CONFIG_SYSVIPC
 diff --git a/ipc/sem.c b/ipc/sem.c
-index ae72b3c..538f43a 100644
+index ae72b3c..3987a97 100644
 --- a/ipc/sem.c
 +++ b/ipc/sem.c
 @@ -162,14 +162,21 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it);
@@ -119,7 +126,7 @@ index ae72b3c..538f43a 100644
   */
  
  #define sc_semmsl	sem_ctls[0]
-@@ -260,23 +267,25 @@ static void sem_rcu_free(struct rcu_head *head)
+@@ -260,31 +267,61 @@ static void sem_rcu_free(struct rcu_head *head)
  #define ipc_smp_acquire__after_spin_is_unlocked()	smp_rmb()
  
  /*
@@ -144,20 +151,29 @@ index ae72b3c..538f43a 100644
 +		/* We are already in complex_mode. Nothing to do */
  		return;
  	}
-+	WRITE_ONCE(sma->complex_mode, true);
-+
-+	/* We need a full barrier:
+ 
++	/* We need a full barrier after seting complex_mode:
 +	 * The write to complex_mode must be visible
 +	 * before we read the first sem->lock spinlock state.
 +	 */
-+	smp_mb();
- 
++	smp_store_mb(sma->complex_mode, true);
++
  	for (i = 0; i < sma->sem_nsems; i++) {
  		sem = sma->sem_base + i;
-@@ -285,6 +294,27 @@ static void sem_wait_array(struct sem_array *sma)
- }
- 
- /*
+ 		spin_unlock_wait(&sem->lock);
+ 	}
+-	ipc_smp_acquire__after_spin_is_unlocked();
++	/*
++	 * spin_unlock_wait() is not a memory barriers, it is only a
++	 * control barrier. The code must pair with spin_unlock(&sem->lock),
++	 * thus just the control barrier is insufficient.
++	 *
++	 * smp_rmb() is sufficient, as writes cannot pass the control barrier.
++	 */
++	smp_rmb();
++}
++
++/*
 + * Try to leave the mode that disallows simple operations:
 + * Caller must own sem_perm.lock.
 + */
@@ -176,13 +192,13 @@ index ae72b3c..538f43a 100644
 +	 * before we set complex_mode to false.
 +	 */
 +	smp_store_release(&sma->complex_mode, false);
-+}
-+
-+/*
+ }
+ 
++#define SEM_GLOBAL_LOCK	(-1)
+ /*
   * If the request contains only one semaphore operation, and there are
   * no complex transactions pending, lock only the semaphore involved.
-  * Otherwise, lock the entire semaphore array, since we either have
-@@ -300,56 +330,40 @@ static inline int sem_lock(struct sem_array *sma, struct sembuf *sops,
+@@ -300,56 +338,42 @@ static inline int sem_lock(struct sem_array *sma, struct sembuf *sops,
  		/* Complex operation - acquire a full lock */
  		ipc_lock_object(&sma->sem_perm);
  
@@ -190,9 +206,10 @@ index ae72b3c..538f43a 100644
 -		 * right now have dropped their locks.
 -		 */
 -		sem_wait_array(sma);
+-		return -1;
 +		/* Prevent parallel simple ops */
 +		complexmode_enter(sma);
- 		return -1;
++		return SEM_GLOBAL_LOCK;
  	}
  
  	/*
@@ -219,9 +236,9 @@ index ae72b3c..538f43a 100644
 -	if (sma->complex_count == 0) {
 +	/*
 +	 * Initial check for complex_mode. Just an optimization,
-+	 * no locking.
++	 * no locking, no memory barrier.
 +	 */
-+	if (!READ_ONCE(sma->complex_mode)) {
++	if (!sma->complex_mode) {
  		/*
  		 * It appears that no complex operation is around.
  		 * Acquire the per-semaphore lock.
@@ -238,6 +255,8 @@ index ae72b3c..538f43a 100644
 -			 */
 -			ipc_smp_acquire__after_spin_is_unlocked();
 +		/*
++		 * See 51d7d5205d33
++		 * ("powerpc: Add smp_mb() to arch_spin_is_locked()"):
 +		 * A full barrier is required: the write of sem->lock
 +		 * must be visible before the read is executed
 +		 */
@@ -252,30 +271,33 @@ index ae72b3c..538f43a 100644
 -				/* fast path successful! */
 -				return sops->sem_num;
 -			}
-+		if (!READ_ONCE(sma->complex_mode)) {
++		if (!smp_load_acquire(&sma->complex_mode)) {
 +			/* fast path successful! */
 +			return sops->sem_num;
  		}
  		spin_unlock(&sem->lock);
  	}
-@@ -369,7 +383,7 @@ static inline int sem_lock(struct sem_array *sma, struct sembuf *sops,
+@@ -369,15 +393,16 @@ static inline int sem_lock(struct sem_array *sma, struct sembuf *sops,
  		/* Not a false alarm, thus complete the sequence for a
  		 * full lock.
  		 */
 -		sem_wait_array(sma);
+-		return -1;
 +		complexmode_enter(sma);
- 		return -1;
++		return SEM_GLOBAL_LOCK;
  	}
  }
-@@ -378,6 +392,7 @@ static inline void sem_unlock(struct sem_array *sma, int locknum)
+ 
+ static inline void sem_unlock(struct sem_array *sma, int locknum)
  {
- 	if (locknum == -1) {
+-	if (locknum == -1) {
++	if (locknum == SEM_GLOBAL_LOCK) {
  		unmerge_queues(sma);
 +		complexmode_tryleave(sma);
  		ipc_unlock_object(&sma->sem_perm);
  	} else {
  		struct sem *sem = sma->sem_base + locknum;
-@@ -529,6 +544,7 @@ static int newary(struct ipc_namespace *ns, struct ipc_params *params)
+@@ -529,6 +554,7 @@ static int newary(struct ipc_namespace *ns, struct ipc_params *params)
  	}
  
  	sma->complex_count = 0;
@@ -283,7 +305,7 @@ index ae72b3c..538f43a 100644
  	INIT_LIST_HEAD(&sma->pending_alter);
  	INIT_LIST_HEAD(&sma->pending_const);
  	INIT_LIST_HEAD(&sma->list_id);
-@@ -2184,10 +2200,10 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it)
+@@ -2184,10 +2210,10 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it)
  	/*
  	 * The proc interface isn't aware of sem_lock(), it calls
  	 * ipc_lock_object() directly (in sysvipc_find_ipc).
@@ -297,7 +319,7 @@ index ae72b3c..538f43a 100644
  
  	sem_otime = get_semotime(sma);
  
-@@ -2204,6 +2220,8 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it)
+@@ -2204,6 +2230,8 @@ static int sysvipc_sem_proc_show(struct seq_file *s, void *it)
  		   sem_otime,
  		   sma->sem_ctime);
  
