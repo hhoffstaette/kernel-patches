@@ -1,0 +1,60 @@
+From 3cb9185c67304b2a7ea9be73e7d13df6fb2793a1 Mon Sep 17 00:00:00 2001
+From: Andrey Ryabinin <aryabinin@virtuozzo.com>
+Date: Wed, 20 Jul 2016 15:45:00 -0700
+Subject: radix-tree: fix radix_tree_iter_retry() for tagged iterators.
+
+radix_tree_iter_retry() resets slot to NULL, but it doesn't reset tags.
+Then NULL slot and non-zero iter.tags passed to radix_tree_next_slot()
+leading to crash:
+
+  RIP: radix_tree_next_slot include/linux/radix-tree.h:473
+    find_get_pages_tag+0x334/0x930 mm/filemap.c:1452
+  ....
+  Call Trace:
+    pagevec_lookup_tag+0x3a/0x80 mm/swap.c:960
+    mpage_prepare_extent_to_map+0x321/0xa90 fs/ext4/inode.c:2516
+    ext4_writepages+0x10be/0x2b20 fs/ext4/inode.c:2736
+    do_writepages+0x97/0x100 mm/page-writeback.c:2364
+    __filemap_fdatawrite_range+0x248/0x2e0 mm/filemap.c:300
+    filemap_write_and_wait_range+0x121/0x1b0 mm/filemap.c:490
+    ext4_sync_file+0x34d/0xdb0 fs/ext4/fsync.c:115
+    vfs_fsync_range+0x10a/0x250 fs/sync.c:195
+    vfs_fsync fs/sync.c:209
+    do_fsync+0x42/0x70 fs/sync.c:219
+    SYSC_fdatasync fs/sync.c:232
+    SyS_fdatasync+0x19/0x20 fs/sync.c:230
+    entry_SYSCALL_64_fastpath+0x23/0xc1 arch/x86/entry/entry_64.S:207
+
+We must reset iterator's tags to bail out from radix_tree_next_slot()
+and go to the slow-path in radix_tree_next_chunk().
+
+Fixes: 46437f9a554f ("radix-tree: fix race in gang lookup")
+Link: http://lkml.kernel.org/r/1468495196-10604-1-git-send-email-aryabinin@virtuozzo.com
+Signed-off-by: Andrey Ryabinin <aryabinin@virtuozzo.com>
+Reported-by: Dmitry Vyukov <dvyukov@google.com>
+Acked-by: Konstantin Khlebnikov <koct9i@gmail.com>
+Cc: Matthew Wilcox <willy@linux.intel.com>
+Cc: Hugh Dickins <hughd@google.com>
+Cc: Ross Zwisler <ross.zwisler@linux.intel.com>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ include/linux/radix-tree.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/linux/radix-tree.h b/include/linux/radix-tree.h
+index cb4b7e8..eca6f62 100644
+--- a/include/linux/radix-tree.h
++++ b/include/linux/radix-tree.h
+@@ -407,6 +407,7 @@ static inline __must_check
+ void **radix_tree_iter_retry(struct radix_tree_iter *iter)
+ {
+ 	iter->next_index = iter->index;
++	iter->tags = 0;
+ 	return NULL;
+ }
+ 
+-- 
+cgit v0.12
+
