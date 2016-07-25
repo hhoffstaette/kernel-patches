@@ -1,0 +1,57 @@
+From: Wang Xiaoguang <wangxg.fnst@cn.fujitsu.com>
+To: linux-btrfs@vger.kernel.org
+Cc: dsterba@suse.cz,
+	jbacik@fb.com,
+	holger@applied-asynchrony.com
+Subject: [PATCH v2 1/4] btrfs: use correct offset for reloc_inode in prealloc_file_extent_cluster()
+Date: Mon, 25 Jul 2016 15:51:38 +0800
+
+In prealloc_file_extent_cluster(), btrfs_check_data_free_space() uses
+wrong file offset for reloc_inode, it uses cluster->start and cluster->end,
+which indeed are extent's bytenr. The correct value should be
+cluster->[start|end] minus block group's start bytenr.
+
+start bytenr   cluster->start
+|              |     extent      |   extent   | ...| extent |
+|----------------------------------------------------------------|
+|                block group reloc_inode                         |
+
+[HH: backported to 4.4++]
+Signed-off-by: Wang Xiaoguang <wangxg.fnst@cn.fujitsu.com>
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+---
+ fs/btrfs/relocation.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 0477dca..a0de885 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -3030,12 +3030,14 @@ int prealloc_file_extent_cluster(struct inode *inode,
+ 	u64 num_bytes;
+ 	int nr = 0;
+ 	int ret = 0;
++	u64 prealloc_start = cluster->start - offset;
++	u64 prealloc_end = cluster->end - offset;
+ 
+ 	BUG_ON(cluster->start != cluster->boundary[0]);
+ 	mutex_lock(&inode->i_mutex);
+ 
+-	ret = btrfs_check_data_free_space(inode, cluster->start,
+-					  cluster->end + 1 - cluster->start);
++	ret = btrfs_check_data_free_space(inode, prealloc_start,
++					  prealloc_end + 1 - prealloc_start);
+ 	if (ret)
+ 		goto out;
+ 
+@@ -3056,8 +3058,8 @@ int prealloc_file_extent_cluster(struct inode *inode,
+ 			break;
+ 		nr++;
+ 	}
+-	btrfs_free_reserved_data_space(inode, cluster->start,
+-				       cluster->end + 1 - cluster->start);
++	btrfs_free_reserved_data_space(inode, prealloc_start,
++				       prealloc_end + 1 - prealloc_start);
+ out:
+ 	mutex_unlock(&inode->i_mutex);
+ 	return ret;
