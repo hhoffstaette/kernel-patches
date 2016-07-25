@@ -25,9 +25,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - bfs: [BFS v467](http://ck-hack.blogspot.de/2015/12/bfs-467-linux-43-ck3.html) (*not* enabled by default)
 - block: [latency-sensitive writeback](http://marc.info/?l=linux-block&m=146168622002151&w=2), CFQ & deadline scheduler fixes
-- btrfs: fixes up to 4.8+ (block allocator, cleanups, data loss, performance, recovery etc.)
+- btrfs: fixes up to ~4.8 (block allocator, cleanups, data loss, performance, recovery etc.)
 - cpufreq: CPU frequency/power management fixes (mostly intel_pstate)
-- ext4: fixes up to 4.7+ (corruption, crash consistency, performance, [mbcache2](https://lwn.net/Articles/668718/))
+- ext4: selected fixes up to ~4.7+ (corruption, crash consistency, performance, [mbcache2](https://lwn.net/Articles/668718/))
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - net: TCP performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
@@ -36,5 +36,5 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - vfs: performance improvements
 - wq: workqueue fixes
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: fixes up to 4.7+ (correctness, performance)
+- xfs: selected fixes up to ~4.8 (correctness, performance)
 
