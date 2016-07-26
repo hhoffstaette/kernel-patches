@@ -1,0 +1,405 @@
+From:	Wang Xiaoguang <wangxg.fnst@cn.fujitsu.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	jbacik@fb.com, dsterba@suse.cz
+Subject: [PATCH v4] btrfs: should block unused block groups deletion work when allocating data space
+Date:	Wed, 27 Jul 2016 13:50:21 +0800
+
+cleaner_kthread() may run at any time, in which it'll call btrfs_delete_unused_bgs()
+to delete unused block groups. Because this work is asynchronous, it may also result
+in false ENOSPC error. Please see below race window:
+
+               CPU1                           |             CPU2
+                                              |
+|-> btrfs_alloc_data_chunk_ondemand()         |-> cleaner_kthread()
+    |-> do_chunk_alloc()                      |   |
+    |   assume it returns ENOSPC, which means |   |
+    |   btrfs_space_info is full and have free|   |
+    |   space to satisfy data request.        |   |
+    |                                         |   |- > btrfs_delete_unused_bgs()
+    |                                         |   |    it will decrease btrfs_space_info
+    |                                         |   |    total_bytes and make
+    |                                         |   |    btrfs_space_info is not full.
+    |                                         |   |
+In this case, we may get ENOSPC error, but btrfs_space_info is not full.
+
+To fix this issue, in btrfs_alloc_data_chunk_ondemand(), if we need to call
+do_chunk_alloc() to allocating new chunk, we should block btrfs_delete_unused_bgs().
+Here we introduce a new struct rw_semaphore bg_delete_sem to do this job.
+
+Indeed there is already a "struct mutex delete_unused_bgs_mutex", but it's mutex,
+we can not use it for this purpose. Of course, we can re-define it to be struct
+rw_semaphore, then use it in btrfs_alloc_data_chunk_ondemand(). Either method will
+work.
+
+But given that delete_unused_bgs_mutex's name length is longer than bg_delete_sem,
+I choose the first method, to create a new struct rw_semaphore bg_delete_sem and
+delete delete_unused_bgs_mutex :)
+
+Signed-off-by: Wang Xiaoguang <wangxg.fnst@cn.fujitsu.com>
+---
+v3: improve one code logic suggested by Josef, thanks.
+v4: replace delete_unused_bgs_mutex with our new bg_delete_sem, also
+    suggested by Josef.
+---
+ fs/btrfs/ctree.h       |  2 +-
+ fs/btrfs/disk-io.c     | 13 ++++++-------
+ fs/btrfs/extent-tree.c | 42 ++++++++++++++++++++++++++++++++++--------
+ fs/btrfs/volumes.c     | 42 +++++++++++++++++++++---------------------
+ 4 files changed, 62 insertions(+), 37 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 7eb2913..90041a2 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -800,6 +800,7 @@ struct btrfs_fs_info {
+ 	struct mutex cleaner_mutex;
+ 	struct mutex chunk_mutex;
+ 	struct mutex volume_mutex;
++	struct rw_semaphore bg_delete_sem;
+ 
+ 	/*
+ 	 * this is taken to make sure we don't set block groups ro after
+@@ -1079,7 +1080,6 @@ struct btrfs_fs_info {
+ 	spinlock_t unused_bgs_lock;
+ 	struct list_head unused_bgs;
+ 	struct mutex unused_bg_unpin_mutex;
+-	struct mutex delete_unused_bgs_mutex;
+ 
+ 	/* For btrfs to record security options */
+ 	struct security_mnt_opts security_opts;
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 60ce119..86cad9a 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1839,12 +1839,11 @@ static int cleaner_kthread(void *arg)
+ 		btrfs_run_defrag_inodes(root->fs_info);
+ 
+ 		/*
+-		 * Acquires fs_info->delete_unused_bgs_mutex to avoid racing
+-		 * with relocation (btrfs_relocate_chunk) and relocation
+-		 * acquires fs_info->cleaner_mutex (btrfs_relocate_block_group)
+-		 * after acquiring fs_info->delete_unused_bgs_mutex. So we
+-		 * can't hold, nor need to, fs_info->cleaner_mutex when deleting
+-		 * unused block groups.
++		 * Acquires fs_info->bg_delete_sem to avoid racing with
++		 * relocation (btrfs_relocate_chunk) and relocation acquires
++		 * fs_info->cleaner_mutex (btrfs_relocate_block_group) after
++		 * acquiring fs_info->bg_delete_sem. So we can't hold, nor need
++		 * to, fs_info->cleaner_mutex when deleting unused block groups.
+ 		 */
+ 		btrfs_delete_unused_bgs(root->fs_info);
+ sleep:
+@@ -2595,7 +2594,6 @@ int open_ctree(struct super_block *sb,
+ 	spin_lock_init(&fs_info->unused_bgs_lock);
+ 	rwlock_init(&fs_info->tree_mod_log_lock);
+ 	mutex_init(&fs_info->unused_bg_unpin_mutex);
+-	mutex_init(&fs_info->delete_unused_bgs_mutex);
+ 	mutex_init(&fs_info->reloc_mutex);
+ 	mutex_init(&fs_info->delalloc_root_mutex);
+ 	mutex_init(&fs_info->cleaner_delayed_iput_mutex);
+@@ -2683,6 +2681,7 @@ int open_ctree(struct super_block *sb,
+ 	init_rwsem(&fs_info->commit_root_sem);
+ 	init_rwsem(&fs_info->cleanup_work_sem);
+ 	init_rwsem(&fs_info->subvol_sem);
++	init_rwsem(&fs_info->bg_delete_sem);
+ 	sema_init(&fs_info->uuid_tree_rescan_sem, 1);
+ 
+ 	btrfs_init_dev_replace_locks(fs_info);
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index df8d756..19d4bb1 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -4111,6 +4111,7 @@ int btrfs_alloc_data_chunk_ondemand(struct inode *inode, u64 bytes)
+ 	int ret = 0;
+ 	int need_commit = 2;
+ 	int have_pinned_space;
++	int have_bg_delete_sem = 0;
+ 
+ 	/* make sure bytes are sectorsize aligned */
+ 	bytes = ALIGN(bytes, root->sectorsize);
+@@ -4121,8 +4122,11 @@ int btrfs_alloc_data_chunk_ondemand(struct inode *inode, u64 bytes)
+ 	}
+ 
+ 	data_sinfo = fs_info->data_sinfo;
+-	if (!data_sinfo)
++	if (!data_sinfo) {
++		down_read(&root->fs_info->bg_delete_sem);
++		have_bg_delete_sem = 1;
+ 		goto alloc;
++	}
+ 
+ again:
+ 	/* make sure we have enough space to handle the data first */
+@@ -4135,6 +4139,17 @@ again:
+ 		struct btrfs_trans_handle *trans;
+ 
+ 		/*
++		 * We may need to allocate new chunk, so we should block
++		 * btrfs_delete_unused_bgs()
++		 */
++		if (!have_bg_delete_sem) {
++			spin_unlock(&data_sinfo->lock);
++			down_read(&root->fs_info->bg_delete_sem);
++			have_bg_delete_sem = 1;
++			goto again;
++		}
++
++		/*
+ 		 * if we don't have enough free bytes in this space then we need
+ 		 * to alloc a new chunk.
+ 		 */
+@@ -4156,17 +4171,20 @@ alloc:
+ 			 * the fs.
+ 			 */
+ 			trans = btrfs_join_transaction(root);
+-			if (IS_ERR(trans))
++			if (IS_ERR(trans)) {
++				up_read(&root->fs_info->bg_delete_sem);
+ 				return PTR_ERR(trans);
++			}
+ 
+ 			ret = do_chunk_alloc(trans, root->fs_info->extent_root,
+ 					     alloc_target,
+ 					     CHUNK_ALLOC_NO_FORCE);
+ 			btrfs_end_transaction(trans, root);
+ 			if (ret < 0) {
+-				if (ret != -ENOSPC)
++				if (ret != -ENOSPC) {
++					up_read(&root->fs_info->bg_delete_sem);
+ 					return ret;
+-				else {
++				} else {
+ 					have_pinned_space = 1;
+ 					goto commit_trans;
+ 				}
+@@ -4200,15 +4218,19 @@ commit_trans:
+ 			}
+ 
+ 			trans = btrfs_join_transaction(root);
+-			if (IS_ERR(trans))
++			if (IS_ERR(trans)) {
++				up_read(&root->fs_info->bg_delete_sem);
+ 				return PTR_ERR(trans);
++			}
+ 			if (have_pinned_space >= 0 ||
+ 			    test_bit(BTRFS_TRANS_HAVE_FREE_BGS,
+ 				     &trans->transaction->flags) ||
+ 			    need_commit > 0) {
+ 				ret = btrfs_commit_transaction(trans, root);
+-				if (ret)
++				if (ret) {
++					up_read(&root->fs_info->bg_delete_sem);
+ 					return ret;
++				}
+ 				/*
+ 				 * The cleaner kthread might still be doing iput
+ 				 * operations. Wait for it to finish so that
+@@ -4225,6 +4247,7 @@ commit_trans:
+ 		trace_btrfs_space_reservation(root->fs_info,
+ 					      "space_info:enospc",
+ 					      data_sinfo->flags, bytes, 1);
++		up_read(&root->fs_info->bg_delete_sem);
+ 		return -ENOSPC;
+ 	}
+ 	data_sinfo->bytes_may_use += bytes;
+@@ -4232,6 +4255,9 @@ commit_trans:
+ 				      data_sinfo->flags, bytes, 1);
+ 	spin_unlock(&data_sinfo->lock);
+ 
++	if (have_bg_delete_sem)
++		up_read(&root->fs_info->bg_delete_sem);
++
+ 	return ret;
+ }
+ 
+@@ -10593,7 +10619,7 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
+ 		}
+ 		spin_unlock(&fs_info->unused_bgs_lock);
+ 
+-		mutex_lock(&fs_info->delete_unused_bgs_mutex);
++		down_write(&root->fs_info->bg_delete_sem);
+ 
+ 		/* Don't want to race with allocators so take the groups_sem */
+ 		down_write(&space_info->groups_sem);
+@@ -10721,7 +10747,7 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
+ end_trans:
+ 		btrfs_end_transaction(trans, root);
+ next:
+-		mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++		up_write(&root->fs_info->bg_delete_sem);
+ 		btrfs_put_block_group(block_group);
+ 		spin_lock(&fs_info->unused_bgs_lock);
+ 	}
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 589f128..7dbf70a 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -2876,7 +2876,7 @@ static int btrfs_relocate_chunk(struct btrfs_root *root, u64 chunk_offset)
+ 	 * we release the path used to search the chunk/dev tree and before
+ 	 * the current task acquires this mutex and calls us.
+ 	 */
+-	ASSERT(mutex_is_locked(&root->fs_info->delete_unused_bgs_mutex));
++	ASSERT(rwsem_is_locked(&root->fs_info->bg_delete_sem));
+ 
+ 	ret = btrfs_can_relocate(extent_root, chunk_offset);
+ 	if (ret)
+@@ -2929,10 +2929,10 @@ again:
+ 	key.type = BTRFS_CHUNK_ITEM_KEY;
+ 
+ 	while (1) {
+-		mutex_lock(&root->fs_info->delete_unused_bgs_mutex);
++		down_read(&root->fs_info->bg_delete_sem);
+ 		ret = btrfs_search_slot(NULL, chunk_root, &key, path, 0, 0);
+ 		if (ret < 0) {
+-			mutex_unlock(&root->fs_info->delete_unused_bgs_mutex);
++			up_read(&root->fs_info->bg_delete_sem);
+ 			goto error;
+ 		}
+ 		BUG_ON(ret == 0); /* Corruption */
+@@ -2940,7 +2940,7 @@ again:
+ 		ret = btrfs_previous_item(chunk_root, path, key.objectid,
+ 					  key.type);
+ 		if (ret)
+-			mutex_unlock(&root->fs_info->delete_unused_bgs_mutex);
++			up_read(&root->fs_info->bg_delete_sem);
+ 		if (ret < 0)
+ 			goto error;
+ 		if (ret > 0)
+@@ -2962,7 +2962,7 @@ again:
+ 			else
+ 				BUG_ON(ret);
+ 		}
+-		mutex_unlock(&root->fs_info->delete_unused_bgs_mutex);
++		up_read(&root->fs_info->bg_delete_sem);
+ 
+ 		if (found_key.offset == 0)
+ 			break;
+@@ -3498,10 +3498,10 @@ again:
+ 			goto error;
+ 		}
+ 
+-		mutex_lock(&fs_info->delete_unused_bgs_mutex);
++		down_read(&fs_info->bg_delete_sem);
+ 		ret = btrfs_search_slot(NULL, chunk_root, &key, path, 0, 0);
+ 		if (ret < 0) {
+-			mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++			up_read(&fs_info->bg_delete_sem);
+ 			goto error;
+ 		}
+ 
+@@ -3515,7 +3515,7 @@ again:
+ 		ret = btrfs_previous_item(chunk_root, path, 0,
+ 					  BTRFS_CHUNK_ITEM_KEY);
+ 		if (ret) {
+-			mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++			up_read(&fs_info->bg_delete_sem);
+ 			ret = 0;
+ 			break;
+ 		}
+@@ -3525,7 +3525,7 @@ again:
+ 		btrfs_item_key_to_cpu(leaf, &found_key, slot);
+ 
+ 		if (found_key.objectid != key.objectid) {
+-			mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++			up_read(&fs_info->bg_delete_sem);
+ 			break;
+ 		}
+ 
+@@ -3543,12 +3543,12 @@ again:
+ 
+ 		btrfs_release_path(path);
+ 		if (!ret) {
+-			mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++			up_read(&fs_info->bg_delete_sem);
+ 			goto loop;
+ 		}
+ 
+ 		if (counting) {
+-			mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++			up_read(&fs_info->bg_delete_sem);
+ 			spin_lock(&fs_info->balance_lock);
+ 			bctl->stat.expected++;
+ 			spin_unlock(&fs_info->balance_lock);
+@@ -3573,7 +3573,7 @@ again:
+ 					count_meta < bctl->meta.limit_min)
+ 				|| ((chunk_type & BTRFS_BLOCK_GROUP_SYSTEM) &&
+ 					count_sys < bctl->sys.limit_min)) {
+-			mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++			up_read(&fs_info->bg_delete_sem);
+ 			goto loop;
+ 		}
+ 
+@@ -3586,7 +3586,7 @@ again:
+ 		    !chunk_reserved && !bytes_used) {
+ 			trans = btrfs_start_transaction(chunk_root, 0);
+ 			if (IS_ERR(trans)) {
+-				mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++				up_read(&fs_info->bg_delete_sem);
+ 				ret = PTR_ERR(trans);
+ 				goto error;
+ 			}
+@@ -3595,7 +3595,7 @@ again:
+ 						      BTRFS_BLOCK_GROUP_DATA);
+ 			btrfs_end_transaction(trans, chunk_root);
+ 			if (ret < 0) {
+-				mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++				up_read(&fs_info->bg_delete_sem);
+ 				goto error;
+ 			}
+ 			chunk_reserved = 1;
+@@ -3603,7 +3603,7 @@ again:
+ 
+ 		ret = btrfs_relocate_chunk(chunk_root,
+ 					   found_key.offset);
+-		mutex_unlock(&fs_info->delete_unused_bgs_mutex);
++		up_read(&fs_info->bg_delete_sem);
+ 		if (ret && ret != -ENOSPC)
+ 			goto error;
+ 		if (ret == -ENOSPC) {
+@@ -4330,16 +4330,16 @@ again:
+ 	key.type = BTRFS_DEV_EXTENT_KEY;
+ 
+ 	do {
+-		mutex_lock(&root->fs_info->delete_unused_bgs_mutex);
++		down_read(&root->fs_info->bg_delete_sem);
+ 		ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
+ 		if (ret < 0) {
+-			mutex_unlock(&root->fs_info->delete_unused_bgs_mutex);
++			up_read(&root->fs_info->bg_delete_sem);
+ 			goto done;
+ 		}
+ 
+ 		ret = btrfs_previous_item(root, path, 0, key.type);
+ 		if (ret)
+-			mutex_unlock(&root->fs_info->delete_unused_bgs_mutex);
++			up_read(&root->fs_info->bg_delete_sem);
+ 		if (ret < 0)
+ 			goto done;
+ 		if (ret) {
+@@ -4353,7 +4353,7 @@ again:
+ 		btrfs_item_key_to_cpu(l, &key, path->slots[0]);
+ 
+ 		if (key.objectid != device->devid) {
+-			mutex_unlock(&root->fs_info->delete_unused_bgs_mutex);
++			up_read(&root->fs_info->bg_delete_sem);
+ 			btrfs_release_path(path);
+ 			break;
+ 		}
+@@ -4362,7 +4362,7 @@ again:
+ 		length = btrfs_dev_extent_length(l, dev_extent);
+ 
+ 		if (key.offset + length <= new_size) {
+-			mutex_unlock(&root->fs_info->delete_unused_bgs_mutex);
++			up_read(&root->fs_info->bg_delete_sem);
+ 			btrfs_release_path(path);
+ 			break;
+ 		}
+@@ -4371,7 +4371,7 @@ again:
+ 		btrfs_release_path(path);
+ 
+ 		ret = btrfs_relocate_chunk(root, chunk_offset);
+-		mutex_unlock(&root->fs_info->delete_unused_bgs_mutex);
++		up_read(&root->fs_info->bg_delete_sem);
+ 		if (ret && ret != -ENOSPC)
+ 			goto done;
+ 		if (ret == -ENOSPC)
