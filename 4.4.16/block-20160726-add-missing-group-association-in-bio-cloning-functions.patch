@@ -1,12 +1,9 @@
+From paolo.valente@linaro.org Tue Jul 26 21:00:01 2016
+Date: Tue, 26 Jul 2016 18:14:49 +0200
 From: Paolo Valente <paolo.valente@linaro.org>
-Newsgroups: gmane.linux.kernel,gmane.linux.kernel.stable
-Subject: [PATCH BUGFIX V4] block: add missing group association in bio-cloning functions
-Date: Wed, 11 May 2016 11:28:04 +0200
-Cc: linux-block@vger.kernel.org, linux-kernel@vger.kernel.org,
-	ulf.hansson@linaro.org, linus.walleij@linaro.org, broonie@kernel.org,
-	stable@vger.kernel.org, Paolo Valente <paolo.valente@linaro.org>
 To: Jens Axboe <axboe@kernel.dk>, Tejun Heo <tj@kernel.org>
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2219447>
+Cc: linux-block@vger.kernel.org, linux-kernel@vger.kernel.org, ulf.hansson@linaro.org, linus.walleij@linaro.org, broonie@kernel.org, stable@vger.kernel.org, jmoyer@redhat.com, Nikolay Borisov <kernel@kyup.com>, Paolo Valente <paolo.valente@linaro.org>
+Subject: [PATCH BUGFIX V4] block: add missing group association in bio-cloning functions
 
 When a bio is cloned, the newly created bio must be associated with
 the same blkcg as the original bio (if BLK_CGROUP is enabled). If
@@ -21,11 +18,14 @@ the root group). The expected group isolation may thereby be broken.
 
 This commit adds the missing association in bio-cloning functions.
 
+Fixes: da2f0f74cf7d ("Btrfs: add support for blkio controllers")
+Cc: stable@vger.kernel.org # v4.3+
+
+[HH: fix return value from bio_clone_blkcg_association()]
 Signed-off-by: Paolo Valente <paolo.valente@linaro.org>
 Reviewed-by: Nikolay Borisov <kernel@kyup.com>
----
-Tejun: I didn't add also your Ack, just because this version is slightly
-different from the one you acked.
+Reviewed-by: Jeff Moyer <jmoyer@redhat.com>
+Acked-by: Tejun Heo <tj@kernel.org>
 ---
  block/bio.c          | 15 +++++++++++++++
  fs/btrfs/extent_io.c |  6 ------
@@ -33,10 +33,10 @@ different from the one you acked.
  3 files changed, 18 insertions(+), 6 deletions(-)
 
 diff --git a/block/bio.c b/block/bio.c
-index 807d25e..89f517c 100644
+index 0e4aa42..4623869 100644
 --- a/block/bio.c
 +++ b/block/bio.c
-@@ -590,6 +590,8 @@ void __bio_clone_fast(struct bio *bio, struct bio *bio_src)
+@@ -579,6 +579,8 @@ void __bio_clone_fast(struct bio *bio, struct bio *bio_src)
  	bio->bi_rw = bio_src->bi_rw;
  	bio->bi_iter = bio_src->bi_iter;
  	bio->bi_io_vec = bio_src->bi_io_vec;
@@ -45,7 +45,7 @@ index 807d25e..89f517c 100644
  }
  EXPORT_SYMBOL(__bio_clone_fast);
  
-@@ -695,6 +697,8 @@ integrity_clone:
+@@ -684,6 +686,8 @@ integrity_clone:
  		}
  	}
  
@@ -54,7 +54,7 @@ index 807d25e..89f517c 100644
  	return bio;
  }
  EXPORT_SYMBOL(bio_clone_bioset);
-@@ -2016,6 +2020,17 @@ void bio_disassociate_task(struct bio *bio)
+@@ -2005,6 +2009,17 @@ void bio_disassociate_task(struct bio *bio)
  	}
  }
  
@@ -73,10 +73,10 @@ index 807d25e..89f517c 100644
  
  static void __init biovec_init_slabs(void)
 diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
-index d247fc0..19f6739 100644
+index 75533ad..92fe3f8 100644
 --- a/fs/btrfs/extent_io.c
 +++ b/fs/btrfs/extent_io.c
-@@ -2686,12 +2686,6 @@ struct bio *btrfs_bio_clone(struct bio *bio, gfp_t gfp_mask)
+@@ -2696,12 +2696,6 @@ struct bio *btrfs_bio_clone(struct bio *bio, gfp_t gfp_mask)
  		btrfs_bio->csum = NULL;
  		btrfs_bio->csum_allocated = NULL;
  		btrfs_bio->end_io = NULL;
@@ -90,7 +90,7 @@ index d247fc0..19f6739 100644
  	return new;
  }
 diff --git a/include/linux/bio.h b/include/linux/bio.h
-index 6b7481f..16cbe59 100644
+index 9faebf7..c9403b7 100644
 --- a/include/linux/bio.h
 +++ b/include/linux/bio.h
 @@ -527,11 +527,14 @@ extern unsigned int bvec_nr_vecs(unsigned short idx);
@@ -104,7 +104,7 @@ index 6b7481f..16cbe59 100644
  static inline int bio_associate_current(struct bio *bio) { return -ENOENT; }
  static inline void bio_disassociate_task(struct bio *bio) { }
 +static inline void bio_clone_blkcg_association(struct bio *dst,
-+			struct bio *src) { return 0; }
++			struct bio *src) { }
  #endif	/* CONFIG_BLK_CGROUP */
  
  #ifdef CONFIG_HIGHMEM
