@@ -24,6 +24,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **LTS series: 4.4**
 
 - bfs: [BFS v467](http://ck-hack.blogspot.de/2015/12/bfs-467-linux-43-ck3.html) (*not* enabled by default)
+- bfq: [BFQ v8](http://algogroup.unimore.it/people/paolo/disk_sched/)
 - block: [latency-sensitive writeback](http://marc.info/?l=linux-block&m=146168622002151&w=2), CFQ & deadline scheduler fixes
 - btrfs: fixes up to ~4.8 (block allocator, cleanups, data loss, performance, recovery etc.)
 - cpufreq: CPU frequency/power management fixes (mostly intel_pstate)
