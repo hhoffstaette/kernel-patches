@@ -1,0 +1,288 @@
+From: Giovanni Gherdovich <ggherdovich@suse.cz>
+Subject: [PATCH] sched/cputime: Mitigate performance regression in times()/clock_gettime()
+Date: Tue, 26 Jul 2016 16:07:14 +0200
+Cc: Mike Galbraith <mgalbraith@suse.de>,
+	Stanislaw Gruszka <sgruszka@redhat.com>,
+	linux-kernel@vger.kernel.org, Mel Gorman <mgorman@suse.com>,
+	Giovanni Gherdovich <ggherdovich@suse.cz>
+To: Ingo Molnar <mingo@redhat.com>,
+	Peter Zijlstra <peterz@infradead.org>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2273769>
+
+Commit 6e998916dfe3 ("sched/cputime: Fix clock_nanosleep()/clock_gettime()
+inconsistency") fixed a problem whereby clock_nanosleep() followed by
+clock_gettime() could allow a task to wake early. It addressed the problem
+by calling the scheduling classes update_curr when the cputimer starts.
+
+Said change induced a considerable performance regression on the syscalls
+times() and clock_gettimes(CLOCK_PROCESS_CPUTIME_ID). There are some
+debuggers and applications that monitor their own performance that
+accidentally depend on the performance of these specific calls.
+
+This patch mitigates the performace loss by prefetching data in the CPU
+cache, as stalls due to cache misses appear to be where most time is spent
+in our benchmarks.
+
+Here are the performance gain of this patch over v4.7-rc7 on a Sandy Bridge
+box with 32 logical cores and 2 NUMA nodes. The test is repeated with a
+variable number of threads, from 2 to 4*num_cpus; the results are in
+seconds and correspond to the average of 10 runs; the percentage gain is
+computed with (before-after)/before so a positive value is an improvement
+(it's faster). The improvement varies between a few percents for 5-20
+threads and more than 10% for 2 or >20 threads.
+
+pound_clock_gettime:
+
+    threads       4.7-rc7     patched 4.7-rc7
+    [num]         [secs]      [secs (percent)]
+      2           3.48        3.06 ( 11.83%)
+      5           3.33        3.25 (  2.40%)
+      8           3.37        3.26 (  3.30%)
+     12           3.32        3.37 ( -1.60%)
+     21           4.01        3.90 (  2.74%)
+     30           3.63        3.36 (  7.41%)
+     48           3.71        3.11 ( 16.27%)
+     79           3.75        3.16 ( 15.74%)
+    110           3.81        3.25 ( 14.80%)
+    128           3.88        3.31 ( 14.76%)
+
+pound_times:
+
+    threads       4.7-rc7     patched 4.7-rc7
+    [num]         [secs]      [secs (percent)]
+      2           3.65        3.25 ( 11.03%)
+      5           3.45        3.17 (  7.92%)
+      8           3.52        3.22 (  8.69%)
+     12           3.29        3.36 ( -2.04%)
+     21           4.07        3.92 (  3.78%)
+     30           3.87        3.40 ( 12.17%)
+     48           3.79        3.16 ( 16.61%)
+     79           3.88        3.28 ( 15.42%)
+    110           3.90        3.38 ( 13.35%)
+    128           4.00        3.38 ( 15.45%)
+
+pound_clock_gettime and pound_clock_gettime are two benchmarks included in
+the MMTests framework. They launch a given number of threads which
+repeatedly call times() or clock_gettimes(). The results above can be
+reproduced with cloning MMTests from github.com and running the "poundtime"
+workload:
+
+$ git clone https://github.com/gormanm/mmtests.git
+$ cd mmtests
+$ cp configs/config-global-dhp__workload_poundtime config
+$ ./run-mmtests.sh --run-monitor $(uname -r)
+
+The above will run "poundtime" measuring the kernel currently running on
+the machine; Once a new kernel is installed and the machine rebooted,
+running again
+
+$ cd mmtests
+$ ./run-mmtests.sh --run-monitor $(uname -r)
+
+will produce results to compare with. A comparison table will be output
+with
+
+$ cd mmtests/work/log
+$ ../../compare-kernels.sh
+
+the table will contain a lot of entries; grepping for "Amean" (as in
+"arithmetic mean") will give the tables presented above. The source code
+for the two benchmarks is reported at the end of this changelog for
+clairity.
+
+The cache misses addressed by this patch were found using a combination of
+`perf top`, `perf record` and `perf annotate`. The incriminated lines were
+found to be
+
+    struct sched_entity *curr = cfs_rq->curr;
+
+and
+
+    delta_exec = now - curr->exec_start;
+
+in the function update_curr() from kernel/sched/fair.c. This patch
+prefetches the data from memory just before update_curr is called in the
+interested execution path.
+
+A comparison of the total number of cycles before and after the patch
+follows; the data is obtained using `perf stat -r 10 -ddd <program>`
+running over the same sequence of number of threads used above (a positive
+gain is an improvement):
+
+  threads   cycles before                 cycles after                gain
+
+    2      19,699,563,964  +-1.19%      17,358,917,517  +-1.85%      11.88%
+    5      47,401,089,566  +-2.96%      45,103,730,829  +-0.97%       4.85%
+    8      80,923,501,004  +-3.01%      71,419,385,977  +-0.77%      11.74%
+   12     112,326,485,473  +-0.47%     110,371,524,403  +-0.47%       1.74%
+   21     193,455,574,299  +-0.72%     180,120,667,904  +-0.36%       6.89%
+   30     315,073,519,013  +-1.64%     271,222,225,950  +-1.29%      13.92%
+   48     321,969,515,332  +-1.48%     273,353,977,321  +-1.16%      15.10%
+   79     337,866,003,422  +-0.97%     289,462,481,538  +-1.05%      14.33%
+  110     338,712,691,920  +-0.78%     290,574,233,170  +-0.77%      14.21%
+  128     348,384,794,006  +-0.50%     292,691,648,206  +-0.66%      15.99%
+
+A comparison of cache miss vs total cache loads ratios, before and after
+the patch (again from the `perf stat -r 10 -ddd <program>` tables):
+
+  threads   L1 misses/total*100     L1 misses/total*100            gain
+		         before                   after
+      2           7.43  +-4.90%           7.36  +-4.70%           0.94%
+      5          13.09  +-4.74%          13.52  +-3.73%          -3.28%
+      8          13.79  +-5.61%          12.90  +-3.27%           6.45%
+     12          11.57  +-2.44%           8.71  +-1.40%          24.72%
+     21          12.39  +-3.92%           9.97  +-1.84%          19.53%
+     30          13.91  +-2.53%          11.73  +-2.28%          15.67%
+     48          13.71  +-1.59%          12.32  +-1.97%          10.14%
+     79          14.44  +-0.66%          13.40  +-1.06%           7.20%
+    110          15.86  +-0.50%          14.46  +-0.59%           8.83%
+    128          16.51  +-0.32%          15.06  +-0.78%           8.78%
+
+As a final note, the following shows the evolution of performance figures
+in the "poundtime" benchmark and pinpoints commit 6e998916dfe3
+("sched/cputime: Fix clock_nanosleep()/clock_gettime() inconsistency") as a
+major source of degradation, mostly unaddressed to this day (figures
+expressed in seconds).
+
+pound_clock_gettime:
+
+  threads   parent of         6e998916dfe3        4.7-rc7
+	    6e998916dfe3            itself
+    2        2.23          3.68 ( -64.56%)        3.48 (-55.48%)
+    5        2.83          3.78 ( -33.42%)        3.33 (-17.43%)
+    8        2.84          4.31 ( -52.12%)        3.37 (-18.76%)
+    12       3.09          3.61 ( -16.74%)        3.32 ( -7.17%)
+    21       3.14          4.63 ( -47.36%)        4.01 (-27.71%)
+    30       3.28          5.75 ( -75.37%)        3.63 (-10.80%)
+    48       3.02          6.05 (-100.56%)        3.71 (-22.99%)
+    79       2.88          6.30 (-118.90%)        3.75 (-30.26%)
+    110      2.95          6.46 (-119.00%)        3.81 (-29.24%)
+    128      3.05          6.42 (-110.08%)        3.88 (-27.04%)
+
+pound_times:
+
+  threads   parent of         6e998916dfe3        4.7-rc7
+	    6e998916dfe3            itself
+    2        2.27          3.73 ( -64.71%)        3.65 (-61.14%)
+    5        2.78          3.77 ( -35.56%)        3.45 (-23.98%)
+    8        2.79          4.41 ( -57.71%)        3.52 (-26.05%)
+    12       3.02          3.56 ( -17.94%)        3.29 ( -9.08%)
+    21       3.10          4.61 ( -48.74%)        4.07 (-31.34%)
+    30       3.33          5.75 ( -72.53%)        3.87 (-16.01%)
+    48       2.96          6.06 (-105.04%)        3.79 (-28.10%)
+    79       2.88          6.24 (-116.83%)        3.88 (-34.81%)
+    110      2.98          6.37 (-114.08%)        3.90 (-31.12%)
+    128      3.10          6.35 (-104.61%)        4.00 (-28.87%)
+
+The source code of the two benchmarks follows. To compile the two:
+
+NR_THREADS=42
+for FILE in pound_times pound_clock_gettime; do
+    gcc -lrt -O2 -lpthread -DNUM_THREADS=$NR_THREADS $FILE.c -o $FILE
+done
+
+==== BEGIN pound_times.c ====
+
+struct tms start;
+
+void *pound (void *threadid)
+{
+  struct tms end;
+  int oldutime = 0;
+  int utime;
+  int i;
+  for (i = 0; i < 5000000 / NUM_THREADS; i++) {
+          times(&end);
+          utime = ((int)end.tms_utime - (int)start.tms_utime);
+          if (oldutime > utime) {
+            printf("utime decreased, was %d, now %d!\n", oldutime, utime);
+          }
+          oldutime = utime;
+  }
+  pthread_exit(NULL);
+}
+
+int main()
+{
+  pthread_t th[NUM_THREADS];
+  long i;
+  times(&start);
+  for (i = 0; i < NUM_THREADS; i++) {
+    pthread_create (&th[i], NULL, pound, (void *)i);
+  }
+  pthread_exit(NULL);
+  return 0;
+}
+==== END pound_times.c ====
+
+==== BEGIN pound_clock_gettime.c ====
+
+void *pound (void *threadid)
+{
+	struct timespec ts;
+	int rc, i;
+	unsigned long prev = 0, this = 0;
+
+	for (i = 0; i < 5000000 / NUM_THREADS; i++) {
+		rc = clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+		if (rc < 0)
+			perror("clock_gettime");
+		this = (ts.tv_sec * 1000000000) + ts.tv_nsec;
+		if (0 && this < prev)
+			printf("%lu ns timewarp at iteration %d\n", prev - this, i);
+		prev = this;
+	}
+	pthread_exit(NULL);
+}
+
+int main()
+{
+	pthread_t th[NUM_THREADS];
+	long rc, i;
+	pid_t pgid;
+
+	for (i = 0; i < NUM_THREADS; i++) {
+		rc = pthread_create(&th[i], NULL, pound, (void *)i);
+		if (rc < 0)
+			perror("pthread_create");
+	}
+
+	pthread_exit(NULL);
+	return 0;
+}
+==== END pound_clock_gettime.c ====
+
+[HH: added explicit include]
+Signed-off-by: Mike Galbraith <mgalbraith@suse.de>
+Signed-off-by: Giovanni Gherdovich <ggherdovich@suse.cz>
+---
+ kernel/sched/core.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff -u a/kernel/sched/core.c b/kernel/sched/core.c
+--- a/kernel/sched/core.c	2016-07-27 13:44:13.000000000 +0200
++++ b/kernel/sched/core.c	2016-07-27 13:49:27.442177225 +0200
+@@ -75,6 +75,7 @@
+ #include <linux/context_tracking.h>
+ #include <linux/compiler.h>
+ #include <linux/frame.h>
++#include <linux/prefetch.h>
+ 
+ #include <asm/switch_to.h>
+ #include <asm/tlb.h>
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 51d7105..0ef1e69 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2998,6 +2998,10 @@ unsigned long long task_sched_runtime(struct task_struct *p)
+ 	 * thread, breaking clock_gettime().
+ 	 */
+ 	if (task_current(rq, p) && task_on_rq_queued(p)) {
++#if defined(CONFIG_FAIR_GROUP_SCHED)
++		prefetch((&p->se)->cfs_rq->curr);
++		prefetch(&(&p->se)->cfs_rq->curr->exec_start);
++#endif
+ 		update_rq_clock(rq);
+ 		p->sched_class->update_curr(rq);
+ 	}
