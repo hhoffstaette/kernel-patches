@@ -1,0 +1,24 @@
+From: Jan Kara <jack@suse.cz>
+Date: Thu, 26 Nov 2015 13:29:21 +0100
+Subject: [PATCH] cgroup: Export cgroup_is_descendant()
+
+CFQ IO scheduler will use cgroup_is_descendant() to decide whether one
+queue can preempt another once.
+
+Signed-off-by: Jan Kara <jack@suse.cz>
+---
+ kernel/cgroup.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/cgroup.c b/kernel/cgroup.c
+index f1603c153890..6b61f847b040 100644
+--- a/kernel/cgroup.c
++++ b/kernel/cgroup.c
+@@ -477,6 +477,7 @@ bool cgroup_is_descendant(struct cgroup *cgrp, struct cgroup *ancestor)
+ 	}
+ 	return false;
+ }
++EXPORT_SYMBOL_GPL(cgroup_is_descendant);
+ 
+ static int notify_on_release(const struct cgroup *cgrp)
+ {
