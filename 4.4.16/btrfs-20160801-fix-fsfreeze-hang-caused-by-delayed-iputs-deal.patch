@@ -1,8 +1,8 @@
 From:	Wang Xiaoguang <wangxg.fnst@cn.fujitsu.com>
 To:	linux-btrfs@vger.kernel.org
 Cc:	dsterba@suse.cz
-Subject: [PATCH v3] btrfs: fix fsfreeze hang caused by delayed iputs deal
-Date:	Thu, 28 Jul 2016 10:43:15 +0800
+Subject: [PATCH v4] btrfs: fix fsfreeze hang caused by delayed iputs deal
+Date:	Mon,  1 Aug 2016 13:28:08 +0800
 
 When running fstests generic/068, sometimes we got below deadlock:
   xfs_io          D ffff8800331dbb20     0  6697   6693 0x00000080
@@ -64,13 +64,14 @@ delayed iputs, see below sample race window:
             |   will be called, which will try |
             |   to get SB_FREEZE_FS lock.      |
 
-To fix this issue, introduce a atomic_t fs_frozen to record internally whether
+To fix this issue, introduce a "int fs_frozen" to record internally whether
 fs has been frozen. If fs has been frozen, we can not handle delayed iputs.
 
 Signed-off-by: Wang Xiaoguang <wangxg.fnst@cn.fujitsu.com>
 ---
 v3: we introduce a atomic_t fs_frozen, and if fs_frozen is 1, we can not
     handle delayed iputs.
+v4: change atomic_t fs_frozen to be int.
 ---
  fs/btrfs/ctree.h       |  2 ++
  fs/btrfs/disk-io.c     |  1 +
@@ -79,39 +80,39 @@ v3: we introduce a atomic_t fs_frozen, and if fs_frozen is 1, we can not
  4 files changed, 19 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index 90041a2..9dddaa0 100644
+index 90041a2..3f241d5 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
 @@ -1091,6 +1091,8 @@ struct btrfs_fs_info {
  	struct list_head pinned_chunks;
  
  	int creating_free_space_tree;
-+	/* Use this atomic to record internally whether fs has been frozen */
-+	atomic_t fs_frozen;
++	/* Used to record internally whether fs has been frozen */
++	int fs_frozen;
  };
  
  struct btrfs_subvolume_writers {
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index 86cad9a..1b85f55 100644
+index 86cad9a..1d26a51 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
 @@ -2621,6 +2621,7 @@ int open_ctree(struct super_block *sb,
  	atomic_set(&fs_info->qgroup_op_seq, 0);
  	atomic_set(&fs_info->reada_works_cnt, 0);
  	atomic64_set(&fs_info->tree_mod_seq, 0);
-+	atomic_set(&fs_info->fs_frozen, 0);
++	fs_info->fs_frozen = 0;
  	fs_info->sb = sb;
  	fs_info->max_inline = BTRFS_DEFAULT_MAX_INLINE;
  	fs_info->metadata_ratio = 0;
 diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
-index 60e7179..c417008 100644
+index 60e7179..6b73cad 100644
 --- a/fs/btrfs/super.c
 +++ b/fs/btrfs/super.c
 @@ -2216,6 +2216,7 @@ static int btrfs_freeze(struct super_block *sb)
  	struct btrfs_trans_handle *trans;
  	struct btrfs_root *root = btrfs_sb(sb)->tree_root;
  
-+	atomic_set(&root->fs_info->fs_frozen, 1);
++	root->fs_info->fs_frozen = 1;
  	trans = btrfs_attach_transaction_barrier(root);
  	if (IS_ERR(trans)) {
  		/* no transaction, don't bother */
@@ -123,7 +124,7 @@ index 60e7179..c417008 100644
 +{
 +	struct btrfs_root *root = btrfs_sb(sb)->tree_root;
 +
-+	atomic_set(&root->fs_info->fs_frozen, 0);
++	root->fs_info->fs_frozen = 0;
 +	return 0;
 +}
 +
@@ -139,7 +140,7 @@ index 60e7179..c417008 100644
  
  static const struct file_operations btrfs_ctl_fops = {
 diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
-index 948aa18..3187356 100644
+index 948aa18..477325d 100644
 --- a/fs/btrfs/transaction.c
 +++ b/fs/btrfs/transaction.c
 @@ -2277,8 +2277,13 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans,
@@ -153,7 +154,7 @@ index 948aa18..3187356 100644
  	if (current != root->fs_info->transaction_kthread &&
 -	    current != root->fs_info->cleaner_kthread)
 +	    current != root->fs_info->cleaner_kthread &&
-+	    !atomic_read(&root->fs_info->fs_frozen))
++	    !root->fs_info->fs_frozen)
  		btrfs_run_delayed_iputs(root);
  
  	return ret;
