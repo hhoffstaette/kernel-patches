@@ -1,13 +1,14 @@
 From: Giovanni Gherdovich <ggherdovich@suse.cz>
-Subject: [PATCH] sched/cputime: Mitigate performance regression in times()/clock_gettime()
-Date: Tue, 26 Jul 2016 16:07:14 +0200
+Subject: [PATCH 1/1] sched/cputime: Mitigate performance regression in times()/clock_gettime()
+Date: Fri,  5 Aug 2016 10:21:56 +0200
 Cc: Mike Galbraith <mgalbraith@suse.de>,
 	Stanislaw Gruszka <sgruszka@redhat.com>,
-	linux-kernel@vger.kernel.org, Mel Gorman <mgorman@suse.com>,
+	linux-kernel@vger.kernel.org,
+	Mel Gorman <mgorman@techsingularity.net>,
 	Giovanni Gherdovich <ggherdovich@suse.cz>
 To: Ingo Molnar <mingo@redhat.com>,
 	Peter Zijlstra <peterz@infradead.org>
-Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2273769>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2280480>
 
 Commit 6e998916dfe3 ("sched/cputime: Fix clock_nanosleep()/clock_gettime()
 inconsistency") fixed a problem whereby clock_nanosleep() followed by
@@ -252,17 +253,17 @@ int main()
 }
 ==== END pound_clock_gettime.c ====
 
-[HH: added explicit include]
-Signed-off-by: Mike Galbraith <mgalbraith@suse.de>
 Signed-off-by: Giovanni Gherdovich <ggherdovich@suse.cz>
+Suggested-by: Mike Galbraith <mgalbraith@suse.de>
 ---
- kernel/sched/core.c | 4 ++++
- 1 file changed, 4 insertions(+)
+ kernel/sched/core.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
 
-diff -u a/kernel/sched/core.c b/kernel/sched/core.c
---- a/kernel/sched/core.c	2016-07-27 13:44:13.000000000 +0200
-+++ b/kernel/sched/core.c	2016-07-27 13:49:27.442177225 +0200
-@@ -75,6 +75,7 @@
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 51d7105..4500421 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -74,6 +74,7 @@
  #include <linux/context_tracking.h>
  #include <linux/compiler.h>
  #include <linux/frame.h>
@@ -270,19 +271,35 @@ diff -u a/kernel/sched/core.c b/kernel/sched/core.c
  
  #include <asm/switch_to.h>
  #include <asm/tlb.h>
-
-diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 51d7105..0ef1e69 100644
---- a/kernel/sched/core.c
-+++ b/kernel/sched/core.c
-@@ -2998,6 +2998,10 @@ unsigned long long task_sched_runtime(struct task_struct *p)
+@@ -2965,6 +2966,23 @@ EXPORT_PER_CPU_SYMBOL(kstat);
+ EXPORT_PER_CPU_SYMBOL(kernel_cpustat);
+ 
+ /*
++ * The function fair_sched_class.update_curr accesses the struct curr
++ * and its field curr->exec_start; when called from task_sched_runtime,
++ * we observe a high rate of cache misses in practice.
++ * Prefetching this data results in improved performance.
++ */
++static inline void prefetch_curr_exec_start(struct task_struct *p)
++{
++#ifdef CONFIG_FAIR_GROUP_SCHED
++	struct sched_entity *curr = (&p->se)->cfs_rq->curr;
++#else
++	struct sched_entity *curr = (&task_rq(p)->cfs)->curr;
++#endif
++	prefetch(curr);
++	prefetch(&curr->exec_start);
++}
++
++/*
+  * Return accounted runtime for the task.
+  * In case the task is currently running, return the runtime plus current's
+  * pending runtime that have not been accounted yet.
+@@ -2998,6 +3016,7 @@ unsigned long long task_sched_runtime(struct task_struct *p)
  	 * thread, breaking clock_gettime().
  	 */
  	if (task_current(rq, p) && task_on_rq_queued(p)) {
-+#if defined(CONFIG_FAIR_GROUP_SCHED)
-+		prefetch((&p->se)->cfs_rq->curr);
-+		prefetch(&(&p->se)->cfs_rq->curr->exec_start);
-+#endif
++		prefetch_curr_exec_start(p);
  		update_rq_clock(rq);
  		p->sched_class->update_curr(rq);
  	}
