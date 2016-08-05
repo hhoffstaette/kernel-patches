@@ -1,0 +1,35 @@
+From 42049bf60db4c01e0432fc861463dcd3208c0d93 Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Wed, 3 Aug 2016 14:05:46 -0700
+Subject: Btrfs: fix __MAX_CSUM_ITEMS
+
+Jeff Mahoney's cleanup commit (14a1e067b4) wasn't correct for csums on
+machines where the pagesize >= metadata blocksize.
+
+This just reverts the relevant hunks to bring the old math back.
+
+[HH: small backport for 4.4.x]
+Signed-off-by: Chris Mason <clm@fb.com>
+---
+ fs/btrfs/file-item.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/file-item.c b/fs/btrfs/file-item.c
+index 2fc803d..d0d571c 100644
+--- a/fs/btrfs/file-item.c
++++ b/fs/btrfs/file-item.c
+@@ -27,8 +27,9 @@
+ #include "print-tree.h"
+ #include "compression.h"
+ 
+-#define __MAX_CSUM_ITEMS(r, size) \
+-	((unsigned long)(((BTRFS_MAX_ITEM_SIZE(r) * 2) / size) - 1))
++#define __MAX_CSUM_ITEMS(r, size) ((unsigned long)(((BTRFS_LEAF_DATA_SIZE(r) - \
++				   sizeof(struct btrfs_item) * 2) / \
++				  size) - 1))
+ 
+ #define MAX_CSUM_ITEMS(r, size) (min_t(u32, __MAX_CSUM_ITEMS(r, size), \
+ 				       PAGE_CACHE_SIZE))
+-- 
+cgit v0.12
+
