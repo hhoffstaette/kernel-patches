@@ -1,0 +1,170 @@
+From b8269db456186ecc13469135c64d215883c410f6 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Thu, 9 Jun 2016 15:47:29 -0600
+Subject: cfq-iosched: temporarily boost queue priority for idle classes
+
+If we're queuing REQ_PRIO IO and the task is running at an idle IO
+class, then temporarily boost the priority. This prevents livelocks
+due to priority inversion, when a low priority task is holding file
+system resources while attempting to do IO.
+
+An example of that is shown below. An ioniced idle task is holding
+the directory mutex, while a normal priority task is trying to do
+a directory lookup.
+
+[478381.198925] ------------[ cut here ]------------
+[478381.200315] INFO: task ionice:1168369 blocked for more than 120 seconds.
+[478381.201324]       Not tainted 4.0.9-38_fbk5_hotfix1_2936_g85409c6 #1
+[478381.202278] "echo 0 > /proc/sys/kernel/hung_task_timeout_secs" disables this message.
+[478381.203462] ionice          D ffff8803692736a8     0 1168369      1 0x00000080
+[478381.203466]  ffff8803692736a8 ffff880399c21300 ffff880276adcc00 ffff880369273698
+[478381.204589]  ffff880369273fd8 0000000000000000 7fffffffffffffff 0000000000000002
+[478381.205752]  ffffffff8177d5e0 ffff8803692736c8 ffffffff8177cea7 0000000000000000
+[478381.206874] Call Trace:
+[478381.207253]  [<ffffffff8177d5e0>] ? bit_wait_io_timeout+0x80/0x80
+[478381.208175]  [<ffffffff8177cea7>] schedule+0x37/0x90
+[478381.208932]  [<ffffffff8177f5fc>] schedule_timeout+0x1dc/0x250
+[478381.209805]  [<ffffffff81421c17>] ? __blk_run_queue+0x37/0x50
+[478381.210706]  [<ffffffff810ca1c5>] ? ktime_get+0x45/0xb0
+[478381.211489]  [<ffffffff8177c407>] io_schedule_timeout+0xa7/0x110
+[478381.212402]  [<ffffffff810a8c2b>] ? prepare_to_wait+0x5b/0x90
+[478381.213280]  [<ffffffff8177d616>] bit_wait_io+0x36/0x50
+[478381.214063]  [<ffffffff8177d325>] __wait_on_bit+0x65/0x90
+[478381.214961]  [<ffffffff8177d5e0>] ? bit_wait_io_timeout+0x80/0x80
+[478381.215872]  [<ffffffff8177d47c>] out_of_line_wait_on_bit+0x7c/0x90
+[478381.216806]  [<ffffffff810a89f0>] ? wake_atomic_t_function+0x40/0x40
+[478381.217773]  [<ffffffff811f03aa>] __wait_on_buffer+0x2a/0x30
+[478381.218641]  [<ffffffff8123c557>] ext4_bread+0x57/0x70
+[478381.219425]  [<ffffffff8124498c>] __ext4_read_dirblock+0x3c/0x380
+[478381.220467]  [<ffffffff8124665d>] ext4_dx_find_entry+0x7d/0x170
+[478381.221357]  [<ffffffff8114c49e>] ? find_get_entry+0x1e/0xa0
+[478381.222208]  [<ffffffff81246bd4>] ext4_find_entry+0x484/0x510
+[478381.223090]  [<ffffffff812471a2>] ext4_lookup+0x52/0x160
+[478381.223882]  [<ffffffff811c401d>] lookup_real+0x1d/0x60
+[478381.224675]  [<ffffffff811c4698>] __lookup_hash+0x38/0x50
+[478381.225697]  [<ffffffff817745bd>] lookup_slow+0x45/0xab
+[478381.226941]  [<ffffffff811c690e>] link_path_walk+0x7ae/0x820
+[478381.227880]  [<ffffffff811c6a42>] path_init+0xc2/0x430
+[478381.228677]  [<ffffffff813e6e26>] ? security_file_alloc+0x16/0x20
+[478381.229776]  [<ffffffff811c8c57>] path_openat+0x77/0x620
+[478381.230767]  [<ffffffff81185c6e>] ? page_add_file_rmap+0x2e/0x70
+[478381.232019]  [<ffffffff811cb253>] do_filp_open+0x43/0xa0
+[478381.233016]  [<ffffffff8108c4a9>] ? creds_are_invalid+0x29/0x70
+[478381.234072]  [<ffffffff811c0cb0>] do_open_execat+0x70/0x170
+[478381.235039]  [<ffffffff811c1bf8>] do_execveat_common.isra.36+0x1b8/0x6e0
+[478381.236051]  [<ffffffff811c214c>] do_execve+0x2c/0x30
+[478381.236809]  [<ffffffff811ca392>] ? getname+0x12/0x20
+[478381.237564]  [<ffffffff811c23be>] SyS_execve+0x2e/0x40
+[478381.238338]  [<ffffffff81780a1d>] stub_execve+0x6d/0xa0
+[478381.239126] ------------[ cut here ]------------
+[478381.239915] ------------[ cut here ]------------
+[478381.240606] INFO: task python2.7:1168375 blocked for more than 120 seconds.
+[478381.242673]       Not tainted 4.0.9-38_fbk5_hotfix1_2936_g85409c6 #1
+[478381.243653] "echo 0 > /proc/sys/kernel/hung_task_timeout_secs" disables this message.
+[478381.244902] python2.7       D ffff88005cf8fb98     0 1168375 1168248 0x00000080
+[478381.244904]  ffff88005cf8fb98 ffff88016c1f0980 ffffffff81c134c0 ffff88016c1f11a0
+[478381.246023]  ffff88005cf8ffd8 ffff880466cd0cbc ffff88016c1f0980 00000000ffffffff
+[478381.247138]  ffff880466cd0cc0 ffff88005cf8fbb8 ffffffff8177cea7 ffff88005cf8fcc8
+[478381.248252] Call Trace:
+[478381.248630]  [<ffffffff8177cea7>] schedule+0x37/0x90
+[478381.249382]  [<ffffffff8177d08e>] schedule_preempt_disabled+0xe/0x10
+[478381.250465]  [<ffffffff8177e892>] __mutex_lock_slowpath+0x92/0x100
+[478381.251409]  [<ffffffff8177e91b>] mutex_lock+0x1b/0x2f
+[478381.252199]  [<ffffffff817745ae>] lookup_slow+0x36/0xab
+[478381.253023]  [<ffffffff811c690e>] link_path_walk+0x7ae/0x820
+[478381.253877]  [<ffffffff811aeb41>] ? try_charge+0xc1/0x700
+[478381.254690]  [<ffffffff811c6a42>] path_init+0xc2/0x430
+[478381.255525]  [<ffffffff813e6e26>] ? security_file_alloc+0x16/0x20
+[478381.256450]  [<ffffffff811c8c57>] path_openat+0x77/0x620
+[478381.257256]  [<ffffffff8115b2fb>] ? lru_cache_add_active_or_unevictable+0x2b/0xa0
+[478381.258390]  [<ffffffff8117b623>] ? handle_mm_fault+0x13f3/0x1720
+[478381.259309]  [<ffffffff811cb253>] do_filp_open+0x43/0xa0
+[478381.260139]  [<ffffffff811d7ae2>] ? __alloc_fd+0x42/0x120
+[478381.260962]  [<ffffffff811b95ac>] do_sys_open+0x13c/0x230
+[478381.261779]  [<ffffffff81011393>] ? syscall_trace_enter_phase1+0x113/0x170
+[478381.262851]  [<ffffffff811b96c2>] SyS_open+0x22/0x30
+[478381.263598]  [<ffffffff81780532>] system_call_fastpath+0x12/0x17
+[478381.264551] ------------[ cut here ]------------
+[478381.265377] ------------[ cut here ]------------
+
+[HH: backported to 4.4++]
+Signed-off-by: Jens Axboe <axboe@fb.com>
+Reviewed-by: Jeff Moyer <jmoyer@redhat.com>
+---
+ block/blk-core.c    |  5 +++++
+ block/cfq-iosched.c | 22 +++++++++++++++++++++-
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 32a283e..3cfd67d 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -1781,6 +1781,11 @@ get_rq:
+ 		rw_flags |= REQ_SYNC;
+ 
+ 	/*
++	 * Add in META/PRIO flags, if set, before we get to the IO scheduler
++	 */
++	rw_flags |= (bio->bi_rw & (REQ_META | REQ_PRIO));
++
++	/*
+ 	 * Grab a free request. This is might sleep but can not fail.
+ 	 * Returns with the queue unlocked.
+ 	 */
+diff --git a/block/cfq-iosched.c b/block/cfq-iosched.c
+index 4e59784..d227ad6 100644
+--- a/block/cfq-iosched.c
++++ b/block/cfq-iosched.c
+@@ -141,7 +141,7 @@ struct cfq_queue {
+ 
+ 	/* io prio of this group */
+ 	unsigned short ioprio, org_ioprio;
+-	unsigned short ioprio_class;
++	unsigned short ioprio_class, org_ioprio_class;
+ 
+ 	pid_t pid;
+ 
+@@ -3700,6 +3700,7 @@ static void cfq_init_prio_data(struct cfq_queue *cfqq, struct cfq_io_cq *cic)
+ 	 * elevate the priority of this queue
+ 	 */
+ 	cfqq->org_ioprio = cfqq->ioprio;
++	cfqq->org_ioprio_class = cfqq->ioprio_class;
+ 	cfq_clear_cfqq_prio_changed(cfqq);
+ }
+ 
+@@ -4295,6 +4296,24 @@ static void cfq_completed_request(struct request_queue *q, struct request *rq)
+ 		cfq_schedule_dispatch(cfqd);
+ }
+ 
++static void cfqq_boost_on_prio(struct cfq_queue *cfqq, int rw)
++{
++	/*
++	 * If REQ_PRIO is set, boost class and prio level, if it's below
++	 * BE/NORM. If prio is not set, restore the potentially boosted
++	 * class/prio level.
++	 */
++	if (!(rw & REQ_PRIO)) {
++		cfqq->ioprio_class = cfqq->org_ioprio_class;
++		cfqq->ioprio = cfqq->org_ioprio;
++	} else {
++		if (cfq_class_idle(cfqq))
++			cfqq->ioprio_class = IOPRIO_CLASS_BE;
++		if (cfqq->ioprio > IOPRIO_NORM)
++			cfqq->ioprio = IOPRIO_NORM;
++	}
++}
++
+ static inline int __cfq_may_queue(struct cfq_queue *cfqq)
+ {
+ 	if (cfq_cfqq_wait_request(cfqq) && !cfq_cfqq_must_alloc_slice(cfqq)) {
+@@ -4325,6 +4344,7 @@ static int cfq_may_queue(struct request_queue *q, int rw)
+ 	cfqq = cic_to_cfqq(cic, rw_is_sync(rw));
+ 	if (cfqq) {
+ 		cfq_init_prio_data(cfqq, cic);
++		cfqq_boost_on_prio(cfqq, rw);
+ 
+ 		return __cfq_may_queue(cfqq);
+ 	}
+-- 
+cgit v0.12
+
