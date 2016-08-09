@@ -1,8 +1,8 @@
 From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
 To:	linux-btrfs@vger.kernel.org
 Cc:	Mark Fasheh <mfasheh@suse.de>
-Subject: [PATCH v2 2/3] btrfs: relocation: Fix leaking qgroups numbers on data extents
-Date:	Fri,  5 Aug 2016 10:29:22 +0800
+Subject: [PATCH v3 2/3] btrfs: relocation: Fix leaking qgroups numbers on data extents
+Date:	Tue,  9 Aug 2016 16:30:20 +0800
 
 When balancing data extents, qgroup will leak all its numbers for
 relocated data extents.
@@ -31,24 +31,16 @@ track all file extents in data reloc tree.
 Since at commit transaction time, the tree swapping is done, and qgroup
 will account these data extents correctly.
 
-[HH: removed root parameter from btrfs_abort_transaction()]
 Cc: Mark Fasheh <mfasheh@suse.de>
 Reported-by: Mark Fasheh <mfasheh@suse.de>
 Reported-by: Filipe Manana <fdmanana@gmail.com>
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
 ---
-changelog:
-v2:
-  Iterate all file extents in data reloc tree, instead of iterating
-  leafs of a swapped level 1 tree block.
-  This fixes case where a level 2 or higher tree block is merged with
-  original subvolume.
----
  fs/btrfs/relocation.c | 114 +++++++++++++++++++++++++++++++++++++++++++++++---
  1 file changed, 108 insertions(+), 6 deletions(-)
 
 diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
-index fc067b0..def7c9c 100644
+index b26a5ae..a6ace8a 100644
 --- a/fs/btrfs/relocation.c
 +++ b/fs/btrfs/relocation.c
 @@ -31,6 +31,7 @@
@@ -59,7 +51,7 @@ index fc067b0..def7c9c 100644
  
  /*
   * backref_node, mapping_node and tree_block start with this
-@@ -3912,6 +3913,95 @@ int prepare_to_relocate(struct reloc_control *rc)
+@@ -3916,6 +3917,95 @@ int prepare_to_relocate(struct reloc_control *rc)
  	return 0;
  }
  
@@ -131,7 +123,7 @@ index fc067b0..def7c9c 100644
 +			btrfs_file_extent_disk_bytenr(path->nodes[0], fi),
 +			btrfs_file_extent_disk_num_bytes(path->nodes[0], fi));
 +			*/
-+		ret = btrfs_qgroup_record_dirty_extent(trans, fs_info,
++		ret = btrfs_qgroup_insert_dirty_extent(trans, fs_info,
 +			btrfs_file_extent_disk_bytenr(path->nodes[0], fi),
 +			btrfs_file_extent_disk_num_bytes(path->nodes[0], fi),
 +			GFP_NOFS);
@@ -155,7 +147,7 @@ index fc067b0..def7c9c 100644
  static noinline_for_stack int relocate_block_group(struct reloc_control *rc)
  {
  	struct rb_root blocks = RB_ROOT;
-@@ -4098,10 +4188,16 @@ restart:
+@@ -4102,10 +4192,16 @@ restart:
  
  	/* get rid of pinned extents */
  	trans = btrfs_join_transaction(rc->extent_root);
@@ -175,7 +167,7 @@ index fc067b0..def7c9c 100644
  out_free:
  	btrfs_free_block_rsv(rc->extent_root, rc->block_rsv);
  	btrfs_free_path(path);
-@@ -4464,10 +4560,16 @@ int btrfs_recover_relocation(struct btrfs_root *root)
+@@ -4468,10 +4564,16 @@ int btrfs_recover_relocation(struct btrfs_root *root)
  	unset_reloc_control(rc);
  
  	trans = btrfs_join_transaction(rc->extent_root);

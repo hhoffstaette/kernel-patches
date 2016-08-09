@@ -1,8 +1,8 @@
-From: Qu Wenruo <quwenruo@cn.fujitsu.com>
-Subject: [PATCH 3/3] btrfs: qgroup: Fix qgroup incorrectness caused by log replay
-Date: Tue,  5 Jul 2016 17:32:07 +0800
-To: linux-btrfs@vger.kernel.org
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.btrfs/58003>
+From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
+To:	linux-btrfs@vger.kernel.org
+Cc:	Mark Fasheh <mfasheh@suse.de>
+Subject: [PATCH v3 3/3] btrfs: qgroup: Fix qgroup incorrectness caused by log replay
+Date:	Tue,  9 Aug 2016 16:30:21 +0800
 
 When doing log replay at mount time(after power loss), qgroup will leak
 numbers of replayed data extents.
@@ -12,13 +12,14 @@ So fix it by manually informing qgroup for owner changed extents.
 
 The bug can be detected by btrfs/119 test case.
 
+Cc: Mark Fasheh <mfasheh@suse.de>
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
 ---
  fs/btrfs/tree-log.c | 16 ++++++++++++++++
  1 file changed, 16 insertions(+)
 
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index 8ab1dc6..a322aa5 100644
+index d31a0c4..9d9cb07 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
 @@ -27,6 +27,7 @@
@@ -36,12 +37,12 @@ index 8ab1dc6..a322aa5 100644
 +		/*
 +		 * Manually record dirty extent, as here we did a shallow
 +		 * file extent item copy and skip normal backref update,
-+		 * but modify extent tree all by ourselves.
++		 * but modifying extent tree all by ourselves.
 +		 * So need to manually record dirty extent for qgroup,
 +		 * as the owner of the file extent changed from log tree
 +		 * (doesn't affect qgroup) to fs/file tree(affects qgroup)
 +		 */
-+		ret = btrfs_qgroup_record_dirty_extent(trans, root->fs_info,
++		ret = btrfs_qgroup_insert_dirty_extent(trans, root->fs_info,
 +				btrfs_file_extent_disk_bytenr(eb, item),
 +				btrfs_file_extent_disk_num_bytes(eb, item),
 +				GFP_NOFS);
