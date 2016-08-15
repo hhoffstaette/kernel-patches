@@ -1,11 +1,12 @@
 From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
-To:	linux-btrfs@vger.kernel.org
-Cc:	Mark Fasheh <mfasheh@suse.de>, Goldwyn Rodrigues <rgoldwyn@suse.de>
-Subject: [PATCH v3 1/3] btrfs: qgroup: Refactor btrfs_qgroup_insert_dirty_extent()
-Date:	Tue,  9 Aug 2016 16:30:19 +0800
+To:	<linux-btrfs@vger.kernel.org>
+CC:	<rgoldwyn@suse.de>, <fdmanana@gmail.com>,
+	Mark Fasheh <mfasheh@suse.de>
+Subject: [PATCH v3.1 1/3] btrfs: qgroup: Refactor btrfs_qgroup_insert_dirty_extent()
+Date:	Mon, 15 Aug 2016 10:36:50 +0800
 
 Refactor btrfs_qgroup_insert_dirty_extent() function, to two functions:
-1. _btrfs_qgroup_insert_dirty_extent()
+1. btrfs_qgroup_insert_dirty_extent_nolock()
    Almost the same with original code.
    For delayed_ref usage, which has delayed refs locked.
 
@@ -13,22 +14,22 @@ Refactor btrfs_qgroup_insert_dirty_extent() function, to two functions:
    pointer, but only needs to know if they need to free the allocated
    memory.
 
-2. btrfs_qgroup_record_dirty_extent()
+2. btrfs_qgroup_insert_dirty_extent()
    The more encapsulated version.
 
    Will do the delayed_refs lock, memory allocation, quota enabled check
-   and other misc things.
+   and other things.
 
 The original design is to keep exported functions to minimal, but since
-more btrfs hacks exposed, like replacing path in balance, needs us to
+more btrfs hacks exposed, like replacing path in balance, we need to
 record dirty extents manually, so we have to add such functions.
 
 Also, add comment for both functions, to info developers how to keep
 qgroup correct when doing hacks.
 
 Cc: Mark Fasheh <mfasheh@suse.de>
-Cc: Goldwyn Rodrigues <rgoldwyn@suse.de>
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Reviewed-and-Tested-by: Goldwyn Rodrigues <rgoldwyn@suse.com>
 ---
  fs/btrfs/delayed-ref.c |  7 ++-----
  fs/btrfs/extent-tree.c | 37 +++++--------------------------------
@@ -37,7 +38,7 @@ Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
  4 files changed, 71 insertions(+), 47 deletions(-)
 
 diff --git a/fs/btrfs/delayed-ref.c b/fs/btrfs/delayed-ref.c
-index b6d210e..dd9b101 100644
+index d9ddcfc..ac02e04 100644
 --- a/fs/btrfs/delayed-ref.c
 +++ b/fs/btrfs/delayed-ref.c
 @@ -541,7 +541,6 @@ add_delayed_ref_head(struct btrfs_fs_info *fs_info,

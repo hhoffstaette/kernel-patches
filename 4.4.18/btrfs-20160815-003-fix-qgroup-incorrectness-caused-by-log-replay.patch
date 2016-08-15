@@ -1,8 +1,9 @@
 From:	Qu Wenruo <quwenruo@cn.fujitsu.com>
-To:	linux-btrfs@vger.kernel.org
-Cc:	Mark Fasheh <mfasheh@suse.de>
-Subject: [PATCH v3 3/3] btrfs: qgroup: Fix qgroup incorrectness caused by log replay
-Date:	Tue,  9 Aug 2016 16:30:21 +0800
+To:	<linux-btrfs@vger.kernel.org>
+CC:	<rgoldwyn@suse.de>, <fdmanana@gmail.com>,
+	Mark Fasheh <mfasheh@suse.de>
+Subject: [PATCH v3.1 3/3] btrfs: qgroup: Fix qgroup incorrectness caused by log replay
+Date:	Mon, 15 Aug 2016 10:36:52 +0800
 
 When doing log replay at mount time(after power loss), qgroup will leak
 numbers of replayed data extents.
@@ -14,12 +15,13 @@ The bug can be detected by btrfs/119 test case.
 
 Cc: Mark Fasheh <mfasheh@suse.de>
 Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Reviewed-and-Tested-by: Goldwyn Rodrigues <rgoldwyn@suse.com>
 ---
  fs/btrfs/tree-log.c | 16 ++++++++++++++++
  1 file changed, 16 insertions(+)
 
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index d31a0c4..9d9cb07 100644
+index fff3f3e..ffe92da 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
 @@ -27,6 +27,7 @@
