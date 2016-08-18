@@ -27,7 +27,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - block: [latency-sensitive writeback](http://marc.info/?l=linux-block&m=146168622002151&w=2), [high-precision I/O time slice accounting](http://www.spinics.net/lists/linux-block/msg02134.html), misc. other CFQ & deadline scheduler fixes
 - btrfs: fixes up to ~4.8 (block allocator, cleanups, data loss, performance, recovery etc.)
 - cpufreq: CPU frequency/power management fixes (mostly intel_pstate)
-- ext4: selected fixes up to ~4.7+ (corruption, crash consistency, performance, [mbcache2](https://lwn.net/Articles/668718/))
+- ext4: selected fixes up to ~4.8 (corruption, crash consistency, performance, [mbcache2](https://lwn.net/Articles/668718/))
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - net: TCP performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
