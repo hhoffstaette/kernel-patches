@@ -1,0 +1,35 @@
+From:   Luis Henriques <luis.henriques@canonical.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     Luis Henriques <luis.henriques@canonical.com>
+Subject: [PATCH 1/2] =?UTF-8?q?btrfs:=20Fix=20warning=20"variable=20?= =?UTF-8?q?=E2=80=98gen=E2=80=99=20set=20but=20not=20used"?=
+Date:   Tue, 23 Aug 2016 23:23:23 +0100
+
+Variable 'gen' in reada_for_search() is not used since commit 58dc4ce43251
+("btrfs: remove unused parameter from readahead_tree_block").  This patch
+simply removes this variable.
+
+Signed-off-by: Luis Henriques <luis.henriques@canonical.com>
+---
+ fs/btrfs/ctree.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index d1c56c94dd5a..dcd39cca7e43 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -2268,7 +2268,6 @@ static void reada_for_search(struct btrfs_root *root,
+ 	u64 search;
+ 	u64 target;
+ 	u64 nread = 0;
+-	u64 gen;
+ 	struct extent_buffer *eb;
+ 	u32 nr;
+ 	u32 blocksize;
+@@ -2313,7 +2312,6 @@ static void reada_for_search(struct btrfs_root *root,
+ 		search = btrfs_node_blockptr(node, nr);
+ 		if ((search <= target && target - search <= 65536) ||
+ 		    (search > target && search - target <= 65536)) {
+-			gen = btrfs_node_ptr_generation(node, nr);
+ 			readahead_tree_block(root, search);
+ 			nread += blocksize;
+ 		}
