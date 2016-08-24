@@ -1,8 +1,8 @@
-From:	Liu Bo <bo.li.liu@oracle.com>
-To:	linux-btrfs@vger.kernel.org
-Cc:	David Sterba <dsterba@suse.cz>
-Subject: [PATCH v2] Btrfs: fix memory leak of block group cache
-Date:	Wed, 20 Jul 2016 17:44:12 -0700
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.cz>, Chris Mason <clm@fb.com>
+Subject: [PATCH v3] Btrfs: fix memory leak of block group cache
+Date:   Tue, 23 Aug 2016 17:26:28 -0700
 
 While processing delayed refs, we may update block group's statistics
 and attach it to cur_trans->dirty_bgs, and later writing dirty block
@@ -13,26 +13,23 @@ For whatever reason, the transaction is aborted and dirty_bgs
 is not processed in cleanup_transaction(), we end up with memory leak
 of these dirty block group cache.
 
-Since btrfs_start_dirty_block_groups() doesn't make it go to the commit
-critical section, this also adds the cleanup work inside it.
-
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 ---
 v2: - remove the 'return' when dirty_bgs is empty because there
       might be block group in list io_bgs.
     - remove unnecessary '\n' in btrfs_err().
-    - more commit log.
+v3: - remove cleanup in btrfs_start_dirty_block_groups() because a later
+      cleanup_transaction() can do the cleanup work, and this also
+      addresses a problem when others holding refs for bg's cache inode.
 
- fs/btrfs/disk-io.c     | 71 ++++++++++++++++++++++++++++++++++++++++++++++++++
- fs/btrfs/disk-io.h     |  2 ++
- fs/btrfs/extent-tree.c |  2 ++
- 3 files changed, 75 insertions(+)
+ fs/btrfs/disk-io.c | 71 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 71 insertions(+)
 
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index db53eb8..4c110de 100644
+index 9d7d78e..bb2ad14 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
-@@ -4434,9 +4434,80 @@ again:
+@@ -4461,9 +4461,80 @@ again:
  	return 0;
  }
  
@@ -50,8 +47,8 @@ index db53eb8..4c110de 100644
 +	btrfs_put_block_group(cache);
 +}
 +
-+void btrfs_cleanup_dirty_bgs(struct btrfs_transaction *cur_trans,
-+			     struct btrfs_root *root)
++static void btrfs_cleanup_dirty_bgs(struct btrfs_transaction *cur_trans,
++				    struct btrfs_root *root)
 +{
 +	struct btrfs_block_group_cache *cache;
 +
@@ -113,29 +110,3 @@ index db53eb8..4c110de 100644
  	btrfs_destroy_delayed_refs(cur_trans, root);
  
  	cur_trans->state = TRANS_STATE_COMMIT_START;
-diff --git a/fs/btrfs/disk-io.h b/fs/btrfs/disk-io.h
-index acba821..6201663 100644
---- a/fs/btrfs/disk-io.h
-+++ b/fs/btrfs/disk-io.h
-@@ -133,6 +133,8 @@ int btrfs_init_log_root_tree(struct btrfs_trans_handle *trans,
- 			     struct btrfs_fs_info *fs_info);
- int btrfs_add_log_tree(struct btrfs_trans_handle *trans,
- 		       struct btrfs_root *root);
-+void btrfs_cleanup_dirty_bgs(struct btrfs_transaction *trans,
-+			     struct btrfs_root *root);
- void btrfs_cleanup_one_transaction(struct btrfs_transaction *trans,
- 				  struct btrfs_root *root);
- struct btrfs_root *btrfs_create_tree(struct btrfs_trans_handle *trans,
-diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 50bd683..7a35c9d 100644
---- a/fs/btrfs/extent-tree.c
-+++ b/fs/btrfs/extent-tree.c
-@@ -3698,6 +3698,8 @@ again:
- 			goto again;
- 		}
- 		spin_unlock(&cur_trans->dirty_bgs_lock);
-+	} else if (ret < 0) {
-+		btrfs_cleanup_dirty_bgs(cur_trans, root);
- 	}
- 
- 	btrfs_free_path(path);
