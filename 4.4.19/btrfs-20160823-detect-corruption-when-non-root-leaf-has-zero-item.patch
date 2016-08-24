@@ -1,8 +1,8 @@
-From:	Liu Bo <bo.li.liu@oracle.com>
-To:	linux-btrfs@vger.kernel.org
-Cc:	David Sterba <dsterba@suse.cz>
-Subject: [PATCH] Btrfs: detect corruption when non-root leaf has zero item
-Date:	Wed,  3 Aug 2016 21:57:08 -0700
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.cz>
+Subject: [PATCH v2] Btrfs: detect corruption when non-root leaf has zero item
+Date:   Tue, 23 Aug 2016 15:22:58 -0700
 
 Right now we treat leaf which has zero item as a valid one
 because we could have an empty tree, that is, a root that is
@@ -16,33 +16,36 @@ not its own root.
 
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 ---
- fs/btrfs/disk-io.c | 22 +++++++++++++++++++++-
- 1 file changed, 21 insertions(+), 1 deletion(-)
+v2: fix code style.
+
+ fs/btrfs/disk-io.c | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
-index a5a22be..dfaeb96 100644
+index a5a22be..8df7e73 100644
 --- a/fs/btrfs/disk-io.c
 +++ b/fs/btrfs/disk-io.c
-@@ -559,8 +559,28 @@ static noinline int check_leaf(struct btrfs_root *root,
+@@ -559,8 +559,29 @@ static noinline int check_leaf(struct btrfs_root *root,
  	u32 nritems = btrfs_header_nritems(leaf);
  	int slot;
  
 -	if (nritems == 0)
 +	if (nritems == 0) {
-+		struct btrfs_root *r;
++		struct btrfs_root *check_root;
 +
 +		key.objectid = btrfs_header_owner(leaf);
 +		key.type = BTRFS_ROOT_ITEM_KEY;
-+		key.offset = -1ULL;
++		key.offset = (u64)-1;
 +
-+		r = btrfs_get_fs_root(root->fs_info, &key, false);
++		check_root = btrfs_get_fs_root(root->fs_info, &key, false);
 +		/*
 +		 * The only reason we also check NULL here is that during
 +		 * open_ctree() some roots has not yet been set up.
 +		 */
-+		if (!IS_ERR_OR_NULL(r)) {
++		if (!IS_ERR_OR_NULL(check_root)) {
 +			/* if leaf is the root, then it's fine */
-+			if (leaf->start != btrfs_root_bytenr(&r->root_item)) {
++			if (leaf->start !=
++			    btrfs_root_bytenr(&check_root->root_item)) {
 +				CORRUPT("non-root leaf's nritems is 0",
 +					leaf, root, 0);
 +				return -EIO;
