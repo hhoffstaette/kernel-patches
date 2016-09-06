@@ -1,0 +1,84 @@
+From: Naohiro Aota <naohiro.aota@hgst.com>
+Subject: [PATCH] btrfs: let btrfs_delete_unused_bgs() to clean relocated bgs
+Date: Fri, 2 Sep 2016 16:46:32 +0900
+Cc: Chris Mason <clm@fb.com>, Josef Bacik <jbacik@fb.com>,
+        David Sterba <dsterba@suse.com>,
+        <linux-kernel@vger.kernel.org>,
+        Naohiro Aota <naohiro.aota@hgst.com>
+To: <linux-btrfs@vger.kernel.org>
+
+Currently, btrfs_relocate_chunk() is removing relocated BG by itself. But
+the work can be done by btrfs_delete_unused_bgs() (and it's better since it
+trim the BG). Let's dedupe the code.
+
+While btrfs_delete_unused_bgs() is already hitting the relocated BG, it
+skip the BG since the BG has "ro" flag set (to keep balancing BG intact).
+On the other hand, btrfs cannot drop "ro" flag here to prevent additional
+writes. So this patch make use of "removed" flag.
+btrfs_delete_unused_bgs() now detect the flag to distinguish whether a
+read-only BG is relocating or not.
+
+Signed-off-by: Naohiro Aota <naohiro.aota@hgst.com>
+---
+ fs/btrfs/extent-tree.c |  2 +-
+ fs/btrfs/volumes.c     | 24 ++++++++++--------------
+ 2 files changed, 11 insertions(+), 15 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 843ed27..d382735 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -10971,7 +10971,7 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
+ 		spin_lock(&block_group->lock);
+ 		if (block_group->reserved ||
+ 		    btrfs_block_group_used(&block_group->item) ||
+-		    block_group->ro ||
++		    (block_group->ro && !block_group->removed) ||
+ 		    list_is_singular(&block_group->list)) {
+ 			/*
+ 			 * We want to bail if we made new allocations or have
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 7e6399f..1a6789d 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -2931,8 +2931,8 @@ out:
+ static int btrfs_relocate_chunk(struct btrfs_root *root, u64 chunk_offset)
+ {
+ 	struct btrfs_root *extent_root;
+-	struct btrfs_trans_handle *trans;
+ 	int ret;
++	struct btrfs_block_group_cache *block_group;
+ 
+ 	root = root->fs_info->chunk_root;
+ 	extent_root = root->fs_info->extent_root;
+@@ -2962,21 +2962,17 @@ static int btrfs_relocate_chunk(struct btrfs_root *root, u64 chunk_offset)
+ 	if (ret)
+ 		return ret;
+ 
+-	trans = btrfs_start_trans_remove_block_group(root->fs_info,
+-						     chunk_offset);
+-	if (IS_ERR(trans)) {
+-		ret = PTR_ERR(trans);
+-		btrfs_handle_fs_error(root->fs_info, ret, NULL);
+-		return ret;
+-	}
+-
+ 	/*
+-	 * step two, delete the device extents and the
+-	 * chunk tree entries
++	 * step two, flag the chunk as removed and let
++	 * btrfs_delete_unused_bgs() remove it.
+ 	 */
+-	ret = btrfs_remove_chunk(trans, root, chunk_offset);
+-	btrfs_end_transaction(trans, extent_root);
+-	return ret;
++	block_group = btrfs_lookup_block_group(root->fs_info, chunk_offset);
++	spin_lock(&block_group->lock);
++	block_group->removed = 1;
++	spin_unlock(&block_group->lock);
++	btrfs_put_block_group(block_group);
++
++	return 0;
+ }
+ 
+ static int btrfs_relocate_sys_chunks(struct btrfs_root *root)
