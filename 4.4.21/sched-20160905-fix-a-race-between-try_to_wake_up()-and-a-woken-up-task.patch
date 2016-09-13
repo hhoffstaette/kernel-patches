@@ -1,0 +1,146 @@
+From 135e8c9250dd5c8c9aae5984fde6f230d0cbfeaf Mon Sep 17 00:00:00 2001
+From: Balbir Singh <bsingharora@gmail.com>
+Date: Mon, 5 Sep 2016 13:16:40 +1000
+Subject: sched/core: Fix a race between try_to_wake_up() and a woken up task
+
+The origin of the issue I've seen is related to
+a missing memory barrier between check for task->state and
+the check for task->on_rq.
+
+The task being woken up is already awake from a schedule()
+and is doing the following:
+
+	do {
+		schedule()
+		set_current_state(TASK_(UN)INTERRUPTIBLE);
+	} while (!cond);
+
+The waker, actually gets stuck doing the following in
+try_to_wake_up():
+
+	while (p->on_cpu)
+		cpu_relax();
+
+Analysis:
+
+The instance I've seen involves the following race:
+
+ CPU1					CPU2
+
+ while () {
+   if (cond)
+     break;
+   do {
+     schedule();
+     set_current_state(TASK_UN..)
+   } while (!cond);
+					wakeup_routine()
+					  spin_lock_irqsave(wait_lock)
+   raw_spin_lock_irqsave(wait_lock)	  wake_up_process()
+ }					  try_to_wake_up()
+ set_current_state(TASK_RUNNING);	  ..
+ list_del(&waiter.list);
+
+CPU2 wakes up CPU1, but before it can get the wait_lock and set
+current state to TASK_RUNNING the following occurs:
+
+ CPU3
+ wakeup_routine()
+ raw_spin_lock_irqsave(wait_lock)
+ if (!list_empty)
+   wake_up_process()
+   try_to_wake_up()
+   raw_spin_lock_irqsave(p->pi_lock)
+   ..
+   if (p->on_rq && ttwu_wakeup())
+   ..
+   while (p->on_cpu)
+     cpu_relax()
+   ..
+
+CPU3 tries to wake up the task on CPU1 again since it finds
+it on the wait_queue, CPU1 is spinning on wait_lock, but immediately
+after CPU2, CPU3 got it.
+
+CPU3 checks the state of p on CPU1, it is TASK_UNINTERRUPTIBLE and
+the task is spinning on the wait_lock. Interestingly since p->on_rq
+is checked under pi_lock, I've noticed that try_to_wake_up() finds
+p->on_rq to be 0. This was the most confusing bit of the analysis,
+but p->on_rq is changed under runqueue lock, rq_lock, the p->on_rq
+check is not reliable without this fix IMHO. The race is visible
+(based on the analysis) only when ttwu_queue() does a remote wakeup
+via ttwu_queue_remote. In which case the p->on_rq change is not
+done uder the pi_lock.
+
+The result is that after a while the entire system locks up on
+the raw_spin_irqlock_save(wait_lock) and the holder spins infintely
+
+Reproduction of the issue:
+
+The issue can be reproduced after a long run on my system with 80
+threads and having to tweak available memory to very low and running
+memory stress-ng mmapfork test. It usually takes a long time to
+reproduce. I am trying to work on a test case that can reproduce
+the issue faster, but thats work in progress. I am still testing the
+changes on my still in a loop and the tests seem OK thus far.
+
+Big thanks to Benjamin and Nick for helping debug this as well.
+Ben helped catch the missing barrier, Nick caught every missing
+bit in my theory.
+
+Signed-off-by: Balbir Singh <bsingharora@gmail.com>
+[ Updated comment to clarify matching barriers. Many
+  architectures do not have a full barrier in switch_to()
+  so that cannot be relied upon. ]
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Acked-by: Benjamin Herrenschmidt <benh@kernel.crashing.org>
+Cc: Alexey Kardashevskiy <aik@ozlabs.ru>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Nicholas Piggin <nicholas.piggin@gmail.com>
+Cc: Nicholas Piggin <npiggin@gmail.com>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: <stable@vger.kernel.org>
+Link: http://lkml.kernel.org/r/e02cce7b-d9ca-1ad0-7a61-ea97c7582b37@gmail.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/core.c | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 2a906f2..44817c6 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2016,6 +2016,28 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
+ 	success = 1; /* we're going to change ->state */
+ 	cpu = task_cpu(p);
+ 
++	/*
++	 * Ensure we load p->on_rq _after_ p->state, otherwise it would
++	 * be possible to, falsely, observe p->on_rq == 0 and get stuck
++	 * in smp_cond_load_acquire() below.
++	 *
++	 * sched_ttwu_pending()                 try_to_wake_up()
++	 *   [S] p->on_rq = 1;                  [L] P->state
++	 *       UNLOCK rq->lock  -----.
++	 *                              \
++	 *				 +---   RMB
++	 * schedule()                   /
++	 *       LOCK rq->lock    -----'
++	 *       UNLOCK rq->lock
++	 *
++	 * [task p]
++	 *   [S] p->state = UNINTERRUPTIBLE     [L] p->on_rq
++	 *
++	 * Pairs with the UNLOCK+LOCK on rq->lock from the
++	 * last wakeup of our task and the schedule that got our task
++	 * current.
++	 */
++	smp_rmb();
+ 	if (p->on_rq && ttwu_remote(p, wake_flags))
+ 		goto stat;
+ 
+-- 
+cgit v0.12
+
