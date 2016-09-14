@@ -1,0 +1,54 @@
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.cz>
+Subject: [PATCH] Btrfs: kill BUG_ON in do_relocation
+Date:   Wed, 14 Sep 2016 09:27:47 -0700
+
+While updating btree, we try to push items between sibling
+nodes/leaves in order to keep height as low as possible.
+But we don't memset the original places with zero when
+pushing items so that we could end up leaving stale content
+in nodes/leaves.  One may read the above stale content by
+increasing btree blocks' @nritems.
+
+One case I've come across is that in fs tree, a leaf has two
+parent nodes, hence running balance ends up with processing
+this leaf with two parent nodes, but it can only reach the
+valid parent node through btrfs_search_slot, so it'd be like,
+
+do_relocation
+    for P in all parent nodes of block A:
+        if !P->eb:
+            btrfs_search_slot(key);   --> get path from P to A.
+        if lowest:
+            BUG_ON(A->bytenr != bytenr of A recorded in P);
+        btrfs_cow_block(P, A);   --> change A's bytenr in P.
+
+After btrfs_cow_block, P has the new bytenr of A, but with the
+same @key, we get the same path again, and get panic by BUG_ON.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/relocation.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 680e234..bce8fea 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -2723,7 +2723,14 @@ static int do_relocation(struct btrfs_trans_handle *trans,
+ 
+ 		bytenr = btrfs_node_blockptr(upper->eb, slot);
+ 		if (lowest) {
+-			BUG_ON(bytenr != node->bytenr);
++			if (bytenr != node->bytenr) {
++				btrfs_err(root->fs_info,
++		"lowest leaf/node mismatch: bytenr %llu node->bytenr %llu slot %d upper %llu",
++					  bytenr, node->bytenr, slot,
++					  upper->eb->start);
++				err = -EEXIST;
++				goto next;
++			}
+ 		} else {
+ 			if (node->eb->start == bytenr)
+ 				goto next;
