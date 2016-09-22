@@ -1,8 +1,8 @@
 From:   Anand Jain <anand.jain@oracle.com>
 To:     linux-btrfs@vger.kernel.org
-Cc:     dsterba@suse.cz, clm@fb.com, idryomov@gmail.com
-Subject: [PATCH] btrfs: fix a possible umount deadlock
-Date:   Fri,  9 Sep 2016 16:31:04 +0800
+Cc:     dsterba@suse.cz
+Subject: [PATCH v3] btrfs: fix a possible umount deadlock
+Date:   Thu, 22 Sep 2016 12:56:13 +0800
 
 btrfs_show_devname() is using the device_list_mutex, sometimes
 a call to blkdev_put() leads vfs calling into this func. So
@@ -158,13 +158,27 @@ call blkdev_put() outside of device_list_mutex, as of now.
 Reported-by: Ilya Dryomov <idryomov@gmail.com>
 Signed-off-by: Anand Jain <anand.jain@oracle.com>
 ---
- fs/btrfs/volumes.c | 21 +++++++++++++++++----
- 1 file changed, 17 insertions(+), 4 deletions(-)
+v2->v3: rename btrfs_close_one_device() to btrfs_prepare_close_one_device()
+        use struct list_head instead of LIST_HEAD
+        use list_first_entry instead of list_entry
+v1->v2: Fix typo, remove static thanks Kdave.
+
+ fs/btrfs/volumes.c | 26 ++++++++++++++++++++------
+ 1 file changed, 20 insertions(+), 6 deletions(-)
 
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index eb7557fec345..29d889ef23cd 100644
+index 1ce584893d1b..0f4460e50cac 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
+@@ -859,7 +859,7 @@ static void btrfs_close_bdev(struct btrfs_device *device)
+ 		blkdev_put(device->bdev, device->mode);
+ }
+ 
+-static void btrfs_close_one_device(struct btrfs_device *device)
++static void btrfs_prepare_close_one_device(struct btrfs_device *device)
+ {
+ 	struct btrfs_fs_devices *fs_devices = device->fs_devices;
+ 	struct btrfs_device *new_device;
 @@ -877,8 +877,6 @@ static void btrfs_close_one_device(struct btrfs_device *device)
  	if (device->missing)
  		fs_devices->missing_devices--;
@@ -174,7 +188,7 @@ index eb7557fec345..29d889ef23cd 100644
  	new_device = btrfs_alloc_device(NULL, &device->devid,
  					device->uuid);
  	BUG_ON(IS_ERR(new_device)); /* -ENOMEM */
-@@ -892,13 +890,13 @@ static void btrfs_close_one_device(struct btrfs_device *device)
+@@ -892,23 +890,39 @@ static void btrfs_close_one_device(struct btrfs_device *device)
  
  	list_replace_rcu(&device->dev_list, &new_device->dev_list);
  	new_device->fs_devices = device->fs_devices;
@@ -185,28 +199,30 @@ index eb7557fec345..29d889ef23cd 100644
  static int __btrfs_close_devices(struct btrfs_fs_devices *fs_devices)
  {
  	struct btrfs_device *device, *tmp;
-+	LIST_HEAD(pending_put);
++	struct list_head pending_put;
++
 +	INIT_LIST_HEAD(&pending_put);
  
  	if (--fs_devices->opened > 0)
  		return 0;
-@@ -906,9 +904,24 @@ static int __btrfs_close_devices(struct btrfs_fs_devices *fs_devices)
+ 
  	mutex_lock(&fs_devices->device_list_mutex);
  	list_for_each_entry_safe(device, tmp, &fs_devices->devices, dev_list) {
- 		btrfs_close_one_device(device);
+-		btrfs_close_one_device(device);
++		btrfs_prepare_close_one_device(device);
 +		list_add(&device->dev_list, &pending_put);
  	}
  	mutex_unlock(&fs_devices->device_list_mutex);
  
 +	/*
 +	 * btrfs_show_devname() is using the device_list_mutex,
-+	 * sometimes a call to blkdev_put() leads vfs calling
++	 * sometimes call to blkdev_put() leads vfs calling
 +	 * into this func. So do put outside of device_list_mutex,
 +	 * as of now.
 +	 */
 +	while (!list_empty(&pending_put)) {
-+		device = list_entry(pending_put.next,
-+					struct btrfs_device, dev_list);
++		device = list_first_entry(&pending_put,
++				struct btrfs_device, dev_list);
 +		list_del(&device->dev_list);
 +		btrfs_close_bdev(device);
 +		call_rcu(&device->rcu, free_device);
