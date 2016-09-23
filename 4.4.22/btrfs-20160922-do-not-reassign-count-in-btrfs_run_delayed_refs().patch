@@ -1,0 +1,28 @@
+From:   Goldwyn Rodrigues <rgoldwyn@suse.de>
+To:     linux-btrfs@vger.kernel.org
+Cc:     Goldwyn Rodrigues <rgoldwyn@suse.com>
+Subject: [PATCH] Do not reassign count in btrfs_run_delayed_refs
+Date:   Thu, 22 Sep 2016 14:11:47 -0500
+
+From: Goldwyn Rodrigues <rgoldwyn@suse.com>
+
+Code cleanup. count is already (unsgined long)-1. That is the reason
+run_all was set. Do not reassign it (unsigned long)-1.
+
+Signed-off-by: Goldwyn Rodrigues <rgoldwyn@suse.com>
+---
+ fs/btrfs/extent-tree.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 38c2df8..23b3b9f 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -2971,7 +2971,6 @@ again:
+ 			spin_unlock(&delayed_refs->lock);
+ 			goto out;
+ 		}
+-		count = (unsigned long)-1;
+ 
+ 		while (node) {
+ 			head = rb_entry(node, struct btrfs_delayed_ref_head,
