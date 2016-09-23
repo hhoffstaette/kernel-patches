@@ -1,0 +1,101 @@
+From foo@baz Wed Sep 21 12:45:10 CEST 2016
+From: David Forster <dforster@brocade.com>
+Date: Wed, 3 Aug 2016 15:13:01 +0100
+Subject: ipv4: panic in leaf_walk_rcu due to stale node pointer
+
+From: David Forster <dforster@brocade.com>
+
+
+[ Upstream commit 94d9f1c5906b20053efe375b6d66610bca4b8b64 ]
+
+Panic occurs when issuing "cat /proc/net/route" whilst
+populating FIB with > 1M routes.
+
+Use of cached node pointer in fib_route_get_idx is unsafe.
+
+ BUG: unable to handle kernel paging request at ffffc90001630024
+ IP: [<ffffffff814cf6a0>] leaf_walk_rcu+0x10/0xe0
+ PGD 11b08d067 PUD 11b08e067 PMD dac4b067 PTE 0
+ Oops: 0000 [#1] SMP
+ Modules linked in: nfsd auth_rpcgss oid_registry nfs_acl nfs lockd grace fscac
+ snd_hda_codec_generic snd_hda_intel snd_hda_codec snd_hda_core snd_hwdep virti
+ acpi_cpufreq button parport_pc ppdev lp parport autofs4 ext4 crc16 mbcache jbd
+tio_ring virtio floppy uhci_hcd ehci_hcd usbcore usb_common libata scsi_mod
+ CPU: 1 PID: 785 Comm: cat Not tainted 4.2.0-rc8+ #4
+ Hardware name: Bochs Bochs, BIOS Bochs 01/01/2007
+ task: ffff8800da1c0bc0 ti: ffff88011a05c000 task.ti: ffff88011a05c000
+ RIP: 0010:[<ffffffff814cf6a0>]  [<ffffffff814cf6a0>] leaf_walk_rcu+0x10/0xe0
+ RSP: 0018:ffff88011a05fda0  EFLAGS: 00010202
+ RAX: ffff8800d8a40c00 RBX: ffff8800da4af940 RCX: ffff88011a05ff20
+ RDX: ffffc90001630020 RSI: 0000000001013531 RDI: ffff8800da4af950
+ RBP: 0000000000000000 R08: ffff8800da1f9a00 R09: 0000000000000000
+ R10: ffff8800db45b7e4 R11: 0000000000000246 R12: ffff8800da4af950
+ R13: ffff8800d97a74c0 R14: 0000000000000000 R15: ffff8800d97a7480
+ FS:  00007fd3970e0700(0000) GS:ffff88011fd00000(0000) knlGS:0000000000000000
+ CS:  0010 DS: 0000 ES: 0000 CR0: 000000008005003b
+ CR2: ffffc90001630024 CR3: 000000011a7e4000 CR4: 00000000000006e0
+ Stack:
+  ffffffff814d00d3 0000000000000000 ffff88011a05ff20 ffff8800da1f9a00
+  ffffffff811dd8b9 0000000000000800 0000000000020000 00007fd396f35000
+  ffffffff811f8714 0000000000003431 ffffffff8138dce0 0000000000000f80
+ Call Trace:
+  [<ffffffff814d00d3>] ? fib_route_seq_start+0x93/0xc0
+  [<ffffffff811dd8b9>] ? seq_read+0x149/0x380
+  [<ffffffff811f8714>] ? fsnotify+0x3b4/0x500
+  [<ffffffff8138dce0>] ? process_echoes+0x70/0x70
+  [<ffffffff8121cfa7>] ? proc_reg_read+0x47/0x70
+  [<ffffffff811bb823>] ? __vfs_read+0x23/0xd0
+  [<ffffffff811bbd42>] ? rw_verify_area+0x52/0xf0
+  [<ffffffff811bbe61>] ? vfs_read+0x81/0x120
+  [<ffffffff811bcbc2>] ? SyS_read+0x42/0xa0
+  [<ffffffff81549ab2>] ? entry_SYSCALL_64_fastpath+0x16/0x75
+ Code: 48 85 c0 75 d8 f3 c3 31 c0 c3 f3 c3 66 66 66 66 66 66 2e 0f 1f 84 00 00
+a 04 89 f0 33 02 44 89 c9 48 d3 e8 0f b6 4a 05 49 89
+ RIP  [<ffffffff814cf6a0>] leaf_walk_rcu+0x10/0xe0
+  RSP <ffff88011a05fda0>
+ CR2: ffffc90001630024
+
+Signed-off-by: Dave Forster <dforster@brocade.com>
+Acked-by: Alexander Duyck <alexander.h.duyck@intel.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ net/ipv4/fib_trie.c |    8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+--- a/net/ipv4/fib_trie.c
++++ b/net/ipv4/fib_trie.c
+@@ -2453,9 +2453,7 @@ struct fib_route_iter {
+ static struct key_vector *fib_route_get_idx(struct fib_route_iter *iter,
+ 					    loff_t pos)
+ {
+-	struct fib_table *tb = iter->main_tb;
+ 	struct key_vector *l, **tp = &iter->tnode;
+-	struct trie *t;
+ 	t_key key;
+ 
+ 	/* use cache location of next-to-find key */
+@@ -2463,8 +2461,6 @@ static struct key_vector *fib_route_get_
+ 		pos -= iter->pos;
+ 		key = iter->key;
+ 	} else {
+-		t = (struct trie *)tb->tb_data;
+-		iter->tnode = t->kv;
+ 		iter->pos = 0;
+ 		key = 0;
+ 	}
+@@ -2505,12 +2501,12 @@ static void *fib_route_seq_start(struct
+ 		return NULL;
+ 
+ 	iter->main_tb = tb;
++	t = (struct trie *)tb->tb_data;
++	iter->tnode = t->kv;
+ 
+ 	if (*pos != 0)
+ 		return fib_route_get_idx(iter, *pos);
+ 
+-	t = (struct trie *)tb->tb_data;
+-	iter->tnode = t->kv;
+ 	iter->pos = 0;
+ 	iter->key = 0;
+ 
