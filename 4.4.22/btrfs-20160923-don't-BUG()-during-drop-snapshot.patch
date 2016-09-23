@@ -1,0 +1,101 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     bo.li.liu@oracle.com, jbacik@fb.com,
+        David Sterba <dsterba@suse.com>
+Subject: [PATCH v2] Btrfs: don't BUG() during drop snapshot
+Date:   Fri, 23 Sep 2016 13:23:28 +0200
+
+From: Josef Bacik <jbacik@fb.com>
+
+Really there's lots of things that can go wrong here, kill all the
+BUG_ON()'s and replace the logic ones with ASSERT()'s and return EIO
+instead.
+
+[HH: fix up context for nonexistent free_extent_buffer() in hunk #1 for 4.4.x]
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+[ switched to btrfs_err, errors go to common label ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+
+- added missing return to one branch
+- merge common exit code to a label, minor reordering
+
+ fs/btrfs/extent-tree.c | 38 +++++++++++++++++++++++++++-----------
+ 1 file changed, 27 insertions(+), 11 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index b6e8b58f05e4..7a0b09fb18e2 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -8922,14 +8922,13 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
+ 	ret = btrfs_lookup_extent_info(trans, root, bytenr, level - 1, 1,
+ 				       &wc->refs[level - 1],
+ 				       &wc->flags[level - 1]);
+-	if (ret < 0) {
+-		btrfs_tree_unlock(next);
+-		return ret;
+-	}
++	if (ret < 0)
++		goto out_unlock;
+ 
+ 	if (unlikely(wc->refs[level - 1] == 0)) {
+ 		btrfs_err(root->fs_info, "Missing references.");
+-		BUG();
++		ret = -EIO;
++		goto out_unlock;
+ 	}
+ 	*lookup_info = 0;
+ 
+@@ -8982,7 +8980,12 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
+ 	}
+ 
+ 	level--;
+-	BUG_ON(level != btrfs_header_level(next));
++	ASSERT(level == btrfs_header_level(next));
++	if (level != btrfs_header_level(next)) {
++		btrfs_err(root->fs_info, "mismatched level");
++		ret = -EIO;
++		goto out_unlock;
++	}
+ 	path->nodes[level] = next;
+ 	path->slots[level] = 0;
+ 	path->locks[level] = BTRFS_WRITE_LOCK_BLOCKING;
+@@ -8997,8 +9000,15 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
+ 		if (wc->flags[level] & BTRFS_BLOCK_FLAG_FULL_BACKREF) {
+ 			parent = path->nodes[level]->start;
+ 		} else {
+-			BUG_ON(root->root_key.objectid !=
++			ASSERT(root->root_key.objectid ==
+ 			       btrfs_header_owner(path->nodes[level]));
++			if (root->root_key.objectid !=
++			    btrfs_header_owner(path->nodes[level])) {
++				btrfs_err(root->fs_info,
++						"mismatched block owner");
++				ret = -EIO;
++				goto out_unlock;
++			}
+ 			parent = 0;
+ 		}
+ 
+@@ -9013,12 +9023,18 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
+ 		}
+ 		ret = btrfs_free_extent(trans, root, bytenr, blocksize, parent,
+ 				root->root_key.objectid, level - 1, 0);
+-		BUG_ON(ret); /* -ENOMEM */
++		if (ret)
++			goto out_unlock;
+ 	}
++
++	*lookup_info = 1;
++	ret = 1;
++
++out_unlock:
+ 	btrfs_tree_unlock(next);
+ 	free_extent_buffer(next);
+-	*lookup_info = 1;
+-	return 1;
++
++	return ret;
+ }
+ 
+ /*
