@@ -1,0 +1,53 @@
+From foo@baz Wed Sep 21 12:45:10 CEST 2016
+From: Dave Jones <davej@codemonkey.org.uk>
+Date: Fri, 2 Sep 2016 14:39:50 -0400
+Subject: ipv6: release dst in ping_v6_sendmsg
+
+From: Dave Jones <davej@codemonkey.org.uk>
+
+
+[ Upstream commit 03c2778a938aaba0893f6d6cdc29511d91a79848 ]
+
+Neither the failure or success paths of ping_v6_sendmsg release
+the dst it acquires.  This leads to a flood of warnings from
+"net/core/dst.c:288 dst_release" on older kernels that
+don't have 8bf4ada2e21378816b28205427ee6b0e1ca4c5f1 backported.
+
+That patch optimistically hoped this had been fixed post 3.10, but
+it seems at least one case wasn't, where I've seen this triggered
+a lot from machines doing unprivileged icmp sockets.
+
+Cc: Martin Lau <kafai@fb.com>
+Signed-off-by: Dave Jones <davej@codemonkey.org.uk>
+Acked-by: Martin KaFai Lau <kafai@fb.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ net/ipv6/ping.c |    9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+--- a/net/ipv6/ping.c
++++ b/net/ipv6/ping.c
+@@ -150,8 +150,10 @@ int ping_v6_sendmsg(struct sock *sk, str
+ 	rt = (struct rt6_info *) dst;
+ 
+ 	np = inet6_sk(sk);
+-	if (!np)
+-		return -EBADF;
++	if (!np) {
++		err = -EBADF;
++		goto dst_err_out;
++	}
+ 
+ 	if (!fl6.flowi6_oif && ipv6_addr_is_multicast(&fl6.daddr))
+ 		fl6.flowi6_oif = np->mcast_oif;
+@@ -186,6 +188,9 @@ int ping_v6_sendmsg(struct sock *sk, str
+ 	}
+ 	release_sock(sk);
+ 
++dst_err_out:
++	dst_release(dst);
++
+ 	if (err)
+ 		return err;
+ 
