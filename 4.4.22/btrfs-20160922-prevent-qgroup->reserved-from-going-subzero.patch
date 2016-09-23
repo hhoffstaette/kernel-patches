@@ -1,0 +1,61 @@
+From:   Goldwyn Rodrigues <rgoldwyn@suse.de>
+To:     linux-btrfs@vger.kernel.org
+Cc:     Goldwyn Rodrigues <rgoldwyn@suse.com>
+Subject: [PATCH] qgroup: Prevent qgroup->reserved from going subzero
+Date:   Thu, 22 Sep 2016 13:47:30 -0500
+
+From: Goldwyn Rodrigues <rgoldwyn@suse.com>
+
+While free'ing qgroup->reserved resources, we must check
+if the page is already commmitted to disk or still in memory.
+If not, the reserve free is doubly accounted, once while
+invalidating the page, and the next time while free'ing
+delalloc. This results is qgroup->reserved(u64) going subzero,
+thus very large value. So, no further I/O can be performed.
+
+This is also expressed in the comments, but not performed.
+
+Testcase:
+SCRATCH_DEV=/dev/vdb
+SCRATCH_MNT=/mnt
+mkfs.btrfs -f $SCRATCH_DEV
+mount -t btrfs $SCRATCH_DEV $SCRATCH_MNT
+cd $SCRATCH_MNT
+btrfs quota enable $SCRATCH_MNT
+btrfs subvolume create a
+btrfs qgroup limit 50m a $SCRATCH_MNT
+sync
+for c in {1..15}; do
+dd if=/dev/zero  bs=1M count=40 of=$SCRATCH_MNT/a/file;
+done
+
+sleep 10
+sync
+sleep 5
+
+touch $SCRATCH_MNT/a/newfile
+
+echo "Removing file"
+rm $SCRATCH_MNT/a/file
+
+[HH: fix up PAGE_CACHE_SIZE for 4.4.x]
+Fixes: b9d0b38928 ("btrfs: Add handler for invalidate page")
+Signed-off-by: Goldwyn Rodrigues <rgoldwyn@suse.com>
+---
+ fs/btrfs/inode.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index e6811c4..2e2a026 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -8917,7 +8917,8 @@ again:
+ 	 * 2) Not written to disk
+ 	 *    This means the reserved space should be freed here.
+ 	 */
+-	btrfs_qgroup_free_data(inode, page_start, PAGE_CACHE_SIZE);
++	if (PageDirty(page))
++		btrfs_qgroup_free_data(inode, page_start, PAGE_CACHE_SIZE);
+ 	if (!inode_evicting) {
+ 		clear_extent_bit(tree, page_start, page_end,
+ 				 EXTENT_LOCKED | EXTENT_DIRTY |
