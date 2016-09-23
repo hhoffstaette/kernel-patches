@@ -1,0 +1,38 @@
+From foo@baz Wed Sep 21 12:45:10 CEST 2016
+From: Artem Germanov <agermanov@anchorfree.com>
+Date: Wed, 7 Sep 2016 10:49:36 -0700
+Subject: tcp: cwnd does not increase in TCP YeAH
+
+From: Artem Germanov <agermanov@anchorfree.com>
+
+
+[ Upstream commit db7196a0d0984b933ccf2cd6a60e26abf466e8a3 ]
+
+Commit 76174004a0f19785a328f40388e87e982bbf69b9
+(tcp: do not slow start when cwnd equals ssthresh )
+introduced regression in TCP YeAH. Using 100ms delay 1% loss virtual
+ethernet link kernel 4.2 shows bandwidth ~500KB/s for single TCP
+connection and kernel 4.3 and above (including 4.8-rc4) shows bandwidth
+~100KB/s.
+   That is caused by stalled cwnd when cwnd equals ssthresh. This patch
+fixes it by proper increasing cwnd in this case.
+
+Signed-off-by: Artem Germanov <agermanov@anchorfree.com>
+Acked-by: Dmitry Adamushko <d.adamushko@anchorfree.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ net/ipv4/tcp_yeah.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/net/ipv4/tcp_yeah.c
++++ b/net/ipv4/tcp_yeah.c
+@@ -75,7 +75,7 @@ static void tcp_yeah_cong_avoid(struct s
+ 	if (!tcp_is_cwnd_limited(sk))
+ 		return;
+ 
+-	if (tp->snd_cwnd <= tp->snd_ssthresh)
++	if (tcp_in_slow_start(tp))
+ 		tcp_slow_start(tp, acked);
+ 
+ 	else if (!yeah->doing_reno_now) {
