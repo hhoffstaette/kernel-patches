@@ -1,0 +1,35 @@
+From 07f6a480436595394a06a69d0ebc18fef6736197 Mon Sep 17 00:00:00 2001
+From: Eric Sandeen <sandeen@redhat.com>
+Date: Wed, 31 Aug 2016 16:49:29 -0500
+Subject: [PATCH 02/42] btrfs: fix perms on demonstration debugfs interface
+
+btrfs provides a helpful demonstration of how to export
+a global variable via debugfs; however, it is unique among
+other debugfs files in that it is world-writable, which causes
+some concern to people who are not familiar with its purpose.
+
+Fix it so that it is only user-writable.
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/sysfs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index c656990..804bd1c 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -836,7 +836,7 @@ static int btrfs_init_debugfs(void)
+ 	if (!btrfs_debugfs_root_dentry)
+ 		return -ENOMEM;
+ 
+-	debugfs_create_u64("test", S_IRUGO | S_IWUGO, btrfs_debugfs_root_dentry,
++	debugfs_create_u64("test", S_IRUGO | S_IWUSR, btrfs_debugfs_root_dentry,
+ 			&btrfs_debugfs_test);
+ #endif
+ 	return 0;
+-- 
+2.10.0
+

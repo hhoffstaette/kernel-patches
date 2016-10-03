@@ -1,0 +1,58 @@
+From 2fd57fcb16483d718043940fd6dfeb176d4dc09c Mon Sep 17 00:00:00 2001
+From: Arnd Bergmann <arnd@arndb.de>
+Date: Fri, 23 Sep 2016 18:05:21 +0200
+Subject: [PATCH 36/42] btrfs: fix btrfs_no_printk stub helper
+
+The addition of btrfs_no_printk() caused a build failure when
+CONFIG_PRINTK is disabled:
+
+fs/btrfs/send.c: In function 'send_rename':
+fs/btrfs/ctree.h:3367:2: error: implicit declaration of function 'btrfs_no_printk' [-Werror=implicit-function-declaration]
+
+This moves the helper outside of that #ifdef so it is always
+defined, and changes the existing #ifdef to refer to that
+helper as well for consistency.
+
+Fixes: 47c57058ff2c ("btrfs: btrfs_debug should consume fs_info when DEBUG is not defined")
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 17 +++++++----------
+ 1 file changed, 7 insertions(+), 10 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 5f1408b..bf7cb6d 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -3256,20 +3256,17 @@ int btrfs_parse_options(struct btrfs_root *root, char *options,
+ 			unsigned long new_flags);
+ int btrfs_sync_fs(struct super_block *sb, int wait);
+ 
++static inline __printf(2, 3)
++void btrfs_no_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...)
++{
++}
++
+ #ifdef CONFIG_PRINTK
+ __printf(2, 3)
+ void btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...);
+-__printf(2, 3)
+-static inline int btrfs_no_printk(const struct btrfs_fs_info *fs_info,
+-				   const char *fmt, ...)
+-{
+-	return 0;
+-}
+ #else
+-static inline __printf(2, 3)
+-void btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...)
+-{
+-}
++#define btrfs_printk(fs_info, fmt, args...) \
++	btrfs_no_printk(fs_info, fmt, ##args)
+ #endif
+ 
+ #define btrfs_emerg(fs_info, fmt, args...) \
+-- 
+2.10.0
+

@@ -1,0 +1,97 @@
+From 9c8e63db1de98c5cc3c6fb32d11b5cf55f228601 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Fri, 2 Sep 2016 15:40:06 -0400
+Subject: [PATCH 15/42] Btrfs: kill BUG_ON()'s in btrfs_mark_extent_written
+
+No reason to bug on in here, fs corruption could easily cause these things to
+happen.
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/file.c | 41 +++++++++++++++++++++++++++++++++--------
+ 1 file changed, 33 insertions(+), 8 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index f1f1ae6..72a180d 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1110,13 +1110,25 @@ again:
+ 
+ 	leaf = path->nodes[0];
+ 	btrfs_item_key_to_cpu(leaf, &key, path->slots[0]);
+-	BUG_ON(key.objectid != ino || key.type != BTRFS_EXTENT_DATA_KEY);
++	if (key.objectid != ino ||
++	    key.type != BTRFS_EXTENT_DATA_KEY) {
++		ret = -EINVAL;
++		btrfs_abort_transaction(trans, ret);
++		goto out;
++	}
+ 	fi = btrfs_item_ptr(leaf, path->slots[0],
+ 			    struct btrfs_file_extent_item);
+-	BUG_ON(btrfs_file_extent_type(leaf, fi) !=
+-	       BTRFS_FILE_EXTENT_PREALLOC);
++	if (btrfs_file_extent_type(leaf, fi) != BTRFS_FILE_EXTENT_PREALLOC) {
++		ret = -EINVAL;
++		btrfs_abort_transaction(trans, ret);
++		goto out;
++	}
+ 	extent_end = key.offset + btrfs_file_extent_num_bytes(leaf, fi);
+-	BUG_ON(key.offset > start || extent_end < end);
++	if (key.offset > start || extent_end < end) {
++		ret = -EINVAL;
++		btrfs_abort_transaction(trans, ret);
++		goto out;
++	}
+ 
+ 	bytenr = btrfs_file_extent_disk_bytenr(leaf, fi);
+ 	num_bytes = btrfs_file_extent_disk_num_bytes(leaf, fi);
+@@ -1213,12 +1225,19 @@ again:
+ 		ret = btrfs_inc_extent_ref(trans, root, bytenr, num_bytes, 0,
+ 					   root->root_key.objectid,
+ 					   ino, orig_offset);
+-		BUG_ON(ret); /* -ENOMEM */
++		if (ret) {
++			btrfs_abort_transaction(trans, ret);
++			goto out;
++		}
+ 
+ 		if (split == start) {
+ 			key.offset = start;
+ 		} else {
+-			BUG_ON(start != key.offset);
++			if (start != key.offset) {
++				ret = -EINVAL;
++				btrfs_abort_transaction(trans, ret);
++				goto out;
++			}
+ 			path->slots[0]--;
+ 			extent_end = end;
+ 		}
+@@ -1240,7 +1259,10 @@ again:
+ 		ret = btrfs_free_extent(trans, root, bytenr, num_bytes,
+ 					0, root->root_key.objectid,
+ 					ino, orig_offset);
+-		BUG_ON(ret); /* -ENOMEM */
++		if (ret) {
++			btrfs_abort_transaction(trans, ret);
++			goto out;
++		}
+ 	}
+ 	other_start = 0;
+ 	other_end = start;
+@@ -1257,7 +1279,10 @@ again:
+ 		ret = btrfs_free_extent(trans, root, bytenr, num_bytes,
+ 					0, root->root_key.objectid,
+ 					ino, orig_offset);
+-		BUG_ON(ret); /* -ENOMEM */
++		if (ret) {
++			btrfs_abort_transaction(trans, ret);
++			goto out;
++		}
+ 	}
+ 	if (del_nr == 0) {
+ 		fi = btrfs_item_ptr(leaf, path->slots[0],
+-- 
+2.10.0
+

@@ -1,0 +1,41 @@
+From 4b78dab35f4ca80db652947b359997e8683f49f2 Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <kernel@kyup.com>
+Date: Wed, 7 Sep 2016 10:38:58 +0300
+Subject: [PATCH 42/42] btrfs: Fix handling of -ENOENT from btrfs_uuid_iter_rem
+
+btrfs_uuid_iter_rem is able to return -ENOENT, however this condition
+is not handled in btrfs_uuid_tree_iterate which can lead to calling
+btrfs_next_item with freed path argument, leading to a null pointer
+dereference. Fix it by redoing the search but with an incremented
+objectid so we don't loop over the same key.
+
+Signed-off-by: Nikolay Borisov <kernel@kyup.com>
+Suggested-by: Chris Mason <clm@fb.com>
+Link: https://lkml.kernel.org/r/57A473B0.2040203@kyup.com
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/uuid-tree.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/uuid-tree.c b/fs/btrfs/uuid-tree.c
+index 7fc89e4..fa0fc96 100644
+--- a/fs/btrfs/uuid-tree.c
++++ b/fs/btrfs/uuid-tree.c
+@@ -332,8 +332,12 @@ again_search_slot:
+ 					 * entry per UUID exists.
+ 					 */
+ 					goto again_search_slot;
+-				}
+-				if (ret < 0 && ret != -ENOENT)
++				} else if (ret == -ENOENT) {
++					key.type = 0;
++					key.offset = 0;
++					key.objectid++;
++					goto again_search_slot;
++				} else if (ret < 0)
+ 					goto out;
+ 			}
+ 			item_size -= sizeof(subid_le);
+-- 
+2.10.0
+

@@ -1,0 +1,117 @@
+From 851cd173f06045816528176001cf82948282029c Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Fri, 23 Sep 2016 13:44:44 -0700
+Subject: [PATCH 35/42] Btrfs: memset to avoid stale content in btree leaf
+
+This is an additional patch to
+"Btrfs: memset to avoid stale content in btree node block".
+
+This uses memset to initialize the unused space in a leaf to avoid
+potential stale content, which may be incurred by pushing items
+between sibling leaves.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c     | 14 --------------
+ fs/btrfs/ctree.h     | 15 +++++++++++++++
+ fs/btrfs/extent_io.c | 18 +++++++++++++-----
+ 3 files changed, 28 insertions(+), 19 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 284cc9d..8f67a14 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -1715,20 +1715,6 @@ int btrfs_realloc_node(struct btrfs_trans_handle *trans,
+ 	return err;
+ }
+ 
+-/*
+- * The leaf data grows from end-to-front in the node.
+- * this returns the address of the start of the last item,
+- * which is the stop of the leaf data stack
+- */
+-static inline unsigned int leaf_data_end(struct btrfs_root *root,
+-					 struct extent_buffer *leaf)
+-{
+-	u32 nr = btrfs_header_nritems(leaf);
+-	if (nr == 0)
+-		return BTRFS_LEAF_DATA_SIZE(root);
+-	return btrfs_item_offset_nr(leaf, nr - 1);
+-}
+-
+ 
+ /*
+  * search for key in the extent_buffer.  The items start at offset p,
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index cb0ae90..5f1408b 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -2293,6 +2293,21 @@ static inline unsigned long btrfs_leaf_data(struct extent_buffer *l)
+ 	return offsetof(struct btrfs_leaf, items);
+ }
+ 
++/*
++ * The leaf data grows from end-to-front in the node.
++ * this returns the address of the start of the last item,
++ * which is the stop of the leaf data stack
++ */
++static inline unsigned int leaf_data_end(struct btrfs_root *root,
++					 struct extent_buffer *leaf)
++{
++	u32 nr = btrfs_header_nritems(leaf);
++
++	if (nr == 0)
++		return BTRFS_LEAF_DATA_SIZE(root);
++	return btrfs_item_offset_nr(leaf, nr - 1);
++}
++
+ /* struct btrfs_file_extent_item */
+ BTRFS_SETGET_FUNCS(file_extent_type, struct btrfs_file_extent_item, type, 8);
+ BTRFS_SETGET_STACK_FUNCS(stack_file_extent_disk_bytenr,
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 0d1876c..ee40384 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -3725,8 +3725,10 @@ static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
+ 	struct block_device *bdev = fs_info->fs_devices->latest_bdev;
+ 	struct extent_io_tree *tree = &BTRFS_I(fs_info->btree_inode)->io_tree;
+ 	u64 offset = eb->start;
++	u32 nritems;
+ 	unsigned long i, num_pages;
+ 	unsigned long bio_flags = 0;
++	unsigned long start, end;
+ 	int write_flags = (epd->sync_io ? WRITE_SYNC : 0) | REQ_META;
+ 	int ret = 0;
+ 
+@@ -3736,15 +3738,21 @@ static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
+ 	if (btrfs_header_owner(eb) == BTRFS_TREE_LOG_OBJECTID)
+ 		bio_flags = EXTENT_BIO_TREE_LOG;
+ 
+-	/* set btree node beyond nritems with 0 to avoid stale content */
++	/* set btree blocks beyond nritems with 0 to avoid stale content. */
++	nritems = btrfs_header_nritems(eb);
+ 	if (btrfs_header_level(eb) > 0) {
+-		u32 nritems;
+-		unsigned long end;
+-
+-		nritems = btrfs_header_nritems(eb);
+ 		end = btrfs_node_key_ptr_offset(nritems);
+ 
+ 		memset_extent_buffer(eb, 0, end, eb->len - end);
++	} else {
++		/*
++		 * leaf:
++		 * header 0 1 2 .. N ... data_N .. data_2 data_1 data_0
++		 */
++		start = btrfs_item_nr_offset(nritems);
++		end = btrfs_leaf_data(eb) +
++		      leaf_data_end(fs_info->tree_root, eb);
++		memset_extent_buffer(eb, 0, start, end - start);
+ 	}
+ 
+ 	for (i = 0; i < num_pages; i++) {
+-- 
+2.10.0
+

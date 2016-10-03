@@ -1,0 +1,28 @@
+From 6cea66e5447caff77d4a3a61295a5d922b97cb4a Mon Sep 17 00:00:00 2001
+From: Goldwyn Rodrigues <rgoldwyn@suse.com>
+Date: Thu, 22 Sep 2016 14:12:09 -0500
+Subject: [PATCH 33/42] btrfs: Remove already completed TODO comment
+
+Fixes: 7cf5b97650f2 ("btrfs: qgroup: Cleanup old inaccurate facilities")
+Signed-off-by: Goldwyn Rodrigues <rgoldwyn@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent-tree.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 4759628..a23597f 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -6112,8 +6112,6 @@ void btrfs_delalloc_release_metadata(struct inode *inode, u64 num_bytes)
+  * @start: start range we are writing to
+  * @len: how long the range we are writing to
+  *
+- * TODO: This function will finally replace old btrfs_delalloc_reserve_space()
+- *
+  * This will do the following things
+  *
+  * o reserve space in data space info for num bytes
+-- 
+2.10.0
+

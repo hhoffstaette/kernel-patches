@@ -1,0 +1,61 @@
+From 49303381f19ab16a371a061b67e783d3f570d56e Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Thu, 25 Aug 2016 18:08:27 -0700
+Subject: [PATCH 07/42] Btrfs: bail out if block group has different mixed flag
+
+Currently we allow inconsistence about mixed flag
+ (BTRFS_BLOCK_GROUP_METADATA | BTRFS_BLOCK_GROUP_DATA).
+
+We'd get ENOSPC if block group has mixed flag and btrfs doesn't.
+If that happens, we have one space_info with mixed flag and another
+space_info only with BTRFS_BLOCK_GROUP_METADATA, and
+global_block_rsv.space_info points to the latter one, but all bytes
+from block_group contributes to the mixed space_info, thus all the
+allocation will fail with ENOSPC.
+
+This adds a check for the above case.
+
+Reported-by: Vegard Nossum <vegard.nossum@oracle.com>
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+[ updated message ]
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent-tree.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 616c455..ff8026e 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -10129,6 +10129,11 @@ int btrfs_read_block_groups(struct btrfs_root *root)
+ 	struct extent_buffer *leaf;
+ 	int need_clear = 0;
+ 	u64 cache_gen;
++	u64 feature;
++	int mixed;
++
++	feature = btrfs_super_incompat_flags(info->super_copy);
++	mixed = !!(feature & BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS);
+ 
+ 	root = info->extent_root;
+ 	key.objectid = 0;
+@@ -10182,6 +10187,15 @@ int btrfs_read_block_groups(struct btrfs_root *root)
+ 				   btrfs_item_ptr_offset(leaf, path->slots[0]),
+ 				   sizeof(cache->item));
+ 		cache->flags = btrfs_block_group_flags(&cache->item);
++		if (!mixed &&
++		    ((cache->flags & BTRFS_BLOCK_GROUP_METADATA) &&
++		    (cache->flags & BTRFS_BLOCK_GROUP_DATA))) {
++			btrfs_err(info,
++"bg %llu is a mixed block group but filesystem hasn't enabled mixed block groups",
++				  cache->key.objectid);
++			ret = -EINVAL;
++			goto error;
++		}
+ 
+ 		key.objectid = found_key.objectid + found_key.offset;
+ 		btrfs_release_path(path);
+-- 
+2.10.0
+

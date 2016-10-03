@@ -1,0 +1,72 @@
+From 897a41b1167955bd543bb252fd3f06f5844f2177 Mon Sep 17 00:00:00 2001
+From: Jeff Mahoney <jeffm@suse.com>
+Date: Wed, 31 Aug 2016 23:55:33 -0400
+Subject: [PATCH 11/42] btrfs: add dynamic debug support
+
+We can re-use the dynamic debugging descriptor to make use of the dynamic
+debugging mechanism but still use our own printk interface.
+
+Defining the DEBUG macro works as it did before.  When it's defined,
+all of the messages default to print.  We can also enable all debug
+messages at boot or module-load time using the 'dyndbg' and
+'btrfs.dyndbg' options.
+
+Signed-off-by: Jeff Mahoney <jeffm@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 31 ++++++++++++++++++++++++++++++-
+ 1 file changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 33fe035..ae496e4 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -37,6 +37,7 @@
+ #include <linux/workqueue.h>
+ #include <linux/security.h>
+ #include <linux/sizes.h>
++#include <linux/dynamic_debug.h>
+ #include "extent_io.h"
+ #include "extent_map.h"
+ #include "async-thread.h"
+@@ -3315,7 +3316,35 @@ void btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...)
+ 	btrfs_printk_ratelimited(fs_info, KERN_NOTICE fmt, ##args)
+ #define btrfs_info_rl(fs_info, fmt, args...) \
+ 	btrfs_printk_ratelimited(fs_info, KERN_INFO fmt, ##args)
+-#ifdef DEBUG
++
++#if defined(CONFIG_DYNAMIC_DEBUG)
++#define btrfs_debug(fs_info, fmt, args...)				\
++do {									\
++        DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, fmt);         	\
++        if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT))  	\
++		btrfs_printk(fs_info, KERN_DEBUG fmt, ##args);		\
++} while (0)
++#define btrfs_debug_in_rcu(fs_info, fmt, args...) 			\
++do {									\
++        DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, fmt); 	        \
++        if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT)) 		\
++		btrfs_printk_in_rcu(fs_info, KERN_DEBUG fmt, ##args);	\
++} while (0)
++#define btrfs_debug_rl_in_rcu(fs_info, fmt, args...)			\
++do {									\
++        DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, fmt);         	\
++        if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT))  	\
++		btrfs_printk_rl_in_rcu(fs_info, KERN_DEBUG fmt,		\
++				       ##args);\
++} while (0)
++#define btrfs_debug_rl(fs_info, fmt, args...) 				\
++do {									\
++        DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, fmt);         	\
++        if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT))  	\
++		btrfs_printk_ratelimited(fs_info, KERN_DEBUG fmt,	\
++					 ##args);			\
++} while (0)
++#elif defined(DEBUG)
+ #define btrfs_debug(fs_info, fmt, args...) \
+ 	btrfs_printk(fs_info, KERN_DEBUG fmt, ##args)
+ #define btrfs_debug_in_rcu(fs_info, fmt, args...) \
+-- 
+2.10.0
+

@@ -1,0 +1,41 @@
+From 196e02490c934398f894e5cb0ee1ac8ad13ca576 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Wed, 7 Sep 2016 14:48:28 -0700
+Subject: [PATCH 38/42] Btrfs: remove unnecessary btrfs_mark_buffer_dirty in
+ split_leaf
+
+When we're not able to get enough space through splitting leaf,
+we'd create a new sibling leaf instead, and it's possible that we return
+ a zero-nritem sibling leaf and mark it dirty before it's in a consistent
+state.  With CONFIG_BTRFS_FS_CHECK_INTEGRITY=y, the integrity check of
+check_leaf will report panic due to this zero-nritem non-root leaf.
+
+This removes the unnecessary btrfs_mark_buffer_dirty.
+
+Reported-by: Filipe Manana <fdmanana@gmail.com>
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 8f67a14..f6ba165 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -4311,7 +4311,11 @@ again:
+ 			if (path->slots[1] == 0)
+ 				fixup_low_keys(fs_info, path, &disk_key, 1);
+ 		}
+-		btrfs_mark_buffer_dirty(right);
++		/*
++		 * We create a new leaf 'right' for the required ins_len and
++		 * we'll do btrfs_mark_buffer_dirty() on this leaf after copying
++		 * the content of ins_len to 'right'.
++		 */
+ 		return ret;
+ 	}
+ 
+-- 
+2.10.0
+
