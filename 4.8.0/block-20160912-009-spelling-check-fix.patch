@@ -1,0 +1,24 @@
+From 21c990f3ab1d3324ad3152cb94f86e6e0772b73c Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@fb.com>
+Date: Sat, 10 Sep 2016 10:06:26 -0600
+Subject: wbt: spelling check fix
+
+Signed-off-by: Jens Axboe <axboe@fb.com>
+---
+ lib/wbt.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/wbt.c b/lib/wbt.c
+index a995703..5c507e5 100644
+--- a/lib/wbt.c
++++ b/lib/wbt.c
+@@ -1,5 +1,5 @@
+ /*
+- * buffered writeback throttling. losely based on CoDel. We can't drop
++ * buffered writeback throttling. loosely based on CoDel. We can't drop
+  * packets for IO scheduling, so the logic is something like this:
+  *
+  * - Monitor latencies in a defined window of time.
+-- 
+cgit v0.11.2
+
