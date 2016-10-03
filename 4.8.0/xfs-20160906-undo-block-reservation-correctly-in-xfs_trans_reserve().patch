@@ -1,0 +1,37 @@
+From:   Eryu Guan <eguan@redhat.com>
+To:     linux-xfs@vger.kernel.org
+Cc:     xfs@oss.sgi.com, Eryu Guan <eguan@redhat.com>
+Subject: [PATCH v2] xfs: undo block reservation correctly in xfs_trans_reserve()
+Date:   Tue,  6 Sep 2016 20:14:40 +0800
+
+"blocks" should be added back to fdblocks at undo time, not taken
+away, i.e. the minus sign should not be used.
+
+This is a regression introduced by commit 0d485ada404b ("xfs: use
+generic percpu counters for free block counter"). And it's found by
+code inspection, I didn't it in real world, so there's no
+reproducer.
+
+Signed-off-by: Eryu Guan <eguan@redhat.com>
+---
+v2:
+- Remove "Fixes:" tag and describe relevant commit in commit log
+- Update commit log to mention that it's found by code inspection
+- Remove outer () from the "int64_t" cast
+
+ fs/xfs/xfs_trans.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_trans.c b/fs/xfs/xfs_trans.c
+index 5f3d33d..836eb80 100644
+--- a/fs/xfs/xfs_trans.c
++++ b/fs/xfs/xfs_trans.c
+@@ -217,7 +217,7 @@ undo_log:
+ 
+ undo_blocks:
+ 	if (blocks > 0) {
+-		xfs_mod_fdblocks(tp->t_mountp, -((int64_t)blocks), rsvd);
++		xfs_mod_fdblocks(tp->t_mountp, (int64_t)blocks, rsvd);
+ 		tp->t_blk_res = 0;
+ 	}
+ 
