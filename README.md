@@ -8,7 +8,7 @@ These patches were born out of an initial need to apply "just a few fixes"
 to [btrfs](https://btrfs.wiki.kernel.org/), and eventually grew to include both
 additional features and performance/scalability improvements to the entire kernel.
 
-To apply over a -stable release:
+To apply over a release:
 
 - check out the branch you want, or use master for the current stable version
 - run the `../kernel-patches/apply.sh` script when in the kernel directory
@@ -21,20 +21,12 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS series: 4.4**
+**Stable series: 4.8**
 
-- bfs: [BFS v467](http://ck-hack.blogspot.de/2015/12/bfs-467-linux-43-ck3.html) (*not* enabled by default)
-- block: [throttled background writeback v7](https://marc.info/?l=linux-block&m=147325975312628), [high-precision I/O time slice accounting](http://www.spinics.net/lists/linux-block/msg02134.html), misc. other CFQ & deadline scheduler fixes
-- btrfs: fixes up to ~4.8 (block allocator, cleanups, data loss, performance, recovery etc.)
-- cpufreq: CPU frequency/power management fixes (mostly intel_pstate)
-- ext4: selected fixes up to ~4.8 (corruption, crash consistency, performance, [mbcache2](https://lwn.net/Articles/668718/))
+- block: [throttled background writeback v7](https://marc.info/?l=linux-block&m=147325975312628)
+- btrfs: fixes up to ~4.9 (cleanups, correctness, error handling etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
-- net: TCP performance, r8169 support for Byte Queue Limits & xmit_more, fq_codel fixes
-- sched: core/fair scheduler fixes, [schedstats as runtime tunable](http://article.gmane.org/gmane.linux.kernel/2148311)
-- time: misc. ntp/rtc/timekeeping fixes
-- vfs: performance improvements
-- wq: workqueue fixes
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: selected fixes up to ~4.8 (correctness, performance)
+- xfs: selected fixes up to ~4.9
 
