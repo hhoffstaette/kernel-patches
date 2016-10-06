@@ -28,6 +28,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - btrfs: fixes up to ~4.9 (cleanups, correctness, error handling etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
+- mm: memory management fixes from 4.9
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes up to ~4.9
 
