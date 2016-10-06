@@ -1,0 +1,44 @@
+From a447d7cd15c759d8ab7f3c9c8183aa8c999d7ed4 Mon Sep 17 00:00:00 2001
+From: Christoph Hellwig <hch@lst.de>
+Date: Mon, 3 Oct 2016 09:47:34 +1100
+Subject: xfs: update atime before I/O in xfs_file_dio_aio_read
+
+After the call to __blkdev_direct_IO the final reference to the file
+might have been dropped by aio_complete already, and the call to
+file_accessed might cause a use after free.
+
+Instead update the access time before the I/O, similar to how we
+update the time stamps before writes.
+
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+Reported-and-tested-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/xfs_file.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index e612a02..b927ea9 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -269,6 +269,8 @@ xfs_file_dio_aio_read(
+ 		return -EINVAL;
+ 	}
+ 
++	file_accessed(iocb->ki_filp);
++
+ 	/*
+ 	 * Locking is a bit tricky here. If we take an exclusive lock for direct
+ 	 * IO, we effectively serialise all new concurrent read IO to this file
+@@ -323,7 +325,6 @@ xfs_file_dio_aio_read(
+ 	}
+ 	xfs_rw_iunlock(ip, XFS_IOLOCK_SHARED);
+ 
+-	file_accessed(iocb->ki_filp);
+ 	return ret;
+ }
+ 
+-- 
+cgit v0.12
+
