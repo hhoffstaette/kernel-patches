@@ -1,0 +1,95 @@
+From 03e86dba5b628a13a58adae62e5b918b969ae93e Mon Sep 17 00:00:00 2001
+From: Tim Chen <tim.c.chen@linux.intel.com>
+Date: Fri, 7 Oct 2016 17:00:02 -0700
+Subject: cpu: fix node state for whether it contains CPU
+
+In current kernel code, we only call node_set_state(cpu_to_node(cpu),
+N_CPU) when a cpu is hot plugged.  But we do not set the node state for
+N_CPU when the cpus are brought online during boot.
+
+So this could lead to failure when we check to see if a node contains
+cpu with node_state(node_id, N_CPU).
+
+One use case is in the node_reclaime function:
+
+        /*
+         * Only run node reclaim on the local node or on nodes that do
+         * not
+         * have associated processors. This will favor the local
+         * processor
+         * over remote processors and spread off node memory allocations
+         * as wide as possible.
+         */
+        if (node_state(pgdat->node_id, N_CPU) && pgdat->node_id !=
+                numa_node_id())
+                return NODE_RECLAIM_NOSCAN;
+
+I instrumented the kernel to call this function after boot and it always
+returns 0 on a x86 desktop machine until I apply the attached patch.
+
+   int num_cpu_node(void)
+   {
+       int i, nr_cpu_nodes = 0;
+
+       for_each_node(i) {
+               if (node_state(i, N_CPU))
+                       ++ nr_cpu_nodes;
+       }
+
+       return nr_cpu_nodes;
+   }
+
+Fix this by checking each node for online CPU when we initialize
+vmstat that's responsible for maintaining node state.
+
+Link: http://lkml.kernel.org/r/20160829175922.GA21775@linux.intel.com
+Signed-off-by: Tim Chen <tim.c.chen@linux.intel.com>
+Acked-by: David Rientjes <rientjes@google.com>
+Cc: Ingo Molnar <mingo@elte.hu>
+Cc: "H. Peter Anvin" <hpa@zytor.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Tim Chen <tim.c.chen@linux.intel.com>
+Cc: <Huang@linux.intel.com>
+Cc: Ying <ying.huang@intel.com>
+Cc: Andi Kleen <andi@firstfloor.org>
+Cc: Dave Hansen <dave.hansen@intel.com>
+Cc: Dan Williams <dan.j.williams@intel.com>
+Cc: "Rafael J. Wysocki" <rjw@rjwysocki.net>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/vmstat.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/mm/vmstat.c b/mm/vmstat.c
+index dc04e76..73aab31 100644
+--- a/mm/vmstat.c
++++ b/mm/vmstat.c
+@@ -1715,6 +1715,16 @@ static void __init start_shepherd_timer(void)
+ 		round_jiffies_relative(sysctl_stat_interval));
+ }
+ 
++static void __init init_cpu_node_state(void)
++{
++	int cpu;
++
++	get_online_cpus();
++	for_each_online_cpu(cpu)
++		node_set_state(cpu_to_node(cpu), N_CPU);
++	put_online_cpus();
++}
++
+ static void vmstat_cpu_dead(int node)
+ {
+ 	int cpu;
+@@ -1772,6 +1782,7 @@ static int __init setup_vmstat(void)
+ #ifdef CONFIG_SMP
+ 	cpu_notifier_register_begin();
+ 	__register_cpu_notifier(&vmstat_notifier);
++	init_cpu_node_state();
+ 
+ 	start_shepherd_timer();
+ 	cpu_notifier_register_done();
+-- 
+cgit v0.12
+
