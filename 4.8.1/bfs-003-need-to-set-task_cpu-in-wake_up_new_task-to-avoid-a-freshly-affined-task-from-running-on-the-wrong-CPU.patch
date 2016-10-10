@@ -1,5 +1,7 @@
-Need to set task_cpu in wake_up_new_task to avoid a freshly affined task from
-running on the wrong CPU.
+From 4fd2f04899abc325e48eb75eb4a24008c1d50d10 Mon Sep 17 00:00:00 2001
+From: Con Kolivas <kernel@kolivas.org>
+Date: Sun, 9 Oct 2016 16:12:20 +1100
+Subject: [PATCH] Need to set task_cpu in wake_up_new_task to avoid a freshly affined task from running on the wrong CPU.
 
 We should use the indirect smt_schedule to avoid a rare crash at startup
 before smt functions are stable.
@@ -10,19 +12,15 @@ till it's descheduled.
 Go directly into __schedule() in __set_cpus_allowed_ptr to ensure we're
 responsible for moving a task that has no affiity for the current CPU and
 don't get preempted.
-
--ck
-
-
 ---
- kernel/sched/bfs.c |   16 ++++++++++------
+ kernel/sched/bfs.c | 16 ++++++++++------
  1 file changed, 10 insertions(+), 6 deletions(-)
 
-Index: linux-4.8-bfs/kernel/sched/bfs.c
-===================================================================
---- linux-4.8-bfs.orig/kernel/sched/bfs.c	2016-10-03 12:24:24.828841965 +1100
-+++ linux-4.8-bfs/kernel/sched/bfs.c	2016-10-04 20:05:16.934454118 +1100
-@@ -1718,6 +1718,8 @@ void wake_up_new_task(struct task_struct
+diff --git a/kernel/sched/bfs.c b/kernel/sched/bfs.c
+index 64adb73..c70890c 100644
+--- a/kernel/sched/bfs.c
++++ b/kernel/sched/bfs.c
+@@ -1718,6 +1718,8 @@ void wake_up_new_task(struct task_struct *p)
  
  	parent = p->parent;
  	rq = task_grq_lock(p, &flags);
@@ -31,7 +29,7 @@ Index: linux-4.8-bfs/kernel/sched/bfs.c
  	rq_curr = rq->curr;
  	p->state = TASK_RUNNING;
  
-@@ -3293,7 +3295,7 @@ static void check_smt_siblings(struct rq
+@@ -3293,7 +3295,7 @@ static void check_smt_siblings(struct rq *this_rq)
  		if (unlikely(!rq->online))
  			continue;
  		p = rq->curr;
@@ -40,7 +38,7 @@ Index: linux-4.8-bfs/kernel/sched/bfs.c
  			set_tsk_need_resched(p);
  			smp_send_reschedule(other_cpu);
  		}
-@@ -3940,9 +3942,7 @@ static void __setscheduler(struct task_s
+@@ -3940,9 +3942,7 @@ static void __setscheduler(struct task_struct *p, struct rq *rq, int policy,
  
  	if (task_running(p)) {
  		reset_rq_task(rq, p);
@@ -51,7 +49,7 @@ Index: linux-4.8-bfs/kernel/sched/bfs.c
  	} else if (task_queued(p)) {
  		dequeue_task(p);
  		enqueue_task(p, rq);
-@@ -5371,10 +5371,14 @@ static int __set_cpus_allowed_ptr(struct
+@@ -5371,10 +5371,14 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
  out:
  	if (queued && !cpumask_subset(new_mask, &old_mask))
  		try_preempt(p, rq);

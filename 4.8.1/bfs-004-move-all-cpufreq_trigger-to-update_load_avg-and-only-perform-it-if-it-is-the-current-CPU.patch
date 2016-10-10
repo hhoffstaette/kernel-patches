@@ -1,0 +1,81 @@
+From a8b37c0be4e0f25a90734bfb7234e5e6dd0590f4 Mon Sep 17 00:00:00 2001
+From: Con Kolivas <kernel@kolivas.org>
+Date: Sun, 9 Oct 2016 16:13:23 +1100
+Subject: [PATCH] Move all cpufreq_trigger to update_load_avg and only perform it if it is the current CPU.
+
+Revert inappropriate doubling up of affinity changes in WUNT.
+
+Make sure cpu locality of the local cpu remains zero in CONFIG_SCHED_SMT.
+---
+ kernel/sched/bfs.c | 15 ++++++---------
+ 1 file changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/kernel/sched/bfs.c b/kernel/sched/bfs.c
+index c70890c..d7dbbcf 100644
+--- a/kernel/sched/bfs.c
++++ b/kernel/sched/bfs.c
+@@ -945,6 +945,8 @@ static void update_load_avg(struct rq *rq)
+ 		rq->load_avg = load;
+ 	}
+ 	rq->load_update = rq->clock;
++	if (likely(rq->cpu == smp_processor_id()))
++		cpufreq_trigger(grq.niffies, rq->load_avg);
+ }
+ 
+ /*
+@@ -970,11 +972,10 @@ static void activate_task(struct task_struct *p, struct rq *rq)
+ 		grq.nr_uninterruptible--;
+ 	enqueue_task(p, rq);
+ 	rq->soft_affined++;
++	update_load_avg(rq);
+ 	p->on_rq = 1;
+ 	grq.nr_running++;
+ 	inc_qnr();
+-	update_load_avg(rq);
+-	cpufreq_trigger(grq.niffies, rq->load_avg);
+ }
+ 
+ /*
+@@ -986,10 +987,9 @@ static inline void deactivate_task(struct task_struct *p, struct rq *rq)
+ 	if (task_contributes_to_load(p))
+ 		grq.nr_uninterruptible++;
+ 	rq->soft_affined--;
++	update_load_avg(rq);
+ 	p->on_rq = 0;
+ 	grq.nr_running--;
+-	update_load_avg(rq);
+-	cpufreq_trigger(grq.niffies, rq->load_avg);
+ }
+ 
+ #ifdef CONFIG_SMP
+@@ -1718,8 +1718,6 @@ void wake_up_new_task(struct task_struct *p)
+ 
+ 	parent = p->parent;
+ 	rq = task_grq_lock(p, &flags);
+-	if (unlikely(needs_other_cpu(p, task_cpu(p))))
+- 		set_task_cpu(p, cpumask_any(tsk_cpus_allowed(p)));
+ 	rq_curr = rq->curr;
+ 	p->state = TASK_RUNNING;
+ 
+@@ -2973,7 +2971,6 @@ void scheduler_tick(void)
+ 	update_rq_clock(rq);
+ 	update_cpu_clock_tick(rq, rq->curr);
+ 	update_load_avg(rq);
+-	cpufreq_trigger(grq.niffies, rq->load_avg);
+ 	if (!rq_idle(rq))
+ 		task_running_tick(rq);
+ 	else
+@@ -7017,11 +7014,11 @@ void __init sched_init_smp(void)
+ 		}
+ #endif
+ #ifdef CONFIG_SCHED_SMT
+-		for_each_cpu(other_cpu, thread_cpumask(cpu))
+-			rq->cpu_locality[other_cpu] = 1;
+ 		if (cpumask_weight(thread_cpumask(cpu)) > 1) {
+ 			cpumask_copy(&rq->thread_mask, thread_cpumask(cpu));
+ 			cpumask_clear_cpu(cpu, &rq->thread_mask);
++			for_each_cpu(other_cpu, thread_cpumask(cpu))
++				rq->cpu_locality[other_cpu] = 1;
+ 			rq->siblings_idle = siblings_cpu_idle;
+ 			smt_threads = true;
+ 		}
