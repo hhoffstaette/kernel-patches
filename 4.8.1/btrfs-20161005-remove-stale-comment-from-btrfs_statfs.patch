@@ -1,0 +1,28 @@
+From 55646ab6b5aa54e3c01ac98468dbf323b0cfa4af Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Wed, 5 Oct 2016 14:23:06 +0200
+Subject: btrfs: remove stale comment from btrfs_statfs
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/super.c | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 74ed5aa..adec3a0 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -2086,10 +2086,6 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 	u64 thresh = 0;
+ 	int mixed = 0;
+ 
+-	/*
+-	 * holding chunk_mutex to avoid allocating new chunks, holding
+-	 * device_list_mutex to avoid the device being removed
+-	 */
+ 	rcu_read_lock();
+ 	list_for_each_entry_rcu(found, head, list) {
+ 		if (found->flags & BTRFS_BLOCK_GROUP_DATA) {
+-- 
+cgit v0.12
+
