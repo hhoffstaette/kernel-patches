@@ -1,0 +1,51 @@
+From c6745632e373734470078820e463d8ff410a4eca Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Wed, 5 Oct 2016 14:23:05 +0200
+Subject: btrfs: remove unused headers, statfs.h
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/file.c  | 1 -
+ fs/btrfs/inode.c | 1 -
+ fs/btrfs/ioctl.c | 1 -
+ 3 files changed, 3 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 72a180d..738f339 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -27,7 +27,6 @@
+ #include <linux/falloc.h>
+ #include <linux/swap.h>
+ #include <linux/writeback.h>
+-#include <linux/statfs.h>
+ #include <linux/compat.h>
+ #include <linux/slab.h>
+ #include <linux/btrfs.h>
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 50ba4ca..6b034a2 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -30,7 +30,6 @@
+ #include <linux/mpage.h>
+ #include <linux/swap.h>
+ #include <linux/writeback.h>
+-#include <linux/statfs.h>
+ #include <linux/compat.h>
+ #include <linux/bit_spinlock.h>
+ #include <linux/xattr.h>
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index af69129..baf93b5 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -33,7 +33,6 @@
+ #include <linux/namei.h>
+ #include <linux/swap.h>
+ #include <linux/writeback.h>
+-#include <linux/statfs.h>
+ #include <linux/compat.h>
+ #include <linux/bit_spinlock.h>
+ #include <linux/security.h>
+-- 
+cgit v0.12
+
