@@ -1,0 +1,37 @@
+From:   Junjie Mao <junjie.mao@enight.me>
+To:     Chris Mason <clm@fb.com>
+Cc:     Josef Bacik <jbacik@fb.com>, David Sterba <dsterba@suse.com>,
+        linux-btrfs@vger.kernel.org, linux-kernel@vger.kernel.org,
+        Junjie Mao <junjie.mao@enight.me>
+Subject: [PATCH] btrfs: assign error values to the correct bio structs
+Date:   Mon, 17 Oct 2016 09:20:25 +0800
+
+Fixes: 4246a0b63bd8 ("block: add a bi_error field to struct bio")
+
+Signed-off-by: Junjie Mao <junjie.mao@enight.me>
+---
+ fs/btrfs/compression.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/compression.c b/fs/btrfs/compression.c
+index ccc70d96958d..d4d8b7e36b2f 100644
+--- a/fs/btrfs/compression.c
++++ b/fs/btrfs/compression.c
+@@ -698,7 +698,7 @@ int btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
+ 
+ 			ret = btrfs_map_bio(root, comp_bio, mirror_num, 0);
+ 			if (ret) {
+-				bio->bi_error = ret;
++				comp_bio->bi_error = ret;
+ 				bio_endio(comp_bio);
+ 			}
+ 
+@@ -728,7 +728,7 @@ int btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
+ 
+ 	ret = btrfs_map_bio(root, comp_bio, mirror_num, 0);
+ 	if (ret) {
+-		bio->bi_error = ret;
++		comp_bio->bi_error = ret;
+ 		bio_endio(comp_bio);
+ 	}
+ 
