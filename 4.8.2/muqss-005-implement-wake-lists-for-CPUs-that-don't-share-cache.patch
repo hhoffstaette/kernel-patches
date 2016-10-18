@@ -1,0 +1,394 @@
+From cc32bf31f12d5755fc71a02c2a67542af13c38b3 Mon Sep 17 00:00:00 2001
+From: Con Kolivas <kernel@kolivas.org>
+Date: Wed, 19 Oct 2016 00:19:08 +1100
+Subject: [PATCH] Implement wake lists for CPUs that don't share cache as per
+ core.c
+
+---
+ kernel/sched/MuQSS.c | 261 +++++++++++++++++++++++++++++++++++++++------------
+ kernel/sched/MuQSS.h |   7 +-
+ 2 files changed, 206 insertions(+), 62 deletions(-)
+
+diff --git a/kernel/sched/MuQSS.c b/kernel/sched/MuQSS.c
+index 1159c66..a14225c 100644
+--- a/kernel/sched/MuQSS.c
++++ b/kernel/sched/MuQSS.c
+@@ -596,6 +596,121 @@ static inline void __task_rq_unlock(struct rq *rq)
+ 	rq_unlock(rq);
+ }
+ 
++/*
++ * cmpxchg based fetch_or, macro so it works for different integer types
++ */
++#define fetch_or(ptr, mask)						\
++	({								\
++		typeof(ptr) _ptr = (ptr);				\
++		typeof(mask) _mask = (mask);				\
++		typeof(*_ptr) _old, _val = *_ptr;			\
++									\
++		for (;;) {						\
++			_old = cmpxchg(_ptr, _val, _val | _mask);	\
++			if (_old == _val)				\
++				break;					\
++			_val = _old;					\
++		}							\
++	_old;								\
++})
++
++#if defined(CONFIG_SMP) && defined(TIF_POLLING_NRFLAG)
++/*
++ * Atomically set TIF_NEED_RESCHED and test for TIF_POLLING_NRFLAG,
++ * this avoids any races wrt polling state changes and thereby avoids
++ * spurious IPIs.
++ */
++static bool set_nr_and_not_polling(struct task_struct *p)
++{
++	struct thread_info *ti = task_thread_info(p);
++	return !(fetch_or(&ti->flags, _TIF_NEED_RESCHED) & _TIF_POLLING_NRFLAG);
++}
++
++/*
++ * Atomically set TIF_NEED_RESCHED if TIF_POLLING_NRFLAG is set.
++ *
++ * If this returns true, then the idle task promises to call
++ * sched_ttwu_pending() and reschedule soon.
++ */
++static bool set_nr_if_polling(struct task_struct *p)
++{
++	struct thread_info *ti = task_thread_info(p);
++	typeof(ti->flags) old, val = READ_ONCE(ti->flags);
++
++	for (;;) {
++		if (!(val & _TIF_POLLING_NRFLAG))
++			return false;
++		if (val & _TIF_NEED_RESCHED)
++			return true;
++		old = cmpxchg(&ti->flags, val, val | _TIF_NEED_RESCHED);
++		if (old == val)
++			break;
++		val = old;
++	}
++	return true;
++}
++
++#else
++static bool set_nr_and_not_polling(struct task_struct *p)
++{
++	set_tsk_need_resched(p);
++	return true;
++}
++
++#ifdef CONFIG_SMP
++static bool set_nr_if_polling(struct task_struct *p)
++{
++	return false;
++}
++#endif
++#endif
++
++void wake_q_add(struct wake_q_head *head, struct task_struct *task)
++{
++	struct wake_q_node *node = &task->wake_q;
++
++	/*
++	 * Atomically grab the task, if ->wake_q is !nil already it means
++	 * its already queued (either by us or someone else) and will get the
++	 * wakeup due to that.
++	 *
++	 * This cmpxchg() implies a full barrier, which pairs with the write
++	 * barrier implied by the wakeup in wake_up_q().
++	 */
++	if (cmpxchg(&node->next, NULL, WAKE_Q_TAIL))
++		return;
++
++	get_task_struct(task);
++
++	/*
++	 * The head is context local, there can be no concurrency.
++	 */
++	*head->lastp = node;
++	head->lastp = &node->next;
++}
++
++void wake_up_q(struct wake_q_head *head)
++{
++	struct wake_q_node *node = head->first;
++
++	while (node != WAKE_Q_TAIL) {
++		struct task_struct *task;
++
++		task = container_of(node, struct task_struct, wake_q);
++		BUG_ON(!task);
++		/* task can safely be re-inserted now */
++		node = node->next;
++		task->wake_q.next = NULL;
++
++		/*
++		 * wake_up_process() implies a wmb() to pair with the queueing
++		 * in wake_q_add() so as not to miss wakeups.
++		 */
++		wake_up_process(task);
++		put_task_struct(task);
++	}
++}
++
+ static inline void prepare_lock_switch(struct rq *rq, struct task_struct *next)
+ {
+ 	next->on_cpu = 1;
+@@ -619,15 +734,17 @@ void resched_task(struct task_struct *p)
+ 	if (test_tsk_need_resched(p))
+ 		return;
+ 
+-	set_tsk_need_resched(p);
+-
+ 	cpu = task_cpu(p);
+ 	if (cpu == smp_processor_id()) {
++		set_tsk_need_resched(p);
+ 		set_preempt_need_resched();
+ 		return;
+ 	}
+ 
+-	smp_send_reschedule(cpu);
++	if (set_nr_and_not_polling(p))
++		smp_send_reschedule(cpu);
++	else
++		trace_sched_wake_idle_without_ipi(cpu);
+ }
+ 
+ /*
+@@ -1042,20 +1159,26 @@ static bool suitable_idle_cpus(struct task_struct *p)
+  */
+ static void resched_curr(struct rq *rq)
+ {
++	int cpu;
++
+ 	if (test_tsk_need_resched(rq->curr))
+ 		return;
+ 
+ 	rq->preempt = rq->curr;
++	cpu = rq->cpu;
+ 
+ 	/* We're doing this without holding the rq lock if it's not task_rq */
+-	set_tsk_need_resched(rq->curr);
+ 
+-	if (rq_local(rq)) {
++	if (cpu == smp_processor_id()) {
++		set_tsk_need_resched(rq->curr);
+ 		set_preempt_need_resched();
+ 		return;
+ 	}
+ 
+-	smp_send_reschedule(rq->cpu);
++	if (set_nr_and_not_polling(rq->curr))
++		smp_send_reschedule(cpu);
++	else
++		trace_sched_wake_idle_without_ipi(cpu);
+ }
+ 
+ #define CPUIDLE_DIFF_THREAD	(1)
+@@ -1722,7 +1845,6 @@ static int ttwu_remote(struct task_struct *p, int wake_flags)
+ 	return ret;
+ }
+ 
+-
+ void wake_up_if_idle(int cpu)
+ {
+ 	struct rq *rq = cpu_rq(cpu);
+@@ -1733,11 +1855,15 @@ void wake_up_if_idle(int cpu)
+ 	if (!is_idle_task(rcu_dereference(rq->curr)))
+ 		goto out;
+ 
+-	rq_lock_irqsave(rq, &flags);
+-	if (likely(is_idle_task(rq->curr)))
+-		smp_send_reschedule(cpu);
+-	/* Else cpu is not in idle, do nothing here */
+-	rq_unlock_irqrestore(rq, &flags);
++	if (set_nr_if_polling(rq->idle)) {
++		trace_sched_wake_idle_without_ipi(cpu);
++	} else {
++		rq_lock_irqsave(rq, &flags);
++		if (likely(is_idle_task(rq->curr)))
++			smp_send_reschedule(cpu);
++		/* Else cpu is not in idle, do nothing here */
++		rq_unlock_irqrestore(rq, &flags);
++	}
+ 
+ out:
+ 	rcu_read_unlock();
+@@ -1746,6 +1872,30 @@ void wake_up_if_idle(int cpu)
+ static bool sched_smp_initialized __read_mostly;
+ 
+ #ifdef CONFIG_SMP
++void sched_ttwu_pending(void)
++{
++	struct rq *rq = this_rq();
++	struct llist_node *llist = llist_del_all(&rq->wake_list);
++	struct task_struct *p;
++	unsigned long flags;
++
++	if (!llist)
++		return;
++
++	raw_spin_lock_irqsave(&rq->lock, flags);
++
++	while (llist) {
++		int wake_flags = 0;
++
++		p = llist_entry(llist, struct task_struct, wake_entry);
++		llist = llist_next(llist);
++
++		ttwu_do_activate(rq, p, wake_flags);
++	}
++
++	raw_spin_unlock_irqrestore(&rq->lock, flags);
++}
++
+ void scheduler_ipi(void)
+ {
+ 	/*
+@@ -1755,13 +1905,39 @@ void scheduler_ipi(void)
+ 	 */
+ 	preempt_fold_need_resched();
+ 
+-	if (!idle_cpu(smp_processor_id()) || need_resched())
++	if (llist_empty(&this_rq()->wake_list) && (!idle_cpu(smp_processor_id()) || need_resched()))
+ 		return;
+ 
++	/*
++	 * Not all reschedule IPI handlers call irq_enter/irq_exit, since
++	 * traditionally all their work was done from the interrupt return
++	 * path. Now that we actually do some work, we need to make sure
++	 * we do call them.
++	 *
++	 * Some archs already do call them, luckily irq_enter/exit nest
++	 * properly.
++	 *
++	 * Arguably we should visit all archs and update all handlers,
++	 * however a fair share of IPIs are still resched only so this would
++	 * somewhat pessimize the simple resched case.
++	 */
+ 	irq_enter();
++	sched_ttwu_pending();
+ 	irq_exit();
+ }
+ 
++static void ttwu_queue_remote(struct task_struct *p, int cpu, int wake_flags)
++{
++	struct rq *rq = cpu_rq(cpu);
++
++	if (llist_add(&p->wake_entry, &cpu_rq(cpu)->wake_list)) {
++		if (!set_nr_if_polling(rq->idle))
++			smp_send_reschedule(cpu);
++		else
++			trace_sched_wake_idle_without_ipi(cpu);
++	}
++}
++
+ static int valid_task_cpu(struct task_struct *p)
+ {
+ 	cpumask_t valid_mask;
+@@ -1838,6 +2014,13 @@ static void ttwu_queue(struct task_struct *p, int cpu, int wake_flags)
+ {
+ 	struct rq *rq = cpu_rq(cpu);
+ 
++#if defined(CONFIG_SMP)
++	if (!cpus_share_cache(smp_processor_id(), cpu)) {
++		sched_clock_cpu(cpu); /* sync clocks x-cpu */
++		ttwu_queue_remote(p, cpu, wake_flags);
++		return;
++	}
++#endif
+ 	rq_lock(rq);
+ 	ttwu_do_activate(rq, p, wake_flags);
+ 	rq_unlock(rq);
+@@ -5589,52 +5772,6 @@ int task_can_attach(struct task_struct *p,
+ 	return ret;
+ }
+ 
+-void wake_q_add(struct wake_q_head *head, struct task_struct *task)
+-{
+-	struct wake_q_node *node = &task->wake_q;
+-
+-	/*
+-	 * Atomically grab the task, if ->wake_q is !nil already it means
+-	 * its already queued (either by us or someone else) and will get the
+-	 * wakeup due to that.
+-	 *
+-	 * This cmpxchg() implies a full barrier, which pairs with the write
+-	 * barrier implied by the wakeup in wake_up_q().
+-	 */
+-	if (cmpxchg(&node->next, NULL, WAKE_Q_TAIL))
+-		return;
+-
+-	get_task_struct(task);
+-
+-	/*
+-	 * The head is context local, there can be no concurrency.
+-	 */
+-	*head->lastp = node;
+-	head->lastp = &node->next;
+-}
+-
+-void wake_up_q(struct wake_q_head *head)
+-{
+-	struct wake_q_node *node = head->first;
+-
+-	while (node != WAKE_Q_TAIL) {
+-		struct task_struct *task;
+-
+-		task = container_of(node, struct task_struct, wake_q);
+-		BUG_ON(!task);
+-		/* task can safely be re-inserted now */
+-		node = node->next;
+-		task->wake_q.next = NULL;
+-
+-		/*
+-		 * wake_up_process() implies a wmb() to pair with the queueing
+-		 * in wake_q_add() so as not to miss wakeups.
+-		 */
+-		wake_up_process(task);
+-		put_task_struct(task);
+-	}
+-}
+-
+ void resched_cpu(int cpu)
+ {
+ 	struct rq *rq = cpu_rq(cpu);
+@@ -5745,8 +5882,10 @@ void wake_up_idle_cpu(int cpu)
+ 	if (cpu == smp_processor_id())
+ 		return;
+ 
+-	set_tsk_need_resched(cpu_rq(cpu)->idle);
+-	smp_send_reschedule(cpu);
++	if (set_nr_and_not_polling(cpu_rq(cpu)->idle))
++		smp_send_reschedule(cpu);
++	else
++		trace_sched_wake_idle_without_ipi(cpu);
+ }
+ 
+ void wake_up_nohz_cpu(int cpu)
+diff --git a/kernel/sched/MuQSS.h b/kernel/sched/MuQSS.h
+index f8d0d58..b0fe03e 100644
+--- a/kernel/sched/MuQSS.h
++++ b/kernel/sched/MuQSS.h
+@@ -104,6 +104,11 @@ struct rq {
+ 	unsigned int ttwu_count;
+ 	unsigned int ttwu_local;
+ #endif /* CONFIG_SCHEDSTATS */
++
++#ifdef CONFIG_SMP
++	struct llist_head wake_list;
++#endif
++
+ #ifdef CONFIG_CPU_IDLE
+ 	/* Must be inspected within a rcu lock section */
+ 	struct cpuidle_state *idle_state;
+@@ -208,7 +213,7 @@ static inline void unregister_sched_domain_sysctl(void)
+ }
+ #endif
+ 
+-static inline void sched_ttwu_pending(void) { }
++extern void sched_ttwu_pending(void);
+ 
+ #ifdef CONFIG_SMP
+ 

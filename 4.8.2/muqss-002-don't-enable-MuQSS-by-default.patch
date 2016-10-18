@@ -1,7 +1,7 @@
 --- linux/init/Kconfig~	2016-04-29 20:36:46.000000000 +0200
 +++ linux/init/Kconfig	2016-04-29 20:40:24.502908686 +0200
-@@ -39,7 +39,7 @@
-           TEST so these options are disabled.
+@@ -36,7 +36,7 @@
+	  low latency on any hardware.
  
            Say Y here.
 -	default y

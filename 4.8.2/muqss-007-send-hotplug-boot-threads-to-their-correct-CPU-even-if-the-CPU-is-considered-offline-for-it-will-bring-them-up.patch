@@ -1,0 +1,34 @@
+From 1815857edb3cb5d7c9a6c72e0479cc5d87bf7cd3 Mon Sep 17 00:00:00 2001
+From: Con Kolivas <kernel@kolivas.org>
+Date: Thu, 20 Oct 2016 06:35:33 +1100
+Subject: [PATCH] Send hotplug boot threads to their correct CPU even if the
+ CPU is considered offline for it will bring them up
+
+---
+ kernel/sched/MuQSS.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/MuQSS.c b/kernel/sched/MuQSS.c
+index e8101a3..3fb5d02 100644
+--- a/kernel/sched/MuQSS.c
++++ b/kernel/sched/MuQSS.c
+@@ -1029,7 +1029,7 @@ static inline int queued_notrunning(void)
+ /* Entered with rq locked */
+ static inline void resched_if_idle(struct rq *rq)
+ {
+-	if (rq_idle(rq) && rq->online)
++	if (rq_idle(rq))
+ 		resched_task(rq->curr);
+ }
+ 
+@@ -1943,8 +1943,9 @@ static int valid_task_cpu(struct task_struct *p)
+ 		cpumask_and(&valid_mask, tsk_cpus_allowed(p), cpu_active_mask);
+ 
+ 	if (unlikely(!cpumask_weight(&valid_mask))) {
++		/* Hotplug boot threads do this before the CPU is up */
+ 		WARN_ON(sched_smp_initialized);
+-		return smp_processor_id();
++		return cpumask_any(tsk_cpus_allowed(p));
+ 	}
+ 	return cpumask_any(&valid_mask);
+ }
