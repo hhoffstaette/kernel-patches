@@ -28,7 +28,6 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - mm: memory management fixes from 4.9+
-- muqss: [MuQSS v112+](http://ck-hack.blogspot.de/2016/10/muqss-multiple-queue-skiplist-scheduler_17.html) (*not* enabled by default)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 4.9+
 
