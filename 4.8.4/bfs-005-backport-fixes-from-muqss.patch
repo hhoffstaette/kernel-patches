@@ -1,0 +1,121 @@
+From d00f33f4e4f030b2588cea8db9fcacafdbf26142 Mon Sep 17 00:00:00 2001
+From: Con Kolivas <kernel@kolivas.org>
+Date: Sun, 9 Oct 2016 16:30:15 +1100
+Subject: [PATCH] Backport fixes from muqss
+
+---
+ kernel/sched/bfs.c | 51 +++++++++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 43 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/sched/bfs.c b/kernel/sched/bfs.c
+index d7dbbcf..ba64ae3 100644
+--- a/kernel/sched/bfs.c
++++ b/kernel/sched/bfs.c
+@@ -949,11 +949,19 @@ static void update_load_avg(struct rq *rq)
+ 		cpufreq_trigger(grq.niffies, rq->load_avg);
+ }
+ 
++/* Entered with rq locked */
++static inline void resched_if_idle(struct rq *rq)
++{
++	if (rq_idle(rq) && rq->online)
++		resched_task(rq->curr);
++}
++
+ /*
+  * activate_task - move a task to the runqueue. Enter with grq locked.
+  */
+ static void activate_task(struct task_struct *p, struct rq *rq)
+ {
++	resched_if_idle(rq);
+ 	update_clocks(rq);
+ 
+ 	/*
+@@ -1517,24 +1525,39 @@ static void try_to_wake_up_local(struct task_struct *p)
+ 	struct rq *rq = task_rq(p);
+ 	bool success = false;
+ 
++	if (WARN_ON_ONCE(rq != this_rq()) ||
++	    WARN_ON_ONCE(p == current))
++		return;
++
+ 	lockdep_assert_held(&grq.lock);
+ 
++	if (!raw_spin_trylock(&p->pi_lock)) {
++		/*
++		 * This is OK, because current is on_cpu, which avoids it being
++		 * picked for load-balance and preemption/IRQs are still
++		 * disabled avoiding further scheduler activity on it and we've
++		 * not yet picked a replacement task.
++		 */
++		grq_unlock();
++		raw_spin_lock(&p->pi_lock);
++		grq_lock();
++	}
++
+ 	if (!(p->state & TASK_NORMAL))
+-		return;
++		goto out;
+ 
+ 	trace_sched_waking(p);
+ 
+ 	if (!task_queued(p)) {
+-		if (likely(!task_running(p))) {
+-			schedstat_inc(rq, ttwu_count);
+-			schedstat_inc(rq, ttwu_local);
+-		}
+ 		ttwu_activate(p, rq, false);
+-		if (schedstat_enabled())
+-			ttwu_stat(p, smp_processor_id(), 0);
+ 		success = true;
+ 	}
++
+ 	ttwu_post_activation(p, rq, success);
++	if (schedstat_enabled())
++		ttwu_stat(p, smp_processor_id(), 0);
++out:
++	raw_spin_unlock(&p->pi_lock);
+ }
+ 
+ /**
+@@ -1568,6 +1591,9 @@ static void time_slice_expired(struct task_struct *p);
+  */
+ int sched_fork(unsigned long __maybe_unused clone_flags, struct task_struct *p)
+ {
++	unsigned long flags;
++	int cpu = get_cpu();
++
+ #ifdef CONFIG_PREEMPT_NOTIFIERS
+ 	INIT_HLIST_HEAD(&p->preempt_notifiers);
+ #endif
+@@ -1617,12 +1643,21 @@ int sched_fork(unsigned long __maybe_unused clone_flags, struct task_struct *p)
+ 		p->sched_reset_on_fork = 0;
+ 	}
+ 
++	/*
++	 * Silence PROVE_RCU.
++	 */
++	raw_spin_lock_irqsave(&p->pi_lock, flags);
++	set_task_cpu(p, cpu);
++	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
++
+ #ifdef CONFIG_SCHED_INFO
+ 	if (unlikely(sched_info_on()))
+ 		memset(&p->sched_info, 0, sizeof(p->sched_info));
+ #endif
+ 	p->on_cpu = false;
+ 	init_task_preempt_count(p);
++
++	put_cpu();
+ 	return 0;
+ }
+ 
+@@ -3420,7 +3455,7 @@ static void __sched notrace __schedule(bool preempt)
+ 				to_wakeup = wq_worker_sleeping(prev);
+ 				if (to_wakeup) {
+ 					/* This shouldn't happen, but does */
+-					if (unlikely(to_wakeup == prev))
++					if (WARN_ON(to_wakeup == prev))
+ 						deactivate = false;
+ 					else
+ 						try_to_wake_up_local(to_wakeup);
