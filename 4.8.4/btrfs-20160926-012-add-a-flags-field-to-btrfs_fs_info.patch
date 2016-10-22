@@ -377,9 +377,9 @@ index 87e7e3d..83ee63b 100644
  					    BTRFS_FREE_SPACE_TREE_OBJECTID);
  	if (IS_ERR(free_space_root)) {
 @@ -1183,7 +1183,7 @@ int btrfs_create_free_space_tree(struct btrfs_fs_info *fs_info)
- 	}
  
  	btrfs_set_fs_compat_ro(fs_info, FREE_SPACE_TREE);
+ 	btrfs_set_fs_compat_ro(fs_info, FREE_SPACE_TREE_VALID);
 -	fs_info->creating_free_space_tree = 0;
 +	clear_bit(BTRFS_FS_CREATING_FREE_SPACE_TREE, &fs_info->flags);
  
