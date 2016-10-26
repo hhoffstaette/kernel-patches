@@ -24,7 +24,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **Stable series: 4.8**
 
 - bfs: [BFS v512+](http://ck-hack.blogspot.de/2016/10/bfs-version-0512-linux-48-ck1-muqss-for.html) (*not* enabled by default)
-- block: [throttled background writeback v7](https://marc.info/?l=linux-block&m=147325975312628)
+- block: [throttled background writeback v8](http://marc.info/?l=linux-block&m=147751514819997)
 - btrfs: fixes from 4.9+ (cleanups, correctness, error handling etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
