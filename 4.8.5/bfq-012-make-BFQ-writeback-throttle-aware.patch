@@ -1,0 +1,33 @@
+From f0671f3399483a4bad65d392975b9e4a65b2eb44 Mon Sep 17 00:00:00 2001
+From: Oleksandr Natalenko <oleksandr@natalenko.name>
+Date: Wed, 26 Oct 2016 17:26:26 +0200
+Subject: [PATCH] bfq-wb-4.8: make BFQ writeback-throttle aware
+
+[HH: fix up to apply to bfq-cgroup.c from v8r4]
+---
+ block/bfq-cgroup.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/block/bfq-cgroup.c b/block/bfq-cgroup.c
+index 89980bc..4043fac 100644
+--- a/block/bfq-cgroup.c
++++ b/block/bfq-cgroup.c
+@@ -649,6 +649,18 @@ static void bfq_bic_update_cgroup(struct bfq_io_cq *bic, struct bio *bio)
+ 	if (unlikely(!bfqd) || likely(bic->blkcg_serial_nr == serial_nr))
+ 		goto out;
+ 
++	/*
++	* If we have a non-root cgroup, we can depend on that to
++	* do proper throttling of writes. Turn off wbt for that
++	* case.
++	*/
++	if (bio_blkcg(bio) != &blkcg_root) {
++		struct request_queue *q = bfqd->queue;
++
++		if (q->rq_wb)
++			wbt_disable(q->rq_wb);
++	}
++
+ 	bfqg = __bfq_bic_change_cgroup(bfqd, bic, bio_blkcg(bio));
+ 	bic->blkcg_serial_nr = serial_nr;
+ out:

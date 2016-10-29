@@ -24,6 +24,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **Stable series: 4.8**
 
 - bfs: [BFS v512+](http://ck-hack.blogspot.de/2016/10/bfs-version-0512-linux-48-ck1-muqss-for.html) (*not* enabled by default)
+- bfq: [BFQ v8r5](http://algogroup.unimore.it/people/paolo/disk_sched/)
 - block: [throttled background writeback v8](http://marc.info/?l=linux-block&m=147751514819997)
 - btrfs: fixes from 4.9+ (cleanups, correctness, error handling etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
