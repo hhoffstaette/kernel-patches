@@ -1,0 +1,54 @@
+From: Shaohua Li <shli@fb.com>
+Subject: [PATCH 1/2] block: immediately dispatch big size request
+Date: Fri, 28 Oct 2016 15:52:35 -0700
+Cc: <Kernel-team@fb.com>, <axboe@fb.com>
+To: <linux-block@vger.kernel.org>, <linux-kernel@vger.kernel.org>
+Archived-At: <http://permalink.gmane.org/gmane.linux.block/1850>
+
+Currently block plug holds up to 16 non-mergeable requests. This makes
+sense if the request size is small, eg, reduce lock contention. But if
+request size is big enough, we don't need to worry about lock
+contention. Holding such request makes no sense and it lows the disk
+utilization.
+
+In practice, this improves 10% throughput for my raid5 sequential write
+workload.
+
+The size (128k) is arbitrary right now, but it makes sure lock
+contention is small. This probably could be more intelligent, eg, check
+average request size holded. Since this is mainly for sequential IO,
+probably not worthy.
+
+Signed-off-by: Shaohua Li <shli@fb.com>
+---
+ block/blk-core.c       | 4 +++-
+ include/linux/blkdev.h | 1 +
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 14d7c07..0a396e9 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -1763,7 +1763,9 @@ static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
+ 		if (!request_count)
+ 			trace_block_plug(q);
+ 		else {
+-			if (request_count >= BLK_MAX_REQUEST_COUNT) {
++			struct request *first = list_entry_rq(plug->list.next);
++			if (request_count >= BLK_MAX_REQUEST_COUNT ||
++			    blk_rq_bytes(first) >= BLK_PLUG_FLUSH_SIZE) {
+ 				blk_flush_plug_list(plug, false);
+ 				trace_block_plug(q);
+ 			}
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index c47c358..72fa505 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -1078,6 +1078,7 @@ struct blk_plug {
+ 	struct list_head cb_list; /* md requires an unplug callback */
+ };
+ #define BLK_MAX_REQUEST_COUNT 16
++#define BLK_PLUG_FLUSH_SIZE (128 * 1024)
+ 
+ struct blk_plug_cb;
+ typedef void (*blk_plug_cb_fn)(struct blk_plug_cb *, bool);

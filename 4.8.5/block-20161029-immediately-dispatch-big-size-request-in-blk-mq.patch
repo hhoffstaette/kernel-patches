@@ -1,0 +1,39 @@
+From: Shaohua Li <shli@fb.com>
+Subject: [PATCH 2/2] blk-mq: immediately dispatch big size request
+Date: Fri, 28 Oct 2016 15:52:36 -0700
+Cc: <Kernel-team@fb.com>, <axboe@fb.com>
+To: <linux-block@vger.kernel.org>, <linux-kernel@vger.kernel.org>
+Archived-At: <http://permalink.gmane.org/gmane.linux.kernel/2337952>
+
+This is corresponding part for blk-mq. Disk with multiple hardware
+queues doesn't need this as we only hold 1 request at most.
+
+Signed-off-by: Shaohua Li <shli@fb.com>
+---
+ block/blk-mq.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index f3d27a6..9612306 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1401,13 +1401,18 @@ static blk_qc_t blk_sq_make_request(struct request_queue *q, struct bio *bio)
+ 	 */
+ 	plug = current->plug;
+ 	if (plug) {
++		struct request *first = NULL;
++
+ 		blk_mq_bio_to_request(rq, bio);
+ 		if (!request_count)
+ 			trace_block_plug(q);
++		else
++			first = list_entry_rq(plug->mq_list.next);
+ 
+ 		blk_mq_put_ctx(data.ctx);
+ 
+-		if (request_count >= BLK_MAX_REQUEST_COUNT) {
++		if (request_count >= BLK_MAX_REQUEST_COUNT || (first &&
++		    blk_rq_bytes(first) >= BLK_PLUG_FLUSH_SIZE)) {
+ 			blk_flush_plug_list(plug, false);
+ 			trace_block_plug(q);
+ 		}
