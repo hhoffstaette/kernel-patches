@@ -1,0 +1,46 @@
+From:   Wang Xiaoguang <wangxg.fnst@cn.fujitsu.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH 2/2] btrfs: increase tickets_id even for failed metadata request
+Date:   Mon,  7 Nov 2016 15:59:17 +0800
+
+Not functional change, it just makes codes logic more reasonable, then
+at least tickets_id can reflect the number of metadata requests we already
+handled.
+
+[HH: fixed up hunk #2 for ticket priority]
+Signed-off-by: Wang Xiaoguang <wangxg.fnst@cn.fujitsu.com>
+---
+ fs/btrfs/extent-tree.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 4607af3..d63bf40 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -4949,14 +4949,16 @@ static inline int need_do_async_reclaim(struct btrfs_space_info *space_info,
+ 			  &root->fs_info->fs_state));
+ }
+ 
+-static void wake_all_tickets(struct list_head *head)
++static void wake_all_tickets(struct btrfs_space_info *space_info)
+ {
+ 	struct reserve_ticket *ticket;
++	struct list_head *head = &space_info->tickets;
+ 
+ 	while (!list_empty(head)) {
+ 		ticket = list_first_entry(head, struct reserve_ticket, list);
+ 		list_del_init(&ticket->list);
+ 		ticket->error = -ENOSPC;
++		space_info->tickets_id++;
+ 		wake_up(&ticket->wait);
+ 	}
+ }
+@@ -5018,7 +5020,7 @@ static void btrfs_async_reclaim_metadata_space(struct work_struct *work)
+ 		}
+ 
+ 		if (flush_state > COMMIT_TRANS && reclaim_priority == 0) {
+-			wake_all_tickets(&space_info->tickets);
++			wake_all_tickets(space_info);
+ 			space_info->flush = 0;
+ 		}
+ 		spin_unlock(&space_info->lock);
