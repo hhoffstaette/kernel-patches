@@ -1,0 +1,26 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH 04/12] btrfs: reada, remove pointless BUG_ON in reada_find_extent
+Date:   Wed,  9 Nov 2016 18:04:25 +0100
+
+The lock is held, we make the same lookup that previously failed with
+EEXIST and we don't insert NULL pointers.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/reada.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/fs/btrfs/reada.c b/fs/btrfs/reada.c
+index fe068b197fc1..95d526af3fba 100644
+--- a/fs/btrfs/reada.c
++++ b/fs/btrfs/reada.c
+@@ -393,7 +393,6 @@ static struct reada_extent *reada_find_extent(struct btrfs_root *root,
+ 	ret = radix_tree_insert(&fs_info->reada_tree, index, re);
+ 	if (ret == -EEXIST) {
+ 		re_exist = radix_tree_lookup(&fs_info->reada_tree, index);
+-		BUG_ON(!re_exist);
+ 		re_exist->refcnt++;
+ 		spin_unlock(&fs_info->reada_lock);
+ 		btrfs_dev_replace_unlock(&fs_info->dev_replace, 0);

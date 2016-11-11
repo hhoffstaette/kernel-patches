@@ -1,0 +1,26 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH 07/12] btrfs: delete unused member from superblock
+Date:   Wed,  9 Nov 2016 18:04:32 +0100
+
+'__bdev' has never been used since
+ 0b86a832a1f38abec695864ec2eaedc9d2383f1b (2008).
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 5ae63f4e60df..64c0dc3367bc 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -798,7 +798,6 @@ struct btrfs_fs_info {
+ 	spinlock_t super_lock;
+ 	struct btrfs_super_block *super_copy;
+ 	struct btrfs_super_block *super_for_commit;
+-	struct block_device *__bdev;
+ 	struct super_block *sb;
+ 	struct inode *btree_inode;
+ 	struct backing_dev_info bdi;

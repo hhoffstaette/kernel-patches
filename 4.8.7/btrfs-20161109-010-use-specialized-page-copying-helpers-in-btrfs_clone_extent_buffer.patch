@@ -1,0 +1,28 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH 10/12] btrfs: use specialized page copying helpers in btrfs_clone_extent_buffer
+Date:   Wed,  9 Nov 2016 18:04:39 +0100
+
+The copy_page is usually optimized and can be faster than memcpy.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent_io.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 45a986791fe0..0a71a85d103d 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4720,9 +4720,9 @@ struct extent_buffer *btrfs_clone_extent_buffer(struct extent_buffer *src)
+ 		WARN_ON(PageDirty(p));
+ 		SetPageUptodate(p);
+ 		new->pages[i] = p;
++		copy_page(page_address(p), page_address(src->pages[i]));
+ 	}
+ 
+-	copy_extent_buffer(new, src, 0, 0, src->len);
+ 	set_bit(EXTENT_BUFFER_UPTODATE, &new->bflags);
+ 	set_bit(EXTENT_BUFFER_DUMMY, &new->bflags);
+ 

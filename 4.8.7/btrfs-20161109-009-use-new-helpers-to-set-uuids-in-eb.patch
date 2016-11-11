@@ -1,0 +1,144 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH 09/12] btrfs: use new helpers to set uuids in eb
+Date:   Wed,  9 Nov 2016 18:04:36 +0100
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c   | 29 +++++++++--------------------
+ fs/btrfs/disk-io.c | 10 +++-------
+ fs/btrfs/ioctl.c   |  8 +++-----
+ fs/btrfs/volumes.c |  4 ++--
+ 4 files changed, 17 insertions(+), 34 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 173768767d1b..93bc38b98b3f 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -271,8 +271,7 @@ int btrfs_copy_root(struct btrfs_trans_handle *trans,
+ 	else
+ 		btrfs_set_header_owner(cow, new_root_objectid);
+ 
+-	write_extent_buffer(cow, root->fs_info->fsid, btrfs_header_fsid(),
+-			    BTRFS_FSID_SIZE);
++	write_extent_buffer_fsid(cow, root->fs_info->fsid);
+ 
+ 	WARN_ON(btrfs_header_generation(buf) > trans->transid);
+ 	if (new_root_objectid == BTRFS_TREE_RELOC_OBJECTID)
+@@ -1141,8 +1140,7 @@ static noinline int __btrfs_cow_block(struct btrfs_trans_handle *trans,
+ 	else
+ 		btrfs_set_header_owner(cow, root->root_key.objectid);
+ 
+-	write_extent_buffer(cow, root->fs_info->fsid, btrfs_header_fsid(),
+-			    BTRFS_FSID_SIZE);
++	write_extent_buffer_fsid(cow, root->fs_info->fsid);
+ 
+ 	ret = update_ref_for_cow(trans, root, buf, cow, &last_ref);
+ 	if (ret) {
+@@ -3358,11 +3356,8 @@ static noinline int insert_new_root(struct btrfs_trans_handle *trans,
+ 	btrfs_set_header_backref_rev(c, BTRFS_MIXED_BACKREF_REV);
+ 	btrfs_set_header_owner(c, root->root_key.objectid);
+ 
+-	write_extent_buffer(c, root->fs_info->fsid, btrfs_header_fsid(),
+-			    BTRFS_FSID_SIZE);
+-
+-	write_extent_buffer(c, root->fs_info->chunk_tree_uuid,
+-			    btrfs_header_chunk_tree_uuid(c), BTRFS_UUID_SIZE);
++	write_extent_buffer_fsid(c, root->fs_info->fsid);
++	write_extent_buffer_chunk_tree_uuid(c, root->fs_info->chunk_tree_uuid);
+ 
+ 	btrfs_set_node_key(c, &lower_key, 0);
+ 	btrfs_set_node_blockptr(c, 0, lower->start);
+@@ -3495,11 +3490,9 @@ static noinline int split_node(struct btrfs_trans_handle *trans,
+ 	btrfs_set_header_generation(split, trans->transid);
+ 	btrfs_set_header_backref_rev(split, BTRFS_MIXED_BACKREF_REV);
+ 	btrfs_set_header_owner(split, root->root_key.objectid);
+-	write_extent_buffer(split, root->fs_info->fsid,
+-			    btrfs_header_fsid(), BTRFS_FSID_SIZE);
+-	write_extent_buffer(split, root->fs_info->chunk_tree_uuid,
+-			    btrfs_header_chunk_tree_uuid(split),
+-			    BTRFS_UUID_SIZE);
++	write_extent_buffer_fsid(split, root->fs_info->fsid);
++	write_extent_buffer_chunk_tree_uuid(split,
++			root->fs_info->chunk_tree_uuid);
+ 
+ 	ret = tree_mod_log_eb_copy(root->fs_info, split, c, 0,
+ 				   mid, c_nritems - mid);
+@@ -4283,12 +4276,8 @@ static noinline int split_leaf(struct btrfs_trans_handle *trans,
+ 	btrfs_set_header_backref_rev(right, BTRFS_MIXED_BACKREF_REV);
+ 	btrfs_set_header_owner(right, root->root_key.objectid);
+ 	btrfs_set_header_level(right, 0);
+-	write_extent_buffer(right, fs_info->fsid,
+-			    btrfs_header_fsid(), BTRFS_FSID_SIZE);
+-
+-	write_extent_buffer(right, fs_info->chunk_tree_uuid,
+-			    btrfs_header_chunk_tree_uuid(right),
+-			    BTRFS_UUID_SIZE);
++	write_extent_buffer_fsid(right, fs_info->fsid);
++	write_extent_buffer_chunk_tree_uuid(right, fs_info->chunk_tree_uuid);
+ 
+ 	if (split == 0) {
+ 		if (mid <= slot) {
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 686d05acfdb7..21f8e597fe97 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1419,11 +1419,8 @@ struct btrfs_root *btrfs_create_tree(struct btrfs_trans_handle *trans,
+ 	btrfs_set_header_owner(leaf, objectid);
+ 	root->node = leaf;
+ 
+-	write_extent_buffer(leaf, fs_info->fsid, btrfs_header_fsid(),
+-			    BTRFS_FSID_SIZE);
+-	write_extent_buffer(leaf, fs_info->chunk_tree_uuid,
+-			    btrfs_header_chunk_tree_uuid(leaf),
+-			    BTRFS_UUID_SIZE);
++	write_extent_buffer_fsid(leaf, fs_info->fsid);
++	write_extent_buffer_chunk_tree_uuid(leaf, fs_info->chunk_tree_uuid);
+ 	btrfs_mark_buffer_dirty(leaf);
+ 
+ 	root->commit_root = btrfs_root_node(root);
+@@ -1506,8 +1503,7 @@ static struct btrfs_root *alloc_log_tree(struct btrfs_trans_handle *trans,
+ 	btrfs_set_header_owner(leaf, BTRFS_TREE_LOG_OBJECTID);
+ 	root->node = leaf;
+ 
+-	write_extent_buffer(root->node, root->fs_info->fsid,
+-			    btrfs_header_fsid(), BTRFS_FSID_SIZE);
++	write_extent_buffer_fsid(root->node, root->fs_info->fsid);
+ 	btrfs_mark_buffer_dirty(root->node);
+ 	btrfs_tree_unlock(root->node);
+ 	return root;
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 71634570943c..9376c42475c5 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -508,11 +508,9 @@ static noinline int create_subvol(struct inode *dir,
+ 	btrfs_set_header_backref_rev(leaf, BTRFS_MIXED_BACKREF_REV);
+ 	btrfs_set_header_owner(leaf, objectid);
+ 
+-	write_extent_buffer(leaf, root->fs_info->fsid, btrfs_header_fsid(),
+-			    BTRFS_FSID_SIZE);
+-	write_extent_buffer(leaf, root->fs_info->chunk_tree_uuid,
+-			    btrfs_header_chunk_tree_uuid(leaf),
+-			    BTRFS_UUID_SIZE);
++	write_extent_buffer_fsid(leaf, root->fs_info->fsid);
++	write_extent_buffer_chunk_tree_uuid(leaf,
++			root->fs_info->chunk_tree_uuid);
+ 	btrfs_mark_buffer_dirty(leaf);
+ 
+ 	inode_item = &root_item->inode;
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 71a60cc01451..5c55b0e11dde 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1595,8 +1595,8 @@ static int btrfs_alloc_dev_extent(struct btrfs_trans_handle *trans,
+ 	btrfs_set_dev_extent_chunk_objectid(leaf, extent, chunk_objectid);
+ 	btrfs_set_dev_extent_chunk_offset(leaf, extent, chunk_offset);
+ 
+-	write_extent_buffer(leaf, root->fs_info->chunk_tree_uuid,
+-		    btrfs_dev_extent_chunk_tree_uuid(extent), BTRFS_UUID_SIZE);
++	write_extent_buffer_chunk_tree_uuid(leaf,
++			root->fs_info->chunk_tree_uuid);
+ 
+ 	btrfs_set_dev_extent_length(leaf, extent, num_bytes);
+ 	btrfs_mark_buffer_dirty(leaf);

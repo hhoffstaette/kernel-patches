@@ -1,0 +1,78 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH 12/12] btrfs: add optimized version of eb to eb copy
+Date:   Wed,  9 Nov 2016 18:04:43 +0100
+
+Using copy_extent_buffer is suitable for copying betwenn buffers from an
+arbitrary offset and deals with page boundaries. This is not necessary
+when doing a full extent_buffer-to-extent_buffer copy. We can utilize
+the copy_page helper as well.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c     |  4 ++--
+ fs/btrfs/extent_io.c | 14 ++++++++++++++
+ fs/btrfs/extent_io.h |  2 ++
+ 3 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index be362b776138..25286a5912fc 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -260,7 +260,7 @@ int btrfs_copy_root(struct btrfs_trans_handle *trans,
+ 	if (IS_ERR(cow))
+ 		return PTR_ERR(cow);
+ 
+-	copy_extent_buffer(cow, buf, 0, 0, cow->len);
++	copy_extent_buffer_full(cow, buf);
+ 	btrfs_set_header_bytenr(cow, cow->start);
+ 	btrfs_set_header_generation(cow, trans->transid);
+ 	btrfs_set_header_backref_rev(cow, BTRFS_MIXED_BACKREF_REV);
+@@ -1129,7 +1129,7 @@ static noinline int __btrfs_cow_block(struct btrfs_trans_handle *trans,
+ 
+ 	/* cow is set to blocking by btrfs_init_new_buffer */
+ 
+-	copy_extent_buffer(cow, buf, 0, 0, cow->len);
++	copy_extent_buffer_full(cow, buf);
+ 	btrfs_set_header_bytenr(cow, cow->start);
+ 	btrfs_set_header_generation(cow, trans->transid);
+ 	btrfs_set_header_backref_rev(cow, BTRFS_MIXED_BACKREF_REV);
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index a7beacbe0087..333491e26742 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -5546,6 +5546,20 @@ void memzero_extent_buffer(struct extent_buffer *eb, unsigned long start,
+ 	}
+ }
+ 
++void copy_extent_buffer_full(struct extent_buffer *dst,
++			     struct extent_buffer *src)
++{
++	int i;
++	unsigned num_pages;
++
++	ASSERT(dst->len == src->len);
++
++	num_pages = num_extent_pages(dst->start, dst->len);
++	for (i = 0; i < num_pages; i++)
++		copy_page(page_address(dst->pages[i]),
++				page_address(src->pages[i]));
++}
++
+ void copy_extent_buffer(struct extent_buffer *dst, struct extent_buffer *src,
+ 			unsigned long dst_offset, unsigned long src_offset,
+ 			unsigned long len)
+diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
+index 12fe17523df2..ae64c1917d0a 100644
+--- a/fs/btrfs/extent_io.h
++++ b/fs/btrfs/extent_io.h
+@@ -410,6 +410,8 @@ void write_extent_buffer_chunk_tree_uuid(struct extent_buffer *eb,
+ 		const void *src);
+ void write_extent_buffer(struct extent_buffer *eb, const void *src,
+ 			 unsigned long start, unsigned long len);
++void copy_extent_buffer_full(struct extent_buffer *dst,
++			     struct extent_buffer *src);
+ void copy_extent_buffer(struct extent_buffer *dst, struct extent_buffer *src,
+ 			unsigned long dst_offset, unsigned long src_offset,
+ 			unsigned long len);

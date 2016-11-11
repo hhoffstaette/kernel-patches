@@ -1,0 +1,248 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH 11/12] btrfs: remove constant parameter to memset_extent_buffer and rename it
+Date:   Wed,  9 Nov 2016 18:04:41 +0100
+
+The only memset we do is to 0, so sink the parameter to the function and
+simplify all calls. Rename the function to reflect the behaviour.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c                 |  6 +++---
+ fs/btrfs/disk-io.c               |  4 ++--
+ fs/btrfs/extent-tree.c           |  2 +-
+ fs/btrfs/extent_io.c             | 10 +++++-----
+ fs/btrfs/extent_io.h             |  4 ++--
+ fs/btrfs/file-item.c             |  2 +-
+ fs/btrfs/free-space-cache.c      |  4 ++--
+ fs/btrfs/inode.c                 |  2 +-
+ fs/btrfs/ioctl.c                 |  2 +-
+ fs/btrfs/relocation.c            |  2 +-
+ fs/btrfs/tests/extent-io-tests.c |  2 +-
+ fs/btrfs/volumes.c               |  2 +-
+ 12 files changed, 21 insertions(+), 21 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 93bc38b98b3f..be362b776138 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -3348,7 +3348,7 @@ static noinline int insert_new_root(struct btrfs_trans_handle *trans,
+ 
+ 	root_add_used(root, root->nodesize);
+ 
+-	memset_extent_buffer(c, 0, 0, sizeof(struct btrfs_header));
++	memzero_extent_buffer(c, 0, sizeof(struct btrfs_header));
+ 	btrfs_set_header_nritems(c, 1);
+ 	btrfs_set_header_level(c, level);
+ 	btrfs_set_header_bytenr(c, c->start);
+@@ -3484,7 +3484,7 @@ static noinline int split_node(struct btrfs_trans_handle *trans,
+ 
+ 	root_add_used(root, root->nodesize);
+ 
+-	memset_extent_buffer(split, 0, 0, sizeof(struct btrfs_header));
++	memzero_extent_buffer(split, 0, sizeof(struct btrfs_header));
+ 	btrfs_set_header_level(split, btrfs_header_level(c));
+ 	btrfs_set_header_bytenr(split, split->start);
+ 	btrfs_set_header_generation(split, trans->transid);
+@@ -4270,7 +4270,7 @@ static noinline int split_leaf(struct btrfs_trans_handle *trans,
+ 
+ 	root_add_used(root, root->nodesize);
+ 
+-	memset_extent_buffer(right, 0, 0, sizeof(struct btrfs_header));
++	memzero_extent_buffer(right, 0, sizeof(struct btrfs_header));
+ 	btrfs_set_header_bytenr(right, right->start);
+ 	btrfs_set_header_generation(right, trans->transid);
+ 	btrfs_set_header_backref_rev(right, BTRFS_MIXED_BACKREF_REV);
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 21f8e597fe97..5d1da78f044b 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1412,7 +1412,7 @@ struct btrfs_root *btrfs_create_tree(struct btrfs_trans_handle *trans,
+ 		goto fail;
+ 	}
+ 
+-	memset_extent_buffer(leaf, 0, 0, sizeof(struct btrfs_header));
++	memzero_extent_buffer(leaf, 0, sizeof(struct btrfs_header));
+ 	btrfs_set_header_bytenr(leaf, leaf->start);
+ 	btrfs_set_header_generation(leaf, trans->transid);
+ 	btrfs_set_header_backref_rev(leaf, BTRFS_MIXED_BACKREF_REV);
+@@ -1496,7 +1496,7 @@ static struct btrfs_root *alloc_log_tree(struct btrfs_trans_handle *trans,
+ 		return ERR_CAST(leaf);
+ 	}
+ 
+-	memset_extent_buffer(leaf, 0, 0, sizeof(struct btrfs_header));
++	memzero_extent_buffer(leaf, 0, sizeof(struct btrfs_header));
+ 	btrfs_set_header_bytenr(leaf, leaf->start);
+ 	btrfs_set_header_generation(leaf, trans->transid);
+ 	btrfs_set_header_backref_rev(leaf, BTRFS_MIXED_BACKREF_REV);
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index e453c7a13bd1..f20478976ae2 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -1114,7 +1114,7 @@ static int convert_extent_item_v0(struct btrfs_trans_handle *trans,
+ 				       BTRFS_BLOCK_FLAG_FULL_BACKREF);
+ 		bi = (struct btrfs_tree_block_info *)(item + 1);
+ 		/* FIXME: get first key of the block */
+-		memset_extent_buffer(leaf, 0, (unsigned long)bi, sizeof(*bi));
++		memzero_extent_buffer(leaf, (unsigned long)bi, sizeof(*bi));
+ 		btrfs_set_tree_block_level(leaf, bi, (int)owner);
+ 	} else {
+ 		btrfs_set_extent_flags(leaf, item, BTRFS_EXTENT_FLAG_DATA);
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 0a71a85d103d..a7beacbe0087 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -3743,7 +3743,7 @@ static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
+ 	if (btrfs_header_level(eb) > 0) {
+ 		end = btrfs_node_key_ptr_offset(nritems);
+ 
+-		memset_extent_buffer(eb, 0, end, eb->len - end);
++		memzero_extent_buffer(eb, end, eb->len - end);
+ 	} else {
+ 		/*
+ 		 * leaf:
+@@ -3752,7 +3752,7 @@ static noinline_for_stack int write_one_eb(struct extent_buffer *eb,
+ 		start = btrfs_item_nr_offset(nritems);
+ 		end = btrfs_leaf_data(eb) +
+ 		      leaf_data_end(fs_info->tree_root, eb);
+-		memset_extent_buffer(eb, 0, start, end - start);
++		memzero_extent_buffer(eb, start, end - start);
+ 	}
+ 
+ 	for (i = 0; i < num_pages; i++) {
+@@ -5517,8 +5517,8 @@ void write_extent_buffer(struct extent_buffer *eb, const void *srcv,
+ 	}
+ }
+ 
+-void memset_extent_buffer(struct extent_buffer *eb, char c,
+-			  unsigned long start, unsigned long len)
++void memzero_extent_buffer(struct extent_buffer *eb, unsigned long start,
++		unsigned long len)
+ {
+ 	size_t cur;
+ 	size_t offset;
+@@ -5538,7 +5538,7 @@ void memset_extent_buffer(struct extent_buffer *eb, char c,
+ 
+ 		cur = min(len, PAGE_SIZE - offset);
+ 		kaddr = page_address(page);
+-		memset(kaddr + offset, c, cur);
++		memset(kaddr + offset, 0, cur);
+ 
+ 		len -= cur;
+ 		offset = 0;
+diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
+index 065c77d43921..12fe17523df2 100644
+--- a/fs/btrfs/extent_io.h
++++ b/fs/btrfs/extent_io.h
+@@ -417,8 +417,8 @@ void memcpy_extent_buffer(struct extent_buffer *dst, unsigned long dst_offset,
+ 			   unsigned long src_offset, unsigned long len);
+ void memmove_extent_buffer(struct extent_buffer *dst, unsigned long dst_offset,
+ 			   unsigned long src_offset, unsigned long len);
+-void memset_extent_buffer(struct extent_buffer *eb, char c,
+-			  unsigned long start, unsigned long len);
++void memzero_extent_buffer(struct extent_buffer *eb, unsigned long start,
++			   unsigned long len);
+ int extent_buffer_test_bit(struct extent_buffer *eb, unsigned long start,
+ 			   unsigned long pos);
+ void extent_buffer_bitmap_set(struct extent_buffer *eb, unsigned long start,
+diff --git a/fs/btrfs/file-item.c b/fs/btrfs/file-item.c
+index d0d571c47d33..43418c08b110 100644
+--- a/fs/btrfs/file-item.c
++++ b/fs/btrfs/file-item.c
+@@ -689,7 +689,7 @@ int btrfs_del_csums(struct btrfs_trans_handle *trans,
+ 			item_offset = btrfs_item_ptr_offset(leaf,
+ 							    path->slots[0]);
+ 
+-			memset_extent_buffer(leaf, 0, item_offset + offset,
++			memzero_extent_buffer(leaf, item_offset + offset,
+ 					     shift_len);
+ 			key.offset = bytenr;
+ 
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index e4b48f377d3a..a754865b3cb1 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -153,7 +153,7 @@ static int __create_free_space_inode(struct btrfs_root *root,
+ 	inode_item = btrfs_item_ptr(leaf, path->slots[0],
+ 				    struct btrfs_inode_item);
+ 	btrfs_item_key(leaf, &disk_key, path->slots[0]);
+-	memset_extent_buffer(leaf, 0, (unsigned long)inode_item,
++	memzero_extent_buffer(leaf, (unsigned long)inode_item,
+ 			     sizeof(*inode_item));
+ 	btrfs_set_inode_generation(leaf, inode_item, trans->transid);
+ 	btrfs_set_inode_size(leaf, inode_item, 0);
+@@ -181,7 +181,7 @@ static int __create_free_space_inode(struct btrfs_root *root,
+ 	leaf = path->nodes[0];
+ 	header = btrfs_item_ptr(leaf, path->slots[0],
+ 				struct btrfs_free_space_header);
+-	memset_extent_buffer(leaf, 0, (unsigned long)header, sizeof(*header));
++	memzero_extent_buffer(leaf, (unsigned long)header, sizeof(*header));
+ 	btrfs_set_free_space_key(leaf, header, &disk_key);
+ 	btrfs_mark_buffer_dirty(leaf);
+ 	btrfs_release_path(path);
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 1f980efbb2e8..1564bb09776a 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -6277,7 +6277,7 @@ static struct inode *btrfs_new_inode(struct btrfs_trans_handle *trans,
+ 
+ 	inode_item = btrfs_item_ptr(path->nodes[0], path->slots[0],
+ 				  struct btrfs_inode_item);
+-	memset_extent_buffer(path->nodes[0], 0, (unsigned long)inode_item,
++	memzero_extent_buffer(path->nodes[0], (unsigned long)inode_item,
+ 			     sizeof(*inode_item));
+ 	fill_inode_item(trans, path->nodes[0], inode_item, inode);
+ 
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 9376c42475c5..d8a28f8cf6b0 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -502,7 +502,7 @@ static noinline int create_subvol(struct inode *dir,
+ 		goto fail;
+ 	}
+ 
+-	memset_extent_buffer(leaf, 0, 0, sizeof(struct btrfs_header));
++	memzero_extent_buffer(leaf, 0, sizeof(struct btrfs_header));
+ 	btrfs_set_header_bytenr(leaf, leaf->start);
+ 	btrfs_set_header_generation(leaf, trans->transid);
+ 	btrfs_set_header_backref_rev(leaf, BTRFS_MIXED_BACKREF_REV);
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index c4af0cdb783d..ca51710b36d3 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -4255,7 +4255,7 @@ static int __insert_orphan_inode(struct btrfs_trans_handle *trans,
+ 
+ 	leaf = path->nodes[0];
+ 	item = btrfs_item_ptr(leaf, path->slots[0], struct btrfs_inode_item);
+-	memset_extent_buffer(leaf, 0, (unsigned long)item, sizeof(*item));
++	memzero_extent_buffer(leaf, (unsigned long)item, sizeof(*item));
+ 	btrfs_set_inode_generation(leaf, item, 1);
+ 	btrfs_set_inode_size(leaf, item, 0);
+ 	btrfs_set_inode_mode(leaf, item, S_IFREG | 0600);
+diff --git a/fs/btrfs/tests/extent-io-tests.c b/fs/btrfs/tests/extent-io-tests.c
+index caad80bb9bd0..2c7a0a922510 100644
+--- a/fs/btrfs/tests/extent-io-tests.c
++++ b/fs/btrfs/tests/extent-io-tests.c
+@@ -306,7 +306,7 @@ static int __test_eb_bitmaps(unsigned long *bitmap, struct extent_buffer *eb,
+ 	int ret;
+ 
+ 	memset(bitmap, 0, len);
+-	memset_extent_buffer(eb, 0, 0, len);
++	memzero_extent_buffer(eb, 0, len);
+ 	if (memcmp_extent_buffer(eb, bitmap, 0, len) != 0) {
+ 		test_msg("Bitmap was not zeroed\n");
+ 		return -EINVAL;
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 5c55b0e11dde..934b474e02e3 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -3062,7 +3062,7 @@ static int insert_balance_item(struct btrfs_root *root,
+ 	leaf = path->nodes[0];
+ 	item = btrfs_item_ptr(leaf, path->slots[0], struct btrfs_balance_item);
+ 
+-	memset_extent_buffer(leaf, 0, (unsigned long)item, sizeof(*item));
++	memzero_extent_buffer(leaf, (unsigned long)item, sizeof(*item));
+ 
+ 	btrfs_cpu_balance_args_to_disk(&disk_bargs, &bctl->data);
+ 	btrfs_set_balance_data(leaf, item, &disk_bargs);
