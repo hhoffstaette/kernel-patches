@@ -1,0 +1,58 @@
+From:   Josef Bacik <jbacik@fb.com>
+To:     <linux-btrfs@vger.kernel.org>, <kernel-team@fb.com>
+Subject: [PATCH 2/2] Btrfs: abort transaction if fill_holes() fails
+Date:   Mon, 14 Nov 2016 14:06:22 -0500
+
+At this point we will have dropped extent entries from the file, so if we fail
+to insert the new hole entries then we are leaving the fs in a corrupt state
+(albeit an easily fixed one).  Abort the transaciton if this happens so we can
+avoid corrupting the fs.  Thanks,
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+---
+ fs/btrfs/file.c | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 1c15a98..d6fc719 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2234,9 +2234,14 @@ static int fill_holes(struct btrfs_trans_handle *trans, struct inode *inode,
+ 	key.offset = offset;
+ 
+ 	ret = btrfs_search_slot(trans, root, &key, path, 0, 1);
+-	if (ret < 0)
++	if (ret <= 0) {
++		/* We should have dropped this offset, so if we find it then
++		 * something has gone horribly wrong.
++		 */
++		if (ret == 0)
++			ret = -EINVAL;
+ 		return ret;
+-	BUG_ON(!ret);
++	}
+ 
+ 	leaf = path->nodes[0];
+ 	if (hole_mergeable(inode, leaf, path->slots[0]-1, offset, end)) {
+@@ -2539,6 +2544,12 @@ static int btrfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 			ret = fill_holes(trans, inode, path, cur_offset,
+ 					 drop_end);
+ 			if (ret) {
++				/* If we failed then we didn't insert our hole
++				 * entries for the area we dropped, so now the
++				 * fs is corrupted, so we must abort the
++				 * transaction.
++				 */
++				btrfs_abort_transaction(trans, ret);
+ 				err = ret;
+ 				break;
+ 			}
+@@ -2603,6 +2614,8 @@ static int btrfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 	if (cur_offset < ino_size && cur_offset < drop_end) {
+ 		ret = fill_holes(trans, inode, path, cur_offset, drop_end);
+ 		if (ret) {
++			/* Same comment as above. */
++			btrfs_abort_transaction(trans, ret);
+ 			err = ret;
+ 			goto out_trans;
+ 		}
