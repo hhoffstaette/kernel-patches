@@ -1,7 +1,7 @@
 From:   Josef Bacik <jbacik@fb.com>
 To:     <linux-btrfs@vger.kernel.org>, <kernel-team@fb.com>
-Subject: [PATCH 1/2] Btrfs: fix file extent corruption
-Date:   Mon, 14 Nov 2016 14:06:21 -0500
+Subject: [PATCH 1/2][V2] Btrfs: fix file extent corruption
+Date:   Wed, 16 Nov 2016 09:13:39 -0500
 
 In order to do hole punching we have a block reserve to hold the reservation we
 need to drop the extents in our range.  Since we could end up dropping a lot of
@@ -18,18 +18,21 @@ that remains to be dropped is actually dropped.  Thanks,
 
 Signed-off-by: Josef Bacik <jbacik@fb.com>
 ---
- fs/btrfs/file.c | 13 +++++++++++--
- 1 file changed, 11 insertions(+), 2 deletions(-)
+V1->V2:
+- don't call fill_holes if our drop_end is == start.
+
+ fs/btrfs/file.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
 
 diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
-index cbefdc8..1c15a98 100644
+index cbefdc8..23859e7 100644
 --- a/fs/btrfs/file.c
 +++ b/fs/btrfs/file.c
 @@ -706,6 +706,7 @@ int __btrfs_drop_extents(struct btrfs_trans_handle *trans,
  	u64 num_bytes = 0;
  	u64 extent_offset = 0;
  	u64 extent_end = 0;
-+	u64 last_end = 0;
++	u64 last_end = start;
  	int del_nr = 0;
  	int del_slot = 0;
  	int extent_type;
@@ -67,3 +70,12 @@ index cbefdc8..1c15a98 100644
  	return ret;
  }
  
+@@ -2526,7 +2535,7 @@ static int btrfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 
+ 		trans->block_rsv = &root->fs_info->trans_block_rsv;
+ 
+-		if (cur_offset < ino_size) {
++		if (cur_offset < drop_end && cur_offset < ino_size) {
+ 			ret = fill_holes(trans, inode, path, cur_offset,
+ 					 drop_end);
+ 			if (ret) {
