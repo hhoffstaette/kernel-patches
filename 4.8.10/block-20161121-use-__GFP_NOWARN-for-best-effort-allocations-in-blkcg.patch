@@ -1,0 +1,84 @@
+From: Tejun Heo <tj@kernel.org>
+Subject: [PATCH] block,blkcg: use __GFP_NOWARN for best-effort allocations in blkcg
+Date: Mon, 21 Nov 2016 18:03:32 -0500
+Cc: Vlastimil Babka <vbabka@suse.cz>, linux-mm@kvack.org,
+	Michal Hocko <mhocko@kernel.org>,
+	Linus Torvalds <torvalds@linux-foundation.org>,
+	LKML <linux-kernel@vger.kernel.org>,
+	Joonsoo Kim <iamjoonsoo.kim@lge.com>,
+	Marc MERLIN <marc@merlins.org>
+To: Jens Axboe <axboe@kernel.dk>
+
+blkcg allocates some per-cgroup data structures with GFP_NOWAIT and
+when that fails falls back to operations which aren't specific to the
+cgroup.  Occassional failures are expected under pressure and falling
+back to non-cgroup operation is the right thing to do.
+
+Unfortunately, I forgot to add __GFP_NOWARN to these allocations and
+these expected failures end up creating a lot of noise.  Add
+__GFP_NOWARN.
+
+Signed-off-by: Tejun Heo <tj@kernel.org>
+Reported-by: Marc MERLIN <marc@merlins.org>
+Reported-by: Vlastimil Babka <vbabka@suse.cz>
+---
+ block/blk-cgroup.c  |    9 +++++----
+ block/cfq-iosched.c |    3 ++-
+ 2 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/block/blk-cgroup.c b/block/blk-cgroup.c
+index b08ccbb..8ba0af7 100644
+--- a/block/blk-cgroup.c
++++ b/block/blk-cgroup.c
+@@ -185,7 +185,8 @@ static struct blkcg_gq *blkg_create(struct blkcg *blkcg,
+ 	}
+ 
+ 	wb_congested = wb_congested_get_create(&q->backing_dev_info,
+-					       blkcg->css.id, GFP_NOWAIT);
++					       blkcg->css.id,
++					       GFP_NOWAIT | __GFP_NOWARN);
+ 	if (!wb_congested) {
+ 		ret = -ENOMEM;
+ 		goto err_put_css;
+@@ -193,7 +194,7 @@ static struct blkcg_gq *blkg_create(struct blkcg *blkcg,
+ 
+ 	/* allocate */
+ 	if (!new_blkg) {
+-		new_blkg = blkg_alloc(blkcg, q, GFP_NOWAIT);
++		new_blkg = blkg_alloc(blkcg, q, GFP_NOWAIT | __GFP_NOWARN);
+ 		if (unlikely(!new_blkg)) {
+ 			ret = -ENOMEM;
+ 			goto err_put_congested;
+@@ -1022,7 +1023,7 @@ blkcg_css_alloc(struct cgroup_subsys_state *parent_css)
+ 	}
+ 
+ 	spin_lock_init(&blkcg->lock);
+-	INIT_RADIX_TREE(&blkcg->blkg_tree, GFP_NOWAIT);
++	INIT_RADIX_TREE(&blkcg->blkg_tree, GFP_NOWAIT | __GFP_NOWARN);
+ 	INIT_HLIST_HEAD(&blkcg->blkg_list);
+ #ifdef CONFIG_CGROUP_WRITEBACK
+ 	INIT_LIST_HEAD(&blkcg->cgwb_list);
+@@ -1240,7 +1241,7 @@ int blkcg_activate_policy(struct request_queue *q,
+ 		if (blkg->pd[pol->plid])
+ 			continue;
+ 
+-		pd = pol->pd_alloc_fn(GFP_NOWAIT, q->node);
++		pd = pol->pd_alloc_fn(GFP_NOWAIT | __GFP_NOWARN, q->node);
+ 		if (!pd)
+ 			swap(pd, pd_prealloc);
+ 		if (!pd) {
+diff --git a/block/cfq-iosched.c b/block/cfq-iosched.c
+index 5e24d88..b4c3b6c 100644
+--- a/block/cfq-iosched.c
++++ b/block/cfq-iosched.c
+@@ -3854,7 +3854,8 @@ cfq_get_queue(struct cfq_data *cfqd, bool is_sync, struct cfq_io_cq *cic,
+ 			goto out;
+ 	}
+ 
+-	cfqq = kmem_cache_alloc_node(cfq_pool, GFP_NOWAIT | __GFP_ZERO,
++	cfqq = kmem_cache_alloc_node(cfq_pool,
++				     GFP_NOWAIT | __GFP_ZERO | __GFP_NOWARN,
+ 				     cfqd->queue->node);
+ 	if (!cfqq) {
+ 		cfqq = &cfqd->oom_cfqq;
+
