@@ -1,0 +1,60 @@
+From 2cdaf447e8c411bb61d3d1c91fafbbdd59ef0db2 Mon Sep 17 00:00:00 2001
+From: Robbie Ko <robbieko@synology.com>
+Date: Fri, 28 Oct 2016 10:32:54 +0800
+Subject: Btrfs: fix enospc in hole punching
+
+The hole punching can result in adding new leafs (and as a consequence
+new nodes) to the tree because when we find file extent items that span
+beyond the hole range we may end up not deleting them (just adjusting
+them, reducing their range by reducing their length or increasing their
+offset field) and add new file extent items representing holes.
+
+So after splitting a leaf (therefore creating a new one) to insert a new
+file extent item representing a hole, a new node might be added to each
+level of the tree in the worst case scenario (since there's a new key
+and every parent node was full).
+
+For example if a file has an extent item representing the range 0 to 64Mb
+and we punch a hole in the range 1Mb to 20Mb, the existing extent item is
+duplicated and one of the copies is adjusted to represent the range 0 to
+1Mb, the other copy adjusted to represent the range 20Mb to 64Mb, and a
+new file extent item representing a hole in the range 1Mb to 20Mb is
+inserted.
+
+Fix this by using btrfs_calc_trans_metadata_size() instead of
+btrfs_calc_trunc_metadata_size(), so that enough metadata space is
+reserved for the worst possible case.
+
+Signed-off-by: Robbie Ko <robbieko@synology.com>
+Reviewed-by: Filipe Manana <fdmanana@suse.com>
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+[Modified changelog for clarity and correctness]
+---
+ fs/btrfs/file.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 72a180d..4129de5 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2347,7 +2347,7 @@ static int btrfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 	u64 tail_len;
+ 	u64 orig_start = offset;
+ 	u64 cur_offset;
+-	u64 min_size = btrfs_calc_trunc_metadata_size(root, 1);
++	u64 min_size = btrfs_calc_trans_metadata_size(root, 1);
+ 	u64 drop_end;
+ 	int ret = 0;
+ 	int err = 0;
+@@ -2494,7 +2494,7 @@ static int btrfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 		ret = -ENOMEM;
+ 		goto out_free;
+ 	}
+-	rsv->size = btrfs_calc_trunc_metadata_size(root, 1);
++	rsv->size = btrfs_calc_trans_metadata_size(root, 1);
+ 	rsv->failfast = 1;
+ 
+ 	/*
+-- 
+cgit v0.12
+
