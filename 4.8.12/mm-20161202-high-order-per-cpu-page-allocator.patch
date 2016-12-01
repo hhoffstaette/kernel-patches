@@ -1,17 +1,16 @@
 From: Mel Gorman <mgorman@techsingularity.net>
-Subject: [PATCH] mm: page_alloc: High-order per-cpu page allocator v3
-Date: Sun, 27 Nov 2016 13:19:54 +0000
+Subject: [PATCH 2/2] mm: page_alloc: High-order per-cpu page allocator v6
+Date: Fri,  2 Dec 2016 11:29:51 +0000
 Cc: Christoph Lameter <cl@linux.com>,
 	Michal Hocko <mhocko@suse.com>,
 	Vlastimil Babka <vbabka@suse.cz>,
 	Johannes Weiner <hannes@cmpxchg.org>,
+	Jesper Dangaard Brouer <brouer@redhat.com>,
+	Joonsoo Kim <iamjoonsoo.kim@lge.com>,
 	Linux-MM <linux-mm@kvack.org>,
 	Linux-Kernel <linux-kernel@vger.kernel.org>,
 	Mel Gorman <mgorman@techsingularity.net>
 To: Andrew Morton <akpm@linux-foundation.org>
-
-Changelog since v2
-o Correct initialisation to avoid -Woverflow warning
 
 SLUB has been the default small kernel object allocator for quite some time
 but it is not universally used due to performance concerns and a reliance
@@ -48,47 +47,47 @@ testing between two physical hosts.
 
 2-socket modern machine
                                 4.9.0-rc5             4.9.0-rc5
-                                  vanilla             hopcpu-v3
-Hmean    send-64         178.38 (  0.00%)      256.74 ( 43.93%)
-Hmean    send-128        351.49 (  0.00%)      507.52 ( 44.39%)
-Hmean    send-256        671.23 (  0.00%)     1004.19 ( 49.60%)
-Hmean    send-1024      2663.60 (  0.00%)     3910.42 ( 46.81%)
-Hmean    send-2048      5126.53 (  0.00%)     7562.13 ( 47.51%)
-Hmean    send-3312      7949.99 (  0.00%)    11565.98 ( 45.48%)
-Hmean    send-4096      9433.56 (  0.00%)    12929.67 ( 37.06%)
-Hmean    send-8192     15940.64 (  0.00%)    21587.63 ( 35.43%)
-Hmean    send-16384    26699.54 (  0.00%)    32013.79 ( 19.90%)
-Hmean    recv-64         178.38 (  0.00%)      256.72 ( 43.92%)
-Hmean    recv-128        351.49 (  0.00%)      507.47 ( 44.38%)
-Hmean    recv-256        671.20 (  0.00%)     1003.95 ( 49.57%)
-Hmean    recv-1024      2663.45 (  0.00%)     3909.70 ( 46.79%)
-Hmean    recv-2048      5126.26 (  0.00%)     7560.67 ( 47.49%)
-Hmean    recv-3312      7949.50 (  0.00%)    11564.63 ( 45.48%)
-Hmean    recv-4096      9433.04 (  0.00%)    12927.48 ( 37.04%)
-Hmean    recv-8192     15939.64 (  0.00%)    21584.59 ( 35.41%)
-Hmean    recv-16384    26698.44 (  0.00%)    32009.77 ( 19.89%)
+                                  vanilla             hopcpu-v5
+Hmean    send-64         178.38 (  0.00%)      260.54 ( 46.06%)
+Hmean    send-128        351.49 (  0.00%)      518.56 ( 47.53%)
+Hmean    send-256        671.23 (  0.00%)     1005.72 ( 49.83%)
+Hmean    send-1024      2663.60 (  0.00%)     3880.54 ( 45.69%)
+Hmean    send-2048      5126.53 (  0.00%)     7545.38 ( 47.18%)
+Hmean    send-3312      7949.99 (  0.00%)    11324.34 ( 42.44%)
+Hmean    send-4096      9433.56 (  0.00%)    12818.85 ( 35.89%)
+Hmean    send-8192     15940.64 (  0.00%)    21404.98 ( 34.28%)
+Hmean    send-16384    26699.54 (  0.00%)    32810.08 ( 22.89%)
+Hmean    recv-64         178.38 (  0.00%)      260.52 ( 46.05%)
+Hmean    recv-128        351.49 (  0.00%)      518.53 ( 47.53%)
+Hmean    recv-256        671.20 (  0.00%)     1005.42 ( 49.79%)
+Hmean    recv-1024      2663.45 (  0.00%)     3879.75 ( 45.67%)
+Hmean    recv-2048      5126.26 (  0.00%)     7544.23 ( 47.17%)
+Hmean    recv-3312      7949.50 (  0.00%)    11322.52 ( 42.43%)
+Hmean    recv-4096      9433.04 (  0.00%)    12816.68 ( 35.87%)
+Hmean    recv-8192     15939.64 (  0.00%)    21402.75 ( 34.27%)
+Hmean    recv-16384    26698.44 (  0.00%)    32806.81 ( 22.88%)
 
 1-socket 6 year old machine
                                 4.9.0-rc5             4.9.0-rc5
-                                  vanilla             hopcpu-v3
-Hmean    send-64          87.47 (  0.00%)      127.14 ( 45.36%)
-Hmean    send-128        174.36 (  0.00%)      256.42 ( 47.06%)
-Hmean    send-256        347.52 (  0.00%)      509.41 ( 46.59%)
-Hmean    send-1024      1363.03 (  0.00%)     1991.54 ( 46.11%)
-Hmean    send-2048      2632.68 (  0.00%)     3759.51 ( 42.80%)
-Hmean    send-3312      4123.19 (  0.00%)     5873.28 ( 42.45%)
-Hmean    send-4096      5056.48 (  0.00%)     7072.81 ( 39.88%)
-Hmean    send-8192      8784.22 (  0.00%)    12143.92 ( 38.25%)
-Hmean    send-16384    15081.60 (  0.00%)    19812.71 ( 31.37%)
-Hmean    recv-64          86.19 (  0.00%)      126.59 ( 46.87%)
-Hmean    recv-128        173.93 (  0.00%)      255.21 ( 46.73%)
-Hmean    recv-256        346.19 (  0.00%)      506.72 ( 46.37%)
-Hmean    recv-1024      1358.28 (  0.00%)     1980.03 ( 45.77%)
-Hmean    recv-2048      2623.45 (  0.00%)     3729.35 ( 42.15%)
-Hmean    recv-3312      4108.63 (  0.00%)     5831.47 ( 41.93%)
-Hmean    recv-4096      5037.25 (  0.00%)     7021.59 ( 39.39%)
-Hmean    recv-8192      8762.32 (  0.00%)    12072.44 ( 37.78%)
-Hmean    recv-16384    15042.36 (  0.00%)    19690.14 ( 30.90%)
+                                  vanilla             hopcpu-v4
+Hmean    send-64          87.47 (  0.00%)      127.01 ( 45.21%)
+Hmean    send-128        174.36 (  0.00%)      254.86 ( 46.17%)
+Hmean    send-256        347.52 (  0.00%)      505.91 ( 45.58%)
+Hmean    send-1024      1363.03 (  0.00%)     1962.49 ( 43.98%)
+Hmean    send-2048      2632.68 (  0.00%)     3731.74 ( 41.75%)
+Hmean    send-3312      4123.19 (  0.00%)     5859.08 ( 42.10%)
+Hmean    send-4096      5056.48 (  0.00%)     7058.00 ( 39.58%)
+Hmean    send-8192      8784.22 (  0.00%)    12134.53 ( 38.14%)
+Hmean    send-16384    15081.60 (  0.00%)    19638.90 ( 30.22%)
+Hmean    recv-64          86.19 (  0.00%)      126.34 ( 46.58%)
+Hmean    recv-128        173.93 (  0.00%)      253.51 ( 45.75%)
+Hmean    recv-256        346.19 (  0.00%)      503.34 ( 45.40%)
+Hmean    recv-1024      1358.28 (  0.00%)     1951.63 ( 43.68%)
+Hmean    recv-2048      2623.45 (  0.00%)     3701.67 ( 41.10%)
+Hmean    recv-3312      4108.63 (  0.00%)     5817.75 ( 41.60%)
+Hmean    recv-4096      5037.25 (  0.00%)     7004.79 ( 39.06%)
+Hmean    recv-8192      8762.32 (  0.00%)    12059.83 ( 37.63%)
+Hmean    recv-16384    15042.36 (  0.00%)    19514.33 ( 29.73%)
 
 This is somewhat dramatic but it's also not universal. For example, it was
 observed on an older HP machine using pcc-cpufreq that there was almost
@@ -103,31 +102,31 @@ The observations on sockperf are different.
 2-socket modern machine
 sockperf-tcp-throughput
                          4.9.0-rc5             4.9.0-rc5
-                           vanilla             hopcpu-v3
-Hmean    14        93.90 (  0.00%)       92.79 ( -1.18%)
-Hmean    100     1211.02 (  0.00%)     1286.66 (  6.25%)
-Hmean    300     3081.59 (  0.00%)     3347.84 (  8.64%)
-Hmean    500     4614.19 (  0.00%)     4953.23 (  7.35%)
-Hmean    850     6521.74 (  0.00%)     6951.72 (  6.59%)
-Stddev   14         0.89 (  0.00%)        3.24 (-264.75%)
-Stddev   100        5.95 (  0.00%)        8.88 (-49.27%)
-Stddev   300       11.16 (  0.00%)       28.13 (-151.98%)
-Stddev   500       36.32 (  0.00%)       42.07 (-15.84%)
-Stddev   850       29.61 (  0.00%)       66.73 (-125.36%)
+                           vanilla             hopcpu-v5
+Hmean    14        93.90 (  0.00%)       92.74 ( -1.23%)
+Hmean    100     1211.02 (  0.00%)     1284.36 (  6.05%)
+Hmean    300     6016.95 (  0.00%)     6149.26 (  2.20%)
+Hmean    500     8846.20 (  0.00%)     8988.84 (  1.61%)
+Hmean    850    12280.71 (  0.00%)    12434.78 (  1.25%)
+Stddev   14         5.32 (  0.00%)        4.79 (  9.88%)
+Stddev   100       35.32 (  0.00%)       74.20 (-110.06%)
+Stddev   300      132.63 (  0.00%)       65.50 ( 50.61%)
+Stddev   500      152.90 (  0.00%)      188.67 (-23.40%)
+Stddev   850      221.46 (  0.00%)      257.61 (-16.32%)
 
 sockperf-udp-throughput
                          4.9.0-rc5             4.9.0-rc5
-                           vanilla             hopcpu-v3
-Hmean    14        16.82 (  0.00%)       25.23 ( 50.03%)
-Hmean    100      119.91 (  0.00%)      180.63 ( 50.65%)
-Hmean    300      358.11 (  0.00%)      539.29 ( 50.59%)
-Hmean    500      595.16 (  0.00%)      892.15 ( 49.90%)
-Hmean    850      989.44 (  0.00%)     1496.01 ( 51.20%)
-Stddev   14         0.05 (  0.00%)        0.10 (-116.02%)
-Stddev   100        0.53 (  0.00%)        1.12 (-111.23%)
-Stddev   300        1.43 (  0.00%)        1.58 (-10.21%)
-Stddev   500        3.93 (  0.00%)        5.14 (-30.95%)
-Stddev   850        4.02 (  0.00%)        6.46 (-60.64%)
+                           vanilla             hopcpu-v5
+Hmean    14        36.32 (  0.00%)       51.25 ( 41.09%)
+Hmean    100      258.41 (  0.00%)      355.76 ( 37.67%)
+Hmean    300      773.96 (  0.00%)     1054.13 ( 36.20%)
+Hmean    500     1291.07 (  0.00%)     1758.21 ( 36.18%)
+Hmean    850     2137.88 (  0.00%)     2939.52 ( 37.50%)
+Stddev   14         0.75 (  0.00%)        1.21 (-61.36%)
+Stddev   100        9.02 (  0.00%)       11.53 (-27.89%)
+Stddev   300       13.66 (  0.00%)       31.24 (-128.62%)
+Stddev   500       25.01 (  0.00%)       53.44 (-113.67%)
+Stddev   850       37.72 (  0.00%)       70.05 (-85.71%)
 
 Note that the improvements for TCP are nowhere near as dramatic as netperf,
 there is a slight loss for small packets and it's much more variable. While
@@ -145,7 +144,7 @@ is imapcted
 1-socket machine
 hackbench-process-pipes
                         4.9.0-rc5             4.9.0-rc5
-                          vanilla        highmark-v1r12
+                          vanilla           highmark-v5
 Amean    1      12.9637 (  0.00%)     13.1807 ( -1.67%)
 Amean    3      13.4770 (  0.00%)     13.6803 ( -1.51%)
 Amean    5      18.5333 (  0.00%)     18.7383 ( -1.11%)
@@ -189,10 +188,14 @@ helps a lot more workloads than it hurts and intuitively, avoiding the
 zone->lock in some cases is a good thing.
 
 Signed-off-by: Mel Gorman <mgorman@techsingularity.net>
+Acked-by: Vlastimil Babka <vbabka@suse.cz>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Acked-by: Jesper Dangaard Brouer <brouer@redhat.com>
+Acked-by: Michal Hocko <mhocko@suse.com>
 ---
- include/linux/mmzone.h |  20 +++++++++-
- mm/page_alloc.c        | 105 +++++++++++++++++++++++++++++--------------------
- 2 files changed, 82 insertions(+), 43 deletions(-)
+ include/linux/mmzone.h |  20 ++++++++-
+ mm/page_alloc.c        | 117 +++++++++++++++++++++++++++++++------------------
+ 2 files changed, 93 insertions(+), 44 deletions(-)
 
 diff --git a/include/linux/mmzone.h b/include/linux/mmzone.h
 index 0f088f3a2fed..54032ab2f4f9 100644
@@ -233,7 +236,7 @@ index 0f088f3a2fed..54032ab2f4f9 100644
  
  struct per_cpu_pageset {
 diff --git a/mm/page_alloc.c b/mm/page_alloc.c
-index 6de9440e3ae2..91dc68c2a717 100644
+index 34ada718ef47..b0f3802482b4 100644
 --- a/mm/page_alloc.c
 +++ b/mm/page_alloc.c
 @@ -1050,9 +1050,9 @@ static __always_inline bool free_pages_prepare(struct page *page,
@@ -310,7 +313,12 @@ index 6de9440e3ae2..91dc68c2a717 100644
  		do {
  			int mt;	/* migratetype of the to-be-freed page */
  
-@@ -1135,11 +1137,14 @@ static void free_pcppages_bulk(struct zone *zone, int count,
+@@ -1132,14 +1134,17 @@ static void free_pcppages_bulk(struct zone *zone, int count,
+ 			if (unlikely(isolated_pageblocks))
+ 				mt = get_pageblock_migratetype(page);
+ 
++			nr_freed += (1 << order);
++			count -= (1 << order);
  			if (bulkfree_pcp_prepare(page))
  				continue;
  
@@ -319,8 +327,6 @@ index 6de9440e3ae2..91dc68c2a717 100644
 -		} while (--count && --batch_free && !list_empty(list));
 +			__free_one_page(page, page_to_pfn(page), zone, order, mt);
 +			trace_mm_page_pcpu_drain(page, order, mt);
-+			nr_freed += (1 << order);
-+			count -= (1 << order);
 +		} while (count > 0 && --batch_free && !list_empty(list));
  	}
  	spin_unlock(&zone->lock);
@@ -328,7 +334,7 @@ index 6de9440e3ae2..91dc68c2a717 100644
  }
  
  static void free_one_page(struct zone *zone,
-@@ -2243,10 +2248,8 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
+@@ -2251,10 +2256,8 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
  	local_irq_save(flags);
  	batch = READ_ONCE(pcp->batch);
  	to_drain = min(pcp->count, batch);
@@ -340,7 +346,7 @@ index 6de9440e3ae2..91dc68c2a717 100644
  	local_irq_restore(flags);
  }
  #endif
-@@ -2268,10 +2271,8 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
+@@ -2276,10 +2279,8 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
  	pset = per_cpu_ptr(zone->pageset, cpu);
  
  	pcp = &pset->pcp;
@@ -352,7 +358,7 @@ index 6de9440e3ae2..91dc68c2a717 100644
  	local_irq_restore(flags);
  }
  
-@@ -2403,18 +2404,18 @@ void mark_free_pages(struct zone *zone)
+@@ -2411,18 +2412,18 @@ void mark_free_pages(struct zone *zone)
  #endif /* CONFIG_PM */
  
  /*
@@ -375,7 +381,7 @@ index 6de9440e3ae2..91dc68c2a717 100644
  		return;
  
  	migratetype = get_pfnblock_migratetype(page, pfn);
-@@ -2431,28 +2432,33 @@ void free_hot_cold_page(struct page *page, bool cold)
+@@ -2439,28 +2440,33 @@ void free_hot_cold_page(struct page *page, bool cold)
  	 */
  	if (migratetype >= MIGRATE_PCPTYPES) {
  		if (unlikely(is_migrate_isolate(migratetype))) {
@@ -414,7 +420,7 @@ index 6de9440e3ae2..91dc68c2a717 100644
  /*
   * Free a list of 0-order pages
   */
-@@ -2588,18 +2594,22 @@ struct page *buffered_rmqueue(struct zone *preferred_zone,
+@@ -2596,20 +2602,33 @@ struct page *buffered_rmqueue(struct zone *preferred_zone,
  	struct page *page;
  	bool cold = ((gfp_flags & __GFP_COLD) != 0);
  
@@ -436,11 +442,23 @@ index 6de9440e3ae2..91dc68c2a717 100644
 +				int nr_pages = rmqueue_bulk(zone, order,
  						pcp->batch, list,
  						migratetype, cold);
-+				pcp->count += (nr_pages << order);
- 				if (unlikely(list_empty(list)))
+-				if (unlikely(list_empty(list)))
++				if (unlikely(list_empty(list))) {
++					/*
++					 * Retry high-order atomic allocs
++					 * from the buddy list which may
++					 * use MIGRATE_HIGHATOMIC.
++					 */
++					if (order && (alloc_flags & ALLOC_HARDER))
++						goto try_buddylist;
++
  					goto failed;
++				}
++				pcp->count += (nr_pages << order);
  			}
-@@ -2610,7 +2620,7 @@ struct page *buffered_rmqueue(struct zone *preferred_zone,
+ 
+ 			if (cold)
+@@ -2618,10 +2637,11 @@ struct page *buffered_rmqueue(struct zone *preferred_zone,
  				page = list_first_entry(list, struct page, lru);
  
  			list_del(&page->lru);
@@ -449,7 +467,11 @@ index 6de9440e3ae2..91dc68c2a717 100644
  
  		} while (check_new_pcp(page));
  	} else {
-@@ -3837,8 +3847,8 @@ EXPORT_SYMBOL(get_zeroed_page);
++try_buddylist:
+ 		/*
+ 		 * We most definitely don't want callers attempting to
+ 		 * allocate greater than order-1 page units with __GFP_NOFAIL.
+@@ -3845,8 +3865,8 @@ EXPORT_SYMBOL(get_zeroed_page);
  void __free_pages(struct page *page, unsigned int order)
  {
  	if (put_page_testzero(page)) {
@@ -460,7 +482,7 @@ index 6de9440e3ae2..91dc68c2a717 100644
  		else
  			__free_pages_ok(page, order);
  	}
-@@ -5160,20 +5170,31 @@ static void pageset_update(struct per_cpu_pages *pcp, unsigned long high,
+@@ -5168,20 +5188,31 @@ static void pageset_update(struct per_cpu_pages *pcp, unsigned long high,
  /* a companion to pageset_set_high() */
  static void pageset_set_batch(struct per_cpu_pageset *p, unsigned long batch)
  {
