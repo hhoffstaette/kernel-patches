@@ -1,0 +1,106 @@
+From:   Qu Wenruo <quwenruo@cn.fujitsu.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     dsterba@suse.cz
+Subject: [PATCH 2/2] btrfs: qgroup: Fix qgroup reserved space underflow caused by buffered write and quota enable
+Date:   Thu,  1 Dec 2016 13:54:56 +0800
+
+[BUG]
+Under the following case, we can underflow qgroup reserved space.
+
+            Task A                |            Task B
+---------------------------------------------------------------
+ Quota disabled                   |
+ Buffered write                   |
+ |- btrfs_check_data_free_space() |
+ |  *NO* qgroup space is reserved |
+ |  since quota is *DISABLED*     |
+ |- All pages are copied to page  |
+    cache                         |
+                                  | Enable quota
+                                  | Quota scan finished
+                                  |
+                                  | Sync_fs
+                                  | |- run_delalloc_range
+                                  | |- Write pages
+                                  | |- btrfs_finish_ordered_io
+                                  |    |- insert_reserved_file_extent
+                                  |       |- btrfs_qgroup_release_data()
+                                  |          Since no qgroup space is
+                                             reserved in Task A, we
+                                             underflow qgroup reserved
+                                             space
+This can be detected by fstest btrfs/104.
+
+[CAUSE]
+In insert_reserved_file_extent() we info qgroup to release the @ram_bytes
+size of qgroup reserved_space under all case.
+And btrfs_qgroup_release_data() will check if qgroup is enabled.
+
+However in above case, the buffered write happens before quota is
+enabled, so we don't havee reserved space for that range.
+
+[FIX]
+In insert_reserved_file_extent(), we info qgroup to release the acctual
+byte number it released.
+In above case, since we don't have reserved space, we info qgroup to
+release 0 byte, so the problem can be fixed.
+
+And thanks to the @reserved parameter introduced by qgroup rework, and
+previous patch to return release bytes, the fix can be as small as less
+than 10 lines.
+
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+---
+To David:
+These 2 patches, with updated extra WARN_ON() patch(V5), btrfs on x86_64 is
+good for current qgroup test group.
+But the bug reported by Chadan still exists, and the fix for that will be
+delayed for a while, as the fix involves large interface change
+(add struct extent_changeset for every qgroup reserve caller).
+
+I'll run extra tests for that fix to ensure they are OK and won't cause
+extra bugs.
+
+Thanks,
+Qu
+---
+ fs/btrfs/inode.c | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 242dc7e..3db58d9 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -2256,6 +2256,7 @@ static int insert_reserved_file_extent(struct btrfs_trans_handle *trans,
+ 	struct btrfs_path *path;
+ 	struct extent_buffer *leaf;
+ 	struct btrfs_key ins;
++	u64 qg_released;
+ 	int extent_inserted = 0;
+ 	int ret;
+ 
+@@ -2311,15 +2312,19 @@ static int insert_reserved_file_extent(struct btrfs_trans_handle *trans,
+ 	ins.objectid = disk_bytenr;
+ 	ins.offset = disk_num_bytes;
+ 	ins.type = BTRFS_EXTENT_ITEM_KEY;
+-	ret = btrfs_alloc_reserved_file_extent(trans, root,
+-					root->root_key.objectid,
+-					btrfs_ino(inode), file_pos,
+-					ram_bytes, &ins);
++
+ 	/*
+ 	 * Release the reserved range from inode dirty range map, as it is
+ 	 * already moved into delayed_ref_head
+ 	 */
+-	btrfs_qgroup_release_data(inode, file_pos, ram_bytes);
++	ret = btrfs_qgroup_release_data(inode, file_pos, ram_bytes);
++	if (ret < 0)
++		goto out;
++	qg_released = ret;
++	ret = btrfs_alloc_reserved_file_extent(trans, root,
++					root->root_key.objectid,
++					btrfs_ino(inode), file_pos,
++					qg_released, &ins);
+ out:
+ 	btrfs_free_path(path);
+ 
