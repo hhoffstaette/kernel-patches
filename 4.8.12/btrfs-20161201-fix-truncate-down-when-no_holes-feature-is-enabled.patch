@@ -1,8 +1,8 @@
 From:   Liu Bo <bo.li.liu@oracle.com>
 To:     linux-btrfs@vger.kernel.org
-Cc:     David Sterba <dsterba@suse.cz>, Filipe Manana <fdmanana@suse.com>
-Subject: [PATCH] Btrfs: fix truncate down when no_holes feature is enabled
-Date:   Fri, 11 Nov 2016 14:27:45 -0800
+Cc:     David Sterba <dsterba@suse.cz>, Chris Mason <clm@fb.com>
+Subject: [PATCH v2] Btrfs: fix truncate down when no_holes feature is enabled
+Date:   Thu,  1 Dec 2016 13:43:31 -0800
 
 For such a file mapping,
 
@@ -16,15 +16,16 @@ However, even if data has been flushed, we can still have trouble
 in updating disk isize since we updated disk isize to 'start' of
 the last evicted extent.
 
-Also add a ASSERT for better catching (for developers only).
-
+Reviewed-by: Chris Mason <clm@fb.com>
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 ---
- fs/btrfs/inode.c | 16 +++++++++++++++-
- 1 file changed, 15 insertions(+), 1 deletion(-)
+v2: Remove the assertion.
+
+ fs/btrfs/inode.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index 2b790bd..603dd492 100644
+index 2b790bd..09157dd 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
 @@ -4483,8 +4483,19 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
@@ -48,13 +49,3 @@ index 2b790bd..603dd492 100644
  			if (found_key.offset >= new_size)
  				del_item = 1;
  			else
-@@ -4666,6 +4677,9 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
- 			btrfs_abort_transaction(trans, ret);
- 	}
- error:
-+	if (err == 0)
-+		ASSERT(last_size == new_size);
-+
- 	if (root->root_key.objectid != BTRFS_TREE_LOG_OBJECTID)
- 		btrfs_ordered_update_i_size(inode, last_size, NULL);
- 
