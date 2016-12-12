@@ -48,7 +48,6 @@ of extents, not di_nextents.
 Thanks to dchinner for looking at this with me and spotting the
 root cause.
 
-[HH: fix up context in hunk #1 for 4.8.x]
 Cc: stable@vger.kernel.org
 Signed-off-by: Eric Sandeen <sandeen@redhat.com>
 ---
@@ -58,13 +57,13 @@ index 552465e..47074e0 100644
 --- a/fs/xfs/xfs_bmap_util.c
 +++ b/fs/xfs/xfs_bmap_util.c
 @@ -1792,6 +1792,7 @@
- 	int		error = 0;
- 	int		aforkblks = 0;
- 	int		taforkblks = 0;
+ 	struct xfs_ifork	tempifp, *ifp, *tifp;
+ 	int			aforkblks = 0;
+ 	int			taforkblks = 0;
 +	xfs_extnum_t		nextents;
- 	__uint64_t	tmp;
- 	int		lock_flags;
-
+ 	__uint64_t		tmp;
+ 	int			error;
+ 
 @@ -1881,7 +1882,8 @@
  		 * pointer.  Otherwise it's already NULL or
  		 * pointing to the extent.

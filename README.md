@@ -21,15 +21,12 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Stable series: 4.8**
+**LTS series: 4.9**
 
-- bfs: [BFS v512+](http://ck-hack.blogspot.de/2016/10/bfs-version-0512-linux-48-ck1-muqss-for.html) (*not* enabled by default)
-- bfq: [BFQ v8r5](http://algogroup.unimore.it/people/paolo/disk_sched/)
-- block: [throttled background writeback v8](http://marc.info/?l=linux-block&m=147751514819997)
-- btrfs: fixes from 4.9+ (cleanups, correctness, error handling etc.)
+- btrfs: fixes from 4.10+ (cleanups, correctness, error handling etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
-- mm: memory management fixes from 4.9+
+- mm: memory management fixes from 4.10+
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: selected fixes from 4.9+
+- xfs: selected fixes from 4.10+
 
