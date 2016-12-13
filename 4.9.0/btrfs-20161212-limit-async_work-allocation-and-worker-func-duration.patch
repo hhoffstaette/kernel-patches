@@ -1,9 +1,9 @@
-Subject: [PATCH] btrfs: limit async_work allocation and worker func duration
+Subject: [PATCH v2] btrfs: limit async_work allocation and worker func duration
 From:   Maxim Patlasov <mpatlasov@virtuozzo.com>
-To:     <clm@fb.com>
-CC:     <jbacik@fb.com>, <linux-kernel@vger.kernel.org>,
+To:     <dsterba@suse.cz>
+CC:     <jbacik@fb.com>, <clm@fb.com>, <linux-kernel@vger.kernel.org>,
         <linux-btrfs@vger.kernel.org>, <mpatlasov@virtuozzo.com>
-Date:   Fri, 2 Dec 2016 17:51:36 -0800
+Date:   Mon, 12 Dec 2016 14:32:44 -0800
 
 Problem statement: unprivileged user who has read-write access to more than
 one btrfs subvolume may easily consume all kernel memory (eventually
@@ -59,27 +59,35 @@ The patch fixes both problems in straightforward way: refuse queuing too
 many works in btrfs_wq_run_delayed_node and bail out of worker func if
 at least BTRFS_DELAYED_WRITEBACK items are processed.
 
+Changed in v2: remove support of thresh == NO_THRESHOLD.
+
 Signed-off-by: Maxim Patlasov <mpatlasov@virtuozzo.com>
 ---
- fs/btrfs/async-thread.c  |    8 ++++++++
+ fs/btrfs/async-thread.c  |   14 ++++++++++++++
  fs/btrfs/async-thread.h  |    1 +
  fs/btrfs/delayed-inode.c |    6 ++++--
- 3 files changed, 13 insertions(+), 2 deletions(-)
+ 3 files changed, 19 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/async-thread.c b/fs/btrfs/async-thread.c
-index e0f071f..29f6252 100644
+index e0f071f..63d1977 100644
 --- a/fs/btrfs/async-thread.c
 +++ b/fs/btrfs/async-thread.c
-@@ -86,6 +86,14 @@ btrfs_work_owner(struct btrfs_work *work)
+@@ -86,6 +86,20 @@ btrfs_work_owner(struct btrfs_work *work)
  	return work->wq->fs_info;
  }
  
 +bool btrfs_workqueue_normal_congested(struct btrfs_workqueue *wq)
 +{
-+	int thresh = wq->normal->thresh != NO_THRESHOLD ?
-+		wq->normal->thresh : num_possible_cpus();
++	/*
++	 * We could compare wq->normal->pending with num_online_cpus()
++	 * to support "thresh == NO_THRESHOLD" case, but it requires
++	 * moving up atomic_inc/dec in thresh_queue/exec_hook. Let's
++	 * postpone it until someone needs the support of that case.
++	 */
++	if (wq->normal->thresh == NO_THRESHOLD)
++		return false;
 +
-+	return atomic_read(&wq->normal->pending) > thresh * 2;
++	return atomic_read(&wq->normal->pending) > wq->normal->thresh * 2;
 +}
 +
  BTRFS_WORK_HELPER(worker_helper);
