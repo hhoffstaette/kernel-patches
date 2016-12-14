@@ -1,22 +1,24 @@
 From:   Liu Bo <bo.li.liu@oracle.com>
 To:     linux-btrfs@vger.kernel.org
 Cc:     David Sterba <dsterba@suse.cz>
-Subject: [PATCH] Btrfs: add 'inode' for extent map tracepoint
-Date:   Thu,  1 Dec 2016 13:44:01 -0800
+Subject: [PATCH v2] Btrfs: add 'inode' for extent map tracepoint
+Date:   Tue, 13 Dec 2016 15:57:25 -0800
 
 'inode' is an important field for btrfs_get_extent, lets trace it.
 
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 ---
+v2: add 'unsigned long long' for consistence.
+
  fs/btrfs/inode.c             |  2 +-
- include/trace/events/btrfs.h | 13 ++++++++-----
- 2 files changed, 9 insertions(+), 6 deletions(-)
+ include/trace/events/btrfs.h | 12 ++++++++----
+ 2 files changed, 9 insertions(+), 5 deletions(-)
 
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index 603dd492..79f35b6 100644
+index 8e3a5a2..1cdd23c 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -7095,7 +7095,7 @@ struct extent_map *btrfs_get_extent(struct inode *inode, struct page *page,
+@@ -7081,7 +7081,7 @@ struct extent_map *btrfs_get_extent(struct inode *inode, struct page *page,
  	write_unlock(&em_tree->lock);
  out:
  
@@ -26,7 +28,7 @@ index 603dd492..79f35b6 100644
  	btrfs_free_path(path);
  	if (trans) {
 diff --git a/include/trace/events/btrfs.h b/include/trace/events/btrfs.h
-index e030d6f..0e04208 100644
+index e030d6f..ef80740 100644
 --- a/include/trace/events/btrfs.h
 +++ b/include/trace/events/btrfs.h
 @@ -184,14 +184,16 @@ DEFINE_EVENT(btrfs__inode, btrfs_inode_evict,
@@ -58,7 +60,7 @@ index e030d6f..0e04208 100644
  		__entry->len		= map->len;
  		__entry->orig_start	= map->orig_start;
  		__entry->block_start	= map->block_start;
-@@ -214,12 +217,12 @@ TRACE_EVENT_CONDITION(btrfs_get_extent,
+@@ -214,11 +217,12 @@ TRACE_EVENT_CONDITION(btrfs_get_extent,
  		__entry->compress_type	= map->compress_type;
  	),
  
@@ -68,8 +70,7 @@ index e030d6f..0e04208 100644
  		  "block_len = %llu, flags = %s, refs = %u, "
  		  "compress_type = %u",
  		  show_root_type(__entry->root_objectid),
--		  (unsigned long long)__entry->start,
-+		  __entry->ino, (unsigned long long)__entry->start,
++		  (unsigned long long)__entry->ino,
+ 		  (unsigned long long)__entry->start,
  		  (unsigned long long)__entry->len,
  		  (unsigned long long)__entry->orig_start,
- 		  show_map_type(__entry->block_start),
