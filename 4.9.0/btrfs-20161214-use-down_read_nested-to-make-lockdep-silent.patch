@@ -1,8 +1,8 @@
 From:   Liu Bo <bo.li.liu@oracle.com>
 To:     linux-btrfs@vger.kernel.org
 Cc:     David Sterba <dsterba@suse.cz>
-Subject: [PATCH] Btrfs: use down_read_nested to make lockdep silent
-Date:   Thu,  1 Dec 2016 13:44:19 -0800
+Subject: [PATCH v2] Btrfs: use down_read_nested to make lockdep silent
+Date:   Tue, 13 Dec 2016 15:58:40 -0800
 
 If @block_group is not @used_bg, it'll try to get @used_bg's lock without
 droping @block_group 's lock and lockdep has throwed a scary deadlock warning
@@ -11,20 +11,22 @@ Fix it by using down_read_nested.
 
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 ---
+v2: Use 'SINGLE_DEPTH_NESTING' to avoid magic number.
+
  fs/btrfs/extent-tree.c | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 210c94a..cdb082a 100644
+index 4607af3..68e9d25 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -7394,7 +7394,8 @@ btrfs_lock_cluster(struct btrfs_block_group_cache *block_group,
+@@ -7397,7 +7397,8 @@ btrfs_lock_cluster(struct btrfs_block_group_cache *block_group,
  
  		spin_unlock(&cluster->refill_lock);
  
 -		down_read(&used_bg->data_rwsem);
 +		/* We should only have one-level nested. */
-+		down_read_nested(&used_bg->data_rwsem, 1);
++		down_read_nested(&used_bg->data_rwsem, SINGLE_DEPTH_NESTING);
  
  		spin_lock(&cluster->refill_lock);
  		if (used_bg == cluster->block_group)
