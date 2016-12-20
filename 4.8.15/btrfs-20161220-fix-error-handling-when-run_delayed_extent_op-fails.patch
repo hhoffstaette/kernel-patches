@@ -1,31 +1,35 @@
-From:   Jeff Mahoney <jeffm@suse.com>
-To:     linux-btrfs <linux-btrfs@vger.kernel.org>
-Subject: [PATCH] btrfs: fix error handling when run_delayed_extent_op fails
-Message-ID: <cbbf1064-dc95-b1e2-94d9-b3b2879913d8@suse.com>
-Date:   Tue, 13 Dec 2016 14:33:33 -0500
+From:   jeffm@suse.com
+To:     linux-btrfs@vger.kernel.org
+Cc:     Jeff Mahoney <jeffm@suse.com>
+Subject: [PATCH 1/2 v2] btrfs: fix error handling when run_delayed_extent_op fails
+Date:   Tue, 20 Dec 2016 13:28:27 -0500
+
+From: Jeff Mahoney <jeffm@suse.com>
 
 In __btrfs_run_delayed_refs, the error path when run_delayed_extent_op
 fails sets locked_ref->processing = 0 but doesn't re-increment
-delayed_refs->num_heads_ready.  As a result, we can end up triggering
-the WARN_ON in btrfs_select_ref_head since the head remains in the tree
-with ->processing = 0 and the ready count is off.
+delayed_refs->num_heads_ready.  As a result, we end up triggering
+the WARN_ON in btrfs_select_ref_head.
 
 Fixes: d7df2c796d7 (Btrfs: attach delayed ref updates to delayed ref heads)
 Reported-by: Jon Nelson <jnelson-suse@jamponi.net>
 Signed-off-by: Jeff Mahoney <jeffm@suse.com>
 ---
- fs/btrfs/extent-tree.c | 1 +
- 1 file changed, 1 insertion(+)
+ fs/btrfs/extent-tree.c | 3 +++
+ 1 file changed, 3 insertions(+)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 4607af3..73a8d31 100644
+index db74889..d74adf1 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -2588,6 +2588,7 @@ static noinline int __btrfs_run_delayed_refs(struct btrfs_trans_handle *trans,
+@@ -2576,7 +2576,10 @@ static noinline int __btrfs_run_delayed_refs(struct btrfs_trans_handle *trans,
+ 					 */
  					if (must_insert_reserved)
  						locked_ref->must_insert_reserved = 1;
++					spin_lock(&delayed_refs->lock);
  					locked_ref->processing = 0;
 +					delayed_refs->num_heads_ready++;
++					spin_unlock(&delayed_refs->lock);
  					btrfs_debug(fs_info,
  						    "run_delayed_extent_op returned %d",
  						    ret);
