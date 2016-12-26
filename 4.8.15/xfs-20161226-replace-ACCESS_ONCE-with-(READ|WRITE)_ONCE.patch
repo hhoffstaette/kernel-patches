@@ -1,0 +1,26 @@
+
+Use the newer and standardized functions when performing volatile
+accesses. Following text is taken from 4d3199e4ca8e
+("locking: Remove ACCESS_ONCE() usage") :
+
+    ACCESS_ONCE() does not work reliably on non-scalar types.
+    For example gcc 4.6 and 4.7 might remove the volatile tag
+    for such accesses during the SRA (scalar replacement of
+    aggregates) step:
+	https://gcc.gnu.org/bugzilla/show_bug.cgi?id=58145
+
+diff -rup a/fs/xfs/xfs_log_priv.h b/fs/xfs/xfs_log_priv.h
+--- a/fs/xfs/xfs_log_priv.h	2016-12-11 20:17:54.000000000 +0100
++++ b/fs/xfs/xfs_log_priv.h	2016-12-26 13:02:49.732235326 +0100
+@@ -590,9 +590,9 @@ xlog_valid_lsn(
+ 	 * a transiently forward state. Instead, we can see the LSN in a
+ 	 * transiently behind state if we happen to race with a cycle wrap.
+ 	 */
+-	cur_cycle = ACCESS_ONCE(log->l_curr_cycle);
++	cur_cycle = READ_ONCE(log->l_curr_cycle);
+ 	smp_rmb();
+-	cur_block = ACCESS_ONCE(log->l_curr_block);
++	cur_block = READ_ONCE(log->l_curr_block);
+ 
+ 	if ((CYCLE_LSN(lsn) > cur_cycle) ||
+ 	    (CYCLE_LSN(lsn) == cur_cycle && BLOCK_LSN(lsn) > cur_block)) {
