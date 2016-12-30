@@ -1,0 +1,35 @@
+From f211d5cd6a36e0a1dfc598bec7d92bd48275aa52 Mon Sep 17 00:00:00 2001
+From: Paolo Valente <paolo.valente@linaro.org>
+Date: Fri, 30 Dec 2016 10:17:24 +0100
+Subject: [PATCH] BFQ-v8r7
+
+Signed-off-by: Paolo Valente <paolo.valente@linaro.org>
+---
+ block/bfq-iosched.c | 2 +-
+ block/bfq.h         | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/block/bfq-iosched.c b/block/bfq-iosched.c
+index 0f9cd53..2a2c130 100644
+--- a/block/bfq-iosched.c
++++ b/block/bfq-iosched.c
+@@ -5229,7 +5229,7 @@ static struct blkcg_policy blkcg_policy_bfq = {
+ static int __init bfq_init(void)
+ {
+ 	int ret;
+-	char msg[60] = "BFQ I/O-scheduler: v8r6";
++	char msg[60] = "BFQ I/O-scheduler: v8r7";
+ 
+ #ifdef CONFIG_BFQ_GROUP_IOSCHED
+ 	ret = blkcg_policy_register(&blkcg_policy_bfq);
+diff --git a/block/bfq.h b/block/bfq.h
+index 57ab51d..bef8244 100644
+--- a/block/bfq.h
++++ b/block/bfq.h
+@@ -1,5 +1,5 @@
+ /*
+- * BFQ v8r6 for 4.9.0: data structures and common functions prototypes.
++ * BFQ v8r7 for 4.9.0: data structures and common functions prototypes.
+  *
+  * Based on ideas and code from CFQ:
+  * Copyright (C) 2003 Jens Axboe <axboe@kernel.dk>
