@@ -1,0 +1,59 @@
+From b24a978c377be5f14e798cb41238e66fe51aab2f Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Fri, 9 Dec 2016 16:49:54 +1100
+Subject: xfs: use GPF_NOFS when allocating btree cursors
+
+Use NOFS for allocating btree cursors, since they can be called
+under the ilock.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Dave Chinner <dchinner@redhat.com>
+Signed-off-by: Dave Chinner <david@fromorbit.com>
+---
+ fs/xfs/libxfs/xfs_alloc_btree.c  | 2 +-
+ fs/xfs/libxfs/xfs_bmap_btree.c   | 2 +-
+ fs/xfs/libxfs/xfs_ialloc_btree.c | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_alloc_btree.c b/fs/xfs/libxfs/xfs_alloc_btree.c
+index 5ba2dac..c06ec77 100644
+--- a/fs/xfs/libxfs/xfs_alloc_btree.c
++++ b/fs/xfs/libxfs/xfs_alloc_btree.c
+@@ -421,7 +421,7 @@ xfs_allocbt_init_cursor(
+ 
+ 	ASSERT(btnum == XFS_BTNUM_BNO || btnum == XFS_BTNUM_CNT);
+ 
+-	cur = kmem_zone_zalloc(xfs_btree_cur_zone, KM_SLEEP);
++	cur = kmem_zone_zalloc(xfs_btree_cur_zone, KM_NOFS);
+ 
+ 	cur->bc_tp = tp;
+ 	cur->bc_mp = mp;
+diff --git a/fs/xfs/libxfs/xfs_bmap_btree.c b/fs/xfs/libxfs/xfs_bmap_btree.c
+index 8007d2b..049fa59 100644
+--- a/fs/xfs/libxfs/xfs_bmap_btree.c
++++ b/fs/xfs/libxfs/xfs_bmap_btree.c
+@@ -796,7 +796,7 @@ xfs_bmbt_init_cursor(
+ 	struct xfs_btree_cur	*cur;
+ 	ASSERT(whichfork != XFS_COW_FORK);
+ 
+-	cur = kmem_zone_zalloc(xfs_btree_cur_zone, KM_SLEEP);
++	cur = kmem_zone_zalloc(xfs_btree_cur_zone, KM_NOFS);
+ 
+ 	cur->bc_tp = tp;
+ 	cur->bc_mp = mp;
+diff --git a/fs/xfs/libxfs/xfs_ialloc_btree.c b/fs/xfs/libxfs/xfs_ialloc_btree.c
+index eab68ae..6c6b959 100644
+--- a/fs/xfs/libxfs/xfs_ialloc_btree.c
++++ b/fs/xfs/libxfs/xfs_ialloc_btree.c
+@@ -357,7 +357,7 @@ xfs_inobt_init_cursor(
+ 	struct xfs_agi		*agi = XFS_BUF_TO_AGI(agbp);
+ 	struct xfs_btree_cur	*cur;
+ 
+-	cur = kmem_zone_zalloc(xfs_btree_cur_zone, KM_SLEEP);
++	cur = kmem_zone_zalloc(xfs_btree_cur_zone, KM_NOFS);
+ 
+ 	cur->bc_tp = tp;
+ 	cur->bc_mp = mp;
+-- 
+cgit v0.12
+
