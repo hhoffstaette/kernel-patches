@@ -1,0 +1,38 @@
+From 7a21272b088894070391a94fdd1c67014020fa1d Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Tue, 3 Jan 2017 18:39:32 -0800
+Subject: xfs: fix double-cleanup when CUI recovery fails
+
+Dan Carpenter reported a double-free of rcur if _defer_finish fails
+while we're recovering CUI items.  Fix the error recovery to prevent
+this.
+
+Reported-by: Dan Carpenter <dan.carpenter@oracle.com>
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+ fs/xfs/xfs_refcount_item.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_refcount_item.c b/fs/xfs/xfs_refcount_item.c
+index fe86a66..6e4c744 100644
+--- a/fs/xfs/xfs_refcount_item.c
++++ b/fs/xfs/xfs_refcount_item.c
+@@ -526,13 +526,14 @@ xfs_cui_recover(
+ 	xfs_refcount_finish_one_cleanup(tp, rcur, error);
+ 	error = xfs_defer_finish(&tp, &dfops, NULL);
+ 	if (error)
+-		goto abort_error;
++		goto abort_defer;
+ 	set_bit(XFS_CUI_RECOVERED, &cuip->cui_flags);
+ 	error = xfs_trans_commit(tp);
+ 	return error;
+ 
+ abort_error:
+ 	xfs_refcount_finish_one_cleanup(tp, rcur, error);
++abort_defer:
+ 	xfs_defer_cancel(&dfops);
+ 	xfs_trans_cancel(tp);
+ 	return error;
+-- 
+cgit v0.12
+
