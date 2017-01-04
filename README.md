@@ -21,6 +21,9 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
+**NOTE:** This branch will no longer receive updates!
+-----------------------------------------------------
+
 **Stable series: 4.8**
 
 - bfs: [BFS v512+](http://ck-hack.blogspot.de/2016/10/bfs-version-0512-linux-48-ck1-muqss-for.html) (*not* enabled by default)
