@@ -1,0 +1,131 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     bigeasy@linutronix.de, quwenruo@cn.fujitsu.com,
+        David Sterba <dsterba@suse.com>, stable@vger.kernel.org,
+        #@suse.cz, 4.8+@suse.cz
+Subject: [PATCH] btrfs: fix crash when tracepoint arguments are freed by wq callbacks
+Date:   Fri,  6 Jan 2017 15:11:34 +0100
+
+Enabling btrfs tracepoints leads to instant crash, as reported. The wq
+callbacks could free the memory and the tracepoints started to
+dereference the members to get to fs_info.
+
+The proposed fix https://marc.info/?l=linux-btrfs&m=148172436722606&w=2
+removed the tracepoints but we could preserve them by passing only the
+required data in a safe way.
+
+Fixes: bc074524e123 ("btrfs: prefix fsid to all trace events")
+CC: stable@vger.kernel.org # 4.8+
+Reported-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/async-thread.c      | 15 +++++++++++----
+ include/trace/events/btrfs.h | 22 +++++++++++++---------
+ 2 files changed, 24 insertions(+), 13 deletions(-)
+
+diff --git a/fs/btrfs/async-thread.c b/fs/btrfs/async-thread.c
+index 63d197724519..ff0b0be92d61 100644
+--- a/fs/btrfs/async-thread.c
++++ b/fs/btrfs/async-thread.c
+@@ -273,6 +273,8 @@ static void run_ordered_work(struct __btrfs_workqueue *wq)
+ 	unsigned long flags;
+ 
+ 	while (1) {
++		void *wtag;
++
+ 		spin_lock_irqsave(lock, flags);
+ 		if (list_empty(list))
+ 			break;
+@@ -299,11 +301,13 @@ static void run_ordered_work(struct __btrfs_workqueue *wq)
+ 		spin_unlock_irqrestore(lock, flags);
+ 
+ 		/*
+-		 * we don't want to call the ordered free functions
+-		 * with the lock held though
++		 * We don't want to call the ordered free functions with the
++		 * lock held though. Save the work as tag for the trace event,
++		 * because the callback could free the structure.
+ 		 */
++		wtag = work;
+ 		work->ordered_free(work);
+-		trace_btrfs_all_work_done(work);
++		trace_btrfs_all_work_done(wq->fs_info, wtag);
+ 	}
+ 	spin_unlock_irqrestore(lock, flags);
+ }
+@@ -311,6 +315,7 @@ static void run_ordered_work(struct __btrfs_workqueue *wq)
+ static void normal_work_helper(struct btrfs_work *work)
+ {
+ 	struct __btrfs_workqueue *wq;
++	void *wtag;
+ 	int need_order = 0;
+ 
+ 	/*
+@@ -324,6 +329,8 @@ static void normal_work_helper(struct btrfs_work *work)
+ 	if (work->ordered_func)
+ 		need_order = 1;
+ 	wq = work->wq;
++	/* Safe for tracepoints in case work gets freed by the callback */
++	wtag = work;
+ 
+ 	trace_btrfs_work_sched(work);
+ 	thresh_exec_hook(wq);
+@@ -333,7 +340,7 @@ static void normal_work_helper(struct btrfs_work *work)
+ 		run_ordered_work(wq);
+ 	}
+ 	if (!need_order)
+-		trace_btrfs_all_work_done(work);
++		trace_btrfs_all_work_done(wq->fs_info, wtag);
+ }
+ 
+ void btrfs_init_work(struct btrfs_work *work, btrfs_work_func_t uniq_func,
+diff --git a/include/trace/events/btrfs.h b/include/trace/events/btrfs.h
+index c14bed4ab097..b09225c77676 100644
+--- a/include/trace/events/btrfs.h
++++ b/include/trace/events/btrfs.h
+@@ -1157,22 +1157,26 @@ DECLARE_EVENT_CLASS(btrfs__work,
+ 		   __entry->func, __entry->ordered_func, __entry->ordered_free)
+ );
+ 
+-/* For situiations that the work is freed */
++/*
++ * For situiations when the work is freed, we pass fs_info and a tag that that
++ * matches address of the work structure so it can be paired with the
++ * scheduling event.
++ */
+ DECLARE_EVENT_CLASS(btrfs__work__done,
+ 
+-	TP_PROTO(struct btrfs_work *work),
++	TP_PROTO(struct btrfs_fs_info *fs_info, void *wtag),
+ 
+-	TP_ARGS(work),
++	TP_ARGS(fs_info, wtag),
+ 
+ 	TP_STRUCT__entry_btrfs(
+-		__field(	void *,	work			)
++		__field(	void *,	wtag			)
+ 	),
+ 
+-	TP_fast_assign_btrfs(btrfs_work_owner(work),
+-		__entry->work		= work;
++	TP_fast_assign_btrfs(fs_info,
++		__entry->wtag		= wtag;
+ 	),
+ 
+-	TP_printk_btrfs("work->%p", __entry->work)
++	TP_printk_btrfs("work->%p", __entry->wtag)
+ );
+ 
+ DEFINE_EVENT(btrfs__work, btrfs_work_queued,
+@@ -1191,9 +1195,9 @@ DEFINE_EVENT(btrfs__work, btrfs_work_sched,
+ 
+ DEFINE_EVENT(btrfs__work__done, btrfs_all_work_done,
+ 
+-	TP_PROTO(struct btrfs_work *work),
++	TP_PROTO(struct btrfs_fs_info *fs_info, void *wtag),
+ 
+-	TP_ARGS(work)
++	TP_ARGS(fs_info, wtag)
+ );
+ 
+ DEFINE_EVENT(btrfs__work, btrfs_ordered_sched,
