@@ -1,9 +1,8 @@
 From:   Liu Bo <bo.li.liu@oracle.com>
 To:     linux-btrfs@vger.kernel.org
-Cc:     David Sterba <dsterba@suse.cz>, fdmanana@gmail.com,
-        wangxg.fnst@cn.fujitsu.com, Josef Bacik <jbacik@fb.com>
-Subject: [PATCH] Btrfs: fix btrfs_ordered_update_i_size to update disk_i_size properly
-Date:   Thu,  1 Dec 2016 13:46:10 -0800
+Cc:     David Sterba <dsterba@suse.cz>
+Subject: [PATCH v2] Btrfs: fix btrfs_ordered_update_i_size to update disk_i_size properly
+Date:   Thu, 12 Jan 2017 08:13:26 -0800
 
 btrfs_ordered_update_i_size can be called by truncate and endio, but only endio
 takes ordered_extent which contains the completed IO.
@@ -22,12 +21,14 @@ we truncate down to the desired size.
 
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 ---
+v2: add comments to clarify why we should update disk_i_size in the truncate case.
+
  fs/btrfs/inode.c        | 14 ++++++++++++++
- fs/btrfs/ordered-data.c |  9 +++++++--
- 2 files changed, 21 insertions(+), 2 deletions(-)
+ fs/btrfs/ordered-data.c | 14 ++++++++++++--
+ 2 files changed, 26 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index 09157dd..ef3594d 100644
+index 1cf8e20..a872628 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
 @@ -4682,6 +4682,13 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
@@ -59,10 +60,10 @@ index 09157dd..ef3594d 100644
  			 * failed to truncate, disk_i_size is only adjusted down
  			 * as we remove extents, so it should represent the true
 diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
-index b2d1e95..5eaa25a 100644
+index b2d1e95..35277c5 100644
 --- a/fs/btrfs/ordered-data.c
 +++ b/fs/btrfs/ordered-data.c
-@@ -982,8 +982,13 @@ int btrfs_ordered_update_i_size(struct inode *inode, u64 offset,
+@@ -982,8 +982,18 @@ int btrfs_ordered_update_i_size(struct inode *inode, u64 offset,
  	}
  	disk_i_size = BTRFS_I(inode)->disk_i_size;
  
@@ -73,6 +74,11 @@ index b2d1e95..5eaa25a 100644
 +	 * If ordered is not NULL, then this is called from endio and
 +	 * disk_i_size will be updated by either truncate itself or any
 +	 * in-flight IOs which are inside the disk_i_size.
++	 *
++	 * Because btrfs_setsize() may set i_size with disk_i_size if truncate
++	 * fails somehow, we need to make sure we have a precise disk_i_size by
++	 * updating it as usual.
++	 *
 +	 */
 +	if (!ordered && disk_i_size > i_size) {
  		BTRFS_I(inode)->disk_i_size = orig_offset;
