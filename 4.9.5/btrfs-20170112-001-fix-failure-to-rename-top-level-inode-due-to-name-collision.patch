@@ -1,0 +1,128 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH 1/3] Btrfs: send, fix failure to rename top level inode due to name collision
+Date:   Thu, 12 Jan 2017 03:07:08 +0000
+
+From: Robbie Ko <robbieko@synology.com>
+
+Under certain situations, an incremental send operation can fail due to a
+premature attempt to create a new top level inode (a direct child of the
+subvolume/snapshot root) whose name collides with another inode that was
+removed from the send snapshot.
+
+Consider the following example scenario.
+
+Parent snapshot:
+
+  .                 (ino 256, gen 8)
+  |---- a1/         (ino 257, gen 9)
+  |---- a2/         (ino 258, gen 9)
+
+Send snapshot:
+
+  .                 (ino 256, gen 3)
+  |---- a2/         (ino 257, gen 7)
+
+In this scenario, when receiving the incremental send stream, the btrfs
+receive command fails like this (ran in verbose mode, -vv argument):
+
+  rmdir a1
+  mkfile o257-7-0
+  rename o257-7-0 -> a2
+  ERROR: rename o257-7-0 -> a2 failed: Is a directory
+
+What happens when computing the incremental send stream is:
+
+1) An operation to remove the directory with inode number 257 and
+   generation 9 is issued.
+
+2) An operation to create the inode with number 257 and generation 7 is
+   issued. This creates the inode with an orphanized name of "o257-7-0".
+
+3) An operation rename the new inode 257 to its final name, "a2", is
+   issued. This is incorrect because inode 258, which has the same name
+   and it's a child of the same parent (root inode 256), was not yet
+   processed and therefore no rmdir operation for it was yet issued.
+   The rename operation is issued because we fail to detect that the
+   name of the new inode 257 collides with inode 258, because their
+   parent, a subvolume/snapshot root (inode 256) has a different
+   generation in both snapshots.
+
+So fix this by ignoring the generation value of a parent directory that
+matches a root inode (number 256) when we are checking if the name of the
+inode currently being processed collides with the name of some other
+inode that was not yet processed.
+
+We can achieve this scenario of different inodes with the same number but
+different generation values either by mounting a filesystem with the inode
+cache option (-o inode_cache) or by creating and sending snapshots across
+different filesystems, like in the following example:
+
+  $ mkfs.btrfs -f /dev/sdb
+  $ mount /dev/sdb /mnt
+  $ mkdir /mnt/a1
+  $ mkdir /mnt/a2
+  $ btrfs subvolume snapshot -r /mnt /mnt/snap1
+  $ btrfs send /mnt/snap1 -f /tmp/1.snap
+  $ umount /mnt
+
+  $ mkfs.btrfs -f /dev/sdc
+  $ mount /dev/sdc /mnt
+  $ touch /mnt/a2
+  $ btrfs subvolume snapshot -r /mnt /mnt/snap2
+  $ btrfs receive /mnt -f /tmp/1.snap
+  # Take note that once the filesystem is created, its current
+  # generation has value 7 so the inode from the second snapshot has
+  # a generation value of 7. And after receiving the first snapshot
+  # the filesystem is at a generation value of 10, because the call to
+  # create the second snapshot bumps the generation to 8 (the snapshot
+  # creation ioctl does a transaction commit), the receive command calls
+  # the snapshot creation ioctl to create the first snapshot, which bumps
+  # the filesystem's generation to 9, and finally when the receive
+  # operation finishes it calls an ioctl to transition the first snapshot
+  # (snap1) from RW mode to RO mode, which does another transaction commit
+  # and bumps the filesystem's generation to 10.
+  $ rm -f /tmp/1.snap
+  $ btrfs send /mnt/snap1 -f /tmp/1.snap
+  $ btrfs send -p /mnt/snap1 /mnt/snap2 -f /tmp/2.snap
+  $ umount /mnt
+
+  $ mkfs.btrfs -f /dev/sdd
+  $ mount /dev/sdd /mnt
+  $ btrfs receive /mnt /tmp/1.snap
+  # Receive of snapshot snap2 used to fail.
+  $ btrfs receive /mnt /tmp/2.snap
+
+Signed-off-by: Robbie Ko <robbieko@synology.com>
+Reviewed-by: Filipe Manana <fdmanana@suse.com>
+[Rewrote changelog to be more precise and clear]
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/send.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index d145ce8..2ae32c4 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -1681,6 +1681,9 @@ static int is_inode_existent(struct send_ctx *sctx, u64 ino, u64 gen)
+ {
+ 	int ret;
+ 
++	if (ino == BTRFS_FIRST_FREE_OBJECTID)
++		return 1;
++
+ 	ret = get_cur_inode_state(sctx, ino, gen);
+ 	if (ret < 0)
+ 		goto out;
+@@ -1866,7 +1869,7 @@ static int will_overwrite_ref(struct send_ctx *sctx, u64 dir, u64 dir_gen,
+ 	 * not deleted and then re-created, if it was then we have no overwrite
+ 	 * and we can just unlink this entry.
+ 	 */
+-	if (sctx->parent_root) {
++	if (sctx->parent_root && dir != BTRFS_FIRST_FREE_OBJECTID) {
+ 		ret = get_inode_info(sctx->parent_root, dir, NULL, &gen, NULL,
+ 				     NULL, NULL, NULL);
+ 		if (ret < 0 && ret != -ENOENT)
