@@ -1,0 +1,42 @@
+From:   Colin King <colin.king@canonical.com>
+To:     "Darrick J . Wong" <darrick.wong@oracle.com>,
+        linux-xfs@vger.kernel.org, linux-kernel@vger.kernel.org
+Subject: [PATCH] xfs: do not call xfs_buf_hash_destroy on a NULL pag
+Date:   Fri, 20 Jan 2017 14:26:42 +0000
+
+From: Colin Ian King <colin.king@canonical.com>
+
+If pag cannot be allocated, the current error exit path will trip
+a null pointer deference error when calling xfs_buf_hash_destroy
+with a null pag.  Fix this by adding a new error exit lable and
+jumping to this, avoiding the hash destroy and unnecessary kmem_free
+on pag.
+
+Fixes CoverityScan CID#1397628 ("Dereference after null check")
+
+Signed-off-by: Colin Ian King <colin.king@canonical.com>
+---
+ fs/xfs/xfs_mount.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_mount.c b/fs/xfs/xfs_mount.c
+index 9b9540d..4e66cd19 100644
+--- a/fs/xfs/xfs_mount.c
++++ b/fs/xfs/xfs_mount.c
+@@ -207,7 +207,7 @@ xfs_initialize_perag(
+ 
+ 		pag = kmem_zalloc(sizeof(*pag), KM_MAYFAIL);
+ 		if (!pag)
+-			goto out_unwind;
++			goto out_unwind_pags;
+ 		pag->pag_agno = index;
+ 		pag->pag_mount = mp;
+ 		spin_lock_init(&pag->pag_ici_lock);
+@@ -242,6 +242,7 @@ xfs_initialize_perag(
+ out_unwind:
+ 	xfs_buf_hash_destroy(pag);
+ 	kmem_free(pag);
++out_unwind_pags:
+ 	for (; index > first_initialised; index--) {
+ 		pag = radix_tree_delete(&mp->m_perag_tree, index);
+ 		xfs_buf_hash_destroy(pag);
