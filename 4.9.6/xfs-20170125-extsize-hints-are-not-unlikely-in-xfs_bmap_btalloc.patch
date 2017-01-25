@@ -1,0 +1,46 @@
+From 493611ebd62673f39e2f52c2561182c558a21cb6 Mon Sep 17 00:00:00 2001
+From: Christoph Hellwig <hch@lst.de>
+Date: Wed, 25 Jan 2017 08:59:43 -0800
+Subject: xfs: extsize hints are not unlikely in xfs_bmap_btalloc
+
+With COW files they are the hotpath, just like for files with the
+extent size hint attribute.  We really shouldn't micro-manage anything
+but failure cases with unlikely.
+
+Additionally Arnd Bergmann recently reported that one of these two
+unlikely annotations causes link failures together with an upcoming
+kernel instrumentation patch, so let's get rid of it ASAP.
+
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+Reported-by: Arnd Bergmann <arnd@arndb.de>
+Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+ fs/xfs/libxfs/xfs_bmap.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
+index ab82dd4..bfc00de 100644
+--- a/fs/xfs/libxfs/xfs_bmap.c
++++ b/fs/xfs/libxfs/xfs_bmap.c
+@@ -3629,7 +3629,7 @@ xfs_bmap_btalloc(
+ 		align = xfs_get_cowextsz_hint(ap->ip);
+ 	else if (xfs_alloc_is_userdata(ap->datatype))
+ 		align = xfs_get_extsz_hint(ap->ip);
+-	if (unlikely(align)) {
++	if (align) {
+ 		error = xfs_bmap_extsize_align(mp, &ap->got, &ap->prev,
+ 						align, 0, ap->eof, 0, ap->conv,
+ 						&ap->offset, &ap->length);
+@@ -3701,7 +3701,7 @@ xfs_bmap_btalloc(
+ 		args.minlen = ap->minlen;
+ 	}
+ 	/* apply extent size hints if obtained earlier */
+-	if (unlikely(align)) {
++	if (align) {
+ 		args.prod = align;
+ 		if ((args.mod = (xfs_extlen_t)do_mod(ap->offset, args.prod)))
+ 			args.mod = (xfs_extlen_t)(args.prod - args.mod);
+-- 
+cgit v0.12
+
