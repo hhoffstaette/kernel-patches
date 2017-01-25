@@ -1,0 +1,32 @@
+From 83d230eb5c638949350f4761acdfc0af5cb1bc00 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Mon, 23 Jan 2017 19:43:00 -0800
+Subject: xfs: verify dirblocklog correctly
+
+sb_dirblklog is added to sb_blocklog to compute the directory block size
+in bytes.  Therefore, we must compare the sum of both those values
+against XFS_MAX_BLOCKSIZE_LOG, not just dirblklog.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Eric Sandeen <sandeen@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+---
+ fs/xfs/libxfs/xfs_sb.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/xfs/libxfs/xfs_sb.c b/fs/xfs/libxfs/xfs_sb.c
+index 2580262..584ec89 100644
+--- a/fs/xfs/libxfs/xfs_sb.c
++++ b/fs/xfs/libxfs/xfs_sb.c
+@@ -242,7 +242,7 @@ xfs_mount_validate_sb(
+ 	    sbp->sb_blocklog < XFS_MIN_BLOCKSIZE_LOG			||
+ 	    sbp->sb_blocklog > XFS_MAX_BLOCKSIZE_LOG			||
+ 	    sbp->sb_blocksize != (1 << sbp->sb_blocklog)		||
+-	    sbp->sb_dirblklog > XFS_MAX_BLOCKSIZE_LOG			||
++	    sbp->sb_dirblklog + sbp->sb_blocklog > XFS_MAX_BLOCKSIZE_LOG ||
+ 	    sbp->sb_inodesize < XFS_DINODE_MIN_SIZE			||
+ 	    sbp->sb_inodesize > XFS_DINODE_MAX_SIZE			||
+ 	    sbp->sb_inodelog < XFS_DINODE_MIN_LOG			||
+-- 
+cgit v0.12
+
