@@ -1,0 +1,93 @@
+From: Johannes Weiner <hannes@cmpxchg.org>
+Subject: [PATCH 1/5] mm: vmscan: scan dirty pages even in laptop mode
+Date: Mon, 23 Jan 2017 13:16:37 -0500
+Cc: Mel Gorman <mgorman@suse.de>,
+	linux-mm@kvack.org,
+	linux-kernel@vger.kernel.org,
+	kernel-team@fb.com
+To: Andrew Morton <akpm@linux-foundation.org>
+
+We have an elaborate dirty/writeback throttling mechanism inside the
+reclaim scanner, but for that to work the pages have to go through
+shrink_page_list() and get counted for what they are. Otherwise, we
+mess up the LRU order and don't match reclaim speed to writeback.
+
+Especially during deactivation, there is never a reason to skip dirty
+pages; nothing is even trying to write them out from there. Don't mess
+up the LRU order for nothing, shuffle these pages along.
+
+Signed-off-by: Johannes Weiner <hannes@cmpxchg.org>
+---
+ include/linux/mmzone.h |  2 --
+ mm/vmscan.c            | 14 ++------------
+ 2 files changed, 2 insertions(+), 14 deletions(-)
+
+diff --git a/include/linux/mmzone.h b/include/linux/mmzone.h
+index df992831fde7..338a786a993f 100644
+--- a/include/linux/mmzone.h
++++ b/include/linux/mmzone.h
+@@ -236,8 +236,6 @@ struct lruvec {
+ #define LRU_ALL_ANON (BIT(LRU_INACTIVE_ANON) | BIT(LRU_ACTIVE_ANON))
+ #define LRU_ALL	     ((1 << NR_LRU_LISTS) - 1)
+ 
+-/* Isolate clean file */
+-#define ISOLATE_CLEAN		((__force isolate_mode_t)0x1)
+ /* Isolate unmapped file */
+ #define ISOLATE_UNMAPPED	((__force isolate_mode_t)0x2)
+ /* Isolate for asynchronous migration */
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 7bb23ff229b6..0d05f7f3b532 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -87,6 +87,7 @@ struct scan_control {
+ 	/* The highest zone to isolate pages for reclaim from */
+ 	enum zone_type reclaim_idx;
+ 
++	/* Writepage batching in laptop mode; RECLAIM_WRITE */
+ 	unsigned int may_writepage:1;
+ 
+ 	/* Can mapped pages be reclaimed? */
+@@ -1373,13 +1374,10 @@ int __isolate_lru_page(struct page *page, isolate_mode_t mode)
+ 	 * wants to isolate pages it will be able to operate on without
+ 	 * blocking - clean pages for the most part.
+ 	 *
+-	 * ISOLATE_CLEAN means that only clean pages should be isolated. This
+-	 * is used by reclaim when it is cannot write to backing storage
+-	 *
+ 	 * ISOLATE_ASYNC_MIGRATE is used to indicate that it only wants to pages
+ 	 * that it is possible to migrate without blocking
+ 	 */
+-	if (mode & (ISOLATE_CLEAN|ISOLATE_ASYNC_MIGRATE)) {
++	if (mode & ISOLATE_ASYNC_MIGRATE) {
+ 		/* All the caller can do on PageWriteback is block */
+ 		if (PageWriteback(page))
+ 			return ret;
+@@ -1387,10 +1385,6 @@ int __isolate_lru_page(struct page *page, isolate_mode_t mode)
+ 		if (PageDirty(page)) {
+ 			struct address_space *mapping;
+ 
+-			/* ISOLATE_CLEAN means only clean pages */
+-			if (mode & ISOLATE_CLEAN)
+-				return ret;
+-
+ 			/*
+ 			 * Only pages without mappings or that have a
+ 			 * ->migratepage callback are possible to migrate
+@@ -1731,8 +1725,6 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
+ 
+ 	if (!sc->may_unmap)
+ 		isolate_mode |= ISOLATE_UNMAPPED;
+-	if (!sc->may_writepage)
+-		isolate_mode |= ISOLATE_CLEAN;
+ 
+ 	spin_lock_irq(&pgdat->lru_lock);
+ 
+@@ -1929,8 +1921,6 @@ static void shrink_active_list(unsigned long nr_to_scan,
+ 
+ 	if (!sc->may_unmap)
+ 		isolate_mode |= ISOLATE_UNMAPPED;
+-	if (!sc->may_writepage)
+-		isolate_mode |= ISOLATE_CLEAN;
+ 
+ 	spin_lock_irq(&pgdat->lru_lock);
+ 
