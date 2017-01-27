@@ -1,0 +1,60 @@
+From: Vinayak Menon <vinmenon@codeaurora.org>
+Subject: [PATCH 1/2 v2] mm: vmscan: do not pass reclaimed slab to vmpressure
+Date: Fri, 27 Jan 2017 13:43:36 +0530
+Cc: linux-mm@kvack.org,
+	linux-kernel@vger.kernel.org,
+	Vinayak Menon <vinmenon@codeaurora.org>
+To: akpm@linux-foundation.org,
+	hannes@cmpxchg.org,
+	mgorman@techsingularity.net,
+	vbabka@suse.cz,
+	mhocko@suse.com,
+	riel@redhat.com,
+	vdavydov.dev@gmail.com,
+	anton.vorontsov@linaro.org,
+	minchan@kernel.org,
+	shashim@codeaurora.org
+
+It is noticed that during a global reclaim the memory
+reclaimed via shrinking the slabs can sometimes result
+in reclaimed pages being greater than the scanned pages
+in shrink_node. When this is passed to vmpressure, the
+unsigned arithmetic results in the pressure value to be
+huge, thus resulting in a critical event being sent to
+root cgroup. While this can be fixed by underflow checks
+in vmpressure, adding reclaimed slab without a corresponding
+increment of nr_scanned results in incorrect vmpressure
+reporting. So do not consider reclaimed slab pages in
+vmpressure calculation.
+
+Signed-off-by: Vinayak Menon <vinmenon@codeaurora.org>
+---
+ mm/vmscan.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 947ab6f..37c4486 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -2594,16 +2594,16 @@ static bool shrink_node(pg_data_t *pgdat, struct scan_control *sc)
+ 				    sc->nr_scanned - nr_scanned,
+ 				    node_lru_pages);
+ 
+-		if (reclaim_state) {
+-			sc->nr_reclaimed += reclaim_state->reclaimed_slab;
+-			reclaim_state->reclaimed_slab = 0;
+-		}
+-
+ 		/* Record the subtree's reclaim efficiency */
+ 		vmpressure(sc->gfp_mask, sc->target_mem_cgroup, true,
+ 			   sc->nr_scanned - nr_scanned,
+ 			   sc->nr_reclaimed - nr_reclaimed);
+ 
++		if (reclaim_state) {
++			sc->nr_reclaimed += reclaim_state->reclaimed_slab;
++			reclaim_state->reclaimed_slab = 0;
++		}
++
+ 		if (sc->nr_reclaimed - nr_reclaimed)
+ 			reclaimable = true;
+ 
