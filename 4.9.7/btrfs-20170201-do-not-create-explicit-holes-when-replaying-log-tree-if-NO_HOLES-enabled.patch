@@ -1,0 +1,46 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH v2] Btrfs: do not create explicit holes when replaying log tree if NO_HOLES enabled
+Date:   Wed,  1 Feb 2017 16:40:14 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+We log holes explicitly by using file extent items, however when replaying
+a log tree, if a logged file extent item corresponds to a hole and the
+NO_HOLES feature is enabled we do not need to copy the file extent item
+into the fs/subvolume tree, as the absence of such file extent items is
+the purpose of the NO_HOLES feature. So skip the copying of file extent
+items representing holes when the NO_HOLES feature is enabled.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+
+v2: Make the check only if the extent type is regular or prealloc,
+    since for inline extents disk_bytenr has no meaning.
+
+ fs/btrfs/tree-log.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index eeffff8..30423ce 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -673,6 +673,10 @@ static noinline int replay_one_extent(struct btrfs_trans_handle *trans,
+ 		unsigned long dest_offset;
+ 		struct btrfs_key ins;
+ 
++		if (btrfs_file_extent_disk_bytenr(eb, item) == 0 &&
++		    btrfs_fs_incompat(fs_info, NO_HOLES))
++			goto update_inode;
++
+ 		ret = btrfs_insert_empty_item(trans, root, path, key,
+ 					      sizeof(*item));
+ 		if (ret)
+@@ -825,6 +829,7 @@ static noinline int replay_one_extent(struct btrfs_trans_handle *trans,
+ 	}
+ 
+ 	inode_add_bytes(inode, nbytes);
++update_inode:
+ 	ret = btrfs_update_inode(trans, root, inode);
+ out:
+ 	if (inode)
