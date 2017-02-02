@@ -12,6 +12,7 @@ into the fs/subvolume tree, as the absence of such file extent items is
 the purpose of the NO_HOLES feature. So skip the copying of file extent
 items representing holes when the NO_HOLES feature is enabled.
 
+[HH: fix up root->fs_info for 4.9.x]
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
 
@@ -30,7 +31,7 @@ index eeffff8..30423ce 100644
  		struct btrfs_key ins;
  
 +		if (btrfs_file_extent_disk_bytenr(eb, item) == 0 &&
-+		    btrfs_fs_incompat(fs_info, NO_HOLES))
++		    btrfs_fs_incompat(root->fs_info, NO_HOLES))
 +			goto update_inode;
 +
  		ret = btrfs_insert_empty_item(trans, root, path, key,
