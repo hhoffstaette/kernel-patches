@@ -1,8 +1,8 @@
 From:   "Bill O'Donnell" <billodo@redhat.com>
 To:     linux-xfs@vger.kernel.org
 Cc:     darrick.wong@oracle.com
-Subject: [PATCH] xfs: correct null checks and error processing in xfs_initialize_perag
-Date:   Sat, 28 Jan 2017 13:19:57 -0600
+Subject: [PATCH v3] xfs: correct null checks and error processing in xfs_initialize_perag
+Date:   Tue,  7 Feb 2017 10:54:03 -0600
 
 If pag cannot be allocated, the current error exit path will trip
 a null pointer deference error when calling xfs_buf_hash_destroy
@@ -25,22 +25,28 @@ Fixes CoverityScan CID#1397628 ("Dereference after null check")
 Reported-by: Colin Ian King <colin.king@canonical.com>
 Signed-off-by: Bill O'Donnell <billodo@redhat.com>
 ---
- fs/xfs/xfs_mount.c | 37 ++++++++++++++++++++++++++-----------
- 1 file changed, 26 insertions(+), 11 deletions(-)
+v3: correct indexing error in out_unwind_new_pags loop, 
+    avoiding destruction of valid pags. Exit loop if !pag.
+v2: correct jump to out_hash_destroy for case where hash is initialized.
+    use NULLAGNUMBER to simplify first_initialised loop logic.
+
+ fs/xfs/xfs_mount.c | 24 +++++++++++++++---------
+ 1 file changed, 15 insertions(+), 9 deletions(-)
 
 diff --git a/fs/xfs/xfs_mount.c b/fs/xfs/xfs_mount.c
-index 9b9540d..b074d2a 100644
+index 9b9540d..1f1e4ae 100644
 --- a/fs/xfs/xfs_mount.c
 +++ b/fs/xfs/xfs_mount.c
-@@ -190,6 +190,7 @@ xfs_initialize_perag(
- 	xfs_agnumber_t	first_initialised = 0;
+@@ -187,7 +187,7 @@ xfs_initialize_perag(
+ 	xfs_agnumber_t	*maxagi)
+ {
+ 	xfs_agnumber_t	index;
+-	xfs_agnumber_t	first_initialised = 0;
++	xfs_agnumber_t	first_initialised = NULLAGNUMBER;
  	xfs_perag_t	*pag;
  	int		error = -ENOMEM;
-+	bool		first_init_done = false;
  
- 	/*
- 	 * Walk the current per-ag tree so we don't try to initialise AGs
-@@ -202,22 +203,20 @@ xfs_initialize_perag(
+@@ -202,22 +202,20 @@ xfs_initialize_perag(
  			xfs_perag_put(pag);
  			continue;
  		}
@@ -62,11 +68,11 @@ index 9b9540d..b074d2a 100644
  
  		if (radix_tree_preload(GFP_NOFS))
 -			goto out_unwind;
-+			goto out_free_pag;
++			goto out_hash_destroy;
  
  		spin_lock(&mp->m_perag_lock);
  		if (radix_tree_insert(&mp->m_perag_tree, index, pag)) {
-@@ -225,10 +224,15 @@ xfs_initialize_perag(
+@@ -225,10 +223,13 @@ xfs_initialize_perag(
  			spin_unlock(&mp->m_perag_lock);
  			radix_tree_preload_end();
  			error = -EEXIST;
@@ -75,15 +81,13 @@ index 9b9540d..b074d2a 100644
  		}
  		spin_unlock(&mp->m_perag_lock);
  		radix_tree_preload_end();
-+		/* a pag is fully initialized */
-+		if (!first_init_done) {
++		/* first new pag is fully initialized */
++		if (first_initialised == NULLAGNUMBER)
 +			first_initialised = index;
-+			first_init_done = true;
-+		}
  	}
  
  	index = xfs_set_inode_alloc(mp, agcount);
-@@ -239,13 +243,24 @@ xfs_initialize_perag(
+@@ -239,11 +240,16 @@ xfs_initialize_perag(
  	mp->m_ag_prealloc_blocks = xfs_prealloc_blocks(mp);
  	return 0;
  
@@ -93,23 +97,12 @@ index 9b9540d..b074d2a 100644
 +out_free_pag:
  	kmem_free(pag);
 -	for (; index > first_initialised; index--) {
--		pag = radix_tree_delete(&mp->m_perag_tree, index);
--		xfs_buf_hash_destroy(pag);
--		kmem_free(pag);
 +out_unwind_new_pags:
-+	/* unwind any newly initialized pags */
-+	if (first_init_done) {
-+		index--;
-+		do {
-+			pag = radix_tree_delete(&mp->m_perag_tree, index);
-+			if (pag) {
-+				xfs_buf_hash_destroy(pag);
-+				kmem_free(pag);
-+			}
-+			if (!index)
-+				break;
-+			index--;
-+		} while (index >= first_initialised);
++	/* unwind any prior newly initialized pags */
++	for (index = first_initialised; index < agcount; index++) {
+ 		pag = radix_tree_delete(&mp->m_perag_tree, index);
++		if (!pag)
++			break;
+ 		xfs_buf_hash_destroy(pag);
+ 		kmem_free(pag);
  	}
- 	return error;
- }
