@@ -1,0 +1,135 @@
+From:   Brian Foster <bfoster@redhat.com>
+To:     linux-xfs@vger.kernel.org
+Subject: [PATCH 2/4] xfs: resurrect debug mode drop buffered writes mechanism
+Date:   Thu,  9 Feb 2017 14:34:51 -0500
+
+A debug mode write failure mechanism was introduced to XFS in commit
+801cc4e17a ("xfs: debug mode forced buffered write failure") to
+facilitate targeted testing of delalloc indirect reservation management
+from userspace. This code was subsequently rendered ineffective by the
+move to iomap based buffered writes in commit 68a9f5e700 ("xfs:
+implement iomap based buffered write path"). This likely went unnoticed
+because the associated userspace code had not made it into xfstests.
+
+Resurrect this mechanism to facilitate effective indlen reservation
+testing from xfstests. The move to iomap based buffered writes relocated
+the hook this mechanism needs to return write failure from XFS to
+generic code. The failure trigger must remain in XFS. Given that
+limitation, convert this from a write failure mechanism to one that
+simply drops writes without returning failure to userspace. Rename all
+"fail_writes" references to "drop_writes" to illustrate the point. This
+is more hacky than preferred, but still triggers the XFS error handling
+behavior required to drive the indlen tests. This is only available in
+DEBUG mode and for testing purposes only.
+
+Signed-off-by: Brian Foster <bfoster@redhat.com>
+---
+ fs/xfs/xfs_iomap.c |  4 ++++
+ fs/xfs/xfs_mount.h | 15 ++++++++-------
+ fs/xfs/xfs_sysfs.c | 14 +++++++-------
+ 3 files changed, 19 insertions(+), 14 deletions(-)
+
+diff --git a/fs/xfs/xfs_iomap.c b/fs/xfs/xfs_iomap.c
+index faa13c8..8c7447e 100644
+--- a/fs/xfs/xfs_iomap.c
++++ b/fs/xfs/xfs_iomap.c
+@@ -1102,6 +1102,10 @@ xfs_file_iomap_end_delalloc(
+ 	xfs_fileoff_t		end_fsb;
+ 	int			error = 0;
+ 
++	/* behave as if the write failed if drop writes is enabled */
++	if (xfs_mp_drop_writes(mp))
++		written = 0;
++
+ 	start_fsb = XFS_B_TO_FSB(mp, offset + written);
+ 	if (unlikely(!written))
+ 		start_fsb = XFS_B_TO_FSBT(mp, offset);
+diff --git a/fs/xfs/xfs_mount.h b/fs/xfs/xfs_mount.h
+index 7f351f7..8f92b2e 100644
+--- a/fs/xfs/xfs_mount.h
++++ b/fs/xfs/xfs_mount.h
+@@ -200,11 +200,12 @@ typedef struct xfs_mount {
+ 	/*
+ 	 * DEBUG mode instrumentation to test and/or trigger delayed allocation
+ 	 * block killing in the event of failed writes. When enabled, all
+-	 * buffered writes are forced to fail. All delalloc blocks in the range
+-	 * of the write (including pre-existing delalloc blocks!) are tossed as
+-	 * part of the write failure error handling sequence.
++	 * buffered writes are silenty dropped and handled as if they failed.
++	 * All delalloc blocks in the range of the write (including pre-existing
++	 * delalloc blocks!) are tossed as part of the write failure error
++	 * handling sequence.
+ 	 */
+-	bool			m_fail_writes;
++	bool			m_drop_writes;
+ #endif
+ } xfs_mount_t;
+ 
+@@ -325,13 +326,13 @@ xfs_daddr_to_agbno(struct xfs_mount *mp, xfs_daddr_t d)
+ 
+ #ifdef DEBUG
+ static inline bool
+-xfs_mp_fail_writes(struct xfs_mount *mp)
++xfs_mp_drop_writes(struct xfs_mount *mp)
+ {
+-	return mp->m_fail_writes;
++	return mp->m_drop_writes;
+ }
+ #else
+ static inline bool
+-xfs_mp_fail_writes(struct xfs_mount *mp)
++xfs_mp_drop_writes(struct xfs_mount *mp)
+ {
+ 	return 0;
+ }
+diff --git a/fs/xfs/xfs_sysfs.c b/fs/xfs/xfs_sysfs.c
+index de6195e..80ac15f 100644
+--- a/fs/xfs/xfs_sysfs.c
++++ b/fs/xfs/xfs_sysfs.c
+@@ -93,7 +93,7 @@ to_mp(struct kobject *kobject)
+ #ifdef DEBUG
+ 
+ STATIC ssize_t
+-fail_writes_store(
++drop_writes_store(
+ 	struct kobject		*kobject,
+ 	const char		*buf,
+ 	size_t			count)
+@@ -107,9 +107,9 @@ fail_writes_store(
+ 		return ret;
+ 
+ 	if (val == 1)
+-		mp->m_fail_writes = true;
++		mp->m_drop_writes = true;
+ 	else if (val == 0)
+-		mp->m_fail_writes = false;
++		mp->m_drop_writes = false;
+ 	else
+ 		return -EINVAL;
+ 
+@@ -117,21 +117,21 @@ fail_writes_store(
+ }
+ 
+ STATIC ssize_t
+-fail_writes_show(
++drop_writes_show(
+ 	struct kobject		*kobject,
+ 	char			*buf)
+ {
+ 	struct xfs_mount	*mp = to_mp(kobject);
+ 
+-	return snprintf(buf, PAGE_SIZE, "%d\n", mp->m_fail_writes ? 1 : 0);
++	return snprintf(buf, PAGE_SIZE, "%d\n", mp->m_drop_writes ? 1 : 0);
+ }
+-XFS_SYSFS_ATTR_RW(fail_writes);
++XFS_SYSFS_ATTR_RW(drop_writes);
+ 
+ #endif /* DEBUG */
+ 
+ static struct attribute *xfs_mp_attrs[] = {
+ #ifdef DEBUG
+-	ATTR_LIST(fail_writes),
++	ATTR_LIST(drop_writes),
+ #endif
+ 	NULL,
+ };
