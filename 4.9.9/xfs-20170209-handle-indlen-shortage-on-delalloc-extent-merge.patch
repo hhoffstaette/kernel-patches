@@ -1,8 +1,7 @@
 From:   Brian Foster <bfoster@redhat.com>
 To:     linux-xfs@vger.kernel.org
-Cc:     Patrick Dung <mpatdung@gmail.com>
-Subject: [PATCH 1/2] xfs: handle indlen shortage on delalloc extent merge
-Date:   Fri,  3 Feb 2017 13:34:24 -0500
+Subject: [PATCH 3/4] xfs: handle indlen shortage on delalloc extent merge
+Date:   Thu,  9 Feb 2017 14:34:52 -0500
 
 When a delalloc extent is created, it can be merged with pre-existing,
 contiguous, delalloc extents. When this occurs,
@@ -36,7 +35,7 @@ Signed-off-by: Brian Foster <bfoster@redhat.com>
  1 file changed, 6 insertions(+), 3 deletions(-)
 
 diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
-index bfc00de..d2e48ed 100644
+index deee1db..49edea4 100644
 --- a/fs/xfs/libxfs/xfs_bmap.c
 +++ b/fs/xfs/libxfs/xfs_bmap.c
 @@ -2809,7 +2809,8 @@ xfs_bmap_add_extent_hole_delay(
