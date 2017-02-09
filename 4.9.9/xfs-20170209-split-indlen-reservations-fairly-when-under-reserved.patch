@@ -1,8 +1,7 @@
 From:   Brian Foster <bfoster@redhat.com>
 To:     linux-xfs@vger.kernel.org
-Cc:     Patrick Dung <mpatdung@gmail.com>
-Subject: [PATCH 2/2] xfs: split indlen reservations fairly when under reserved
-Date:   Fri,  3 Feb 2017 13:34:25 -0500
+Subject: [PATCH 4/4] xfs: split indlen reservations fairly when under reserved
+Date:   Thu,  9 Feb 2017 14:34:53 -0500
 
 Certain workoads that punch holes into speculative preallocation can
 cause delalloc indirect reservation splits when the delalloc extent is
@@ -26,20 +25,22 @@ circumstances.
 Reported-by: Patrick Dung <mpatdung@gmail.com>
 Signed-off-by: Brian Foster <bfoster@redhat.com>
 ---
- fs/xfs/libxfs/xfs_bmap.c | 58 +++++++++++++++++++++++++++++++++---------------
- 1 file changed, 40 insertions(+), 18 deletions(-)
+ fs/xfs/libxfs/xfs_bmap.c | 61 ++++++++++++++++++++++++++++++++++--------------
+ 1 file changed, 43 insertions(+), 18 deletions(-)
 
 diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
-index d2e48ed..4ca4606 100644
+index 49edea4..e27b9ee 100644
 --- a/fs/xfs/libxfs/xfs_bmap.c
 +++ b/fs/xfs/libxfs/xfs_bmap.c
-@@ -4790,34 +4790,56 @@ xfs_bmap_split_indlen(
+@@ -4790,6 +4790,7 @@ xfs_bmap_split_indlen(
  	xfs_filblks_t			len2 = *indlen2;
  	xfs_filblks_t			nres = len1 + len2; /* new total res. */
  	xfs_filblks_t			stolen = 0;
 +	xfs_filblks_t			resfactor;
  
- 	/*
+ 	trace_printk("%d: ores %llu len1 %llu len2 %llu\n", __LINE__, ores, len1, len2);
+ 
+@@ -4797,29 +4798,53 @@ xfs_bmap_split_indlen(
  	 * Steal as many blocks as we can to try and satisfy the worst case
  	 * indlen for both new extents.
  	 */
@@ -64,9 +65,12 @@ index d2e48ed..4ca4606 100644
 +	 * of the two extents is left with nothing when extents are repeatedly
 +	 * split.
 +	 */
-+	resfactor = (ores * 100) / nres;
-+	len1 = resfactor * len1 / 100;
-+	len2 = resfactor * len2 / 100;
++	resfactor = (ores * 100);
++	do_div(resfactor, nres);
++	len1 *= resfactor;
++	do_div(len1, 100);
++	len2 *= resfactor;
++	do_div(len2, 100);
 +	ASSERT(len1 + len2 <= ores);
 +	ASSERT(len1 < *indlen1 && len2 < *indlen2);
  
