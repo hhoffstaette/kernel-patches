@@ -1,0 +1,187 @@
+From 6b94780e45c17b83e3e75f8aaca5a328db583c74 Mon Sep 17 00:00:00 2001
+From: Vincent Guittot <vincent.guittot@linaro.org>
+Date: Thu, 8 Dec 2016 17:56:54 +0100
+Subject: sched/core: Use load_avg for selecting idlest group
+
+find_idlest_group() only compares the runnable_load_avg when looking
+for the least loaded group. But on fork intensive use case like
+hackbench where tasks blocked quickly after the fork, this can lead to
+selecting the same CPU instead of other CPUs, which have similar
+runnable load but a lower load_avg.
+
+When the runnable_load_avg of 2 CPUs are close, we now take into
+account the amount of blocked load as a 2nd selection factor. There is
+now 3 zones for the runnable_load of the rq:
+
+ - [0 .. (runnable_load - imbalance)]:
+	Select the new rq which has significantly less runnable_load
+
+ - [(runnable_load - imbalance) .. (runnable_load + imbalance)]:
+	The runnable loads are close so we use load_avg to chose
+	between the 2 rq
+
+ - [(runnable_load + imbalance) .. ULONG_MAX]:
+	Keep the current rq which has significantly less runnable_load
+
+The scale factor that is currently used for comparing runnable_load,
+doesn't work well with small value. As an example, the use of a
+scaling factor fails as soon as this_runnable_load == 0 because we
+always select local rq even if min_runnable_load is only 1, which
+doesn't really make sense because they are just the same. So instead
+of scaling factor, we use an absolute margin for runnable_load to
+detect CPUs with similar runnable_load and we keep using scaling
+factor for blocked load.
+
+For use case like hackbench, this enable the scheduler to select
+different CPUs during the fork sequence and to spread tasks across the
+system.
+
+Tests have been done on a Hikey board (ARM based octo cores) for
+several kernel. The result below gives min, max, avg and stdev values
+of 18 runs with each configuration.
+
+The patches depend on the "no missing update_rq_clock()" work.
+
+hackbench -P -g 1
+
+         ea86cb4b7621  7dc603c9028e  v4.8        v4.8+patches
+  min    0.049         0.050         0.051       0,048
+  avg    0.057         0.057(0%)     0.057(0%)   0,055(+5%)
+  max    0.066         0.068         0.070       0,063
+  stdev  +/-9%         +/-9%         +/-8%       +/-9%
+
+More performance numbers here:
+
+  https://lkml.kernel.org/r/20161203214707.GI20785@codeblueprint.co.uk
+
+Tested-by: Matt Fleming <matt@codeblueprint.co.uk>
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Matt Fleming <matt@codeblueprint.co.uk>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Morten.Rasmussen@arm.com
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: dietmar.eggemann@arm.com
+Cc: kernellwp@gmail.com
+Cc: umgwanakikbuti@gmail.com
+Cc: yuyang.du@intel.comc
+Link: http://lkml.kernel.org/r/1481216215-24651-3-git-send-email-vincent.guittot@linaro.org
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/fair.c | 55 ++++++++++++++++++++++++++++++++++++++++++-----------
+ 1 file changed, 44 insertions(+), 11 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index ebb815f..6559d19 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5405,16 +5405,20 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
+ {
+ 	struct sched_group *idlest = NULL, *group = sd->groups;
+ 	struct sched_group *most_spare_sg = NULL;
+-	unsigned long min_load = ULONG_MAX, this_load = 0;
++	unsigned long min_runnable_load = ULONG_MAX, this_runnable_load = 0;
++	unsigned long min_avg_load = ULONG_MAX, this_avg_load = 0;
+ 	unsigned long most_spare = 0, this_spare = 0;
+ 	int load_idx = sd->forkexec_idx;
+-	int imbalance = 100 + (sd->imbalance_pct-100)/2;
++	int imbalance_scale = 100 + (sd->imbalance_pct-100)/2;
++	unsigned long imbalance = scale_load_down(NICE_0_LOAD) *
++				(sd->imbalance_pct-100) / 100;
+ 
+ 	if (sd_flag & SD_BALANCE_WAKE)
+ 		load_idx = sd->wake_idx;
+ 
+ 	do {
+-		unsigned long load, avg_load, spare_cap, max_spare_cap;
++		unsigned long load, avg_load, runnable_load;
++		unsigned long spare_cap, max_spare_cap;
+ 		int local_group;
+ 		int i;
+ 
+@@ -5431,6 +5435,7 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
+ 		 * the group containing the CPU with most spare capacity.
+ 		 */
+ 		avg_load = 0;
++		runnable_load = 0;
+ 		max_spare_cap = 0;
+ 
+ 		for_each_cpu(i, sched_group_cpus(group)) {
+@@ -5440,7 +5445,9 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
+ 			else
+ 				load = target_load(i, load_idx);
+ 
+-			avg_load += load;
++			runnable_load += load;
++
++			avg_load += cfs_rq_load_avg(&cpu_rq(i)->cfs);
+ 
+ 			spare_cap = capacity_spare_wake(i, p);
+ 
+@@ -5449,14 +5456,31 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
+ 		}
+ 
+ 		/* Adjust by relative CPU capacity of the group */
+-		avg_load = (avg_load * SCHED_CAPACITY_SCALE) / group->sgc->capacity;
++		avg_load = (avg_load * SCHED_CAPACITY_SCALE) /
++					group->sgc->capacity;
++		runnable_load = (runnable_load * SCHED_CAPACITY_SCALE) /
++					group->sgc->capacity;
+ 
+ 		if (local_group) {
+-			this_load = avg_load;
++			this_runnable_load = runnable_load;
++			this_avg_load = avg_load;
+ 			this_spare = max_spare_cap;
+ 		} else {
+-			if (avg_load < min_load) {
+-				min_load = avg_load;
++			if (min_runnable_load > (runnable_load + imbalance)) {
++				/*
++				 * The runnable load is significantly smaller
++				 * so we can pick this new cpu
++				 */
++				min_runnable_load = runnable_load;
++				min_avg_load = avg_load;
++				idlest = group;
++			} else if ((runnable_load < (min_runnable_load + imbalance)) &&
++				   (100*min_avg_load > imbalance_scale*avg_load)) {
++				/*
++				 * The runnable loads are close so take the
++				 * blocked load into account through avg_load.
++				 */
++				min_avg_load = avg_load;
+ 				idlest = group;
+ 			}
+ 
+@@ -5482,14 +5506,23 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
+ 		goto skip_spare;
+ 
+ 	if (this_spare > task_util(p) / 2 &&
+-	    imbalance*this_spare > 100*most_spare)
++	    imbalance_scale*this_spare > 100*most_spare)
+ 		return NULL;
+-	else if (most_spare > task_util(p) / 2)
++
++	if (most_spare > task_util(p) / 2)
+ 		return most_spare_sg;
+ 
+ skip_spare:
+-	if (!idlest || 100*this_load < imbalance*min_load)
++	if (!idlest)
++		return NULL;
++
++	if (min_runnable_load > (this_runnable_load + imbalance))
+ 		return NULL;
++
++	if ((this_runnable_load < (min_runnable_load + imbalance)) &&
++	     (100*this_avg_load < imbalance_scale*min_avg_load))
++		return NULL;
++
+ 	return idlest;
+ }
+ 
+-- 
+cgit v0.12
+
