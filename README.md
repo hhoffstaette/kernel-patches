@@ -30,6 +30,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - loop: observe rotational property of underlying device
 - mm: memory management fixes from 4.10+
 - muqss: [MuQSS v150](http://ck-hack.blogspot.de/2016/12/linux-49-ck1-muqss-version-0150.html) (*disabled* by default)
+- sched: CFS cpu scheduler fixes from 4.10+
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 4.10+
 

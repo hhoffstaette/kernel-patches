@@ -1,0 +1,120 @@
+From 104cb16d9eb684f071d5bf3aa87c0d01af259b7c Mon Sep 17 00:00:00 2001
+From: Morten Rasmussen <morten.rasmussen@arm.com>
+Date: Fri, 14 Oct 2016 14:41:07 +0100
+Subject: sched/fair: Compute task/cpu utilization at wake-up correctly
+
+At task wake-up load-tracking isn't updated until the task is enqueued.
+The task's own view of its utilization contribution may therefore not be
+aligned with its contribution to the cfs_rq load-tracking which may have
+been updated in the meantime. Basically, the task's own utilization
+hasn't yet accounted for the sleep decay, while the cfs_rq may have
+(partially). Estimating the cfs_rq utilization in case the task is
+migrated at wake-up as task_rq(p)->cfs.avg.util_avg - p->se.avg.util_avg
+is therefore incorrect as the two load-tracking signals aren't time
+synchronized (different last update).
+
+To solve this problem, this patch synchronizes the task utilization with
+its previous rq before the task utilization is used in the wake-up path.
+Currently the update/synchronization is done _after_ the task has been
+placed by select_task_rq_fair(). The synchronization is done without
+having to take the rq lock using the existing mechanism used in
+remove_entity_load_avg().
+
+Signed-off-by: Morten Rasmussen <morten.rasmussen@arm.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: dietmar.eggemann@arm.com
+Cc: freedom.tan@mediatek.com
+Cc: keita.kobayashi.ym@renesas.com
+Cc: mgalbraith@suse.de
+Cc: sgurrappadi@nvidia.com
+Cc: vincent.guittot@linaro.org
+Cc: yuyang.du@intel.com
+Link: http://lkml.kernel.org/r/1476452472-24740-2-git-send-email-morten.rasmussen@arm.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/fair.c | 39 +++++++++++++++++++++++++++++++++++----
+ 1 file changed, 35 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 3cf446c..b05d691 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -3199,13 +3199,25 @@ static inline u64 cfs_rq_last_update_time(struct cfs_rq *cfs_rq)
+ #endif
+ 
+ /*
++ * Synchronize entity load avg of dequeued entity without locking
++ * the previous rq.
++ */
++void sync_entity_load_avg(struct sched_entity *se)
++{
++	struct cfs_rq *cfs_rq = cfs_rq_of(se);
++	u64 last_update_time;
++
++	last_update_time = cfs_rq_last_update_time(cfs_rq);
++	__update_load_avg(last_update_time, cpu_of(rq_of(cfs_rq)), &se->avg, 0, 0, NULL);
++}
++
++/*
+  * Task first catches up with cfs_rq, and then subtract
+  * itself from the cfs_rq (task must be off the queue now).
+  */
+ void remove_entity_load_avg(struct sched_entity *se)
+ {
+ 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+-	u64 last_update_time;
+ 
+ 	/*
+ 	 * tasks cannot exit without having gone through wake_up_new_task() ->
+@@ -3217,9 +3229,7 @@ void remove_entity_load_avg(struct sched_entity *se)
+ 	 * calls this.
+ 	 */
+ 
+-	last_update_time = cfs_rq_last_update_time(cfs_rq);
+-
+-	__update_load_avg(last_update_time, cpu_of(rq_of(cfs_rq)), &se->avg, 0, 0, NULL);
++	sync_entity_load_avg(se);
+ 	atomic_long_add(se->avg.load_avg, &cfs_rq->removed_load_avg);
+ 	atomic_long_add(se->avg.util_avg, &cfs_rq->removed_util_avg);
+ }
+@@ -5583,6 +5593,24 @@ static inline int task_util(struct task_struct *p)
+ }
+ 
+ /*
++ * cpu_util_wake: Compute cpu utilization with any contributions from
++ * the waking task p removed.
++ */
++static int cpu_util_wake(int cpu, struct task_struct *p)
++{
++	unsigned long util, capacity;
++
++	/* Task has no contribution or is new */
++	if (cpu != task_cpu(p) || !p->se.avg.last_update_time)
++		return cpu_util(cpu);
++
++	capacity = capacity_orig_of(cpu);
++	util = max_t(long, cpu_rq(cpu)->cfs.avg.util_avg - task_util(p), 0);
++
++	return (util >= capacity) ? capacity : util;
++}
++
++/*
+  * Disable WAKE_AFFINE in the case where task @p doesn't fit in the
+  * capacity of either the waking CPU @cpu or the previous CPU @prev_cpu.
+  *
+@@ -5600,6 +5628,9 @@ static int wake_cap(struct task_struct *p, int cpu, int prev_cpu)
+ 	if (max_cap - min_cap < max_cap >> 3)
+ 		return 0;
+ 
++	/* Bring task utilization in sync with prev_cpu */
++	sync_entity_load_avg(&p->se);
++
+ 	return min_cap * 1024 < task_util(p) * capacity_margin;
+ }
+ 
+-- 
+cgit v0.12
+
