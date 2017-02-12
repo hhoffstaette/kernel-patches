@@ -1,0 +1,84 @@
+From f519a3f1c6b7a990e5aed37a8f853c6ecfdee945 Mon Sep 17 00:00:00 2001
+From: Vincent Guittot <vincent.guittot@linaro.org>
+Date: Thu, 8 Dec 2016 17:56:53 +0100
+Subject: sched/core: Fix find_idlest_group() for fork
+
+During fork, the utilization of a task is init once the rq has been
+selected because the current utilization level of the rq is used to
+set the utilization of the fork task. As the task's utilization is
+still 0 at this step of the fork sequence, it doesn't make sense to
+look for some spare capacity that can fit the task's utilization.
+Furthermore, I can see perf regressions for the test:
+
+   hackbench -P -g 1
+
+because the least loaded policy is always bypassed and tasks are not
+spread during fork.
+
+With this patch and the fix below, we are back to same performances as
+for v4.8. The fix below is only a temporary one used for the test
+until a smarter solution is found because we can't simply remove the
+test which is useful for others benchmarks
+
+| @@ -5708,13 +5708,6 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, int t
+|
+|	avg_cost = this_sd->avg_scan_cost;
+|
+| -	/*
+| -	 * Due to large variance we need a large fuzz factor; hackbench in
+| -	 * particularly is sensitive here.
+| -	 */
+| -	if ((avg_idle / 512) < avg_cost)
+| -		return -1;
+| -
+|	time = local_clock();
+|
+|	for_each_cpu_wrap(cpu, sched_domain_span(sd), target, wrap) {
+
+Tested-by: Matt Fleming <matt@codeblueprint.co.uk>
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Matt Fleming <matt@codeblueprint.co.uk>
+Acked-by: Morten Rasmussen <morten.rasmussen@arm.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: dietmar.eggemann@arm.com
+Cc: kernellwp@gmail.com
+Cc: umgwanakikbuti@gmail.com
+Cc: yuyang.du@intel.comc
+Link: http://lkml.kernel.org/r/1481216215-24651-2-git-send-email-vincent.guittot@linaro.org
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/fair.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 18d9e75..ebb815f 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5473,13 +5473,21 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
+ 	 * utilized systems if we require spare_capacity > task_util(p),
+ 	 * so we allow for some task stuffing by using
+ 	 * spare_capacity > task_util(p)/2.
++	 *
++	 * Spare capacity can't be used for fork because the utilization has
++	 * not been set yet, we must first select a rq to compute the initial
++	 * utilization.
+ 	 */
++	if (sd_flag & SD_BALANCE_FORK)
++		goto skip_spare;
++
+ 	if (this_spare > task_util(p) / 2 &&
+ 	    imbalance*this_spare > 100*most_spare)
+ 		return NULL;
+ 	else if (most_spare > task_util(p) / 2)
+ 		return most_spare_sg;
+ 
++skip_spare:
+ 	if (!idlest || 100*this_load < imbalance*min_load)
+ 		return NULL;
+ 	return idlest;
+-- 
+cgit v0.12
+
