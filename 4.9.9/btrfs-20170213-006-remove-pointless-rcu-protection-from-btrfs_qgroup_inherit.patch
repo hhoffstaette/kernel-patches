@@ -1,0 +1,28 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH 7/7] btrfs: remove pointless rcu protection from btrfs_qgroup_inherit
+Date:   Mon, 13 Feb 2017 15:30:29 +0100
+
+There was never need for RCU protection around reading nodesize or other
+fairly constant filesystem data.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/qgroup.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 114d6770dc23..052f1410dc14 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -2189,9 +2189,7 @@ int btrfs_qgroup_inherit(struct btrfs_trans_handle *trans,
+ 			goto out;
+ 		}
+ 
+-		rcu_read_lock();
+ 		level_size = srcroot->nodesize;
+-		rcu_read_unlock();
+ 	}
+ 
+ 	/*
