@@ -1,7 +1,7 @@
 From:   fdmanana@kernel.org
 To:     linux-btrfs@vger.kernel.org
-Subject: [PATCH] Btrfs: fix data loss after truncate when using the no-holes feature
-Date:   Tue, 14 Feb 2017 20:35:26 +0000
+Subject: [PATCH v2] Btrfs: fix data loss after truncate when using the no-holes feature
+Date:   Wed, 15 Feb 2017 18:42:33 +0000
 
 From: Filipe Manana <fdmanana@suse.com>
 
@@ -43,21 +43,47 @@ Cc: <stable@vger.kernel.org>  # 3.14+
 Fixes: 16e7549f045d ("Btrfs: incompatible format change to remove hole extents")
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
- fs/btrfs/inode.c | 6 +++++-
- 1 file changed, 5 insertions(+), 1 deletion(-)
+
+V2: Do the update of last_size only if no error happened, which is specially
+    important when we're called by inode eviction and err is -eagain.
+    Added an assertion and removed so no longer needed code from the loop.
+
+ fs/btrfs/inode.c | 19 ++++++-------------
+ 1 file changed, 6 insertions(+), 13 deletions(-)
 
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index 8eb6703..a0a38ce 100644
+index 8eb6703..a9db345 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -4703,8 +4703,12 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
+@@ -4508,19 +4508,8 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
+ 		if (found_type > min_type) {
+ 			del_item = 1;
+ 		} else {
+-			if (item_end < new_size) {
+-				/*
+-				 * With NO_HOLES mode, for the following mapping
+-				 *
+-				 * [0-4k][hole][8k-12k]
+-				 *
+-				 * if truncating isize down to 6k, it ends up
+-				 * isize being 8k.
+-				 */
+-				if (btrfs_fs_incompat(root->fs_info, NO_HOLES))
+-					last_size = new_size;
++			if (item_end < new_size)
+ 				break;
+-			}
+ 			if (found_key.offset >= new_size)
+ 				del_item = 1;
+ 			else
+@@ -4703,8 +4692,12 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
  			btrfs_abort_transaction(trans, ret);
  	}
  error:
 -	if (root->root_key.objectid != BTRFS_TREE_LOG_OBJECTID)
 +	if (root->root_key.objectid != BTRFS_TREE_LOG_OBJECTID) {
-+		if (last_size > new_size &&
-+		    btrfs_fs_incompat(fs_info, NO_HOLES))
++		ASSERT(last_size >= new_size);
++		if (!err && last_size > new_size)
 +			last_size = new_size;
  		btrfs_ordered_update_i_size(inode, last_size, NULL);
 +	}
