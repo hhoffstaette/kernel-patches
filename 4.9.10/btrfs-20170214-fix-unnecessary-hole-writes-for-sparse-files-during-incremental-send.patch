@@ -74,6 +74,7 @@ hole for the respective range.
 
 A test case for fstests will follow soon.
 
+[HH: fixed fs_info->sectorsize for 4.9.x]
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
  fs/btrfs/send.c | 88 +++++++++++++++++++++++++++++++++++++++++++++++++++++++--
@@ -140,7 +141,7 @@ index 712922e..456c890 100644
 +			u64 size = btrfs_file_extent_inline_len(leaf, slot, fi);
 +
 +			extent_end = ALIGN(key.offset + size,
-+					   root->fs_info->sectorsize);
++					   root->sectorsize);
 +		} else {
 +			extent_end = key.offset +
 +				btrfs_file_extent_num_bytes(leaf, fi);
