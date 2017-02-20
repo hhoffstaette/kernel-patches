@@ -1,0 +1,35 @@
+From 8a570142cebcf6b5ce0b7e7bedad9911e9608e98 Mon Sep 17 00:00:00 2001
+From: Con Kolivas <kernel@kolivas.org>
+Date: Mon, 20 Feb 2017 12:58:10 +1100
+Subject: [PATCH] Remove quick ramp up which may have been keeping CPUs in high
+ frequency states at relatively low loads with schedutil.
+
+---
+ kernel/sched/MuQSS.c | 7 ++-----
+ 1 file changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/sched/MuQSS.c b/kernel/sched/MuQSS.c
+index 383e84e..27da444 100644
+--- a/kernel/sched/MuQSS.c
++++ b/kernel/sched/MuQSS.c
+@@ -887,8 +887,8 @@ static inline bool rq_local(struct rq *rq);
+  */
+ static void update_load_avg(struct rq *rq, unsigned int flags)
+ {
+-	unsigned long us_interval;
+-	long load, curload;
++	unsigned long us_interval, curload;
++	long load;
+ 
+ 	if (unlikely(rq->niffies <= rq->load_update))
+ 		return;
+@@ -899,9 +899,6 @@ static void update_load_avg(struct rq *rq, unsigned int flags)
+ 	if (unlikely(load < 0))
+ 		load = 0;
+ 	load += curload * curload * SCHED_CAPACITY_SCALE * us_interval * 5 / 262144;
+-	/* If this CPU has all the load, make it ramp up quickly */
+-	if (curload > load && curload >= atomic_read(&grq.nr_running))
+-		load = curload;
+ 	rq->load_avg = load;
+ 
+ 	rq->load_update = rq->niffies;
