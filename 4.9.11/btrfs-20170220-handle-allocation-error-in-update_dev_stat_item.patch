@@ -1,0 +1,25 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH 2/3] btrfs: handle allocation error in update_dev_stat_item
+Date:   Mon, 20 Feb 2017 19:25:04 +0100
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 1fac98728814..64d6665f6eda 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6954,7 +6954,8 @@ static int update_dev_stat_item(struct btrfs_trans_handle *trans,
+ 	key.offset = device->devid;
+ 
+ 	path = btrfs_alloc_path();
+-	BUG_ON(!path);
++	if (!path)
++		return -ENOMEM;
+ 	ret = btrfs_search_slot(trans, dev_root, &key, path, -1, 1);
+ 	if (ret < 0) {
+ 		btrfs_warn_in_rcu(fs_info,
