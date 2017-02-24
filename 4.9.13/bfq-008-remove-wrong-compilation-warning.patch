@@ -1,0 +1,26 @@
+From 23a3965c19616da0b723f0a83288dfc76aace016 Mon Sep 17 00:00:00 2001
+From: Paolo Valente <paolo.valente@linaro.org>
+Date: Sat, 4 Feb 2017 17:31:41 +0100
+Subject: [PATCH] Remove wrong compilation warning
+
+BUGFIX: Removed a wrong compilation warning, due to the compiler
+not taking into account short circuit in a condition.
+
+Signed-off-by: Paolo Valente <paolo.valente@linaro.org>
+---
+ block/bfq-sched.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/block/bfq-sched.c b/block/bfq-sched.c
+index 797bce7..2e9dc59 100644
+--- a/block/bfq-sched.c
++++ b/block/bfq-sched.c
+@@ -1301,7 +1301,7 @@ static void bfq_deactivate_entity(struct bfq_entity *entity,
+ 				  bool expiration)
+ {
+ 	struct bfq_sched_data *sd;
+-	struct bfq_entity *parent;
++	struct bfq_entity *parent = NULL;
+ 
+ 	for_each_entity_safe(entity, parent) {
+ 		sd = entity->sched_data;

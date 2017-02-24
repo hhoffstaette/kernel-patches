@@ -1,0 +1,32 @@
+From 0796dc37acb561ef9c544a68045ff9a016b1ccab Mon Sep 17 00:00:00 2001
+From: Oleksandr Natalenko <oleksandr@natalenko.name>
+Date: Mon, 20 Feb 2017 16:02:07 +0100
+Subject: [PATCH] block/bfq-cgroup: fix bfq_bic_update_cgroup() API
+
+bfq_bic_update_cgroup() should return nothing even if
+CONFIG_BFQ_GROUP_IOSCHED is disabled.
+
+Signed-off-by: Oleksandr Natalenko <oleksandr@natalenko.name>
+---
+ block/bfq-cgroup.c | 8 +-------
+ 1 file changed, 1 insertion(+), 7 deletions(-)
+
+diff --git a/block/bfq-cgroup.c b/block/bfq-cgroup.c
+index a5f8dc1..de045cf 100644
+--- a/block/bfq-cgroup.c
++++ b/block/bfq-cgroup.c
+@@ -1157,13 +1157,7 @@ static void bfq_init_entity(struct bfq_entity *entity,
+ 	entity->sched_data = &bfqg->sched_data;
+ }
+ 
+-static struct bfq_group *
+-bfq_bic_update_cgroup(struct bfq_io_cq *bic, struct bio *bio)
+-{
+-	struct bfq_data *bfqd = bic_to_bfqd(bic);
+-
+-	return bfqd->root_group;
+-}
++static void bfq_bic_update_cgroup(struct bfq_io_cq *bic, struct bio *bio) {}
+ 
+ static void bfq_end_wr_async(struct bfq_data *bfqd)
+ {

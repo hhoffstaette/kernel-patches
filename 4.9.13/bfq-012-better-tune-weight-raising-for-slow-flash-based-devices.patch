@@ -1,0 +1,31 @@
+From 7a2380425fe4d433a75982295fae3079f6a7b6a3 Mon Sep 17 00:00:00 2001
+From: Luca Miccio <lucmiccio@gmail.com>
+Date: Sat, 4 Feb 2017 18:03:06 +0100
+Subject: [PATCH] Better tune weight-raising for slow flash-based devices
+
+IMPROVEMENT Luca Miccio has run a few responsiveness tests on recent
+Android systems with average-speed storage devices. These tests have
+shown that the following BFQ parameter was too low for these systems:
+reference duration for slow storage devices of weight raising for
+interactive applications. This commit raises that duration to a
+value that is yelding optimal results in our tests.
+
+Signed-off-by: Luca Miccio <lucmiccio@gmail.com>
+Signed-off-by: Paolo Valente <paolo.valente@linaro.org>
+---
+ block/bfq-iosched.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/block/bfq-iosched.c b/block/bfq-iosched.c
+index d603cf9..ba82d8f 100644
+--- a/block/bfq-iosched.c
++++ b/block/bfq-iosched.c
+@@ -5260,7 +5260,7 @@ static int __init bfq_init(void)
+ 	 * be run for a long time.
+ 	 */
+ 	T_slow[0] = msecs_to_jiffies(3500); /* actually 4 sec */
+-	T_slow[1] = msecs_to_jiffies(1000); /* actually 1.5 sec */
++	T_slow[1] = msecs_to_jiffies(6000); /* actually 6.5 sec */
+ 	T_fast[0] = msecs_to_jiffies(7000); /* actually 8 sec */
+ 	T_fast[1] = msecs_to_jiffies(2500); /* actually 3 sec */
+ 
