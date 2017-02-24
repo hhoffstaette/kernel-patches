@@ -22,6 +22,7 @@ is more hacky than preferred, but still triggers the XFS error handling
 behavior required to drive the indlen tests. This is only available in
 DEBUG mode and for testing purposes only.
 
+[HH: merged hunk #1 for 4.9.13]
 Signed-off-by: Brian Foster <bfoster@redhat.com>
 ---
  fs/xfs/xfs_iomap.c |  4 ++++
@@ -41,9 +42,9 @@ index faa13c8..8c7447e 100644
 +	if (xfs_mp_drop_writes(mp))
 +		written = 0;
 +
- 	start_fsb = XFS_B_TO_FSB(mp, offset + written);
- 	if (unlikely(!written))
- 		start_fsb = XFS_B_TO_FSBT(mp, offset);
+ 	/*
+ 	 * start_fsb refers to the first unused block after a short write. If
+ 	 * nothing was written, round offset down to point at the first block in
 diff --git a/fs/xfs/xfs_mount.h b/fs/xfs/xfs_mount.h
 index 7f351f7..8f92b2e 100644
 --- a/fs/xfs/xfs_mount.h
