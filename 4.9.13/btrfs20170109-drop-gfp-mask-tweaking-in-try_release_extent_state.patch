@@ -1,0 +1,39 @@
+From 1aceabf362dc8c54ec7790de7f95d75c1ecb9678 Mon Sep 17 00:00:00 2001
+From: Michal Hocko <mhocko@suse.com>
+Date: Mon, 9 Jan 2017 15:39:03 +0100
+Subject: btrfs: drop gfp mask tweaking in try_release_extent_state
+
+try_release_extent_state reduces the gfp mask to GFP_NOFS if it is
+compatible. This is true for GFP_KERNEL as well. There is no real
+reason to do that though. There is no new lock taken down the
+the only consumer of the gfp mask which is
+try_release_extent_state
+  clear_extent_bit
+    __clear_extent_bit
+      alloc_extent_state
+
+So this seems just unnecessary and confusing.
+
+Signed-off-by: Michal Hocko <mhocko@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent_io.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 28a5a15..1297b63 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4269,8 +4269,6 @@ static int try_release_extent_state(struct extent_map_tree *map,
+ 			   EXTENT_IOBITS, 0, NULL))
+ 		ret = 0;
+ 	else {
+-		if ((mask & GFP_NOFS) == GFP_NOFS)
+-			mask = GFP_NOFS;
+ 		/*
+ 		 * at this point we can safely clear everything except the
+ 		 * locked bit and the nodatasum bit
+-- 
+cgit v0.12
+
