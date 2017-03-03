@@ -1,0 +1,41 @@
+From 5d17a73a2ebeb8d1c6924b91e53ab2650fe86ffb Mon Sep 17 00:00:00 2001
+From: Michal Hocko <mhocko@suse.com>
+Date: Fri, 24 Feb 2017 14:58:53 -0800
+Subject: vmalloc: back off when the current task is killed
+
+__vmalloc_area_node() allocates pages to cover the requested vmalloc
+size.  This can be a lot of memory.  If the current task is killed by
+the OOM killer, and thus has an unlimited access to memory reserves, it
+can consume all the memory theoretically.  Fix this by checking for
+fatal_signal_pending and back off early.
+
+Link: http://lkml.kernel.org/r/20170201092706.9966-4-mhocko@kernel.org
+Signed-off-by: Michal Hocko <mhocko@suse.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Cc: Tetsuo Handa <penguin-kernel@I-love.SAKURA.ne.jp>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/vmalloc.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/mm/vmalloc.c b/mm/vmalloc.c
+index d89034a..011b446 100644
+--- a/mm/vmalloc.c
++++ b/mm/vmalloc.c
+@@ -1642,6 +1642,11 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
+ 	for (i = 0; i < area->nr_pages; i++) {
+ 		struct page *page;
+ 
++		if (fatal_signal_pending(current)) {
++			area->nr_pages = i;
++			goto fail;
++		}
++
+ 		if (node == NUMA_NO_NODE)
+ 			page = alloc_page(alloc_mask);
+ 		else
+-- 
+cgit v0.12
+
