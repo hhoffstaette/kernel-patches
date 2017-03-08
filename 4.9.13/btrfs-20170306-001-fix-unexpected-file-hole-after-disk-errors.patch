@@ -1,0 +1,61 @@
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.cz>, Qu Wenruo <quwenruo@cn.fujitsu.com>
+Subject: [PATCH v2] Btrfs: fix unexpected file hole after disk errors
+Date:   Mon,  6 Mar 2017 12:23:30 -0800
+
+Btrfs creates hole extents to cover any unwritten section right before
+doing buffer writes after commit 3ac0d7b96a26 ("btrfs: Change the expanding
+write sequence to fix snapshot related bug.").
+
+However, that takes the start position of the buffered write to compare
+against the current EOF, hole extents would be created only if (EOF <
+start).
+
+If the EOF is at the middle of the buffered write, no hole extents will be
+created and a file hole without a hole extent is left in this file.
+
+This bug was revealed by generic/019 in fstests.  'fsstress' in this test
+may create the above situation and the test then fails all requests
+including writes, so the buffer write which is supposed to cover the
+hole (without the hole extent) couldn't make it on disk.  Running fsck
+against such btrfs ends up with detecting file extent holes.
+
+Things could be more serious, some stale data would be exposed to
+userspace if files with this kind of hole are truncated to a position of
+the hole, because the on-disk inode size is beyond the last extent in the
+file.
+
+This fixes the bug by comparing the end position against the EOF.
+
+[HH: backported to 4.9.x++]
+Cc: David Sterba <dsterba@suse.cz>
+Cc: Qu Wenruo <quwenruo@cn.fujitsu.com>
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+v2: update comments to be precise.
+
+ fs/btrfs/file.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 520cb72..dcf0286 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1865,10 +1865,13 @@ static ssize_t btrfs_file_write_iter(struct kiocb *iocb,
+ 	pos = iocb->ki_pos;
+ 	count = iov_iter_count(from);
+ 	start_pos = round_down(pos, root->sectorsize);
++	end_pos = round_up(pos + count, root->sectorsize);
+ 	oldsize = i_size_read(inode);
+-	if (start_pos > oldsize) {
+-		/* Expand hole size to cover write data, preventing empty gap */
+-		end_pos = round_up(pos + count, root->sectorsize);
++	if (end_pos > oldsize) {
++		/*
++		 * Expand hole size to cover write data in order to prevent an
++		 * empty gap in case of a write failure.
++		 */
+ 		err = btrfs_cont_expand(inode, oldsize, end_pos);
+ 		if (err) {
+ 			inode_unlock(inode);
