@@ -1,0 +1,82 @@
+From c3988d630a4dfec5c09f2b6496734f320949ea9c Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Fri, 17 Feb 2017 15:18:32 +0100
+Subject: btrfs: let writepage_end_io_hook return void
+
+There's no error path in any of the instances, always return 0.
+
+Reviewed-by: Liu Bo <bo.li.liu@oracle.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent_io.c | 9 +++------
+ fs/btrfs/extent_io.h | 2 +-
+ fs/btrfs/inode.c     | 6 ++----
+ 3 files changed, 6 insertions(+), 11 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index c3abf84..94beb75 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -2437,12 +2437,9 @@ void end_extent_writepage(struct page *page, int err, u64 start, u64 end)
+ 
+ 	tree = &BTRFS_I(page->mapping->host)->io_tree;
+ 
+-	if (tree->ops && tree->ops->writepage_end_io_hook) {
+-		ret = tree->ops->writepage_end_io_hook(page, start,
+-					       end, NULL, uptodate);
+-		if (ret)
+-			uptodate = 0;
+-	}
++	if (tree->ops && tree->ops->writepage_end_io_hook)
++		tree->ops->writepage_end_io_hook(page, start, end, NULL,
++				uptodate);
+ 
+ 	if (!uptodate) {
+ 		ClearPageUptodate(page);
+diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
+index c16260c..78bb4d76 100644
+--- a/fs/btrfs/extent_io.h
++++ b/fs/btrfs/extent_io.h
+@@ -104,7 +104,7 @@ struct extent_io_ops {
+ 	int (*readpage_end_io_hook)(struct btrfs_io_bio *io_bio, u64 phy_offset,
+ 				    struct page *page, u64 start, u64 end,
+ 				    int mirror);
+-	int (*writepage_end_io_hook)(struct page *page, u64 start, u64 end,
++	void (*writepage_end_io_hook)(struct page *page, u64 start, u64 end,
+ 				      struct extent_state *state, int uptodate);
+ 	void (*set_bit_hook)(struct inode *inode, struct extent_state *state,
+ 			     unsigned *bits);
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 0d932b9..b904c74 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -2972,7 +2972,7 @@ static void finish_ordered_fn(struct btrfs_work *work)
+ 	btrfs_finish_ordered_io(ordered_extent);
+ }
+ 
+-static int btrfs_writepage_end_io_hook(struct page *page, u64 start, u64 end,
++static void btrfs_writepage_end_io_hook(struct page *page, u64 start, u64 end,
+ 				struct extent_state *state, int uptodate)
+ {
+ 	struct inode *inode = page->mapping->host;
+@@ -2986,7 +2986,7 @@ static int btrfs_writepage_end_io_hook(struct page *page, u64 start, u64 end,
+ 	ClearPagePrivate2(page);
+ 	if (!btrfs_dec_test_ordered_pending(inode, &ordered_extent, start,
+ 					    end - start + 1, uptodate))
+-		return 0;
++		return;
+ 
+ 	if (btrfs_is_free_space_inode(BTRFS_I(inode))) {
+ 		wq = fs_info->endio_freespace_worker;
+@@ -2999,8 +2999,6 @@ static int btrfs_writepage_end_io_hook(struct page *page, u64 start, u64 end,
+ 	btrfs_init_work(&ordered_extent->work, func, finish_ordered_fn, NULL,
+ 			NULL);
+ 	btrfs_queue_work(wq, &ordered_extent->work);
+-
+-	return 0;
+ }
+ 
+ static int __readpage_endio_check(struct inode *inode,
+-- 
+cgit v0.12
+
