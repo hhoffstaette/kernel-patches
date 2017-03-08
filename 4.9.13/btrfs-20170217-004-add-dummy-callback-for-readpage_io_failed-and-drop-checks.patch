@@ -1,0 +1,92 @@
+From 20a7db8ab3f2057a518448b1728d504ffadef65e Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Fri, 17 Feb 2017 16:24:29 +0100
+Subject: btrfs: add dummy callback for readpage_io_failed and drop checks
+
+Make extent_io_ops::readpage_io_failed_hook callback mandatory and
+define a dummy function for btrfs_extent_io_ops. As the failed IO
+callback is not performance critical, the branch vs extra trade off does
+not hurt.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c   | 2 +-
+ fs/btrfs/extent_io.c | 2 +-
+ fs/btrfs/extent_io.h | 2 +-
+ fs/btrfs/inode.c     | 7 +++++++
+ 4 files changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 60d4f1b..cad47ec 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -4658,7 +4658,7 @@ static const struct extent_io_ops btree_extent_io_ops = {
+ 	.readpage_end_io_hook = btree_readpage_end_io_hook,
+ 	/* note we're sharing with inode.c for the merge bio hook */
+ 	.merge_bio_hook = btrfs_merge_bio_hook,
++	.readpage_io_failed_hook = btree_io_failed_hook,
+ 
+ 	/* optional callbacks */
+-	.readpage_io_failed_hook = btree_io_failed_hook,
+ };
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 0786985..28e8192 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -2581,7 +2581,7 @@ static void end_bio_extent_readpage(struct bio *bio)
+ 		if (likely(uptodate))
+ 			goto readpage_ok;
+ 
+-		if (tree->ops && tree->ops->readpage_io_failed_hook) {
++		if (tree->ops) {
+ 			ret = tree->ops->readpage_io_failed_hook(page, mirror);
+ 			if (!ret && !bio->bi_error)
+ 				uptodate = 1;
+diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
+index 1f8478d..3e4fad4 100644
+--- a/fs/btrfs/extent_io.h
++++ b/fs/btrfs/extent_io.h
+@@ -103,6 +103,7 @@ struct extent_io_ops {
+ 	int (*merge_bio_hook)(struct page *page, unsigned long offset,
+ 			      size_t size, struct bio *bio,
+ 			      unsigned long bio_flags);
++	int (*readpage_io_failed_hook)(struct page *page, int failed_mirror);
+ 
+ 	/*
+ 	 * Optional hooks, called if the pointer is not NULL
+@@ -110,7 +111,6 @@ struct extent_io_ops {
+ 	int (*fill_delalloc)(struct inode *inode, struct page *locked_page,
+ 			     u64 start, u64 end, int *page_started,
+ 			     unsigned long *nr_written);
+-	int (*readpage_io_failed_hook)(struct page *page, int failed_mirror);
+ 
+ 	int (*writepage_start_hook)(struct page *page, u64 start, u64 end);
+ 	void (*writepage_end_io_hook)(struct page *page, u64 start, u64 end,
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 3b327c8..ca1995c 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -10509,6 +10509,12 @@ out_inode:
+ 
+ }
+ 
++__attribute__((const))
++static int dummy_readpage_io_failed_hook(struct page *page, int failed_mirror)
++{
++	return 0;
++}
++
+ static const struct inode_operations btrfs_dir_inode_operations = {
+ 	.getattr	= btrfs_getattr,
+ 	.lookup		= btrfs_lookup,
+@@ -10551,6 +10557,7 @@ static const struct extent_io_ops btrfs_extent_io_ops = {
+ 	.submit_bio_hook = btrfs_submit_bio_hook,
+ 	.readpage_end_io_hook = btrfs_readpage_end_io_hook,
+ 	.merge_bio_hook = btrfs_merge_bio_hook,
++	.readpage_io_failed_hook = dummy_readpage_io_failed_hook,
+ 
+ 	/* optional callbacks */
+ 	.fill_delalloc = run_delalloc_range,
+-- 
+cgit v0.12
+
