@@ -1,0 +1,29 @@
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.cz>
+Subject: [PATCH] Btrfs: update comments in cache_save_setup
+Date:   Mon,  6 Mar 2017 13:49:02 -0800
+
+We also don't bother to flush free space cache while with free space
+tree.
+
+Cc: David Sterba <dsterba@suse.cz>
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/extent-tree.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index be54776..ff45060 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3443,7 +3443,8 @@ static int cache_save_setup(struct btrfs_block_group_cache *block_group,
+ 		/*
+ 		 * don't bother trying to write stuff out _if_
+ 		 * a) we're not cached,
+-		 * b) we're with nospace_cache mount option.
++		 * b) we're with nospace_cache mount option,
++		 * c) we're with v2 space_cache (FREE_SPACE_TREE).
+ 		 */
+ 		dcs = BTRFS_DC_WRITTEN;
+ 		spin_unlock(&block_group->lock);
