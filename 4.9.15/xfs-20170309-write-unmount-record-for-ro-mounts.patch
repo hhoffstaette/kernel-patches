@@ -1,0 +1,66 @@
+From patchwork Thu Mar  9 20:15:01 2017
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [1/2] xfs: write unmount record for ro mounts
+From: Eric Sandeen <sandeen@sandeen.net>
+X-Patchwork-Id: 9614121
+Message-Id: <9a573fb1-0d4c-e393-b0b7-a0688b3849e5@sandeen.net>
+To: Eric Sandeen <sandeen@redhat.com>, linux-xfs <linux-xfs@vger.kernel.org>
+Date: Thu, 9 Mar 2017 14:15:01 -0600
+
+There are dueling comments in the xfs code about intent
+for log writes when unmounting a readonly filesystem.
+
+In xfs_mountfs, we see the intent:
+
+/*
+ * Now the log is fully replayed, we can transition to full read-only
+ * mode for read-only mounts. This will sync all the metadata and clean
+ * the log so that the recovery we just performed does not have to be
+ * replayed again on the next mount.
+ */
+
+and it calls xfs_quiesce_attr(), but by the time we get to 
+xfs_log_unmount_write(), it returns early for a RDONLY mount:
+
+ * Don't write out unmount record on read-only mounts.
+
+Because of this, sequential ro mounts of a filesystem with
+a dirty log will replay the log each time, which seems odd.
+
+Fix this by writing an unmount record even for RO mounts, as long
+as norecovery wasn't specified (don't write a clean log record
+if a dirty log may still be there!) and the log device is
+writable.
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+---
+
+
+--
+To unsubscribe from this list: send the line "unsubscribe linux-xfs" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+diff --git a/fs/xfs/xfs_log.c b/fs/xfs/xfs_log.c
+index b1469f0..62176b8 100644
+--- a/fs/xfs/xfs_log.c
++++ b/fs/xfs/xfs_log.c
+@@ -801,11 +801,14 @@
+ 	int		 error;
+ 
+ 	/*
+-	 * Don't write out unmount record on read-only mounts.
++	 * Don't write out unmount record on norecovery mounts or ro devices.
+ 	 * Or, if we are doing a forced umount (typically because of IO errors).
+ 	 */
+-	if (mp->m_flags & XFS_MOUNT_RDONLY)
++	if (mp->m_flags & XFS_MOUNT_NORECOVERY ||
++	    xfs_readonly_buftarg(log->l_mp->m_logdev_targp)) {
++		ASSERT(mp->m_flags & XFS_MOUNT_RDONLY);
+ 		return 0;
++	}
+ 
+ 	error = _xfs_log_force(mp, XFS_LOG_SYNC, NULL);
+ 	ASSERT(error || !(XLOG_FORCED_SHUTDOWN(log)));
