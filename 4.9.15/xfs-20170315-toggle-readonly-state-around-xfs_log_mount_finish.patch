@@ -1,0 +1,64 @@
+From patchwork Tue Mar 14 23:23:57 2017
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [2/2,V2] xfs: toggle readonly state around xfs_log_mount_finish
+From: Eric Sandeen <sandeen@sandeen.net>
+X-Patchwork-Id: 9624641
+Message-Id: <74f6a009-211c-617a-2d6f-0a115ceb366b@sandeen.net>
+To: Eric Sandeen <sandeen@redhat.com>, linux-xfs <linux-xfs@vger.kernel.org>
+Date: Tue, 14 Mar 2017 18:23:57 -0500
+
+When we do log recovery on a readonly mount, unlinked inode
+processing does not happen due to the readonly checks in
+xfs_inactive(), which are trying to prevent any I/O on a
+readonly mount.
+
+This is misguided - we do I/O on readonly mounts all the time,
+for consistency; for example, log recovery.  So do the same
+RDONLY flag twiddling around xfs_log_mount_finish() as we
+do around xfs_log_mount(), for the same reason.
+
+This all cries out for a big rework but for now this is a
+simple fix to an obvious problem.
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+---
+
+V2: And now for something completely different...
+
+
+--
+To unsubscribe from this list: send the line "unsubscribe linux-xfs" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+diff --git a/fs/xfs/xfs_log.c b/fs/xfs/xfs_log.c
+index 62176b8..374edc1 100644
+--- a/fs/xfs/xfs_log.c
++++ b/fs/xfs/xfs_log.c
+@@ -743,16 +743,23 @@
+ 	struct xfs_mount	*mp)
+ {
+ 	int	error = 0;
++	int	readonly = (mp->m_flags & XFS_MOUNT_RDONLY);
+ 
+ 	if (mp->m_flags & XFS_MOUNT_NORECOVERY) {
+ 		ASSERT(mp->m_flags & XFS_MOUNT_RDONLY);
+ 		return 0;
++	} else if (readonly) {
++		/* Allow unlinked processing to proceed */
++		mp->m_flags &= ~XFS_MOUNT_RDONLY;
+ 	}
+ 
+ 	error = xlog_recover_finish(mp->m_log);
+ 	if (!error)
+ 		xfs_log_work_queue(mp);
+ 
++	if (readonly)
++		mp->m_flags |= XFS_MOUNT_RDONLY;
++
+ 	return error;
+ }
+ 
