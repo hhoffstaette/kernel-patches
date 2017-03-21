@@ -23,7 +23,6 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **LTS series: 4.9**
 
-- bfq: [BFQ v8r8](http://algogroup.unimore.it/people/paolo/disk_sched/)
 - block: [throttled background writeback v8](http://marc.info/?l=linux-block&m=147751514819997) (*disabled* by default)
 - btrfs: fixes from 4.10+ (cleanups, correctness, error handling etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
