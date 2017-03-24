@@ -23,7 +23,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **LTS series: 4.9**
 
-- block: [throttled background writeback v8](http://marc.info/?l=linux-block&m=147751514819997) (*disabled* by default)
+- block: [throttled background writeback v8](http://marc.info/?l=linux-block&m=147751514819997) (*enabled* by default)
 - btrfs: fixes from 4.10+ (cleanups, correctness, error handling etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
