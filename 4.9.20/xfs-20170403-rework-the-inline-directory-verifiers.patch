@@ -1,8 +1,9 @@
-Date:   Mon, 27 Mar 2017 16:03:15 -0700
+Date:   Mon, 3 Apr 2017 10:39:43 -0700
 From:   "Darrick J. Wong" <darrick.wong@oracle.com>
 To:     Dave Chinner <david@fromorbit.com>
-Cc:     xfs <linux-xfs@vger.kernel.org>, Brian Foster <bfoster@redhat.com>
-Subject: [PATCH v2] xfs: move the inline directory verifiers
+Cc:     xfs <linux-xfs@vger.kernel.org>, Brian Foster <bfoster@redhat.com>,
+        Christoph Hellwig <hch@infradead.org>
+Subject: [PATCH v3] xfs: rework the inline directory verifiers
 
 The inline directory verifiers should be called on the inode fork data,
 which means after iformat_local on the read side, and prior to
@@ -10,13 +11,20 @@ ifork_flush on the write side.  This makes the fork verifier more
 consistent with the way buffer verifiers work -- i.e. they will operate
 on the memory buffer that the code will be reading and writing directly.
 
-Also revise the verifier function to return -EFSCORRUPTED so that we
-don't flood the logs with corruption messages and assert notices.
+Furthermore, revise the verifier function to return -EFSCORRUPTED so
+that we don't flood the logs with corruption messages and assert
+notices.  This has been a particular problem with xfs/348, which
+triggers the XFS_WANT_CORRUPTED_RETURN assertions, which halts the
+kernel when CONFIG_XFS_DEBUG=y.  Disk corruption isn't supposed to do
+that, at least not in a verifier.
 
 [HH: small context fix for hunk #3 in xfs_dir2_sf.c]
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
 ---
 v2: get the inode d_ops the proper way
+v3: describe the bug that this patch fixes; no code changes
 ---
  fs/xfs/libxfs/xfs_dir2_priv.h  |    3 +-
  fs/xfs/libxfs/xfs_dir2_sf.c    |   63 ++++++++++++++++++++++++++--------------
