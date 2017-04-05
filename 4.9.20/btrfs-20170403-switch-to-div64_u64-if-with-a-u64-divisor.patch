@@ -1,0 +1,91 @@
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.cz>
+Subject: [PATCH] Btrfs: switch to div64_u64 if with a u64 divisor
+Date:   Mon,  3 Apr 2017 13:45:24 -0700
+
+This is fixing code pieces where we use div_u64 when passing a u64 divisor.
+
+Cc: David Sterba <dsterba@suse.cz>
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/dev-replace.c | 2 +-
+ fs/btrfs/scrub.c       | 4 ++--
+ fs/btrfs/volumes.c     | 8 ++++----
+ 3 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/fs/btrfs/dev-replace.c b/fs/btrfs/dev-replace.c
+index e653921..9fa83d7 100644
+--- a/fs/btrfs/dev-replace.c
++++ b/fs/btrfs/dev-replace.c
+@@ -665,7 +665,7 @@ void btrfs_dev_replace_status(struct btrfs_fs_info *fs_info,
+ 	case BTRFS_IOCTL_DEV_REPLACE_STATE_STARTED:
+ 	case BTRFS_IOCTL_DEV_REPLACE_STATE_SUSPENDED:
+ 		srcdev = dev_replace->srcdev;
+-		args->status.progress_1000 = div_u64(dev_replace->cursor_left,
++		args->status.progress_1000 = div64_u64(dev_replace->cursor_left,
+ 			div_u64(btrfs_device_get_total_bytes(srcdev), 1000));
+ 		break;
+ 	}
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index 8a5f059..b9525ca 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -2760,7 +2760,7 @@ static int get_raid56_logic_offset(u64 physical, int num,
+ 	for (i = 0; i < nr_data_stripes(map); i++) {
+ 		*offset = last_offset + i * map->stripe_len;
+ 
+-		stripe_nr = div_u64(*offset, map->stripe_len);
++		stripe_nr = div64_u64(*offset, map->stripe_len);
+ 		stripe_nr = div_u64(stripe_nr, nr_data_stripes(map));
+ 
+ 		/* Work out the disk rotation on this stripe-set */
+@@ -3174,7 +3174,7 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
+ 
+ 	physical = map->stripes[num].physical;
+ 	offset = 0;
+-	nstripes = div_u64(length, map->stripe_len);
++	nstripes = div64_u64(length, map->stripe_len);
+ 	if (map->type & BTRFS_BLOCK_GROUP_RAID0) {
+ 		offset = map->stripe_len * num;
+ 		increment = map->stripe_len * map->num_stripes;
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index cd0794e..09f987c 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -4785,7 +4785,7 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
+ 	stripe_size = div_u64(stripe_size, dev_stripes);
+ 
+ 	/* align to BTRFS_STRIPE_LEN */
+-	stripe_size = div_u64(stripe_size, raid_stripe_len);
++	stripe_size = div64_u64(stripe_size, raid_stripe_len);
+ 	stripe_size *= raid_stripe_len;
+ 
+ 	map = kmalloc(map_lookup_size(num_stripes), GFP_NOFS);
+@@ -5521,7 +5521,7 @@ static int __btrfs_map_block(struct btrfs_fs_info *fs_info,
+ 	stripe_index = 0;
+ 	stripe_nr_orig = stripe_nr;
+ 	stripe_nr_end = ALIGN(offset + *length, map->stripe_len);
+-	stripe_nr_end = div_u64(stripe_nr_end, map->stripe_len);
++	stripe_nr_end = div64_u64(stripe_nr_end, map->stripe_len);
+ 	stripe_end_offset = stripe_nr_end * map->stripe_len -
+ 			    (offset + *length);
+ 
+@@ -5587,7 +5587,7 @@ static int __btrfs_map_block(struct btrfs_fs_info *fs_info,
+ 		    (op == BTRFS_MAP_WRITE || op == BTRFS_MAP_GET_READ_MIRRORS ||
+ 		     mirror_num > 1)) {
+ 			/* push stripe_nr back to the start of the full stripe */
+-			stripe_nr = div_u64(raid56_full_stripe_start,
++			stripe_nr = div64_u64(raid56_full_stripe_start,
+ 					stripe_len * nr_data_stripes(map));
+ 
+ 			/* RAID[56] write or recovery. Return all stripes */
+@@ -5949,7 +5949,7 @@ int btrfs_rmap_block(struct btrfs_fs_info *fs_info,
+ 			continue;
+ 
+ 		stripe_nr = physical - map->stripes[i].physical;
+-		stripe_nr = div_u64(stripe_nr, map->stripe_len);
++		stripe_nr = div64_u64(stripe_nr, map->stripe_len);
+ 
+ 		if (map->type & BTRFS_BLOCK_GROUP_RAID10) {
+ 			stripe_nr = stripe_nr * map->num_stripes + i;
