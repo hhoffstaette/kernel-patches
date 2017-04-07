@@ -1,0 +1,83 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: send, fix file hole not being preserved due to inline extent
+Date:   Thu,  6 Apr 2017 17:07:56 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+Normally we don't have inline extents followed by regular extents, but
+there's currently at least one harmless case where this happens. For
+example, when the page size is 4Kb and compression is enabled:
+
+  $ mkfs.btrfs -f /dev/sdb
+  $ mount -o compress /dev/sdb /mnt
+  $ xfs_io -f -c "pwrite -S 0xaa 0 4K" -c "fsync" /mnt/foobar
+  $ xfs_io -c "pwrite -S 0xbb 8K 4K" -c "fsync" /mnt/foobar
+
+In this case we get a compressed inline extent, representing 4Kb of
+data, followed by a hole extent and then a regular data extent. The
+inline extent was not expanded/converted to a regular extent exactly
+because it represents 4Kb of data. This does not cause any apparent
+problem (such as the issue solved by commit e1699d2d7bf6
+("btrfs: add missing memset while reading compressed inline extents"))
+except trigger an unexpected case in the incremental send code path
+that makes us issue an operation to write a hole when it's not needed,
+resulting in more writes at the receiver and wasting space at the
+receiver.
+
+So teach the incremental send code to deal with this particular case.
+
+The issue can be currently triggered by running fstests btrfs/137 with
+compression enabled (MOUNT_OPTIONS="-o compress" ./check btrfs/137).
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/send.c | 23 +++++++++++++++++++++--
+ 1 file changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 456c890..f66095a 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -5184,13 +5184,19 @@ static int is_extent_unchanged(struct send_ctx *sctx,
+ 	while (key.offset < ekey->offset + left_len) {
+ 		ei = btrfs_item_ptr(eb, slot, struct btrfs_file_extent_item);
+ 		right_type = btrfs_file_extent_type(eb, ei);
+-		if (right_type != BTRFS_FILE_EXTENT_REG) {
++		if (right_type != BTRFS_FILE_EXTENT_REG &&
++		    right_type != BTRFS_FILE_EXTENT_INLINE) {
+ 			ret = 0;
+ 			goto out;
+ 		}
+ 
+ 		right_disknr = btrfs_file_extent_disk_bytenr(eb, ei);
+-		right_len = btrfs_file_extent_num_bytes(eb, ei);
++		if (right_type == BTRFS_FILE_EXTENT_INLINE) {
++			right_len = btrfs_file_extent_inline_len(eb, slot, ei);
++			right_len = PAGE_ALIGN(right_len);
++		} else {
++			right_len = btrfs_file_extent_num_bytes(eb, ei);
++		}
+ 		right_offset = btrfs_file_extent_offset(eb, ei);
+ 		right_gen = btrfs_file_extent_generation(eb, ei);
+ 
+@@ -5204,6 +5210,19 @@ static int is_extent_unchanged(struct send_ctx *sctx,
+ 			goto out;
+ 		}
+ 
++		/*
++		 * We just wanted to see if when we have an inline extent, what
++		 * follows it is a regular extent (wanted to check the above
++		 * condition for inline extents too). This should normally not
++		 * happen but it's possible for example when we have an inline
++		 * compressed extent representing data with a size matching
++		 * the page size (currently the same as sector size).
++		 */
++		if (right_type == BTRFS_FILE_EXTENT_INLINE) {
++			ret = 0;
++			goto out;
++		}
++
+ 		left_offset_fixed = left_offset;
+ 		if (key.offset < ekey->offset) {
+ 			/* Fix the right offset for 2a and 7. */
