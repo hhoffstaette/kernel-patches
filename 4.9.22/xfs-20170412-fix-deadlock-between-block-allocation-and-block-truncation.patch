@@ -1,0 +1,27 @@
+Date:   Wed, 12 Apr 2017 09:10:17 -0700
+From:   Christoph Hellwig <hch@infradead.org>
+To:     Nikolay Borisov <n.borisov.lkml@gmail.com>
+Cc:     linux-xfs@vger.kernel.org
+Subject: Re: Deadlock between block allocation and block truncation
+
+Hi Nikolay,
+
+I guess the culprit is that truncate can free up to two extents in
+the same transaction and thus try to lock two different AGs without
+requiring them to be in increasing order.
+
+Does the one liner below fix the problem for you?
+
+diff --git a/fs/xfs/xfs_inode.c b/fs/xfs/xfs_inode.c
+index 7605d8396596..29f2cd5afb04 100644
+--- a/fs/xfs/xfs_inode.c
++++ b/fs/xfs/xfs_inode.c
+@@ -58,7 +58,7 @@ kmem_zone_t *xfs_inode_zone;
+  * Used in xfs_itruncate_extents().  This is the maximum number of extents
+  * freed from a file in a single transaction.
+  */
+-#define	XFS_ITRUNC_MAX_EXTENTS	2
++#define	XFS_ITRUNC_MAX_EXTENTS	1
+ 
+ STATIC int xfs_iflush_int(struct xfs_inode *, struct xfs_buf *);
+ STATIC int xfs_iunlink(struct xfs_trans *, struct xfs_inode *);
