@@ -1,0 +1,64 @@
+From 612dafabb6a0fa62e9b86f11da5d37ee11dea28f Mon Sep 17 00:00:00 2001
+From: Tetsuo Handa <penguin-kernel@I-love.SAKURA.ne.jp>
+Date: Wed, 22 Feb 2017 15:40:50 -0800
+Subject: block: use for_each_thread() in sys_ioprio_set()/sys_ioprio_get()
+
+IOPRIO_WHO_USER case in sys_ioprio_set()/sys_ioprio_get() are using
+while_each_thread(), which is unsafe under RCU lock according to commit
+0c740d0afc3bff0a ("introduce for_each_thread() to replace the buggy
+while_each_thread()").  Use for_each_thread() (via
+for_each_process_thread()) which is safe under RCU lock.
+
+Link: http://lkml.kernel.org/r/201702011947.DBD56740.OMVHOLOtSJFFFQ@I-love.SAKURA.ne.jp
+Link: http://lkml.kernel.org/r/1486041779-4401-1-git-send-email-penguin-kernel@I-love.SAKURA.ne.jp
+Signed-off-by: Tetsuo Handa <penguin-kernel@I-love.SAKURA.ne.jp>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ block/ioprio.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/block/ioprio.c b/block/ioprio.c
+index 01b8116..3790669 100644
+--- a/block/ioprio.c
++++ b/block/ioprio.c
+@@ -122,14 +122,14 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
+ 			if (!user)
+ 				break;
+ 
+-			do_each_thread(g, p) {
++			for_each_process_thread(g, p) {
+ 				if (!uid_eq(task_uid(p), uid) ||
+ 				    !task_pid_vnr(p))
+ 					continue;
+ 				ret = set_task_ioprio(p, ioprio);
+ 				if (ret)
+ 					goto free_uid;
+-			} while_each_thread(g, p);
++			}
+ free_uid:
+ 			if (who)
+ 				free_uid(user);
+@@ -222,7 +222,7 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
+ 			if (!user)
+ 				break;
+ 
+-			do_each_thread(g, p) {
++			for_each_process_thread(g, p) {
+ 				if (!uid_eq(task_uid(p), user->uid) ||
+ 				    !task_pid_vnr(p))
+ 					continue;
+@@ -233,7 +233,7 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
+ 					ret = tmpio;
+ 				else
+ 					ret = ioprio_best(ret, tmpio);
+-			} while_each_thread(g, p);
++			}
+ 
+ 			if (who)
+ 				free_uid(user);
+-- 
+cgit v1.1
+
