@@ -1,0 +1,50 @@
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: skip checksum verification if IO error occurs
+Date:   Thu, 13 Apr 2017 18:11:48 -0700
+
+Currently dio read also goes to verify checksum if -EIO has been returned,
+although it usually fails on checksum, it's not necessary at all, we could
+directly check if there is another copy to read.
+
+And with this, the behavior of dio read is now consistent with that of
+buffered read.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/inode.c | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 5e71f1e..632b616 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -8030,6 +8030,7 @@ static int __btrfs_subio_endio_read(struct inode *inode,
+ 	unsigned int pgoff;
+ 	int csum_pos;
+ 	int i;
++	int uptodate = !!(err == 0);
+ 	int ret;
+ 
+ 	fs_info = BTRFS_I(inode)->root->fs_info;
+@@ -8044,12 +8045,14 @@ static int __btrfs_subio_endio_read(struct inode *inode,
+ 
+ 		pgoff = bvec->bv_offset;
+ next_block:
+-		csum_pos = BTRFS_BYTES_TO_BLKS(fs_info, offset);
+-		ret = __readpage_endio_check(inode, io_bio, csum_pos,
+-					bvec->bv_page, pgoff, start,
+-					sectorsize);
+-		if (likely(!ret))
+-			goto next;
++		if (uptodate) {
++			csum_pos = BTRFS_BYTES_TO_BLKS(fs_info, offset);
++			ret = __readpage_endio_check(inode, io_bio, csum_pos,
++						     bvec->bv_page, pgoff,
++						     start, sectorsize);
++			if (likely(!ret))
++				goto next;
++		}
+ try_again:
+ 		done.uptodate = 0;
+ 		done.start = start;
