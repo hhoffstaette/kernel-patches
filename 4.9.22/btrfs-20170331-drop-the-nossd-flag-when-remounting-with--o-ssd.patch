@@ -1,0 +1,43 @@
+From 951e7966398b0fd6bacebec2d87ffd61c3f68b18 Mon Sep 17 00:00:00 2001
+From: Adam Borowski <kilobyte@angband.pl>
+Date: Fri, 31 Mar 2017 17:19:04 +0200
+Subject: btrfs: drop the nossd flag when remounting with -o ssd
+
+The opposite case was already handled right in the very next switch entry.
+And also when turning on nossd, drop ssd_spread.
+
+Reported-by: Hans van Kranenburg <hans.van.kranenburg@mendix.com>
+Signed-off-by: Adam Borowski <kilobyte@angband.pl>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/super.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index da687dc..9530a33 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -549,16 +549,19 @@ int btrfs_parse_options(struct btrfs_fs_info *info, char *options,
+ 		case Opt_ssd:
+ 			btrfs_set_and_info(info, SSD,
+ 					   "use ssd allocation scheme");
++			btrfs_clear_opt(info->mount_opt, NOSSD);
+ 			break;
+ 		case Opt_ssd_spread:
+ 			btrfs_set_and_info(info, SSD_SPREAD,
+ 					   "use spread ssd allocation scheme");
+ 			btrfs_set_opt(info->mount_opt, SSD);
++			btrfs_clear_opt(info->mount_opt, NOSSD);
+ 			break;
+ 		case Opt_nossd:
+ 			btrfs_set_and_info(info, NOSSD,
+ 					     "not using ssd allocation scheme");
+ 			btrfs_clear_opt(info->mount_opt, SSD);
++			btrfs_clear_opt(info->mount_opt, SSD_SPREAD);
+ 			break;
+ 		case Opt_barrier:
+ 			btrfs_clear_and_info(info, NOBARRIER,
+-- 
+cgit v1.1
+
