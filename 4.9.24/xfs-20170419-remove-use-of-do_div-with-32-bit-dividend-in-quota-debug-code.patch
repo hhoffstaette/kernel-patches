@@ -1,0 +1,32 @@
+From:   Eric Sandeen <sandeen@sandeen.net>
+Subject: [PATCH V2] xfs: remove use of do_div with 32-bit dividend in quota debug code
+To:     Eric Sandeen <sandeen@redhat.com>,
+        linux-xfs <linux-xfs@vger.kernel.org>
+Date:   Wed, 19 Apr 2017 14:41:07 -0500
+
+The kbuild test robot caught this; in debug code we have another
+caller of do_div with a 32-bit dividend (j) which is caught now
+that we are using the kernel-supplied do_div.
+
+None of the values used here are 64-bit; just use simple division.
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+---
+
+V2: now with less actual 64-bit division!
+
+diff --git a/fs/xfs/xfs_qm.c b/fs/xfs/xfs_qm.c
+index b669b12..6b42db4 100644
+--- a/fs/xfs/xfs_qm.c
++++ b/fs/xfs/xfs_qm.c
+@@ -851,8 +851,8 @@ struct xfs_qm_isolate {
+ 	 * started afresh by xfs_qm_quotacheck.
+ 	 */
+ #ifdef DEBUG
+-	j = XFS_FSB_TO_B(mp, XFS_DQUOT_CLUSTER_SIZE_FSB);
+-	do_div(j, sizeof(xfs_dqblk_t));
++	j = (int)XFS_FSB_TO_B(mp, XFS_DQUOT_CLUSTER_SIZE_FSB) /
++		sizeof(xfs_dqblk_t);
+ 	ASSERT(mp->m_quotainfo->qi_dqperchunk == j);
+ #endif
+ 	dqb = bp->b_addr;
