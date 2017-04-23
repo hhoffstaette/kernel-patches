@@ -1,0 +1,94 @@
+From:   Brian Foster <bfoster@redhat.com>
+To:     linux-xfs@vger.kernel.org
+Subject: [PATCH v3 1/2] xfs: fix up quotacheck buffer list error handling
+Date:   Fri, 21 Apr 2017 08:22:12 -0400
+
+The quotacheck error handling of the delwri buffer list assumes the
+resident buffers are locked and doesn't clear the _XBF_DELWRI_Q flag
+on the buffers that are dequeued. This can lead to assert failures
+on buffer release and possibly other locking problems.
+
+Move this code to a delwri queue cancel helper function to
+encapsulate the logic required to properly release buffers from a
+delwri queue. Update the helper to clear the delwri queue flag and
+call it from quotacheck.
+
+Signed-off-by: Brian Foster <bfoster@redhat.com>
+---
+ fs/xfs/xfs_buf.c | 24 ++++++++++++++++++++++++
+ fs/xfs/xfs_buf.h |  1 +
+ fs/xfs/xfs_qm.c  |  7 +------
+ 3 files changed, 26 insertions(+), 6 deletions(-)
+
+diff --git a/fs/xfs/xfs_buf.c b/fs/xfs/xfs_buf.c
+index b620872..ba036c1 100644
+--- a/fs/xfs/xfs_buf.c
++++ b/fs/xfs/xfs_buf.c
+@@ -1079,6 +1079,8 @@ void
+ xfs_buf_unlock(
+ 	struct xfs_buf		*bp)
+ {
++	ASSERT(xfs_buf_islocked(bp));
++
+ 	XB_CLEAR_OWNER(bp);
+ 	up(&bp->b_sema);
+ 
+@@ -1815,6 +1817,28 @@ xfs_alloc_buftarg(
+ }
+ 
+ /*
++ * Cancel a delayed write list.
++ *
++ * Remove each buffer from the list, clear the delwri queue flag and drop the
++ * associated buffer reference.
++ */
++void
++xfs_buf_delwri_cancel(
++	struct list_head	*list)
++{
++	struct xfs_buf		*bp;
++
++	while (!list_empty(list)) {
++		bp = list_first_entry(list, struct xfs_buf, b_list);
++
++		xfs_buf_lock(bp);
++		bp->b_flags &= ~_XBF_DELWRI_Q;
++		list_del_init(&bp->b_list);
++		xfs_buf_relse(bp);
++	}
++}
++
++/*
+  * Add a buffer to the delayed write list.
+  *
+  * This queues a buffer for writeout if it hasn't already been.  Note that
+diff --git a/fs/xfs/xfs_buf.h b/fs/xfs/xfs_buf.h
+index e1bc1af..8d1d44f 100644
+--- a/fs/xfs/xfs_buf.h
++++ b/fs/xfs/xfs_buf.h
+@@ -329,6 +329,7 @@ extern void *xfs_buf_offset(struct xfs_buf *, size_t);
+ extern void xfs_buf_stale(struct xfs_buf *bp);
+ 
+ /* Delayed Write Buffer Routines */
++extern void xfs_buf_delwri_cancel(struct list_head *);
+ extern bool xfs_buf_delwri_queue(struct xfs_buf *, struct list_head *);
+ extern int xfs_buf_delwri_submit(struct list_head *);
+ extern int xfs_buf_delwri_submit_nowait(struct list_head *);
+diff --git a/fs/xfs/xfs_qm.c b/fs/xfs/xfs_qm.c
+index b669b12..8b9a9f1 100644
+--- a/fs/xfs/xfs_qm.c
++++ b/fs/xfs/xfs_qm.c
+@@ -1384,12 +1384,7 @@ xfs_qm_quotacheck(
+ 	mp->m_qflags |= flags;
+ 
+  error_return:
+-	while (!list_empty(&buffer_list)) {
+-		struct xfs_buf *bp =
+-			list_first_entry(&buffer_list, struct xfs_buf, b_list);
+-		list_del_init(&bp->b_list);
+-		xfs_buf_relse(bp);
+-	}
++	xfs_buf_delwri_cancel(&buffer_list);
+ 
+ 	if (error) {
+ 		xfs_warn(mp,
