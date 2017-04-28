@@ -1,9 +1,9 @@
-Date:   Mon, 24 Apr 2017 18:58:37 -0700
+Date:   Thu, 27 Apr 2017 14:27:47 -0700
 From:   "Darrick J. Wong" <darrick.wong@oracle.com>
 To:     xfs <linux-xfs@vger.kernel.org>
 Cc:     Brian Foster <bfoster@redhat.com>,
         Christoph Hellwig <hch@infradead.org>
-Subject: [PATCH v3] xfs: reserve enough blocks to handle btree splits when remapping
+Subject: [PATCH v4] xfs: reserve enough blocks to handle btree splits when remapping
 
 In xfs_reflink_end_cow, we erroneously reserve only enough blocks to
 handle adding 1 extent.  This is problematic if we fragment free space,
@@ -21,34 +21,48 @@ is big enough.
 
 Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
 ---
+v4: improve resblks macro comments, strengthen checking that we never
+try to cow-remap more than we can handle, and fix an off-by-one bug
 v3: don't use the swap-extents-with-rmap block reservation for cow
 remapping; we should already have sufficient per-ag reservation
 v2: avoid 64-bit division when calculating block reservation
 ---
- fs/xfs/libxfs/xfs_trans_space.h |   13 +++++++------
- fs/xfs/xfs_bmap_item.c          |    7 ++++++-
- fs/xfs/xfs_reflink.c            |   12 ++++++++++--
- 3 files changed, 23 insertions(+), 9 deletions(-)
+ fs/xfs/libxfs/xfs_trans_space.h |   23 +++++++++++++++++------
+ fs/xfs/xfs_bmap_item.c          |    5 ++++-
+ fs/xfs/xfs_reflink.c            |   18 ++++++++++++++++--
+ 3 files changed, 37 insertions(+), 9 deletions(-)
 
 diff --git a/fs/xfs/libxfs/xfs_trans_space.h b/fs/xfs/libxfs/xfs_trans_space.h
-index 7917f6e..0044e14 100644
+index 7917f6e..d787c67 100644
 --- a/fs/xfs/libxfs/xfs_trans_space.h
 +++ b/fs/xfs/libxfs/xfs_trans_space.h
-@@ -23,6 +23,11 @@
+@@ -21,8 +21,20 @@
+ /*
+  * Components of space reservations.
   */
++
++/* Worst case number of rmaps that can be held in a block. */
  #define XFS_MAX_CONTIG_RMAPS_PER_BLOCK(mp)    \
  		(((mp)->m_rmap_mxr[0]) - ((mp)->m_rmap_mnr[0]))
++
++/* Adding one rmap could split every level up to the top of the tree. */
 +#define XFS_RMAPADD_SPACE_RES(mp) ((mp)->m_rmap_maxlevels)
-+#define XFS_NRMAPADD_SPACE_RES(mp,b,w)\
++
++/* Blocks we might need to add "b" rmaps to a tree. */
++#define XFS_NRMAPADD_SPACE_RES(mp, b)\
 +	(((b + XFS_MAX_CONTIG_RMAPS_PER_BLOCK(mp) - 1) / \
 +	  XFS_MAX_CONTIG_RMAPS_PER_BLOCK(mp)) * \
 +	  XFS_RMAPADD_SPACE_RES(mp))
++
  #define XFS_MAX_CONTIG_EXTENTS_PER_BLOCK(mp)    \
  		(((mp)->m_alloc_mxr[0]) - ((mp)->m_alloc_mnr[0]))
  #define	XFS_EXTENTADD_SPACE_RES(mp,w)	(XFS_BM_MAXLEVELS(mp,w) - 1)
-@@ -31,12 +36,8 @@
+@@ -30,13 +42,12 @@
+ 	(((b + XFS_MAX_CONTIG_EXTENTS_PER_BLOCK(mp) - 1) / \
  	  XFS_MAX_CONTIG_EXTENTS_PER_BLOCK(mp)) * \
  	  XFS_EXTENTADD_SPACE_RES(mp,w))
++
++/* Blocks we might need to add "b" mappings & rmappings to a file. */
  #define XFS_SWAP_RMAP_SPACE_RES(mp,b,w)\
 -	(((b + XFS_MAX_CONTIG_EXTENTS_PER_BLOCK(mp) - 1) / \
 -	  XFS_MAX_CONTIG_EXTENTS_PER_BLOCK(mp)) * \
@@ -57,12 +71,13 @@ index 7917f6e..0044e14 100644
 -	  XFS_MAX_CONTIG_RMAPS_PER_BLOCK(mp)) * \
 -	  (mp)->m_rmap_maxlevels)
 +	(XFS_NEXTENTADD_SPACE_RES((mp), (b), (w)) + \
-+	 XFS_NRMAPADD_SPACE_RES((mp), (b), (w)))
++	 XFS_NRMAPADD_SPACE_RES((mp), (b)))
++
  #define	XFS_DAENTER_1B(mp,w)	\
  	((w) == XFS_DATA_FORK ? (mp)->m_dir_geo->fsbcount : 1)
  #define	XFS_DAENTER_DBS(mp,w)	\
 diff --git a/fs/xfs/xfs_bmap_item.c b/fs/xfs/xfs_bmap_item.c
-index 2d70173..378f144 100644
+index 2d70173..d419d23 100644
 --- a/fs/xfs/xfs_bmap_item.c
 +++ b/fs/xfs/xfs_bmap_item.c
 @@ -34,6 +34,8 @@
@@ -74,30 +89,21 @@ index 2d70173..378f144 100644
  
  
  kmem_zone_t	*xfs_bui_zone;
-@@ -403,6 +405,7 @@ xfs_bui_recover(
- 	struct xfs_inode		*ip = NULL;
- 	struct xfs_defer_ops		dfops;
- 	xfs_fsblock_t			firstfsb;
-+	unsigned int			resblks;
- 
- 	ASSERT(!test_bit(XFS_BUI_RECOVERED, &buip->bui_flags));
- 
-@@ -447,7 +450,9 @@ xfs_bui_recover(
+@@ -447,7 +449,8 @@ xfs_bui_recover(
  		return -EIO;
  	}
  
 -	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_itruncate, 0, 0, 0, &tp);
-+	resblks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
-+	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_itruncate, resblks, 0,
-+			0, &tp);
++	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_itruncate,
++			XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK), 0, 0, &tp);
  	if (error)
  		return error;
  	budp = xfs_trans_get_bud(tp, buip);
 diff --git a/fs/xfs/xfs_reflink.c b/fs/xfs/xfs_reflink.c
-index c0f3754..aab156a 100644
+index c0f3754..ffe6fe7 100644
 --- a/fs/xfs/xfs_reflink.c
 +++ b/fs/xfs/xfs_reflink.c
-@@ -705,8 +705,16 @@ xfs_reflink_end_cow(
+@@ -705,8 +705,22 @@ xfs_reflink_end_cow(
  	offset_fsb = XFS_B_TO_FSBT(ip->i_mount, offset);
  	end_fsb = XFS_B_TO_FSB(ip->i_mount, offset + count);
  
@@ -109,9 +115,15 @@ index c0f3754..aab156a 100644
 +	 * extents, so just cap the worst case extent count to 2^32-1.
 +	 * Stick a warning in just in case, and avoid 64-bit division.
 +	 */
-+	WARN_ON(end_fsb - offset_fsb + 1 > UINT_MAX);
-+	resblks = min_t(xfs_fileoff_t, UINT_MAX, end_fsb - offset_fsb + 1);
-+	resblks = XFS_NEXTENTADD_SPACE_RES(ip->i_mount, resblks,
++	BUILD_BUG_ON(MAX_RW_COUNT > UINT_MAX);
++	if (end_fsb - offset_fsb > UINT_MAX) {
++		error = -EFSCORRUPTED;
++		xfs_force_shutdown(ip->i_mount, SHUTDOWN_CORRUPT_INCORE);
++		ASSERT(0);
++		goto out;
++	}
++	resblks = XFS_NEXTENTADD_SPACE_RES(ip->i_mount,
++			(unsigned int)(end_fsb - offset_fsb),
 +			XFS_DATA_FORK);
  	error = xfs_trans_alloc(ip->i_mount, &M_RES(ip->i_mount)->tr_write,
  			resblks, 0, 0, &tp);
