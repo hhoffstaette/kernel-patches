@@ -1,9 +1,10 @@
+From: Theodore Ts'o <tytso@mit.edu>
+Subject: [PATCH -v2] ext4: avoid unnecessary transaction stalls during writeback
+Date: Sun, 30 Apr 2017 18:30:53 -0400
+Cc: Jan Kara <jack@suse.cz>, Theodore Ts'o <tytso@mit.edu>
+To: Ext4 Developers List <linux-ext4@vger.kernel.org>
+
 From: Jan Kara <jack@suse.cz>
-Subject: [PATCH 3/3] ext4: Avoid unnecessary transaction stalls during writeback
-Date: Tue, 11 Apr 2017 15:54:18 +0200
-Cc: <linux-ext4@vger.kernel.org>, Jan Kara <jack@suse.cz>
-To: Ted Tso <tytso@mit.edu>
-Archived-At: <http://permalink.gmane.org/gmane.comp.file-systems.ext4/56867>
 
 Currently ext4_writepages() submits all pages with transaction started.
 When no page needs block allocation or extent conversion we can submit
@@ -15,7 +16,7 @@ periods of time.
 Take for example a simple benchmark simulating PostgreSQL database
 (pgioperf in mmtest). The benchmark runs 16 processes doing random reads
 from a huge file, one process doing random writes to the huge file, and
-one process doing sequential writes to a small file and frequently
+one process doing sequential writes to a small files and frequently
 running fsync. With unpatched kernel transaction commits take on average
 ~18s with standard deviation of ~41s, top 5 commit times are:
 
@@ -26,36 +27,49 @@ deviation of 0.15s, top 5 commit times are:
 
 0.563792s, 0.519980s, 0.509841s, 0.471700s, 0.469899s
 
+[ Modified so we use an explicit do_map flag instead of relying on
+  io_end not being allocated, the since io_end->inode is needed for I/O
+  error handling. -- tytso ]
+
 Signed-off-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
 ---
- fs/ext4/inode.c | 24 ++++++++++++++++++++++++
- 1 file changed, 24 insertions(+)
+ fs/ext4/inode.c | 35 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 35 insertions(+)
 
 diff --git a/fs/ext4/inode.c b/fs/ext4/inode.c
-index baa87e7d1426..ff55d430938b 100644
+index 178ac7c39403..c65e29953800 100644
 --- a/fs/ext4/inode.c
 +++ b/fs/ext4/inode.c
-@@ -2171,6 +2171,9 @@ static bool mpage_add_bh_to_extent(struct mpage_da_data *mpd, ext4_lblk_t lblk,
+@@ -1643,6 +1643,7 @@ struct mpage_da_data {
+ 	 */
+ 	struct ext4_map_blocks map;
+ 	struct ext4_io_submit io_submit;	/* IO submission data */
++	unsigned int do_map:1;
+ };
+ 
+ static void mpage_release_unused_pages(struct mpage_da_data *mpd,
+@@ -2179,6 +2180,9 @@ static bool mpage_add_bh_to_extent(struct mpage_da_data *mpd, ext4_lblk_t lblk,
  
  	/* First block in the extent? */
  	if (map->m_len == 0) {
 +		/* We cannot map unless handle is started... */
-+		if (!mpd->io_submit.io_end)
++		if (!mpd->do_map)
 +			return false;
  		map->m_lblk = lblk;
  		map->m_len = 1;
  		map->m_flags = bh->b_state & BH_FLAGS;
-@@ -2223,6 +2226,9 @@ static int mpage_process_page_bufs(struct mpage_da_data *mpd,
+@@ -2231,6 +2235,9 @@ static int mpage_process_page_bufs(struct mpage_da_data *mpd,
  			/* Found extent to map? */
  			if (mpd->map.m_len)
  				return 0;
 +			/* Buffer needs mapping and handle is not started? */
-+			if (!mpd->io_submit.io_end)
++			if (!mpd->do_map)
 +				return 0;
  			/* Everything mapped so far and we hit EOF */
  			break;
  		}
-@@ -2739,6 +2745,21 @@ static int ext4_writepages(struct address_space *mapping,
+@@ -2747,6 +2754,29 @@ static int ext4_writepages(struct address_space *mapping,
  		tag_pages_for_writeback(mapping, mpd.first_page, mpd.last_page);
  	done = false;
  	blk_start_plug(&plug);
@@ -66,9 +80,17 @@ index baa87e7d1426..ff55d430938b 100644
 +	 * in the block layer on device congestion while having transaction
 +	 * started.
 +	 */
++	mpd.do_map = 0;
++	mpd.io_submit.io_end = ext4_init_io_end(inode, GFP_KERNEL);
++	if (!mpd.io_submit.io_end) {
++		ret = -ENOMEM;
++		goto unplug;
++	}
 +	ret = mpage_prepare_extent_to_map(&mpd);
 +	/* Submit prepared bio */
 +	ext4_io_submit(&mpd.io_submit);
++	ext4_put_io_end_defer(mpd.io_submit.io_end);
++	mpd.io_submit.io_end = NULL;
 +	/* Unlock pages we didn't use */
 +	mpage_release_unused_pages(&mpd, false);
 +	if (ret < 0)
@@ -77,15 +99,26 @@ index baa87e7d1426..ff55d430938b 100644
  	while (!done && mpd.first_page <= mpd.last_page) {
  		/* For each extent of pages we use new io_end */
  		mpd.io_submit.io_end = ext4_init_io_end(inode, GFP_KERNEL);
-@@ -2767,6 +2788,7 @@ static int ext4_writepages(struct address_space *mapping,
+@@ -2775,8 +2805,10 @@ static int ext4_writepages(struct address_space *mapping,
  				wbc->nr_to_write, inode->i_ino, ret);
  			/* Release allocated io_end */
  			ext4_put_io_end(mpd.io_submit.io_end);
 +			mpd.io_submit.io_end = NULL;
  			break;
  		}
++		mpd.do_map = 1;
  
-@@ -2816,6 +2838,7 @@ static int ext4_writepages(struct address_space *mapping,
+ 		trace_ext4_da_write_pages(inode, mpd.first_page, mpd.wbc);
+ 		ret = mpage_prepare_extent_to_map(&mpd);
+@@ -2807,6 +2839,7 @@ static int ext4_writepages(struct address_space *mapping,
+ 		if (!ext4_handle_valid(handle) || handle->h_sync == 0) {
+ 			ext4_journal_stop(handle);
+ 			handle = NULL;
++			mpd.do_map = 0;
+ 		}
+ 		/* Submit prepared bio */
+ 		ext4_io_submit(&mpd.io_submit);
+@@ -2824,6 +2857,7 @@ static int ext4_writepages(struct address_space *mapping,
  			ext4_journal_stop(handle);
  		} else
  			ext4_put_io_end(mpd.io_submit.io_end);
@@ -93,7 +126,7 @@ index baa87e7d1426..ff55d430938b 100644
  
  		if (ret == -ENOSPC && sbi->s_journal) {
  			/*
-@@ -2831,6 +2854,7 @@ static int ext4_writepages(struct address_space *mapping,
+@@ -2839,6 +2873,7 @@ static int ext4_writepages(struct address_space *mapping,
  		if (ret)
  			break;
  	}
