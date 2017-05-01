@@ -1,0 +1,37 @@
+From: Theodore Ts'o <tytso@mit.edu>
+Subject: [PATCH] ext4: replace BUG_ON with WARN_ONCE in ext4_end_bio()
+Date: Sun, 30 Apr 2017 20:08:27 -0400
+Cc: Theodore Ts'o <tytso@mit.edu>
+To: Ext4 Developers List <linux-ext4@vger.kernel.org>
+
+Add fallback code and a WARN_ONCE() call instead of a BUG_ON() in
+the ext4_end_bio() function.
+
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ fs/ext4/page-io.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/fs/ext4/page-io.c b/fs/ext4/page-io.c
+index 208241b06662..1a82138ba739 100644
+--- a/fs/ext4/page-io.c
++++ b/fs/ext4/page-io.c
+@@ -297,8 +297,17 @@ static void ext4_end_bio(struct bio *bio)
+ {
+ 	ext4_io_end_t *io_end = bio->bi_private;
+ 	sector_t bi_sector = bio->bi_iter.bi_sector;
++	char b[BDEVNAME_SIZE];
+ 
+-	BUG_ON(!io_end);
++	if (WARN_ONCE(!io_end, "io_end is NULL: %s: sector %Lu len %u err %d\n",
++		      bdevname(bio->bi_bdev, b),
++		      (long long) bio->bi_iter.bi_sector,
++		      (unsigned) bio_sectors(bio),
++		      bio->bi_error)) {
++		ext4_finish_bio(bio);
++		bio_put(bio);
++		return;
++	}
+ 	bio->bi_end_io = NULL;
+ 
+ 	if (bio->bi_error) {
