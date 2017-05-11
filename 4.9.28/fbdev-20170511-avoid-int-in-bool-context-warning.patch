@@ -1,0 +1,35 @@
+From: Arnd Bergmann <arnd@arndb.de>
+Subject: [PATCH] fbdev: avoid int-in-bool-context warning
+Date: Thu, 11 May 2017 14:47:01 +0200
+Cc: Arnd Bergmann <arnd@arndb.de>, linux-fbdev@vger.kernel.org,
+        linux-kernel@vger.kernel.org
+To: Bartlomiej Zolnierkiewicz <b.zolnierkie@samsung.com>,
+        Andrew Morton <akpm@linux-foundation.org>
+
+gcc-7 suspects this code might be wrong because we use the
+result of a multiplication as a bool:
+
+drivers/video/fbdev/core/fbmon.c: In function 'fb_edid_add_monspecs':
+drivers/video/fbdev/core/fbmon.c:1051:84: error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+
+It's actually fine, so let's add a comparison to zero to make
+that clear to the compiler too.
+
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+---
+ drivers/video/fbdev/core/fbmon.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/video/fbdev/core/fbmon.c b/drivers/video/fbdev/core/fbmon.c
+index eaa6bab21839..99e45a49e435 100644
+--- a/drivers/video/fbdev/core/fbmon.c
++++ b/drivers/video/fbdev/core/fbmon.c
+@@ -1048,7 +1048,7 @@ void fb_edid_add_monspecs(unsigned char *edid, struct fb_monspecs *specs)
+ 
+ 	for (i = 0; i < (128 - edid[2]) / DETAILED_TIMING_DESCRIPTION_SIZE;
+ 	     i++, block += DETAILED_TIMING_DESCRIPTION_SIZE)
+-		if (PIXEL_CLOCK)
++		if (PIXEL_CLOCK != 0)
+ 			edt[num++] = block - edid;
+ 
+ 	/* Yikes, EDID data is totally useless */
