@@ -1,0 +1,30 @@
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: clear EXTENT_DEFRAG bits in finish_ordered_io
+Date:   Tue,  9 May 2017 17:02:15 -0600
+
+Before this, we use 'filled' mode here, ie. if all range has been filled
+with EXTENT_DEFRAG bits, get to clear it, but if the defrag range joins
+the adjacent delalloc range, then we'll leave EXTENT_DEFRAG bits until
+evicting inode.
+
+This clears the bit if any was found within the ordered extent.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/inode.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 78ab511..1293810 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -2875,7 +2875,7 @@ static int btrfs_finish_ordered_io(struct btrfs_ordered_extent *ordered_extent)
+ 
+ 	ret = test_range_bit(io_tree, ordered_extent->file_offset,
+ 			ordered_extent->file_offset + ordered_extent->len - 1,
+-			EXTENT_DEFRAG, 1, cached_state);
++			EXTENT_DEFRAG, 0, cached_state);
+ 	if (ret) {
+ 		u64 last_snapshot = btrfs_root_last_snapshot(&root->root_item);
+ 		if (0 && last_snapshot >= BTRFS_I(inode)->generation)
