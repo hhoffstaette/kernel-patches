@@ -1,0 +1,108 @@
+From: Jan Kara <jack@suse.cz>
+Subject: [PATCH] ext4: Fix SEEK_HOLE
+Date: Thu, 11 May 2017 18:49:08 +0200
+Cc: <linux-ext4@vger.kernel.org>, Jan Kara <jack@suse.cz>,
+        stable@vger.kernel.org, Zheng Liu <wenqing.lz@taobao.com>
+To: Ted Tso <tytso@mit.edu>
+
+Currently, SEEK_HOLE implementation in ext4 may both return that there's
+a hole at some offset although that offset already has data and skip
+some holes during a search for the next hole. The first problem is
+demostrated by:
+
+xfs_io -c "falloc 0 256k" -c "pwrite 0 56k" -c "seek -h 0" file
+wrote 57344/57344 bytes at offset 0
+56 KiB, 14 ops; 0.0000 sec (2.054 GiB/sec and 538461.5385 ops/sec)
+Whence	Result
+HOLE	0
+
+Where we can see that SEEK_HOLE wrongly returned offset 0 as containing
+a hole although we have written data there. The second problem can be
+demonstrated by:
+
+xfs_io -c "falloc 0 256k" -c "pwrite 0 56k" -c "pwrite 128k 8k"
+       -c "seek -h 0" file
+
+wrote 57344/57344 bytes at offset 0
+56 KiB, 14 ops; 0.0000 sec (1.978 GiB/sec and 518518.5185 ops/sec)
+wrote 8192/8192 bytes at offset 131072
+8 KiB, 2 ops; 0.0000 sec (2 GiB/sec and 500000.0000 ops/sec)
+Whence	Result
+HOLE	139264
+
+Where we can see that hole at offsets 56k..128k has been ignored by the
+SEEK_HOLE call.
+
+The underlying problem is in the ext4_find_unwritten_pgoff()
+implementation which in some cases fails to update returned offset when it
+finds a hole and in some cases the condition for detecting a hole is
+just wrong.
+
+Fix ext4_find_unwritten_pgoff() to always properly update returned
+offset and detect a hole.
+
+CC: stable@vger.kernel.org
+Fixes: c8c0df241cc2719b1262e627f999638411934f60
+CC: Zheng Liu <wenqing.lz@taobao.com>
+Signed-off-by: Jan Kara <jack@suse.cz>
+---
+ fs/ext4/file.c | 25 +++++++++----------------
+ 1 file changed, 9 insertions(+), 16 deletions(-)
+
+diff --git a/fs/ext4/file.c b/fs/ext4/file.c
+index 831fd6beebf0..e4de6769376b 100644
+--- a/fs/ext4/file.c
++++ b/fs/ext4/file.c
+@@ -486,29 +486,18 @@ static int ext4_find_unwritten_pgoff(struct inode *inode,
+ 					  (pgoff_t)num);
+ 		if (nr_pages == 0) {
+ 			if (whence == SEEK_DATA)
+-				break;
++				goto out;
+ 
+ 			BUG_ON(whence != SEEK_HOLE);
+-			/*
+-			 * If this is the first time to go into the loop and
+-			 * offset is not beyond the end offset, it will be a
+-			 * hole at this offset
+-			 */
+-			if (lastoff == startoff || lastoff < endoff)
+-				found = 1;
+ 			break;
+ 		}
+ 
+ 		/*
+-		 * If this is the first time to go into the loop and
+-		 * offset is smaller than the first page offset, it will be a
+-		 * hole at this offset.
++		 * If current offset is smaller than the first page offset,
++		 * there is a hole at this offset.
+ 		 */
+-		if (lastoff == startoff && whence == SEEK_HOLE &&
+-		    lastoff < page_offset(pvec.pages[0])) {
+-			found = 1;
++		if (whence == SEEK_HOLE && lastoff < page_offset(pvec.pages[0]))
+ 			break;
+-		}
+ 
+ 		for (i = 0; i < nr_pages; i++) {
+ 			struct page *page = pvec.pages[i];
+@@ -571,13 +560,17 @@ static int ext4_find_unwritten_pgoff(struct inode *inode,
+ 		if (nr_pages < num && whence == SEEK_HOLE) {
+ 			found = 1;
+ 			*offset = lastoff;
+-			break;
++			goto out;
+ 		}
+ 
+ 		index = pvec.pages[i - 1]->index + 1;
+ 		pagevec_release(&pvec);
+ 	} while (index <= end);
+ 
++	if (whence == SEEK_HOLE && lastoff < endoff) {
++		found = 1;
++		*offset = lastoff;
++	}
+ out:
+ 	pagevec_release(&pvec);
+ 	return found;
