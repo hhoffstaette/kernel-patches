@@ -1,6 +1,6 @@
 From: Jan Kara <jack@suse.cz>
-Subject: [PATCH] ext4: Fix SEEK_HOLE
-Date: Thu, 11 May 2017 18:49:08 +0200
+Subject: [PATCH 1/2] ext4: Fix SEEK_HOLE
+Date: Thu, 18 May 2017 12:49:41 +0200
 Cc: <linux-ext4@vger.kernel.org>, Jan Kara <jack@suse.cz>,
         stable@vger.kernel.org, Zheng Liu <wenqing.lz@taobao.com>
 To: Ted Tso <tytso@mit.edu>
@@ -33,34 +33,38 @@ HOLE	139264
 Where we can see that hole at offsets 56k..128k has been ignored by the
 SEEK_HOLE call.
 
-The underlying problem is in the ext4_find_unwritten_pgoff()
-implementation which in some cases fails to update returned offset when it
-finds a hole and in some cases the condition for detecting a hole is
-just wrong.
+The underlying problem is in the ext4_find_unwritten_pgoff() which is
+just buggy. In some cases it fails to update returned offset when it
+finds a hole (when no pages are found or when the first found page has
+higher index than expected), in some cases conditions for detecting hole
+are just missing (we fail to detect a situation where indices of
+returned pages are not contiguous).
 
-Fix ext4_find_unwritten_pgoff() to always properly update returned
-offset and detect a hole.
+Fix ext4_find_unwritten_pgoff() to properly detect non-contiguous page
+indices and also handle all cases where we got less pages then expected
+in one place and handle it properly there.
 
 CC: stable@vger.kernel.org
 Fixes: c8c0df241cc2719b1262e627f999638411934f60
 CC: Zheng Liu <wenqing.lz@taobao.com>
 Signed-off-by: Jan Kara <jack@suse.cz>
 ---
- fs/ext4/file.c | 25 +++++++++----------------
- 1 file changed, 9 insertions(+), 16 deletions(-)
+ fs/ext4/file.c | 50 ++++++++++++++------------------------------------
+ 1 file changed, 14 insertions(+), 36 deletions(-)
 
 diff --git a/fs/ext4/file.c b/fs/ext4/file.c
-index 831fd6beebf0..e4de6769376b 100644
+index 831fd6beebf0..bbea2dccd584 100644
 --- a/fs/ext4/file.c
 +++ b/fs/ext4/file.c
-@@ -486,29 +486,18 @@ static int ext4_find_unwritten_pgoff(struct inode *inode,
+@@ -484,47 +484,27 @@ static int ext4_find_unwritten_pgoff(struct inode *inode,
+ 		num = min_t(pgoff_t, end - index, PAGEVEC_SIZE);
+ 		nr_pages = pagevec_lookup(&pvec, inode->i_mapping, index,
  					  (pgoff_t)num);
- 		if (nr_pages == 0) {
- 			if (whence == SEEK_DATA)
+-		if (nr_pages == 0) {
+-			if (whence == SEEK_DATA)
 -				break;
-+				goto out;
- 
- 			BUG_ON(whence != SEEK_HOLE);
+-
+-			BUG_ON(whence != SEEK_HOLE);
 -			/*
 -			 * If this is the first time to go into the loop and
 -			 * offset is not beyond the end offset, it will be a
@@ -68,32 +72,61 @@ index 831fd6beebf0..e4de6769376b 100644
 -			 */
 -			if (lastoff == startoff || lastoff < endoff)
 -				found = 1;
- 			break;
- 		}
- 
- 		/*
+-			break;
+-		}
+-
+-		/*
 -		 * If this is the first time to go into the loop and
 -		 * offset is smaller than the first page offset, it will be a
 -		 * hole at this offset.
-+		 * If current offset is smaller than the first page offset,
-+		 * there is a hole at this offset.
- 		 */
+-		 */
 -		if (lastoff == startoff && whence == SEEK_HOLE &&
 -		    lastoff < page_offset(pvec.pages[0])) {
 -			found = 1;
-+		if (whence == SEEK_HOLE && lastoff < page_offset(pvec.pages[0]))
++		if (nr_pages == 0)
  			break;
 -		}
  
  		for (i = 0; i < nr_pages; i++) {
  			struct page *page = pvec.pages[i];
-@@ -571,13 +560,17 @@ static int ext4_find_unwritten_pgoff(struct inode *inode,
- 		if (nr_pages < num && whence == SEEK_HOLE) {
- 			found = 1;
- 			*offset = lastoff;
--			break;
-+			goto out;
+ 			struct buffer_head *bh, *head;
+ 
+ 			/*
+-			 * If the current offset is not beyond the end of given
+-			 * range, it will be a hole.
++			 * If current offset is smaller than the page offset,
++			 * there is a hole at this offset.
+ 			 */
+-			if (lastoff < endoff && whence == SEEK_HOLE &&
+-			    page->index > end) {
++			if (whence == SEEK_HOLE && lastoff < endoff &&
++			    lastoff < page_offset(pvec.pages[i])) {
+ 				found = 1;
+ 				*offset = lastoff;
+ 				goto out;
+ 			}
+ 
++			if (page->index > end)
++				goto out;
++
+ 			lock_page(page);
+ 
+ 			if (unlikely(page->mapping != inode->i_mapping)) {
+@@ -564,20 +544,18 @@ static int ext4_find_unwritten_pgoff(struct inode *inode,
+ 			unlock_page(page);
  		}
+ 
+-		/*
+-		 * The no. of pages is less than our desired, that would be a
+-		 * hole in there.
+-		 */
+-		if (nr_pages < num && whence == SEEK_HOLE) {
+-			found = 1;
+-			*offset = lastoff;
++		/* The no. of pages is less than our desired, we are done. */
++		if (nr_pages < num)
+ 			break;
+-		}
  
  		index = pvec.pages[i - 1]->index + 1;
  		pagevec_release(&pvec);
