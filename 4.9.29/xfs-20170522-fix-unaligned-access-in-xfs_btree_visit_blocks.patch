@@ -1,0 +1,29 @@
+From:   Eric Sandeen <sandeen@sandeen.net>
+To:     Eric Sandeen <sandeen@redhat.com>,
+        linux-xfs <linux-xfs@vger.kernel.org>
+Cc:     Christoph Hellwig <hch@infradead.org>
+Subject: [PATCH V2] xfs: fix unaligned access in xfs_btree_visit_blocks
+Date:   Mon, 22 May 2017 15:06:40 -0500
+
+This structure copy was throwing unaligned access warnings on sparc64:
+
+Kernel unaligned access at TPC[1043c088] xfs_btree_visit_blocks+0x88/0xe0 [xfs]
+
+xfs_btree_copy_ptrs does a memcpy, which avoids it.
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+---
+
+diff --git a/fs/xfs/libxfs/xfs_btree.c b/fs/xfs/libxfs/xfs_btree.c
+index 5392674..3a673ba 100644
+--- a/fs/xfs/libxfs/xfs_btree.c
++++ b/fs/xfs/libxfs/xfs_btree.c
+@@ -4395,7 +4395,7 @@ struct xfs_btree_split_args {
+ 			xfs_btree_readahead_ptr(cur, ptr, 1);
+ 
+ 			/* save for the next iteration of the loop */
+-			lptr = *ptr;
++			xfs_btree_copy_ptrs(cur, &lptr, ptr, 1);
+ 		}
+ 
+ 		/* for each buffer in the level */
