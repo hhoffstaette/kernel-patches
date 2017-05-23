@@ -1,0 +1,46 @@
+From: Miroslav Lichvar <mlichvar@redhat.com>
+Subject: [PATCH RFC 2/3] timekeeping: Don't align frequency adjustments to ticks
+Date: Wed, 17 May 2017 18:13:16 +0200
+Cc: John Stultz <john.stultz@linaro.org>,
+        Prarit Bhargava <prarit@redhat.com>,
+        Richard Cochran <richardcochran@gmail.com>
+To: linux-kernel@vger.kernel.org
+
+When the timekeeping multiplier is adjusted, the NTP error is adjusted
+to correct the clock for the misalignment of the update to the start of
+the tick. This error is corrected in later updates and the clock appears
+as if the frequency was changed exactly on the tick.
+
+Remove this correction to keep the point where the frequency is
+effectively changed at the time of the update. This removes a major
+source of the NTP error.
+
+Cc: John Stultz <john.stultz@linaro.org>
+Cc: Prarit Bhargava <prarit@redhat.com>
+Cc: Richard Cochran <richardcochran@gmail.com>
+Signed-off-by: Miroslav Lichvar <mlichvar@redhat.com>
+---
+ kernel/time/timekeeping.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
+index ff542dd..5ae6f27 100644
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -1760,8 +1760,6 @@ static __always_inline void timekeeping_apply_adjustment(struct timekeeper *tk,
+ 	 *	xtime_nsec_2 = xtime_nsec_1 - offset
+ 	 * Which simplfies to:
+ 	 *	xtime_nsec -= offset
+-	 *
+-	 * XXX - TODO: Doc ntp_error calculation.
+ 	 */
+ 	if ((mult_adj > 0) && (tk->tkr_mono.mult + mult_adj < mult_adj)) {
+ 		/* NTP adjustment caused clocksource mult overflow */
+@@ -1772,7 +1770,6 @@ static __always_inline void timekeeping_apply_adjustment(struct timekeeper *tk,
+ 	tk->tkr_mono.mult += mult_adj;
+ 	tk->xtime_interval += interval;
+ 	tk->tkr_mono.xtime_nsec -= offset;
+-	tk->ntp_error -= (interval - offset) << tk->ntp_error_shift;
+ }
+ 
+ /*
