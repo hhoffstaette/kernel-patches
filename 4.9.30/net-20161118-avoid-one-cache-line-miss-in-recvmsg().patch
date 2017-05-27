@@ -1,0 +1,49 @@
+From d21dbdfe0afb5195607d207f894fe86d5b322d46 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Fri, 18 Nov 2016 17:18:03 -0800
+Subject: udp: avoid one cache line miss in recvmsg()
+
+UDP_SKB_CB(skb)->partial_cov is located at offset 66 in skb,
+requesting a cold cache line being read in cpu cache.
+
+We can avoid this cache line miss for UDP sockets,
+as partial_cov has a meaning only for UDPLite.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/udp.c | 3 ++-
+ net/ipv6/udp.c | 3 ++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/net/ipv4/udp.c b/net/ipv4/udp.c
+index e1fc011..b949770 100644
+--- a/net/ipv4/udp.c
++++ b/net/ipv4/udp.c
+@@ -1389,7 +1389,8 @@ try_again:
+ 	 * coverage checksum (UDP-Lite), do it before the copy.
+ 	 */
+ 
+-	if (copied < ulen || UDP_SKB_CB(skb)->partial_cov || peeking) {
++	if (copied < ulen || peeking ||
++	    (is_udplite && UDP_SKB_CB(skb)->partial_cov)) {
+ 		checksum_valid = !udp_lib_checksum_complete(skb);
+ 		if (!checksum_valid)
+ 			goto csum_copy_err;
+diff --git a/net/ipv6/udp.c b/net/ipv6/udp.c
+index 4f99417..8fd4d89 100644
+--- a/net/ipv6/udp.c
++++ b/net/ipv6/udp.c
+@@ -363,7 +363,8 @@ try_again:
+ 	 * coverage checksum (UDP-Lite), do it before the copy.
+ 	 */
+ 
+-	if (copied < ulen || UDP_SKB_CB(skb)->partial_cov || peeking) {
++	if (copied < ulen || peeking ||
++	    (is_udplite && UDP_SKB_CB(skb)->partial_cov)) {
+ 		checksum_valid = !udp_lib_checksum_complete(skb);
+ 		if (!checksum_valid)
+ 			goto csum_copy_err;
+-- 
+cgit v1.1
+
