@@ -1,0 +1,69 @@
+From ac229dca7e4e582114e1ec9765fda0915aa58468 Mon Sep 17 00:00:00 2001
+From: Yuchung Cheng <ycheng@google.com>
+Date: Thu, 12 Jan 2017 22:11:40 -0800
+Subject: tcp: remove RFC4653 NCR
+
+This patch removes the (partial) implementation of the aggressive
+limited transmit in RFC4653 TCP Non-Congestion Robustness (NCR).
+
+NCR is a mitigation to the problem created by the dynamic
+DUPACK threshold.  With the current adaptive DUPACK threshold
+(tp->reordering) could cause timeouts by preventing fast recovery.
+For example, if the last packet of a cwnd burst was reordered, the
+threshold will be set to the size of cwnd. But if next application
+burst is smaller than threshold and has drops instead of reorderings,
+the sender would not trigger fast recovery but instead resorts to a
+timeout recovery.
+
+NCR mitigates this issue by checking the number of DUPACKs against
+the current flight size additionally. The techniqueue is similar to
+the early retransmit RFC.
+
+With RACK loss detection, this mitigation is not needed, because RACK
+does not use DUPACK threshold to detect losses. RACK arms a reordering
+timer to fire at most a quarter RTT later to start fast recovery.
+
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Acked-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_input.c | 15 ---------------
+ 1 file changed, 15 deletions(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 79c8190..87315ab 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -2161,8 +2161,6 @@ static inline int tcp_dupack_heuristics(const struct tcp_sock *tp)
+ static bool tcp_time_to_recover(struct sock *sk, int flag)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
+-	__u32 packets_out;
+-	int tcp_reordering = sock_net(sk)->ipv4.sysctl_tcp_reordering;
+ 
+ 	/* Trick#1: The loss is proven. */
+ 	if (tp->lost_out)
+@@ -2172,19 +2170,6 @@ static bool tcp_time_to_recover(struct sock *sk, int flag)
+ 	if (tcp_dupack_heuristics(tp) > tp->reordering)
+ 		return true;
+ 
+-	/* Trick#4: It is still not OK... But will it be useful to delay
+-	 * recovery more?
+-	 */
+-	packets_out = tp->packets_out;
+-	if (packets_out <= tp->reordering &&
+-	    tp->sacked_out >= max_t(__u32, packets_out/2, tcp_reordering) &&
+-	    !tcp_may_send_now(sk)) {
+-		/* We have nothing to send. This connection is limited
+-		 * either by receiver window or by application.
+-		 */
+-		return true;
+-	}
+-
+ 	/* If a thin stream is detected, retransmit after first
+ 	 * received dupack. Employ only if SACK is supported in order
+ 	 * to avoid possible corner-case series of spurious retransmissions
+-- 
+cgit v1.1
+
