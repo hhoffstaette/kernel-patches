@@ -1,0 +1,83 @@
+From d2329f102d846214e449941289c7009e16be01a0 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Tue, 25 Apr 2017 10:15:38 -0700
+Subject: tcp: do not pass timestamp to tcp_rack_advance()
+
+No longer needed, since tp->tcp_mstamp holds the information.
+
+This is needed to remove sack_state.ack_time in a following patch.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ include/net/tcp.h       | 3 +--
+ net/ipv4/tcp_input.c    | 6 ++----
+ net/ipv4/tcp_recovery.c | 5 ++---
+ 3 files changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index d7aae25..270e5cc 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -1855,8 +1855,7 @@ void tcp_init(void);
+ /* tcp_recovery.c */
+ extern void tcp_rack_mark_lost(struct sock *sk);
+ extern void tcp_rack_advance(struct tcp_sock *tp, u8 sacked, u32 end_seq,
+-			     const struct skb_mstamp *xmit_time,
+-			     const struct skb_mstamp *ack_time);
++			     const struct skb_mstamp *xmit_time);
+ extern void tcp_rack_reo_timeout(struct sock *sk);
+ 
+ /*
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 2d84483..5485204 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -1214,8 +1214,7 @@ static u8 tcp_sacktag_one(struct sock *sk,
+ 		return sacked;
+ 
+ 	if (!(sacked & TCPCB_SACKED_ACKED)) {
+-		tcp_rack_advance(tp, sacked, end_seq,
+-				 xmit_time, &state->ack_time);
++		tcp_rack_advance(tp, sacked, end_seq, xmit_time);
+ 
+ 		if (sacked & TCPCB_SACKED_RETRANS) {
+ 			/* If the segment is not tagged as lost,
+@@ -3118,8 +3117,7 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
+ 			tp->delivered += acked_pcount;
+ 			if (!tcp_skb_spurious_retrans(tp, skb))
+ 				tcp_rack_advance(tp, sacked, scb->end_seq,
+-						 &skb->skb_mstamp,
+-						 &sack->ack_time);
++						 &skb->skb_mstamp);
+ 		}
+ 		if (sacked & TCPCB_LOST)
+ 			tp->lost_out -= acked_pcount;
+diff --git a/net/ipv4/tcp_recovery.c b/net/ipv4/tcp_recovery.c
+index 6ca8b5d..cd72b3d 100644
+--- a/net/ipv4/tcp_recovery.c
++++ b/net/ipv4/tcp_recovery.c
+@@ -127,8 +127,7 @@ void tcp_rack_mark_lost(struct sock *sk)
+  * draft-cheng-tcpm-rack-00.txt
+  */
+ void tcp_rack_advance(struct tcp_sock *tp, u8 sacked, u32 end_seq,
+-		      const struct skb_mstamp *xmit_time,
+-		      const struct skb_mstamp *ack_time)
++		      const struct skb_mstamp *xmit_time)
+ {
+ 	u32 rtt_us;
+ 
+@@ -137,7 +136,7 @@ void tcp_rack_advance(struct tcp_sock *tp, u8 sacked, u32 end_seq,
+ 				 end_seq, tp->rack.end_seq))
+ 		return;
+ 
+-	rtt_us = skb_mstamp_us_delta(ack_time, xmit_time);
++	rtt_us = skb_mstamp_us_delta(&tp->tcp_mstamp, xmit_time);
+ 	if (sacked & TCPCB_RETRANS) {
+ 		/* If the sacked packet was retransmitted, it's ambiguous
+ 		 * whether the retransmission or the original (or the prior
+-- 
+cgit v1.1
+

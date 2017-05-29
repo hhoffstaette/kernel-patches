@@ -1,0 +1,34 @@
+From 7e0ca8a4c19c5fbaa802ffd609f5f9ab9249af5d Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Tue, 25 Apr 2017 10:15:39 -0700
+Subject: tcp: use tp->tcp_mstamp in tcp_clean_rtx_queue()
+
+Following patch will remove ack_time from struct tcp_sacktag_state
+
+Same info is now found in tp->tcp_mstamp
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_input.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 5485204..f4e1836 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -3056,8 +3056,8 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
+ {
+ 	const struct inet_connection_sock *icsk = inet_csk(sk);
+ 	struct skb_mstamp first_ackt, last_ackt;
+-	struct skb_mstamp *now = &sack->ack_time;
+ 	struct tcp_sock *tp = tcp_sk(sk);
++	struct skb_mstamp *now = &tp->tcp_mstamp;
+ 	u32 prior_sacked = tp->sacked_out;
+ 	u32 reord = tp->packets_out;
+ 	bool fully_acked = true;
+-- 
+cgit v1.1
+
