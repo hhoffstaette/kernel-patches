@@ -25,6 +25,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - block: [throttled background writeback v8](http://marc.info/?l=linux-block&m=147751514819997) (*enabled* by default)
 - btrfs: fixes from 4.10+ (cleanups, correctness, error handling etc.)
+- ext4: patches from 4.10+ (performance, correctness)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - mm: memory management fixes from 4.10+
