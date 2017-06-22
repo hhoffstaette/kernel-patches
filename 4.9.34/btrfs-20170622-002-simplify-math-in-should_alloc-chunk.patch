@@ -1,8 +1,8 @@
 From:   jeffm@suse.com
 To:     linux-btrfs@vger.kernel.org
 Cc:     Nikolay Borisov <nborisov@suse.com>, Jeff Mahoney <jeffm@suse.com>
-Subject: [PATCH 2/2] btrfs: Simplify math in should_alloc chunk
-Date:   Wed, 14 Jun 2017 11:44:27 -0400
+Subject: [PATCH v2 2/2] btrfs: Simplify math in should_alloc chunk
+Date:   Thu, 22 Jun 2017 09:51:48 -0400
 
 From: Nikolay Borisov <nborisov@suse.com>
 
@@ -22,20 +22,20 @@ Signed-off-by: Jeff Mahoney <jeffm@suse.com>
  1 file changed, 4 insertions(+), 5 deletions(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index d027807..6111f79 100644
+index 88b04742beea..b8293062ac8e 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -4388,8 +4388,7 @@ static int should_alloc_chunk(struct btrfs_root *root,
+@@ -4376,8 +4376,7 @@ static int should_alloc_chunk(struct btrfs_root *root,
  			      struct btrfs_space_info *sinfo, int force)
  {
  	struct btrfs_block_rsv *global_rsv = &root->fs_info->global_block_rsv;
 -	u64 num_bytes = sinfo->total_bytes - sinfo->bytes_readonly;
--	u64 num_allocated = sinfo->bytes_used + sinfo->bytes_reserved + sinfo->bytes_pinned + sinfo->bytes_may_use;
-+	u64 bytes_used = btrfs_space_info_used(sinfo, true);
+-	u64 num_allocated = sinfo->bytes_used + sinfo->bytes_reserved + sinfo->bytes_pinned;
++	u64 bytes_used = btrfs_space_info_used(sinfo, false);
  	u64 thresh;
  
  	if (force == CHUNK_ALLOC_FORCE)
-@@ -4401,7 +4400,7 @@ static int should_alloc_chunk(struct btrfs_root *root,
+@@ -4389,7 +4388,7 @@ static int should_alloc_chunk(struct btrfs_root *root,
  	 * global_rsv, it doesn't change except when the transaction commits.
  	 */
  	if (sinfo->flags & BTRFS_BLOCK_GROUP_METADATA)
@@ -44,7 +44,7 @@ index d027807..6111f79 100644
  
  	/*
  	 * in limited mode, we want to have some free space up to
-@@ -4411,11 +4410,11 @@ static int should_alloc_chunk(struct btrfs_root *root,
+@@ -4399,11 +4398,11 @@ static int should_alloc_chunk(struct btrfs_root *root,
  		thresh = btrfs_super_total_bytes(root->fs_info->super_copy);
  		thresh = max_t(u64, SZ_64M, div_factor_fine(thresh, 1));
  
