@@ -1,0 +1,90 @@
+From:   Qu Wenruo <quwenruo@cn.fujitsu.com>
+To:     <linux-btrfs@vger.kernel.org>, <kilobyte@angband.pl>,
+        <dsterba@suse.cz>
+Subject: [PATCH] btrfs: Remove false alert when fiemap range is smaller than on-disk extent
+Date:   Thu, 22 Jun 2017 10:01:21 +0800
+
+Commit 4751832da990 ("btrfs: fiemap: Cache and merge fiemap extent before
+submit it to user") introduced a warning to catch unemitted cached
+fiemap extent.
+
+However such warning doesn't take the following case into consideration:
+
+0			4K			8K
+|<---- fiemap range --->|
+|<----------- On-disk extent ------------------>|
+
+In this case, the whole 0~8K is cached, and since it's larger than
+fiemap range, it break the fiemap extent emit loop.
+This leaves the fiemap extent cached but not emitted, and caught by the
+final fiemap extent sanity check, causing kernel warning.
+
+This patch removes the kernel warning and renames the sanity check to
+emit_last_fiemap_cache() since it's possible and valid to have cached
+fiemap extent.
+
+Reported-by: David Sterba <dsterba@suse.cz>
+Reported-by: Adam Borowski <kilobyte@angband.pl>
+Fixes: 4751832da990 ("btrfs: fiemap: Cache and merge fiemap extent ...")
+Signed-off-by: Qu Wenruo <quwenruo@cn.fujitsu.com>
+---
+Test case will follow with xfs_io modification to allow fiemap called on
+a given range other than the whole file.
+---
+ fs/btrfs/extent_io.c | 28 ++++++++++++----------------
+ 1 file changed, 12 insertions(+), 16 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index d3619e010005..13cae68bfe46 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4463,29 +4463,25 @@ static int emit_fiemap_extent(struct fiemap_extent_info *fieinfo,
+ }
+ 
+ /*
+- * Sanity check for fiemap cache
++ * Emit last fiemap cache
+  *
+- * All fiemap cache should be submitted by emit_fiemap_extent()
+- * Iteration should be terminated either by last fiemap extent or
+- * fieinfo->fi_extents_max.
+- * So no cached fiemap should exist.
++ * The last fiemap cache may still be cached in the following case:
++ * 0		      4k		    8k
++ * |<- Fiemap range ->|
++ * |<------------  First extent ----------->|
++ *
++ * In this case, the first extent range will be cached but not emitted.
++ * So we must emit it before ending extent_fiemap().
+  */
+-static int check_fiemap_cache(struct btrfs_fs_info *fs_info,
+-			       struct fiemap_extent_info *fieinfo,
+-			       struct fiemap_cache *cache)
++static int emit_last_fiemap_cache(struct btrfs_fs_info *fs_info,
++				  struct fiemap_extent_info *fieinfo,
++				  struct fiemap_cache *cache)
+ {
+ 	int ret;
+ 
+ 	if (!cache->cached)
+ 		return 0;
+ 
+-	/* Small and recoverbale problem, only to info developer */
+-#ifdef CONFIG_BTRFS_DEBUG
+-	WARN_ON(1);
+-#endif
+-	btrfs_warn(fs_info,
+-		   "unhandled fiemap cache detected: offset=%llu phys=%llu len=%llu flags=0x%x",
+-		   cache->offset, cache->phys, cache->len, cache->flags);
+ 	ret = fiemap_fill_next_extent(fieinfo, cache->offset, cache->phys,
+ 				      cache->len, cache->flags);
+ 	cache->cached = false;
+@@ -4701,7 +4697,7 @@ int extent_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
+ 	}
+ out_free:
+ 	if (!ret)
+-		ret = check_fiemap_cache(root->fs_info, fieinfo, &cache);
++		ret = emit_last_fiemap_cache(root->fs_info, fieinfo, &cache);
+ 	free_extent_map(em);
+ out:
+ 	btrfs_free_path(path);
