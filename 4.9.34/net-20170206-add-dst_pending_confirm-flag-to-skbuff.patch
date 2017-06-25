@@ -1,0 +1,140 @@
+From 4ff0620354f2b39b9fe2a91c22c4de9d1fba0c8e Mon Sep 17 00:00:00 2001
+From: Julian Anastasov <ja@ssi.bg>
+Date: Mon, 6 Feb 2017 23:14:12 +0200
+Subject: net: add dst_pending_confirm flag to skbuff
+
+Add new skbuff flag to allow protocols to confirm neighbour.
+When same struct dst_entry can be used for many different
+neighbours we can not use it for pending confirmations.
+
+Add sock_confirm_neigh() helper to confirm the neighbour and
+use it for IPv4, IPv6 and VRF before dst_neigh_output.
+
+Signed-off-by: Julian Anastasov <ja@ssi.bg>
+Acked-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/vrf.c      |  5 ++++-
+ include/linux/skbuff.h | 12 ++++++++++++
+ include/net/sock.h     | 14 ++++++++++++++
+ net/ipv4/ip_output.c   |  5 ++++-
+ net/ipv6/ip6_output.c  |  1 +
+ 5 files changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/vrf.c b/drivers/net/vrf.c
+index 264fc15..630eafd 100644
+--- a/drivers/net/vrf.c
++++ b/drivers/net/vrf.c
+@@ -378,6 +378,7 @@ static int vrf_finish_output6(struct net *net, struct sock *sk,
+ 	if (unlikely(!neigh))
+ 		neigh = __neigh_create(&nd_tbl, nexthop, dst->dev, false);
+ 	if (!IS_ERR(neigh)) {
++		sock_confirm_neigh(skb, neigh);
+ 		ret = dst_neigh_output(dst, neigh, skb);
+ 		rcu_read_unlock_bh();
+ 		return ret;
+@@ -574,8 +575,10 @@ static int vrf_finish_output(struct net *net, struct sock *sk, struct sk_buff *s
+ 	neigh = __ipv4_neigh_lookup_noref(dev, nexthop);
+ 	if (unlikely(!neigh))
+ 		neigh = __neigh_create(&arp_tbl, &nexthop, dev, false);
+-	if (!IS_ERR(neigh))
++	if (!IS_ERR(neigh)) {
++		sock_confirm_neigh(skb, neigh);
+ 		ret = dst_neigh_output(dst, neigh, skb);
++	}
+ 
+ 	rcu_read_unlock_bh();
+ err:
+diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
+index c6a78e1..f1adddc 100644
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -612,6 +612,7 @@ static inline bool skb_mstamp_after(const struct skb_mstamp *t1,
+  *	@wifi_acked_valid: wifi_acked was set
+  *	@wifi_acked: whether frame was acked on wifi or not
+  *	@no_fcs:  Request NIC to treat last 4 bytes as Ethernet FCS
++ *	@dst_pending_confirm: need to confirm neighbour
+   *	@napi_id: id of the NAPI struct this skb came from
+  *	@secmark: security marking
+  *	@mark: Generic packet mark
+@@ -741,6 +742,7 @@ struct sk_buff {
+ 	__u8			csum_level:2;
+ 	__u8			csum_bad:1;
+ 
++	__u8			dst_pending_confirm:1;
+ #ifdef CONFIG_IPV6_NDISC_NODETYPE
+ 	__u8			ndisc_nodetype:2;
+ #endif
+@@ -3698,6 +3700,16 @@ static inline bool skb_rx_queue_recorded(const struct sk_buff *skb)
+ 	return skb->queue_mapping != 0;
+ }
+ 
++static inline void skb_set_dst_pending_confirm(struct sk_buff *skb, u32 val)
++{
++	skb->dst_pending_confirm = val;
++}
++
++static inline bool skb_get_dst_pending_confirm(const struct sk_buff *skb)
++{
++	return skb->dst_pending_confirm != 0;
++}
++
+ static inline struct sec_path *skb_sec_path(struct sk_buff *skb)
+ {
+ #ifdef CONFIG_XFRM
+diff --git a/include/net/sock.h b/include/net/sock.h
+index 85d856b..6f83e78 100644
+--- a/include/net/sock.h
++++ b/include/net/sock.h
+@@ -1821,6 +1821,20 @@ static inline void sk_dst_confirm(struct sock *sk)
+ 		sk->sk_dst_pending_confirm = 1;
+ }
+ 
++static inline void sock_confirm_neigh(struct sk_buff *skb, struct neighbour *n)
++{
++	if (skb_get_dst_pending_confirm(skb)) {
++		struct sock *sk = skb->sk;
++		unsigned long now = jiffies;
++
++		/* avoid dirtying neighbour */
++		if (n->confirmed != now)
++			n->confirmed = now;
++		if (sk && sk->sk_dst_pending_confirm)
++			sk->sk_dst_pending_confirm = 0;
++	}
++}
++
+ bool sk_mc_loop(struct sock *sk);
+ 
+ static inline bool sk_can_gso(const struct sock *sk)
+diff --git a/net/ipv4/ip_output.c b/net/ipv4/ip_output.c
+index b67719f..c9fc32f 100644
+--- a/net/ipv4/ip_output.c
++++ b/net/ipv4/ip_output.c
+@@ -222,7 +222,10 @@ static int ip_finish_output2(struct net *net, struct sock *sk, struct sk_buff *s
+ 	if (unlikely(!neigh))
+ 		neigh = __neigh_create(&arp_tbl, &nexthop, dev, false);
+ 	if (!IS_ERR(neigh)) {
+-		int res = dst_neigh_output(dst, neigh, skb);
++		int res;
++
++		sock_confirm_neigh(skb, neigh);
++		res = dst_neigh_output(dst, neigh, skb);
+ 
+ 		rcu_read_unlock_bh();
+ 		return res;
+diff --git a/net/ipv6/ip6_output.c b/net/ipv6/ip6_output.c
+index b6a94ff..14d99fb 100644
+--- a/net/ipv6/ip6_output.c
++++ b/net/ipv6/ip6_output.c
+@@ -119,6 +119,7 @@ static int ip6_finish_output2(struct net *net, struct sock *sk, struct sk_buff *
+ 	if (unlikely(!neigh))
+ 		neigh = __neigh_create(&nd_tbl, nexthop, dst->dev, false);
+ 	if (!IS_ERR(neigh)) {
++		sock_confirm_neigh(skb, neigh);
+ 		ret = dst_neigh_output(dst, neigh, skb);
+ 		rcu_read_unlock_bh();
+ 		return ret;
+-- 
+cgit v1.1
+
