@@ -1,0 +1,120 @@
+From 0f87230d1a6c253681550c6064715d06a32be73d Mon Sep 17 00:00:00 2001
+From: Francis Yan <francisyyan@gmail.com>
+Date: Sun, 27 Nov 2016 23:07:14 -0800
+Subject: tcp: instrument how long TCP is busy sending
+
+This patch measures TCP busy time, which is defined as the period
+of time when sender has data (or FIN) to send. The time starts when
+data is buffered and stops when the write queue is flushed by ACKs
+or error events.
+
+Note the busy time does not include SYN time, unless data is
+included in SYN (i.e. Fast Open). It does include FIN time even
+if the FIN carries no payload. Excluding pure FIN is possible but
+would incur one additional test in the fast path, which may not
+be worth it.
+
+Signed-off-by: Francis Yan <francisyyan@gmail.com>
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Soheil Hassas Yeganeh <soheil@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ include/net/tcp.h     |  6 +++++-
+ net/ipv4/tcp_input.c  |  3 +++
+ net/ipv4/tcp_output.c | 19 ++++++++++++++++---
+ 3 files changed, 24 insertions(+), 4 deletions(-)
+
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index e5ff408..3e097e3 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -1535,6 +1535,7 @@ static inline void tcp_write_queue_purge(struct sock *sk)
+ {
+ 	struct sk_buff *skb;
+ 
++	tcp_chrono_stop(sk, TCP_CHRONO_BUSY);
+ 	while ((skb = __skb_dequeue(&sk->sk_write_queue)) != NULL)
+ 		sk_wmem_free_skb(sk, skb);
+ 	sk_mem_reclaim(sk);
+@@ -1593,8 +1594,10 @@ static inline void tcp_advance_send_head(struct sock *sk, const struct sk_buff *
+ 
+ static inline void tcp_check_send_head(struct sock *sk, struct sk_buff *skb_unlinked)
+ {
+-	if (sk->sk_send_head == skb_unlinked)
++	if (sk->sk_send_head == skb_unlinked) {
+ 		sk->sk_send_head = NULL;
++		tcp_chrono_stop(sk, TCP_CHRONO_BUSY);
++	}
+ 	if (tcp_sk(sk)->highest_sack == skb_unlinked)
+ 		tcp_sk(sk)->highest_sack = NULL;
+ }
+@@ -1616,6 +1619,7 @@ static inline void tcp_add_write_queue_tail(struct sock *sk, struct sk_buff *skb
+ 	/* Queue it, remembering where we must start sending. */
+ 	if (sk->sk_send_head == NULL) {
+ 		sk->sk_send_head = skb;
++		tcp_chrono_start(sk, TCP_CHRONO_BUSY);
+ 
+ 		if (tcp_sk(sk)->highest_sack == NULL)
+ 			tcp_sk(sk)->highest_sack = skb;
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 22e6a20..a5d1727 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -3178,6 +3178,9 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
+ 			tp->lost_skb_hint = NULL;
+ 	}
+ 
++	if (!skb)
++		tcp_chrono_stop(sk, TCP_CHRONO_BUSY);
++
+ 	if (likely(between(tp->snd_up, prior_snd_una, tp->snd_una)))
+ 		tp->snd_up = tp->snd_una;
+ 
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 34f7517..e8ea584 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -2096,8 +2096,8 @@ void tcp_chrono_start(struct sock *sk, const enum tcp_chrono type)
+ 	struct tcp_sock *tp = tcp_sk(sk);
+ 
+ 	/* If there are multiple conditions worthy of tracking in a
+-	 * chronograph then the highest priority enum takes precedence over
+-	 * the other conditions. So that if something "more interesting"
++	 * chronograph then the highest priority enum takes precedence
++	 * over the other conditions. So that if something "more interesting"
+ 	 * starts happening, stop the previous chrono and start a new one.
+ 	 */
+ 	if (type > tp->chrono_type)
+@@ -2108,7 +2108,18 @@ void tcp_chrono_stop(struct sock *sk, const enum tcp_chrono type)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
+ 
+-	tcp_chrono_set(tp, TCP_CHRONO_UNSPEC);
++
++	/* There are multiple conditions worthy of tracking in a
++	 * chronograph, so that the highest priority enum takes
++	 * precedence over the other conditions (see tcp_chrono_start).
++	 * If a condition stops, we only stop chrono tracking if
++	 * it's the "most interesting" or current chrono we are
++	 * tracking and starts busy chrono if we have pending data.
++	 */
++	if (tcp_write_queue_empty(sk))
++		tcp_chrono_set(tp, TCP_CHRONO_UNSPEC);
++	else if (type == tp->chrono_type)
++		tcp_chrono_set(tp, TCP_CHRONO_BUSY);
+ }
+ 
+ /* This routine writes packets to the network.  It advances the
+@@ -3328,6 +3339,8 @@ static int tcp_send_syn_data(struct sock *sk, struct sk_buff *syn)
+ 	fo->copied = space;
+ 
+ 	tcp_connect_queue_skb(sk, syn_data);
++	if (syn_data->len)
++		tcp_chrono_start(sk, TCP_CHRONO_BUSY);
+ 
+ 	err = tcp_transmit_skb(sk, syn_data, 1, sk->sk_allocation);
+ 
+-- 
+cgit v1.1
+
