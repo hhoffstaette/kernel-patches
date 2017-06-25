@@ -1,0 +1,44 @@
+From 628174ccc45f648b83374d0a5bd554b0a88522ce Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Tue, 16 May 2017 14:00:09 -0700
+Subject: tcp: uses jiffies_32 to feed tp->chrono_start
+
+tcp_time_stamp will no longer be tied to jiffies.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp.c        | 2 +-
+ net/ipv4/tcp_output.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index d0bb61e..b85bfe7 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -2757,7 +2757,7 @@ static void tcp_get_info_chrono_stats(const struct tcp_sock *tp,
+ 	for (i = TCP_CHRONO_BUSY; i < __TCP_CHRONO_MAX; ++i) {
+ 		stats[i] = tp->chrono_stat[i - 1];
+ 		if (i == tp->chrono_type)
+-			stats[i] += tcp_time_stamp - tp->chrono_start;
++			stats[i] += tcp_jiffies32 - tp->chrono_start;
+ 		stats[i] *= USEC_PER_SEC / HZ;
+ 		total += stats[i];
+ 	}
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index f0fd1b4..1011ea4 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -2202,7 +2202,7 @@ static bool tcp_small_queue_check(struct sock *sk, const struct sk_buff *skb,
+ 
+ static void tcp_chrono_set(struct tcp_sock *tp, const enum tcp_chrono new)
+ {
+-	const u32 now = tcp_time_stamp;
++	const u32 now = tcp_jiffies32;
+ 
+ 	if (tp->chrono_type > TCP_CHRONO_UNSPEC)
+ 		tp->chrono_stat[tp->chrono_type - 1] += now - tp->chrono_start;
+-- 
+cgit v1.1
+

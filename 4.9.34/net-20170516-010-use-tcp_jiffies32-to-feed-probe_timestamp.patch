@@ -1,0 +1,63 @@
+From c74df29a8d119a09ccc5e50265e3383c76278f3d Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Tue, 16 May 2017 14:00:08 -0700
+Subject: tcp: use tcp_jiffies32 to feed probe_timestamp
+
+Use tcp_jiffies32 instead of tcp_time_stamp, since
+tcp_time_stamp will soon be only used for TCP TS option.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_output.c | 6 +++---
+ net/ipv4/tcp_timer.c  | 2 +-
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index cbda5de..f0fd1b4 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -1475,7 +1475,7 @@ void tcp_mtup_init(struct sock *sk)
+ 	icsk->icsk_mtup.search_low = tcp_mss_to_mtu(sk, net->ipv4.sysctl_tcp_base_mss);
+ 	icsk->icsk_mtup.probe_size = 0;
+ 	if (icsk->icsk_mtup.enabled)
+-		icsk->icsk_mtup.probe_timestamp = tcp_time_stamp;
++		icsk->icsk_mtup.probe_timestamp = tcp_jiffies32;
+ }
+ EXPORT_SYMBOL(tcp_mtup_init);
+ 
+@@ -1987,7 +1987,7 @@ static inline void tcp_mtu_check_reprobe(struct sock *sk)
+ 	s32 delta;
+ 
+ 	interval = net->ipv4.sysctl_tcp_probe_interval;
+-	delta = tcp_time_stamp - icsk->icsk_mtup.probe_timestamp;
++	delta = tcp_jiffies32 - icsk->icsk_mtup.probe_timestamp;
+ 	if (unlikely(delta >= interval * HZ)) {
+ 		int mss = tcp_current_mss(sk);
+ 
+@@ -1999,7 +1999,7 @@ static inline void tcp_mtu_check_reprobe(struct sock *sk)
+ 		icsk->icsk_mtup.search_low = tcp_mss_to_mtu(sk, mss);
+ 
+ 		/* Update probe time stamp */
+-		icsk->icsk_mtup.probe_timestamp = tcp_time_stamp;
++		icsk->icsk_mtup.probe_timestamp = tcp_jiffies32;
+ 	}
+ }
+ 
+diff --git a/net/ipv4/tcp_timer.c b/net/ipv4/tcp_timer.c
+index 9e0616c..6629f47 100644
+--- a/net/ipv4/tcp_timer.c
++++ b/net/ipv4/tcp_timer.c
+@@ -115,7 +115,7 @@ static void tcp_mtu_probing(struct inet_connection_sock *icsk, struct sock *sk)
+ 	if (net->ipv4.sysctl_tcp_mtu_probing) {
+ 		if (!icsk->icsk_mtup.enabled) {
+ 			icsk->icsk_mtup.enabled = 1;
+-			icsk->icsk_mtup.probe_timestamp = tcp_time_stamp;
++			icsk->icsk_mtup.probe_timestamp = tcp_jiffies32;
+ 			tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
+ 		} else {
+ 			struct net *net = sock_net(sk);
+-- 
+cgit v1.1
+

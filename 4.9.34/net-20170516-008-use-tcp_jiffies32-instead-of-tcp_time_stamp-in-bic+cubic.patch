@@ -1,0 +1,89 @@
+From ac35f562203a45a04f79f412509df48857f928be Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Tue, 16 May 2017 14:00:06 -0700
+Subject: tcp: bic, cubic: use tcp_jiffies32 instead of tcp_time_stamp
+
+Use tcp_jiffies32 instead of tcp_time_stamp, since
+tcp_time_stamp will soon be only used for TCP TS option.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_bic.c   |  6 +++---
+ net/ipv4/tcp_cubic.c | 12 ++++++------
+ 2 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/net/ipv4/tcp_bic.c b/net/ipv4/tcp_bic.c
+index 36087bc..609965f 100644
+--- a/net/ipv4/tcp_bic.c
++++ b/net/ipv4/tcp_bic.c
+@@ -84,14 +84,14 @@ static void bictcp_init(struct sock *sk)
+ static inline void bictcp_update(struct bictcp *ca, u32 cwnd)
+ {
+ 	if (ca->last_cwnd == cwnd &&
+-	    (s32)(tcp_time_stamp - ca->last_time) <= HZ / 32)
++	    (s32)(tcp_jiffies32 - ca->last_time) <= HZ / 32)
+ 		return;
+ 
+ 	ca->last_cwnd = cwnd;
+-	ca->last_time = tcp_time_stamp;
++	ca->last_time = tcp_jiffies32;
+ 
+ 	if (ca->epoch_start == 0) /* record the beginning of an epoch */
+-		ca->epoch_start = tcp_time_stamp;
++		ca->epoch_start = tcp_jiffies32;
+ 
+ 	/* start off normal */
+ 	if (cwnd <= low_window) {
+diff --git a/net/ipv4/tcp_cubic.c b/net/ipv4/tcp_cubic.c
+index 2052ca7..57ae5b5 100644
+--- a/net/ipv4/tcp_cubic.c
++++ b/net/ipv4/tcp_cubic.c
+@@ -231,21 +231,21 @@ static inline void bictcp_update(struct bictcp *ca, u32 cwnd, u32 acked)
+ 	ca->ack_cnt += acked;	/* count the number of ACKed packets */
+ 
+ 	if (ca->last_cwnd == cwnd &&
+-	    (s32)(tcp_time_stamp - ca->last_time) <= HZ / 32)
++	    (s32)(tcp_jiffies32 - ca->last_time) <= HZ / 32)
+ 		return;
+ 
+ 	/* The CUBIC function can update ca->cnt at most once per jiffy.
+ 	 * On all cwnd reduction events, ca->epoch_start is set to 0,
+ 	 * which will force a recalculation of ca->cnt.
+ 	 */
+-	if (ca->epoch_start && tcp_time_stamp == ca->last_time)
++	if (ca->epoch_start && tcp_jiffies32 == ca->last_time)
+ 		goto tcp_friendliness;
+ 
+ 	ca->last_cwnd = cwnd;
+-	ca->last_time = tcp_time_stamp;
++	ca->last_time = tcp_jiffies32;
+ 
+ 	if (ca->epoch_start == 0) {
+-		ca->epoch_start = tcp_time_stamp;	/* record beginning */
++		ca->epoch_start = tcp_jiffies32;	/* record beginning */
+ 		ca->ack_cnt = acked;			/* start counting */
+ 		ca->tcp_cwnd = cwnd;			/* syn with cubic */
+ 
+@@ -276,7 +276,7 @@ static inline void bictcp_update(struct bictcp *ca, u32 cwnd, u32 acked)
+ 	 * if the cwnd < 1 million packets !!!
+ 	 */
+ 
+-	t = (s32)(tcp_time_stamp - ca->epoch_start);
++	t = (s32)(tcp_jiffies32 - ca->epoch_start);
+ 	t += msecs_to_jiffies(ca->delay_min >> 3);
+ 	/* change the unit from HZ to bictcp_HZ */
+ 	t <<= BICTCP_HZ;
+@@ -448,7 +448,7 @@ static void bictcp_acked(struct sock *sk, const struct ack_sample *sample)
+ 		return;
+ 
+ 	/* Discard delay samples right after fast recovery */
+-	if (ca->epoch_start && (s32)(tcp_time_stamp - ca->epoch_start) < HZ)
++	if (ca->epoch_start && (s32)(tcp_jiffies32 - ca->epoch_start) < HZ)
+ 		return;
+ 
+ 	delay = (sample->rtt_us << 3) / USEC_PER_MSEC;
+-- 
+cgit v1.1
+
