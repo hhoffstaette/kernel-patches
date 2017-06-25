@@ -1,0 +1,1815 @@
+From 2456e855354415bfaeb7badaa14e11b3e02c8466 Mon Sep 17 00:00:00 2001
+From: Thomas Gleixner <tglx@linutronix.de>
+Date: Sun, 25 Dec 2016 11:38:40 +0100
+Subject: ktime: Get rid of the union
+
+ktime is a union because the initial implementation stored the time in
+scalar nanoseconds on 64 bit machine and in a endianess optimized timespec
+variant for 32bit machines. The Y2038 cleanup removed the timespec variant
+and switched everything to scalar nanoseconds. The union remained, but
+become completely pointless.
+
+Get rid of the union and just keep ktime_t as simple typedef of type s64.
+
+The conversion was done with coccinelle and some manual mopping up.
+
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+---
+ drivers/base/power/wakeup.c            |  2 +-
+ drivers/media/rc/ir-rx51.c             |  2 +-
+ drivers/rtc/interface.c                |  8 ++--
+ drivers/usb/chipidea/otg_fsm.c         | 14 +++----
+ drivers/usb/host/ehci-timer.c          |  2 +-
+ drivers/usb/host/fotg210-hcd.c         |  2 +-
+ fs/aio.c                               |  4 +-
+ fs/nfs/flexfilelayout/flexfilelayout.c |  3 +-
+ fs/ocfs2/cluster/heartbeat.c           |  2 +-
+ fs/timerfd.c                           | 26 ++++++-------
+ include/linux/futex.h                  |  4 +-
+ include/linux/hrtimer.h                | 12 +++---
+ include/linux/ktime.h                  | 68 ++++++++++++----------------------
+ include/linux/tick.h                   |  4 +-
+ include/linux/wait.h                   |  2 +-
+ include/net/red.h                      |  4 +-
+ include/net/sock.h                     |  4 +-
+ include/trace/events/alarmtimer.h      |  6 +--
+ include/trace/events/timer.h           | 16 ++++----
+ kernel/futex.c                         |  4 +-
+ kernel/signal.c                        |  6 +--
+ kernel/time/alarmtimer.c               | 20 +++++-----
+ kernel/time/clockevents.c              |  6 +--
+ kernel/time/hrtimer.c                  | 52 +++++++++++++-------------
+ kernel/time/itimer.c                   | 10 ++---
+ kernel/time/ntp.c                      |  2 +-
+ kernel/time/posix-timers.c             | 20 +++++-----
+ kernel/time/tick-broadcast-hrtimer.c   |  2 +-
+ kernel/time/tick-broadcast.c           | 24 ++++++------
+ kernel/time/tick-oneshot.c             |  2 +-
+ kernel/time/tick-sched.c               | 22 +++++------
+ kernel/time/timekeeping.c              |  6 +--
+ lib/timerqueue.c                       |  4 +-
+ net/can/bcm.c                          | 28 +++++++-------
+ net/can/gw.c                           |  2 +-
+ net/core/dev.c                         |  4 +-
+ net/core/skbuff.c                      |  2 +-
+ net/ipv4/tcp_output.c                  |  4 +-
+ net/ipv6/exthdrs.c                     |  2 +-
+ net/ipx/af_ipx.c                       |  2 +-
+ net/netfilter/nf_conntrack_core.c      |  2 +-
+ net/netfilter/nfnetlink_log.c          |  2 +-
+ net/netfilter/nfnetlink_queue.c        |  4 +-
+ net/netfilter/xt_time.c                |  2 +-
+ net/sched/sch_netem.c                  |  2 +-
+ net/socket.c                           |  2 +-
+ net/sunrpc/svcsock.c                   |  2 +-
+ sound/core/hrtimer.c                   |  2 +-
+ 48 files changed, 200 insertions(+), 227 deletions(-)
+
+diff --git a/drivers/base/power/wakeup.c b/drivers/base/power/wakeup.c
+index bf9ba26..9433290 100644
+--- a/drivers/base/power/wakeup.c
++++ b/drivers/base/power/wakeup.c
+@@ -998,7 +998,7 @@ static int print_wakeup_source_stats(struct seq_file *m,
+ 
+ 		active_time = ktime_sub(now, ws->last_time);
+ 		total_time = ktime_add(total_time, active_time);
+-		if (active_time.tv64 > max_time.tv64)
++		if (active_time > max_time)
+ 			max_time = active_time;
+ 
+ 		if (ws->autosleep_enabled)
+diff --git a/drivers/media/rc/ir-rx51.c b/drivers/media/rc/ir-rx51.c
+index 82fb6f2..e6efa8c 100644
+--- a/drivers/media/rc/ir-rx51.c
++++ b/drivers/media/rc/ir-rx51.c
+@@ -109,7 +109,7 @@ static enum hrtimer_restart lirc_rx51_timer_cb(struct hrtimer *timer)
+ 
+ 		now = timer->base->get_time();
+ 
+-	} while (hrtimer_get_expires_tv64(timer) < now.tv64);
++	} while (hrtimer_get_expires_tv64(timer) < now);
+ 
+ 	return HRTIMER_RESTART;
+ end:
+diff --git a/drivers/rtc/interface.c b/drivers/rtc/interface.c
+index 84a52db..5cf196d 100644
+--- a/drivers/rtc/interface.c
++++ b/drivers/rtc/interface.c
+@@ -394,8 +394,8 @@ int rtc_initialize_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
+ 	rtc->aie_timer.period = ktime_set(0, 0);
+ 
+ 	/* Alarm has to be enabled & in the future for us to enqueue it */
+-	if (alarm->enabled && (rtc_tm_to_ktime(now).tv64 <
+-			 rtc->aie_timer.node.expires.tv64)) {
++	if (alarm->enabled && (rtc_tm_to_ktime(now) <
++			 rtc->aie_timer.node.expires)) {
+ 
+ 		rtc->aie_timer.enabled = 1;
+ 		timerqueue_add(&rtc->timerqueue, &rtc->aie_timer.node);
+@@ -766,7 +766,7 @@ static int rtc_timer_enqueue(struct rtc_device *rtc, struct rtc_timer *timer)
+ 
+ 	/* Skip over expired timers */
+ 	while (next) {
+-		if (next->expires.tv64 >= now.tv64)
++		if (next->expires >= now)
+ 			break;
+ 		next = timerqueue_iterate_next(next);
+ 	}
+@@ -858,7 +858,7 @@ again:
+ 	__rtc_read_time(rtc, &tm);
+ 	now = rtc_tm_to_ktime(tm);
+ 	while ((next = timerqueue_getnext(&rtc->timerqueue))) {
+-		if (next->expires.tv64 > now.tv64)
++		if (next->expires > now)
+ 			break;
+ 
+ 		/* expire timer */
+diff --git a/drivers/usb/chipidea/otg_fsm.c b/drivers/usb/chipidea/otg_fsm.c
+index de8e22e..93e24ce 100644
+--- a/drivers/usb/chipidea/otg_fsm.c
++++ b/drivers/usb/chipidea/otg_fsm.c
+@@ -234,8 +234,8 @@ static void ci_otg_add_timer(struct ci_hdrc *ci, enum otg_fsm_timer t)
+ 				ktime_set(timer_sec, timer_nsec));
+ 	ci->enabled_otg_timer_bits |= (1 << t);
+ 	if ((ci->next_otg_timer == NUM_OTG_FSM_TIMERS) ||
+-			(ci->hr_timeouts[ci->next_otg_timer].tv64 >
+-						ci->hr_timeouts[t].tv64)) {
++			(ci->hr_timeouts[ci->next_otg_timer] >
++						ci->hr_timeouts[t])) {
+ 			ci->next_otg_timer = t;
+ 			hrtimer_start_range_ns(&ci->otg_fsm_hrtimer,
+ 					ci->hr_timeouts[t], NSEC_PER_MSEC,
+@@ -269,8 +269,8 @@ static void ci_otg_del_timer(struct ci_hdrc *ci, enum otg_fsm_timer t)
+ 			for_each_set_bit(cur_timer, &enabled_timer_bits,
+ 							NUM_OTG_FSM_TIMERS) {
+ 				if ((next_timer == NUM_OTG_FSM_TIMERS) ||
+-					(ci->hr_timeouts[next_timer].tv64 <
+-					ci->hr_timeouts[cur_timer].tv64))
++					(ci->hr_timeouts[next_timer] <
++					 ci->hr_timeouts[cur_timer]))
+ 					next_timer = cur_timer;
+ 			}
+ 		}
+@@ -397,14 +397,14 @@ static enum hrtimer_restart ci_otg_hrtimer_func(struct hrtimer *t)
+ 
+ 	now = ktime_get();
+ 	for_each_set_bit(cur_timer, &enabled_timer_bits, NUM_OTG_FSM_TIMERS) {
+-		if (now.tv64 >= ci->hr_timeouts[cur_timer].tv64) {
++		if (now >= ci->hr_timeouts[cur_timer]) {
+ 			ci->enabled_otg_timer_bits &= ~(1 << cur_timer);
+ 			if (otg_timer_handlers[cur_timer])
+ 				ret = otg_timer_handlers[cur_timer](ci);
+ 		} else {
+ 			if ((next_timer == NUM_OTG_FSM_TIMERS) ||
+-				(ci->hr_timeouts[cur_timer].tv64 <
+-					ci->hr_timeouts[next_timer].tv64))
++				(ci->hr_timeouts[cur_timer] <
++					ci->hr_timeouts[next_timer]))
+ 				next_timer = cur_timer;
+ 		}
+ 	}
+diff --git a/drivers/usb/host/ehci-timer.c b/drivers/usb/host/ehci-timer.c
+index 69f50e6..262e10c 100644
+--- a/drivers/usb/host/ehci-timer.c
++++ b/drivers/usb/host/ehci-timer.c
+@@ -425,7 +425,7 @@ static enum hrtimer_restart ehci_hrtimer_func(struct hrtimer *t)
+ 	 */
+ 	now = ktime_get();
+ 	for_each_set_bit(e, &events, EHCI_HRTIMER_NUM_EVENTS) {
+-		if (now.tv64 >= ehci->hr_timeouts[e].tv64)
++		if (now >= ehci->hr_timeouts[e])
+ 			event_handlers[e](ehci);
+ 		else
+ 			ehci_enable_event(ehci, e, false);
+diff --git a/drivers/usb/host/fotg210-hcd.c b/drivers/usb/host/fotg210-hcd.c
+index 66efa9a..4dda56e 100644
+--- a/drivers/usb/host/fotg210-hcd.c
++++ b/drivers/usb/host/fotg210-hcd.c
+@@ -1381,7 +1381,7 @@ static enum hrtimer_restart fotg210_hrtimer_func(struct hrtimer *t)
+ 	 */
+ 	now = ktime_get();
+ 	for_each_set_bit(e, &events, FOTG210_HRTIMER_NUM_EVENTS) {
+-		if (now.tv64 >= fotg210->hr_timeouts[e].tv64)
++		if (now >= fotg210->hr_timeouts[e])
+ 			event_handlers[e](fotg210);
+ 		else
+ 			fotg210_enable_event(fotg210, e, false);
+diff --git a/fs/aio.c b/fs/aio.c
+index 955c524..4ab67e8 100644
+--- a/fs/aio.c
++++ b/fs/aio.c
+@@ -1285,7 +1285,7 @@ static long read_events(struct kioctx *ctx, long min_nr, long nr,
+ 			struct io_event __user *event,
+ 			struct timespec __user *timeout)
+ {
+-	ktime_t until = { .tv64 = KTIME_MAX };
++	ktime_t until = KTIME_MAX;
+ 	long ret = 0;
+ 
+ 	if (timeout) {
+@@ -1311,7 +1311,7 @@ static long read_events(struct kioctx *ctx, long min_nr, long nr,
+ 	 * the ringbuffer empty. So in practice we should be ok, but it's
+ 	 * something to be aware of when touching this code.
+ 	 */
+-	if (until.tv64 == 0)
++	if (until == 0)
+ 		aio_read_events(ctx, min_nr, nr, event, &ret);
+ 	else
+ 		wait_event_interruptible_hrtimeout(ctx->wait,
+diff --git a/fs/nfs/flexfilelayout/flexfilelayout.c b/fs/nfs/flexfilelayout/flexfilelayout.c
+index 45962fe..c98f6db 100644
+--- a/fs/nfs/flexfilelayout/flexfilelayout.c
++++ b/fs/nfs/flexfilelayout/flexfilelayout.c
+@@ -619,12 +619,11 @@ nfs4_ff_layoutstat_start_io(struct nfs4_ff_layout_mirror *mirror,
+ 			    struct nfs4_ff_layoutstat *layoutstat,
+ 			    ktime_t now)
+ {
+-	static const ktime_t notime = {0};
+ 	s64 report_interval = FF_LAYOUTSTATS_REPORT_INTERVAL;
+ 	struct nfs4_flexfile_layout *ffl = FF_LAYOUT_FROM_HDR(mirror->layout);
+ 
+ 	nfs4_ff_start_busy_timer(&layoutstat->busy_timer, now);
+-	if (ktime_equal(mirror->start_time, notime))
++	if (ktime_equal(mirror->start_time, 0))
+ 		mirror->start_time = now;
+ 	if (mirror->report_interval != 0)
+ 		report_interval = (s64)mirror->report_interval * 1000LL;
+diff --git a/fs/ocfs2/cluster/heartbeat.c b/fs/ocfs2/cluster/heartbeat.c
+index 96a155a..f6e8717 100644
+--- a/fs/ocfs2/cluster/heartbeat.c
++++ b/fs/ocfs2/cluster/heartbeat.c
+@@ -1250,7 +1250,7 @@ static int o2hb_thread(void *data)
+ 
+ 		mlog(ML_HEARTBEAT,
+ 		     "start = %lld, end = %lld, msec = %u, ret = %d\n",
+-		     before_hb.tv64, after_hb.tv64, elapsed_msec, ret);
++		     before_hb, after_hb, elapsed_msec, ret);
+ 
+ 		if (!kthread_should_stop() &&
+ 		    elapsed_msec < reg->hr_timeout_ms) {
+diff --git a/fs/timerfd.c b/fs/timerfd.c
+index 9ae4abb..fb4407a 100644
+--- a/fs/timerfd.c
++++ b/fs/timerfd.c
+@@ -55,7 +55,7 @@ static inline bool isalarm(struct timerfd_ctx *ctx)
+ /*
+  * This gets called when the timer event triggers. We set the "expired"
+  * flag, but we do not re-arm the timer (in case it's necessary,
+- * tintv.tv64 != 0) until the timer is accessed.
++ * tintv != 0) until the timer is accessed.
+  */
+ static void timerfd_triggered(struct timerfd_ctx *ctx)
+ {
+@@ -93,7 +93,7 @@ static enum alarmtimer_restart timerfd_alarmproc(struct alarm *alarm,
+  */
+ void timerfd_clock_was_set(void)
+ {
+-	ktime_t moffs = ktime_mono_to_real((ktime_t){ .tv64 = 0 });
++	ktime_t moffs = ktime_mono_to_real(0);
+ 	struct timerfd_ctx *ctx;
+ 	unsigned long flags;
+ 
+@@ -102,8 +102,8 @@ void timerfd_clock_was_set(void)
+ 		if (!ctx->might_cancel)
+ 			continue;
+ 		spin_lock_irqsave(&ctx->wqh.lock, flags);
+-		if (ctx->moffs.tv64 != moffs.tv64) {
+-			ctx->moffs.tv64 = KTIME_MAX;
++		if (ctx->moffs != moffs) {
++			ctx->moffs = KTIME_MAX;
+ 			ctx->ticks++;
+ 			wake_up_locked(&ctx->wqh);
+ 		}
+@@ -124,9 +124,9 @@ static void timerfd_remove_cancel(struct timerfd_ctx *ctx)
+ 
+ static bool timerfd_canceled(struct timerfd_ctx *ctx)
+ {
+-	if (!ctx->might_cancel || ctx->moffs.tv64 != KTIME_MAX)
++	if (!ctx->might_cancel || ctx->moffs != KTIME_MAX)
+ 		return false;
+-	ctx->moffs = ktime_mono_to_real((ktime_t){ .tv64 = 0 });
++	ctx->moffs = ktime_mono_to_real(0);
+ 	return true;
+ }
+ 
+@@ -155,7 +155,7 @@ static ktime_t timerfd_get_remaining(struct timerfd_ctx *ctx)
+ 	else
+ 		remaining = hrtimer_expires_remaining_adjusted(&ctx->t.tmr);
+ 
+-	return remaining.tv64 < 0 ? ktime_set(0, 0): remaining;
++	return remaining < 0 ? ktime_set(0, 0): remaining;
+ }
+ 
+ static int timerfd_setup(struct timerfd_ctx *ctx, int flags,
+@@ -184,7 +184,7 @@ static int timerfd_setup(struct timerfd_ctx *ctx, int flags,
+ 		ctx->t.tmr.function = timerfd_tmrproc;
+ 	}
+ 
+-	if (texp.tv64 != 0) {
++	if (texp != 0) {
+ 		if (isalarm(ctx)) {
+ 			if (flags & TFD_TIMER_ABSTIME)
+ 				alarm_start(&ctx->t.alarm, texp);
+@@ -261,9 +261,9 @@ static ssize_t timerfd_read(struct file *file, char __user *buf, size_t count,
+ 	if (ctx->ticks) {
+ 		ticks = ctx->ticks;
+ 
+-		if (ctx->expired && ctx->tintv.tv64) {
++		if (ctx->expired && ctx->tintv) {
+ 			/*
+-			 * If tintv.tv64 != 0, this is a periodic timer that
++			 * If tintv != 0, this is a periodic timer that
+ 			 * needs to be re-armed. We avoid doing it in the timer
+ 			 * callback to avoid DoS attacks specifying a very
+ 			 * short timer period.
+@@ -410,7 +410,7 @@ SYSCALL_DEFINE2(timerfd_create, int, clockid, int, flags)
+ 	else
+ 		hrtimer_init(&ctx->t.tmr, clockid, HRTIMER_MODE_ABS);
+ 
+-	ctx->moffs = ktime_mono_to_real((ktime_t){ .tv64 = 0 });
++	ctx->moffs = ktime_mono_to_real(0);
+ 
+ 	ufd = anon_inode_getfd("[timerfd]", &timerfd_fops, ctx,
+ 			       O_RDWR | (flags & TFD_SHARED_FCNTL_FLAGS));
+@@ -469,7 +469,7 @@ static int do_timerfd_settime(int ufd, int flags,
+ 	 * We do not update "ticks" and "expired" since the timer will be
+ 	 * re-programmed again in the following timerfd_setup() call.
+ 	 */
+-	if (ctx->expired && ctx->tintv.tv64) {
++	if (ctx->expired && ctx->tintv) {
+ 		if (isalarm(ctx))
+ 			alarm_forward_now(&ctx->t.alarm, ctx->tintv);
+ 		else
+@@ -499,7 +499,7 @@ static int do_timerfd_gettime(int ufd, struct itimerspec *t)
+ 	ctx = f.file->private_data;
+ 
+ 	spin_lock_irq(&ctx->wqh.lock);
+-	if (ctx->expired && ctx->tintv.tv64) {
++	if (ctx->expired && ctx->tintv) {
+ 		ctx->expired = 0;
+ 
+ 		if (isalarm(ctx)) {
+diff --git a/include/linux/futex.h b/include/linux/futex.h
+index 6435f46..7c5b694 100644
+--- a/include/linux/futex.h
++++ b/include/linux/futex.h
+@@ -1,14 +1,14 @@
+ #ifndef _LINUX_FUTEX_H
+ #define _LINUX_FUTEX_H
+ 
++#include <linux/ktime.h>
+ #include <uapi/linux/futex.h>
+ 
+ struct inode;
+ struct mm_struct;
+ struct task_struct;
+-union ktime;
+ 
+-long do_futex(u32 __user *uaddr, int op, u32 val, union ktime *timeout,
++long do_futex(u32 __user *uaddr, int op, u32 val, ktime_t *timeout,
+ 	      u32 __user *uaddr2, u32 val2, u32 val3);
+ 
+ extern int
+diff --git a/include/linux/hrtimer.h b/include/linux/hrtimer.h
+index 5e00f80..cdab81b 100644
+--- a/include/linux/hrtimer.h
++++ b/include/linux/hrtimer.h
+@@ -228,8 +228,8 @@ static inline void hrtimer_set_expires_range_ns(struct hrtimer *timer, ktime_t t
+ 
+ static inline void hrtimer_set_expires_tv64(struct hrtimer *timer, s64 tv64)
+ {
+-	timer->node.expires.tv64 = tv64;
+-	timer->_softexpires.tv64 = tv64;
++	timer->node.expires = tv64;
++	timer->_softexpires = tv64;
+ }
+ 
+ static inline void hrtimer_add_expires(struct hrtimer *timer, ktime_t time)
+@@ -256,11 +256,11 @@ static inline ktime_t hrtimer_get_softexpires(const struct hrtimer *timer)
+ 
+ static inline s64 hrtimer_get_expires_tv64(const struct hrtimer *timer)
+ {
+-	return timer->node.expires.tv64;
++	return timer->node.expires;
+ }
+ static inline s64 hrtimer_get_softexpires_tv64(const struct hrtimer *timer)
+ {
+-	return timer->_softexpires.tv64;
++	return timer->_softexpires;
+ }
+ 
+ static inline s64 hrtimer_get_expires_ns(const struct hrtimer *timer)
+@@ -297,7 +297,7 @@ extern void hrtimer_peek_ahead_timers(void);
+  * this resolution values.
+  */
+ # define HIGH_RES_NSEC		1
+-# define KTIME_HIGH_RES		(ktime_t) { .tv64 = HIGH_RES_NSEC }
++# define KTIME_HIGH_RES		(HIGH_RES_NSEC)
+ # define MONOTONIC_RES_NSEC	HIGH_RES_NSEC
+ # define KTIME_MONOTONIC_RES	KTIME_HIGH_RES
+ 
+@@ -333,7 +333,7 @@ __hrtimer_expires_remaining_adjusted(const struct hrtimer *timer, ktime_t now)
+ 	 * hrtimer_start_range_ns() to prevent short timeouts.
+ 	 */
+ 	if (IS_ENABLED(CONFIG_TIME_LOW_RES) && timer->is_rel)
+-		rem.tv64 -= hrtimer_resolution;
++		rem -= hrtimer_resolution;
+ 	return rem;
+ }
+ 
+diff --git a/include/linux/ktime.h b/include/linux/ktime.h
+index 0fb7ffb..8e573de 100644
+--- a/include/linux/ktime.h
++++ b/include/linux/ktime.h
+@@ -24,21 +24,8 @@
+ #include <linux/time.h>
+ #include <linux/jiffies.h>
+ 
+-/*
+- * ktime_t:
+- *
+- * A single 64-bit variable is used to store the hrtimers
+- * internal representation of time values in scalar nanoseconds. The
+- * design plays out best on 64-bit CPUs, where most conversions are
+- * NOPs and most arithmetic ktime_t operations are plain arithmetic
+- * operations.
+- *
+- */
+-union ktime {
+-	s64	tv64;
+-};
+-
+-typedef union ktime ktime_t;		/* Kill this */
++/* Nanosecond scalar representation for kernel time values */
++typedef s64	ktime_t;
+ 
+ /**
+  * ktime_set - Set a ktime_t variable from a seconds/nanoseconds value
+@@ -50,39 +37,34 @@ typedef union ktime ktime_t;		/* Kill this */
+ static inline ktime_t ktime_set(const s64 secs, const unsigned long nsecs)
+ {
+ 	if (unlikely(secs >= KTIME_SEC_MAX))
+-		return (ktime_t){ .tv64 = KTIME_MAX };
++		return KTIME_MAX;
+ 
+-	return (ktime_t) { .tv64 = secs * NSEC_PER_SEC + (s64)nsecs };
++	return secs * NSEC_PER_SEC + (s64)nsecs;
+ }
+ 
+ /* Subtract two ktime_t variables. rem = lhs -rhs: */
+-#define ktime_sub(lhs, rhs) \
+-		({ (ktime_t){ .tv64 = (lhs).tv64 - (rhs).tv64 }; })
++#define ktime_sub(lhs, rhs)	((lhs) - (rhs))
+ 
+ /* Add two ktime_t variables. res = lhs + rhs: */
+-#define ktime_add(lhs, rhs) \
+-		({ (ktime_t){ .tv64 = (lhs).tv64 + (rhs).tv64 }; })
++#define ktime_add(lhs, rhs)	((lhs) + (rhs))
+ 
+ /*
+  * Same as ktime_add(), but avoids undefined behaviour on overflow; however,
+  * this means that you must check the result for overflow yourself.
+  */
+-#define ktime_add_unsafe(lhs, rhs) \
+-		({ (ktime_t){ .tv64 = (u64) (lhs).tv64 + (rhs).tv64 }; })
++#define ktime_add_unsafe(lhs, rhs)	((u64) (lhs) + (rhs))
+ 
+ /*
+  * Add a ktime_t variable and a scalar nanosecond value.
+  * res = kt + nsval:
+  */
+-#define ktime_add_ns(kt, nsval) \
+-		({ (ktime_t){ .tv64 = (kt).tv64 + (nsval) }; })
++#define ktime_add_ns(kt, nsval)		((kt) + (nsval))
+ 
+ /*
+  * Subtract a scalar nanosecod from a ktime_t variable
+  * res = kt - nsval:
+  */
+-#define ktime_sub_ns(kt, nsval) \
+-		({ (ktime_t){ .tv64 = (kt).tv64 - (nsval) }; })
++#define ktime_sub_ns(kt, nsval)		((kt) - (nsval))
+ 
+ /* convert a timespec to ktime_t format: */
+ static inline ktime_t timespec_to_ktime(struct timespec ts)
+@@ -103,16 +85,16 @@ static inline ktime_t timeval_to_ktime(struct timeval tv)
+ }
+ 
+ /* Map the ktime_t to timespec conversion to ns_to_timespec function */
+-#define ktime_to_timespec(kt)		ns_to_timespec((kt).tv64)
++#define ktime_to_timespec(kt)		ns_to_timespec((kt))
+ 
+ /* Map the ktime_t to timespec conversion to ns_to_timespec function */
+-#define ktime_to_timespec64(kt)		ns_to_timespec64((kt).tv64)
++#define ktime_to_timespec64(kt)		ns_to_timespec64((kt))
+ 
+ /* Map the ktime_t to timeval conversion to ns_to_timeval function */
+-#define ktime_to_timeval(kt)		ns_to_timeval((kt).tv64)
++#define ktime_to_timeval(kt)		ns_to_timeval((kt))
+ 
+ /* Convert ktime_t to nanoseconds - NOP in the scalar storage format: */
+-#define ktime_to_ns(kt)			((kt).tv64)
++#define ktime_to_ns(kt)			(kt)
+ 
+ 
+ /**
+@@ -126,7 +108,7 @@ static inline ktime_t timeval_to_ktime(struct timeval tv)
+  */
+ static inline int ktime_equal(const ktime_t cmp1, const ktime_t cmp2)
+ {
+-	return cmp1.tv64 == cmp2.tv64;
++	return cmp1 == cmp2;
+ }
+ 
+ /**
+@@ -141,9 +123,9 @@ static inline int ktime_equal(const ktime_t cmp1, const ktime_t cmp2)
+  */
+ static inline int ktime_compare(const ktime_t cmp1, const ktime_t cmp2)
+ {
+-	if (cmp1.tv64 < cmp2.tv64)
++	if (cmp1 < cmp2)
+ 		return -1;
+-	if (cmp1.tv64 > cmp2.tv64)
++	if (cmp1 > cmp2)
+ 		return 1;
+ 	return 0;
+ }
+@@ -182,7 +164,7 @@ static inline s64 ktime_divns(const ktime_t kt, s64 div)
+ 	 */
+ 	BUG_ON(div < 0);
+ 	if (__builtin_constant_p(div) && !(div >> 32)) {
+-		s64 ns = kt.tv64;
++		s64 ns = kt;
+ 		u64 tmp = ns < 0 ? -ns : ns;
+ 
+ 		do_div(tmp, div);
+@@ -199,7 +181,7 @@ static inline s64 ktime_divns(const ktime_t kt, s64 div)
+ 	 * so catch them on 64bit as well.
+ 	 */
+ 	WARN_ON(div < 0);
+-	return kt.tv64 / div;
++	return kt / div;
+ }
+ #endif
+ 
+@@ -256,7 +238,7 @@ extern ktime_t ktime_add_safe(const ktime_t lhs, const ktime_t rhs);
+ static inline __must_check bool ktime_to_timespec_cond(const ktime_t kt,
+ 						       struct timespec *ts)
+ {
+-	if (kt.tv64) {
++	if (kt) {
+ 		*ts = ktime_to_timespec(kt);
+ 		return true;
+ 	} else {
+@@ -275,7 +257,7 @@ static inline __must_check bool ktime_to_timespec_cond(const ktime_t kt,
+ static inline __must_check bool ktime_to_timespec64_cond(const ktime_t kt,
+ 						       struct timespec64 *ts)
+ {
+-	if (kt.tv64) {
++	if (kt) {
+ 		*ts = ktime_to_timespec64(kt);
+ 		return true;
+ 	} else {
+@@ -290,20 +272,16 @@ static inline __must_check bool ktime_to_timespec64_cond(const ktime_t kt,
+  * this resolution values.
+  */
+ #define LOW_RES_NSEC		TICK_NSEC
+-#define KTIME_LOW_RES		(ktime_t){ .tv64 = LOW_RES_NSEC }
++#define KTIME_LOW_RES		(LOW_RES_NSEC)
+ 
+ static inline ktime_t ns_to_ktime(u64 ns)
+ {
+-	static const ktime_t ktime_zero = { .tv64 = 0 };
+-
+-	return ktime_add_ns(ktime_zero, ns);
++	return ns;
+ }
+ 
+ static inline ktime_t ms_to_ktime(u64 ms)
+ {
+-	static const ktime_t ktime_zero = { .tv64 = 0 };
+-
+-	return ktime_add_ms(ktime_zero, ms);
++	return ms * NSEC_PER_MSEC;
+ }
+ 
+ # include <linux/timekeeping.h>
+diff --git a/include/linux/tick.h b/include/linux/tick.h
+index 62be0786..a04fea1 100644
+--- a/include/linux/tick.h
++++ b/include/linux/tick.h
+@@ -127,9 +127,7 @@ static inline void tick_nohz_idle_exit(void) { }
+ 
+ static inline ktime_t tick_nohz_get_sleep_length(void)
+ {
+-	ktime_t len = { .tv64 = NSEC_PER_SEC/HZ };
+-
+-	return len;
++	return NSEC_PER_SEC / HZ;
+ }
+ static inline u64 get_cpu_idle_time_us(int cpu, u64 *unused) { return -1; }
+ static inline u64 get_cpu_iowait_time_us(int cpu, u64 *unused) { return -1; }
+diff --git a/include/linux/wait.h b/include/linux/wait.h
+index 2408e8d5..1421132 100644
+--- a/include/linux/wait.h
++++ b/include/linux/wait.h
+@@ -510,7 +510,7 @@ do {									\
+ 	hrtimer_init_on_stack(&__t.timer, CLOCK_MONOTONIC,		\
+ 			      HRTIMER_MODE_REL);			\
+ 	hrtimer_init_sleeper(&__t, current);				\
+-	if ((timeout).tv64 != KTIME_MAX)				\
++	if ((timeout) != KTIME_MAX)				\
+ 		hrtimer_start_range_ns(&__t.timer, timeout,		\
+ 				       current->timer_slack_ns,		\
+ 				       HRTIMER_MODE_REL);		\
+diff --git a/include/net/red.h b/include/net/red.h
+index 76e0b5f..208e718 100644
+--- a/include/net/red.h
++++ b/include/net/red.h
+@@ -207,7 +207,7 @@ static inline void red_set_parms(struct red_parms *p,
+ 
+ static inline int red_is_idling(const struct red_vars *v)
+ {
+-	return v->qidlestart.tv64 != 0;
++	return v->qidlestart != 0;
+ }
+ 
+ static inline void red_start_of_idle_period(struct red_vars *v)
+@@ -217,7 +217,7 @@ static inline void red_start_of_idle_period(struct red_vars *v)
+ 
+ static inline void red_end_of_idle_period(struct red_vars *v)
+ {
+-	v->qidlestart.tv64 = 0;
++	v->qidlestart = 0;
+ }
+ 
+ static inline void red_restart(struct red_vars *v)
+diff --git a/include/net/sock.h b/include/net/sock.h
+index 282d065..f0e867f 100644
+--- a/include/net/sock.h
++++ b/include/net/sock.h
+@@ -2193,8 +2193,8 @@ sock_recv_timestamp(struct msghdr *msg, struct sock *sk, struct sk_buff *skb)
+ 	 */
+ 	if (sock_flag(sk, SOCK_RCVTSTAMP) ||
+ 	    (sk->sk_tsflags & SOF_TIMESTAMPING_RX_SOFTWARE) ||
+-	    (kt.tv64 && sk->sk_tsflags & SOF_TIMESTAMPING_SOFTWARE) ||
+-	    (hwtstamps->hwtstamp.tv64 &&
++	    (kt && sk->sk_tsflags & SOF_TIMESTAMPING_SOFTWARE) ||
++	    (hwtstamps->hwtstamp &&
+ 	     (sk->sk_tsflags & SOF_TIMESTAMPING_RAW_HARDWARE)))
+ 		__sock_recv_timestamp(msg, sk, skb);
+ 	else
+diff --git a/include/trace/events/alarmtimer.h b/include/trace/events/alarmtimer.h
+index a1c108c..ae4f358 100644
+--- a/include/trace/events/alarmtimer.h
++++ b/include/trace/events/alarmtimer.h
+@@ -31,7 +31,7 @@ TRACE_EVENT(alarmtimer_suspend,
+ 	),
+ 
+ 	TP_fast_assign(
+-		__entry->expires = expires.tv64;
++		__entry->expires = expires;
+ 		__entry->alarm_type = flag;
+ 	),
+ 
+@@ -57,8 +57,8 @@ DECLARE_EVENT_CLASS(alarm_class,
+ 	TP_fast_assign(
+ 		__entry->alarm = alarm;
+ 		__entry->alarm_type = alarm->type;
+-		__entry->expires = alarm->node.expires.tv64;
+-		__entry->now = now.tv64;
++		__entry->expires = alarm->node.expires;
++		__entry->now = now;
+ 	),
+ 
+ 	TP_printk("alarmtimer:%p type:%s expires:%llu now:%llu",
+diff --git a/include/trace/events/timer.h b/include/trace/events/timer.h
+index 28c5da6..1448637 100644
+--- a/include/trace/events/timer.h
++++ b/include/trace/events/timer.h
+@@ -177,16 +177,14 @@ TRACE_EVENT(hrtimer_start,
+ 	TP_fast_assign(
+ 		__entry->hrtimer	= hrtimer;
+ 		__entry->function	= hrtimer->function;
+-		__entry->expires	= hrtimer_get_expires(hrtimer).tv64;
+-		__entry->softexpires	= hrtimer_get_softexpires(hrtimer).tv64;
++		__entry->expires	= hrtimer_get_expires(hrtimer);
++		__entry->softexpires	= hrtimer_get_softexpires(hrtimer);
+ 	),
+ 
+ 	TP_printk("hrtimer=%p function=%pf expires=%llu softexpires=%llu",
+ 		  __entry->hrtimer, __entry->function,
+-		  (unsigned long long)ktime_to_ns((ktime_t) {
+-				  .tv64 = __entry->expires }),
+-		  (unsigned long long)ktime_to_ns((ktime_t) {
+-				  .tv64 = __entry->softexpires }))
++		  (unsigned long long) __entry->expires,
++		  (unsigned long long) __entry->softexpires)
+ );
+ 
+ /**
+@@ -211,13 +209,13 @@ TRACE_EVENT(hrtimer_expire_entry,
+ 
+ 	TP_fast_assign(
+ 		__entry->hrtimer	= hrtimer;
+-		__entry->now		= now->tv64;
++		__entry->now		= *now;
+ 		__entry->function	= hrtimer->function;
+ 	),
+ 
+ 	TP_printk("hrtimer=%p function=%pf now=%llu", __entry->hrtimer, __entry->function,
+-		  (unsigned long long)ktime_to_ns((ktime_t) { .tv64 = __entry->now }))
+- );
++		  (unsigned long long) __entry->now)
++);
+ 
+ DECLARE_EVENT_CLASS(hrtimer_class,
+ 
+diff --git a/kernel/futex.c b/kernel/futex.c
+index 9246d9f..0842c8ca 100644
+--- a/kernel/futex.c
++++ b/kernel/futex.c
+@@ -2459,7 +2459,7 @@ retry:
+ 	restart->fn = futex_wait_restart;
+ 	restart->futex.uaddr = uaddr;
+ 	restart->futex.val = val;
+-	restart->futex.time = abs_time->tv64;
++	restart->futex.time = *abs_time;
+ 	restart->futex.bitset = bitset;
+ 	restart->futex.flags = flags | FLAGS_HAS_TIMEOUT;
+ 
+@@ -2480,7 +2480,7 @@ static long futex_wait_restart(struct restart_block *restart)
+ 	ktime_t t, *tp = NULL;
+ 
+ 	if (restart->futex.flags & FLAGS_HAS_TIMEOUT) {
+-		t.tv64 = restart->futex.time;
++		t = restart->futex.time;
+ 		tp = &t;
+ 	}
+ 	restart->fn = do_no_restart_syscall;
+diff --git a/kernel/signal.c b/kernel/signal.c
+index f5d4e27..ff046b7 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -587,7 +587,7 @@ int dequeue_signal(struct task_struct *tsk, sigset_t *mask, siginfo_t *info)
+ 			struct hrtimer *tmr = &tsk->signal->real_timer;
+ 
+ 			if (!hrtimer_is_queued(tmr) &&
+-			    tsk->signal->it_real_incr.tv64 != 0) {
++			    tsk->signal->it_real_incr != 0) {
+ 				hrtimer_forward(tmr, tmr->base->get_time(),
+ 						tsk->signal->it_real_incr);
+ 				hrtimer_restart(tmr);
+@@ -2766,7 +2766,7 @@ int copy_siginfo_to_user(siginfo_t __user *to, const siginfo_t *from)
+ int do_sigtimedwait(const sigset_t *which, siginfo_t *info,
+ 		    const struct timespec *ts)
+ {
+-	ktime_t *to = NULL, timeout = { .tv64 = KTIME_MAX };
++	ktime_t *to = NULL, timeout = KTIME_MAX;
+ 	struct task_struct *tsk = current;
+ 	sigset_t mask = *which;
+ 	int sig, ret = 0;
+@@ -2786,7 +2786,7 @@ int do_sigtimedwait(const sigset_t *which, siginfo_t *info,
+ 
+ 	spin_lock_irq(&tsk->sighand->siglock);
+ 	sig = dequeue_signal(tsk, &mask, info);
+-	if (!sig && timeout.tv64) {
++	if (!sig && timeout) {
+ 		/*
+ 		 * None ready, temporarily unblock those we're interested
+ 		 * while we are sleeping in so that we'll be awakened when
+diff --git a/kernel/time/alarmtimer.c b/kernel/time/alarmtimer.c
+index 3921cf7..ab6ac07 100644
+--- a/kernel/time/alarmtimer.c
++++ b/kernel/time/alarmtimer.c
+@@ -254,13 +254,13 @@ static int alarmtimer_suspend(struct device *dev)
+ 		if (!next)
+ 			continue;
+ 		delta = ktime_sub(next->expires, base->gettime());
+-		if (!min.tv64 || (delta.tv64 < min.tv64)) {
++		if (!min || (delta < min)) {
+ 			expires = next->expires;
+ 			min = delta;
+ 			type = i;
+ 		}
+ 	}
+-	if (min.tv64 == 0)
++	if (min == 0)
+ 		return 0;
+ 
+ 	if (ktime_to_ns(min) < 2 * NSEC_PER_SEC) {
+@@ -328,7 +328,7 @@ static void alarmtimer_freezerset(ktime_t absexp, enum alarmtimer_type type)
+ 	delta = ktime_sub(absexp, base->gettime());
+ 
+ 	spin_lock_irqsave(&freezer_delta_lock, flags);
+-	if (!freezer_delta.tv64 || (delta.tv64 < freezer_delta.tv64)) {
++	if (!freezer_delta || (delta < freezer_delta)) {
+ 		freezer_delta = delta;
+ 		freezer_expires = absexp;
+ 		freezer_alarmtype = type;
+@@ -453,10 +453,10 @@ u64 alarm_forward(struct alarm *alarm, ktime_t now, ktime_t interval)
+ 
+ 	delta = ktime_sub(now, alarm->node.expires);
+ 
+-	if (delta.tv64 < 0)
++	if (delta < 0)
+ 		return 0;
+ 
+-	if (unlikely(delta.tv64 >= interval.tv64)) {
++	if (unlikely(delta >= interval)) {
+ 		s64 incr = ktime_to_ns(interval);
+ 
+ 		overrun = ktime_divns(delta, incr);
+@@ -464,7 +464,7 @@ u64 alarm_forward(struct alarm *alarm, ktime_t now, ktime_t interval)
+ 		alarm->node.expires = ktime_add_ns(alarm->node.expires,
+ 							incr*overrun);
+ 
+-		if (alarm->node.expires.tv64 > now.tv64)
++		if (alarm->node.expires > now)
+ 			return overrun;
+ 		/*
+ 		 * This (and the ktime_add() below) is the
+@@ -522,7 +522,7 @@ static enum alarmtimer_restart alarm_handle_timer(struct alarm *alarm,
+ 	}
+ 
+ 	/* Re-add periodic timers */
+-	if (ptr->it.alarm.interval.tv64) {
++	if (ptr->it.alarm.interval) {
+ 		ptr->it_overrun += alarm_forward(alarm, now,
+ 						ptr->it.alarm.interval);
+ 		result = ALARMTIMER_RESTART;
+@@ -730,7 +730,7 @@ static int update_rmtp(ktime_t exp, enum  alarmtimer_type type,
+ 
+ 	rem = ktime_sub(exp, alarm_bases[type].gettime());
+ 
+-	if (rem.tv64 <= 0)
++	if (rem <= 0)
+ 		return 0;
+ 	rmt = ktime_to_timespec(rem);
+ 
+@@ -755,7 +755,7 @@ static long __sched alarm_timer_nsleep_restart(struct restart_block *restart)
+ 	struct alarm alarm;
+ 	int ret = 0;
+ 
+-	exp.tv64 = restart->nanosleep.expires;
++	exp = restart->nanosleep.expires;
+ 	alarm_init(&alarm, type, alarmtimer_nsleep_wakeup);
+ 
+ 	if (alarmtimer_do_nsleep(&alarm, exp))
+@@ -835,7 +835,7 @@ static int alarm_timer_nsleep(const clockid_t which_clock, int flags,
+ 	restart = &current->restart_block;
+ 	restart->fn = alarm_timer_nsleep_restart;
+ 	restart->nanosleep.clockid = type;
+-	restart->nanosleep.expires = exp.tv64;
++	restart->nanosleep.expires = exp;
+ 	restart->nanosleep.rmtp = rmtp;
+ 	ret = -ERESTART_RESTARTBLOCK;
+ 
+diff --git a/kernel/time/clockevents.c b/kernel/time/clockevents.c
+index 2c5bc77..97ac095 100644
+--- a/kernel/time/clockevents.c
++++ b/kernel/time/clockevents.c
+@@ -179,7 +179,7 @@ void clockevents_switch_state(struct clock_event_device *dev,
+ void clockevents_shutdown(struct clock_event_device *dev)
+ {
+ 	clockevents_switch_state(dev, CLOCK_EVT_STATE_SHUTDOWN);
+-	dev->next_event.tv64 = KTIME_MAX;
++	dev->next_event = KTIME_MAX;
+ }
+ 
+ /**
+@@ -213,7 +213,7 @@ static int clockevents_increase_min_delta(struct clock_event_device *dev)
+ 	if (dev->min_delta_ns >= MIN_DELTA_LIMIT) {
+ 		printk_deferred(KERN_WARNING
+ 				"CE: Reprogramming failure. Giving up\n");
+-		dev->next_event.tv64 = KTIME_MAX;
++		dev->next_event = KTIME_MAX;
+ 		return -ETIME;
+ 	}
+ 
+@@ -310,7 +310,7 @@ int clockevents_program_event(struct clock_event_device *dev, ktime_t expires,
+ 	int64_t delta;
+ 	int rc;
+ 
+-	if (unlikely(expires.tv64 < 0)) {
++	if (unlikely(expires < 0)) {
+ 		WARN_ON_ONCE(1);
+ 		return -ETIME;
+ 	}
+diff --git a/kernel/time/hrtimer.c b/kernel/time/hrtimer.c
+index 161e340..c7f7801 100644
+--- a/kernel/time/hrtimer.c
++++ b/kernel/time/hrtimer.c
+@@ -171,7 +171,7 @@ hrtimer_check_target(struct hrtimer *timer, struct hrtimer_clock_base *new_base)
+ 		return 0;
+ 
+ 	expires = ktime_sub(hrtimer_get_expires(timer), new_base->offset);
+-	return expires.tv64 <= new_base->cpu_base->expires_next.tv64;
++	return expires <= new_base->cpu_base->expires_next;
+ #else
+ 	return 0;
+ #endif
+@@ -313,7 +313,7 @@ ktime_t ktime_add_safe(const ktime_t lhs, const ktime_t rhs)
+ 	 * We use KTIME_SEC_MAX here, the maximum timeout which we can
+ 	 * return to user space in a timespec:
+ 	 */
+-	if (res.tv64 < 0 || res.tv64 < lhs.tv64 || res.tv64 < rhs.tv64)
++	if (res < 0 || res < lhs || res < rhs)
+ 		res = ktime_set(KTIME_SEC_MAX, 0);
+ 
+ 	return res;
+@@ -465,8 +465,8 @@ static inline void hrtimer_update_next_timer(struct hrtimer_cpu_base *cpu_base,
+ static ktime_t __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base)
+ {
+ 	struct hrtimer_clock_base *base = cpu_base->clock_base;
+-	ktime_t expires, expires_next = { .tv64 = KTIME_MAX };
+ 	unsigned int active = cpu_base->active_bases;
++	ktime_t expires, expires_next = KTIME_MAX;
+ 
+ 	hrtimer_update_next_timer(cpu_base, NULL);
+ 	for (; active; base++, active >>= 1) {
+@@ -479,7 +479,7 @@ static ktime_t __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base)
+ 		next = timerqueue_getnext(&base->active);
+ 		timer = container_of(next, struct hrtimer, node);
+ 		expires = ktime_sub(hrtimer_get_expires(timer), base->offset);
+-		if (expires.tv64 < expires_next.tv64) {
++		if (expires < expires_next) {
+ 			expires_next = expires;
+ 			hrtimer_update_next_timer(cpu_base, timer);
+ 		}
+@@ -489,8 +489,8 @@ static ktime_t __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base)
+ 	 * the clock bases so the result might be negative. Fix it up
+ 	 * to prevent a false positive in clockevents_program_event().
+ 	 */
+-	if (expires_next.tv64 < 0)
+-		expires_next.tv64 = 0;
++	if (expires_next < 0)
++		expires_next = 0;
+ 	return expires_next;
+ }
+ #endif
+@@ -561,10 +561,10 @@ hrtimer_force_reprogram(struct hrtimer_cpu_base *cpu_base, int skip_equal)
+ 
+ 	expires_next = __hrtimer_get_next_event(cpu_base);
+ 
+-	if (skip_equal && expires_next.tv64 == cpu_base->expires_next.tv64)
++	if (skip_equal && expires_next == cpu_base->expires_next)
+ 		return;
+ 
+-	cpu_base->expires_next.tv64 = expires_next.tv64;
++	cpu_base->expires_next = expires_next;
+ 
+ 	/*
+ 	 * If a hang was detected in the last timer interrupt then we
+@@ -622,10 +622,10 @@ static void hrtimer_reprogram(struct hrtimer *timer,
+ 	 * CLOCK_REALTIME timer might be requested with an absolute
+ 	 * expiry time which is less than base->offset. Set it to 0.
+ 	 */
+-	if (expires.tv64 < 0)
+-		expires.tv64 = 0;
++	if (expires < 0)
++		expires = 0;
+ 
+-	if (expires.tv64 >= cpu_base->expires_next.tv64)
++	if (expires >= cpu_base->expires_next)
+ 		return;
+ 
+ 	/* Update the pointer to the next expiring timer */
+@@ -653,7 +653,7 @@ static void hrtimer_reprogram(struct hrtimer *timer,
+  */
+ static inline void hrtimer_init_hres(struct hrtimer_cpu_base *base)
+ {
+-	base->expires_next.tv64 = KTIME_MAX;
++	base->expires_next = KTIME_MAX;
+ 	base->hres_active = 0;
+ }
+ 
+@@ -827,21 +827,21 @@ u64 hrtimer_forward(struct hrtimer *timer, ktime_t now, ktime_t interval)
+ 
+ 	delta = ktime_sub(now, hrtimer_get_expires(timer));
+ 
+-	if (delta.tv64 < 0)
++	if (delta < 0)
+ 		return 0;
+ 
+ 	if (WARN_ON(timer->state & HRTIMER_STATE_ENQUEUED))
+ 		return 0;
+ 
+-	if (interval.tv64 < hrtimer_resolution)
+-		interval.tv64 = hrtimer_resolution;
++	if (interval < hrtimer_resolution)
++		interval = hrtimer_resolution;
+ 
+-	if (unlikely(delta.tv64 >= interval.tv64)) {
++	if (unlikely(delta >= interval)) {
+ 		s64 incr = ktime_to_ns(interval);
+ 
+ 		orun = ktime_divns(delta, incr);
+ 		hrtimer_add_expires_ns(timer, incr * orun);
+-		if (hrtimer_get_expires_tv64(timer) > now.tv64)
++		if (hrtimer_get_expires_tv64(timer) > now)
+ 			return orun;
+ 		/*
+ 		 * This (and the ktime_add() below) is the
+@@ -1104,7 +1104,7 @@ u64 hrtimer_get_next_event(void)
+ 	raw_spin_lock_irqsave(&cpu_base->lock, flags);
+ 
+ 	if (!__hrtimer_hres_active(cpu_base))
+-		expires = __hrtimer_get_next_event(cpu_base).tv64;
++		expires = __hrtimer_get_next_event(cpu_base);
+ 
+ 	raw_spin_unlock_irqrestore(&cpu_base->lock, flags);
+ 
+@@ -1296,7 +1296,7 @@ static void __hrtimer_run_queues(struct hrtimer_cpu_base *cpu_base, ktime_t now)
+ 			 * are right-of a not yet expired timer, because that
+ 			 * timer will have to trigger a wakeup anyway.
+ 			 */
+-			if (basenow.tv64 < hrtimer_get_softexpires_tv64(timer))
++			if (basenow < hrtimer_get_softexpires_tv64(timer))
+ 				break;
+ 
+ 			__run_hrtimer(cpu_base, base, timer, &basenow);
+@@ -1318,7 +1318,7 @@ void hrtimer_interrupt(struct clock_event_device *dev)
+ 
+ 	BUG_ON(!cpu_base->hres_active);
+ 	cpu_base->nr_events++;
+-	dev->next_event.tv64 = KTIME_MAX;
++	dev->next_event = KTIME_MAX;
+ 
+ 	raw_spin_lock(&cpu_base->lock);
+ 	entry_time = now = hrtimer_update_base(cpu_base);
+@@ -1331,7 +1331,7 @@ retry:
+ 	 * timers which run their callback and need to be requeued on
+ 	 * this CPU.
+ 	 */
+-	cpu_base->expires_next.tv64 = KTIME_MAX;
++	cpu_base->expires_next = KTIME_MAX;
+ 
+ 	__hrtimer_run_queues(cpu_base, now);
+ 
+@@ -1379,13 +1379,13 @@ retry:
+ 	cpu_base->hang_detected = 1;
+ 	raw_spin_unlock(&cpu_base->lock);
+ 	delta = ktime_sub(now, entry_time);
+-	if ((unsigned int)delta.tv64 > cpu_base->max_hang_time)
+-		cpu_base->max_hang_time = (unsigned int) delta.tv64;
++	if ((unsigned int)delta > cpu_base->max_hang_time)
++		cpu_base->max_hang_time = (unsigned int) delta;
+ 	/*
+ 	 * Limit it to a sensible value as we enforce a longer
+ 	 * delay. Give the CPU at least 100ms to catch up.
+ 	 */
+-	if (delta.tv64 > 100 * NSEC_PER_MSEC)
++	if (delta > 100 * NSEC_PER_MSEC)
+ 		expires_next = ktime_add_ns(now, 100 * NSEC_PER_MSEC);
+ 	else
+ 		expires_next = ktime_add(now, delta);
+@@ -1495,7 +1495,7 @@ static int update_rmtp(struct hrtimer *timer, struct timespec __user *rmtp)
+ 	ktime_t rem;
+ 
+ 	rem = hrtimer_expires_remaining(timer);
+-	if (rem.tv64 <= 0)
++	if (rem <= 0)
+ 		return 0;
+ 	rmt = ktime_to_timespec(rem);
+ 
+@@ -1693,7 +1693,7 @@ schedule_hrtimeout_range_clock(ktime_t *expires, u64 delta,
+ 	 * Optimize when a zero timeout value is given. It does not
+ 	 * matter whether this is an absolute or a relative time.
+ 	 */
+-	if (expires && !expires->tv64) {
++	if (expires && *expires == 0) {
+ 		__set_current_state(TASK_RUNNING);
+ 		return 0;
+ 	}
+diff --git a/kernel/time/itimer.c b/kernel/time/itimer.c
+index a45afb7..8c89143 100644
+--- a/kernel/time/itimer.c
++++ b/kernel/time/itimer.c
+@@ -34,10 +34,10 @@ static struct timeval itimer_get_remtime(struct hrtimer *timer)
+ 	 * then we return 0 - which is correct.
+ 	 */
+ 	if (hrtimer_active(timer)) {
+-		if (rem.tv64 <= 0)
+-			rem.tv64 = NSEC_PER_USEC;
++		if (rem <= 0)
++			rem = NSEC_PER_USEC;
+ 	} else
+-		rem.tv64 = 0;
++		rem = 0;
+ 
+ 	return ktime_to_timeval(rem);
+ }
+@@ -216,12 +216,12 @@ again:
+ 			goto again;
+ 		}
+ 		expires = timeval_to_ktime(value->it_value);
+-		if (expires.tv64 != 0) {
++		if (expires != 0) {
+ 			tsk->signal->it_real_incr =
+ 				timeval_to_ktime(value->it_interval);
+ 			hrtimer_start(timer, expires, HRTIMER_MODE_REL);
+ 		} else
+-			tsk->signal->it_real_incr.tv64 = 0;
++			tsk->signal->it_real_incr = 0;
+ 
+ 		trace_itimer_state(ITIMER_REAL, value, 0);
+ 		spin_unlock_irq(&tsk->sighand->siglock);
+diff --git a/kernel/time/ntp.c b/kernel/time/ntp.c
+index 6df8927..edf19cc 100644
+--- a/kernel/time/ntp.c
++++ b/kernel/time/ntp.c
+@@ -381,7 +381,7 @@ ktime_t ntp_get_next_leap(void)
+ 
+ 	if ((time_state == TIME_INS) && (time_status & STA_INS))
+ 		return ktime_set(ntp_next_leap_sec, 0);
+-	ret.tv64 = KTIME_MAX;
++	ret = KTIME_MAX;
+ 	return ret;
+ }
+ 
+diff --git a/kernel/time/posix-timers.c b/kernel/time/posix-timers.c
+index 42d7b95..9fe98b3 100644
+--- a/kernel/time/posix-timers.c
++++ b/kernel/time/posix-timers.c
+@@ -359,7 +359,7 @@ static void schedule_next_timer(struct k_itimer *timr)
+ {
+ 	struct hrtimer *timer = &timr->it.real.timer;
+ 
+-	if (timr->it.real.interval.tv64 == 0)
++	if (timr->it.real.interval == 0)
+ 		return;
+ 
+ 	timr->it_overrun += (unsigned int) hrtimer_forward(timer,
+@@ -449,7 +449,7 @@ static enum hrtimer_restart posix_timer_fn(struct hrtimer *timer)
+ 	timr = container_of(timer, struct k_itimer, it.real.timer);
+ 	spin_lock_irqsave(&timr->it_lock, flags);
+ 
+-	if (timr->it.real.interval.tv64 != 0)
++	if (timr->it.real.interval != 0)
+ 		si_private = ++timr->it_requeue_pending;
+ 
+ 	if (posix_timer_event(timr, si_private)) {
+@@ -458,7 +458,7 @@ static enum hrtimer_restart posix_timer_fn(struct hrtimer *timer)
+ 		 * we will not get a call back to restart it AND
+ 		 * it should be restarted.
+ 		 */
+-		if (timr->it.real.interval.tv64 != 0) {
++		if (timr->it.real.interval != 0) {
+ 			ktime_t now = hrtimer_cb_get_time(timer);
+ 
+ 			/*
+@@ -487,7 +487,7 @@ static enum hrtimer_restart posix_timer_fn(struct hrtimer *timer)
+ 			{
+ 				ktime_t kj = ktime_set(0, NSEC_PER_SEC / HZ);
+ 
+-				if (timr->it.real.interval.tv64 < kj.tv64)
++				if (timr->it.real.interval < kj)
+ 					now = ktime_add(now, kj);
+ 			}
+ #endif
+@@ -743,7 +743,7 @@ common_timer_get(struct k_itimer *timr, struct itimerspec *cur_setting)
+ 	iv = timr->it.real.interval;
+ 
+ 	/* interval timer ? */
+-	if (iv.tv64)
++	if (iv)
+ 		cur_setting->it_interval = ktime_to_timespec(iv);
+ 	else if (!hrtimer_active(timer) &&
+ 		 (timr->it_sigev_notify & ~SIGEV_THREAD_ID) != SIGEV_NONE)
+@@ -756,13 +756,13 @@ common_timer_get(struct k_itimer *timr, struct itimerspec *cur_setting)
+ 	 * timer move the expiry time forward by intervals, so
+ 	 * expiry is > now.
+ 	 */
+-	if (iv.tv64 && (timr->it_requeue_pending & REQUEUE_PENDING ||
+-	    (timr->it_sigev_notify & ~SIGEV_THREAD_ID) == SIGEV_NONE))
++	if (iv && (timr->it_requeue_pending & REQUEUE_PENDING ||
++		   (timr->it_sigev_notify & ~SIGEV_THREAD_ID) == SIGEV_NONE))
+ 		timr->it_overrun += (unsigned int) hrtimer_forward(timer, now, iv);
+ 
+ 	remaining = __hrtimer_expires_remaining_adjusted(timer, now);
+ 	/* Return 0 only, when the timer is expired and not pending */
+-	if (remaining.tv64 <= 0) {
++	if (remaining <= 0) {
+ 		/*
+ 		 * A single shot SIGEV_NONE timer must return 0, when
+ 		 * it is expired !
+@@ -839,7 +839,7 @@ common_timer_set(struct k_itimer *timr, int flags,
+ 		common_timer_get(timr, old_setting);
+ 
+ 	/* disable the timer */
+-	timr->it.real.interval.tv64 = 0;
++	timr->it.real.interval = 0;
+ 	/*
+ 	 * careful here.  If smp we could be in the "fire" routine which will
+ 	 * be spinning as we hold the lock.  But this is ONLY an SMP issue.
+@@ -924,7 +924,7 @@ retry:
+ 
+ static int common_timer_del(struct k_itimer *timer)
+ {
+-	timer->it.real.interval.tv64 = 0;
++	timer->it.real.interval = 0;
+ 
+ 	if (hrtimer_try_to_cancel(&timer->it.real.timer) < 0)
+ 		return TIMER_RETRY;
+diff --git a/kernel/time/tick-broadcast-hrtimer.c b/kernel/time/tick-broadcast-hrtimer.c
+index 690b797..a7bb8f3 100644
+--- a/kernel/time/tick-broadcast-hrtimer.c
++++ b/kernel/time/tick-broadcast-hrtimer.c
+@@ -97,7 +97,7 @@ static enum hrtimer_restart bc_handler(struct hrtimer *t)
+ 	ce_broadcast_hrtimer.event_handler(&ce_broadcast_hrtimer);
+ 
+ 	if (clockevent_state_oneshot(&ce_broadcast_hrtimer))
+-		if (ce_broadcast_hrtimer.next_event.tv64 != KTIME_MAX)
++		if (ce_broadcast_hrtimer.next_event != KTIME_MAX)
+ 			return HRTIMER_RESTART;
+ 
+ 	return HRTIMER_NORESTART;
+diff --git a/kernel/time/tick-broadcast.c b/kernel/time/tick-broadcast.c
+index d2a20e8..3109204 100644
+--- a/kernel/time/tick-broadcast.c
++++ b/kernel/time/tick-broadcast.c
+@@ -604,14 +604,14 @@ static void tick_handle_oneshot_broadcast(struct clock_event_device *dev)
+ 	bool bc_local;
+ 
+ 	raw_spin_lock(&tick_broadcast_lock);
+-	dev->next_event.tv64 = KTIME_MAX;
+-	next_event.tv64 = KTIME_MAX;
++	dev->next_event = KTIME_MAX;
++	next_event = KTIME_MAX;
+ 	cpumask_clear(tmpmask);
+ 	now = ktime_get();
+ 	/* Find all expired events */
+ 	for_each_cpu(cpu, tick_broadcast_oneshot_mask) {
+ 		td = &per_cpu(tick_cpu_device, cpu);
+-		if (td->evtdev->next_event.tv64 <= now.tv64) {
++		if (td->evtdev->next_event <= now) {
+ 			cpumask_set_cpu(cpu, tmpmask);
+ 			/*
+ 			 * Mark the remote cpu in the pending mask, so
+@@ -619,8 +619,8 @@ static void tick_handle_oneshot_broadcast(struct clock_event_device *dev)
+ 			 * timer in tick_broadcast_oneshot_control().
+ 			 */
+ 			cpumask_set_cpu(cpu, tick_broadcast_pending_mask);
+-		} else if (td->evtdev->next_event.tv64 < next_event.tv64) {
+-			next_event.tv64 = td->evtdev->next_event.tv64;
++		} else if (td->evtdev->next_event < next_event) {
++			next_event = td->evtdev->next_event;
+ 			next_cpu = cpu;
+ 		}
+ 	}
+@@ -657,7 +657,7 @@ static void tick_handle_oneshot_broadcast(struct clock_event_device *dev)
+ 	 * - There are pending events on sleeping CPUs which were not
+ 	 * in the event mask
+ 	 */
+-	if (next_event.tv64 != KTIME_MAX)
++	if (next_event != KTIME_MAX)
+ 		tick_broadcast_set_event(dev, next_cpu, next_event);
+ 
+ 	raw_spin_unlock(&tick_broadcast_lock);
+@@ -672,7 +672,7 @@ static int broadcast_needs_cpu(struct clock_event_device *bc, int cpu)
+ {
+ 	if (!(bc->features & CLOCK_EVT_FEAT_HRTIMER))
+ 		return 0;
+-	if (bc->next_event.tv64 == KTIME_MAX)
++	if (bc->next_event == KTIME_MAX)
+ 		return 0;
+ 	return bc->bound_on == cpu ? -EBUSY : 0;
+ }
+@@ -688,7 +688,7 @@ static void broadcast_shutdown_local(struct clock_event_device *bc,
+ 	if (bc->features & CLOCK_EVT_FEAT_HRTIMER) {
+ 		if (broadcast_needs_cpu(bc, smp_processor_id()))
+ 			return;
+-		if (dev->next_event.tv64 < bc->next_event.tv64)
++		if (dev->next_event < bc->next_event)
+ 			return;
+ 	}
+ 	clockevents_switch_state(dev, CLOCK_EVT_STATE_SHUTDOWN);
+@@ -754,7 +754,7 @@ int __tick_broadcast_oneshot_control(enum tick_broadcast_state state)
+ 			 */
+ 			if (cpumask_test_cpu(cpu, tick_broadcast_force_mask)) {
+ 				ret = -EBUSY;
+-			} else if (dev->next_event.tv64 < bc->next_event.tv64) {
++			} else if (dev->next_event < bc->next_event) {
+ 				tick_broadcast_set_event(bc, cpu, dev->next_event);
+ 				/*
+ 				 * In case of hrtimer broadcasts the
+@@ -789,7 +789,7 @@ int __tick_broadcast_oneshot_control(enum tick_broadcast_state state)
+ 			/*
+ 			 * Bail out if there is no next event.
+ 			 */
+-			if (dev->next_event.tv64 == KTIME_MAX)
++			if (dev->next_event == KTIME_MAX)
+ 				goto out;
+ 			/*
+ 			 * If the pending bit is not set, then we are
+@@ -824,7 +824,7 @@ int __tick_broadcast_oneshot_control(enum tick_broadcast_state state)
+ 			 * nohz fixups.
+ 			 */
+ 			now = ktime_get();
+-			if (dev->next_event.tv64 <= now.tv64) {
++			if (dev->next_event <= now) {
+ 				cpumask_set_cpu(cpu, tick_broadcast_force_mask);
+ 				goto out;
+ 			}
+@@ -897,7 +897,7 @@ void tick_broadcast_setup_oneshot(struct clock_event_device *bc)
+ 						       tick_next_period);
+ 			tick_broadcast_set_event(bc, cpu, tick_next_period);
+ 		} else
+-			bc->next_event.tv64 = KTIME_MAX;
++			bc->next_event = KTIME_MAX;
+ 	} else {
+ 		/*
+ 		 * The first cpu which switches to oneshot mode sets
+diff --git a/kernel/time/tick-oneshot.c b/kernel/time/tick-oneshot.c
+index b513446..6b009c2 100644
+--- a/kernel/time/tick-oneshot.c
++++ b/kernel/time/tick-oneshot.c
+@@ -28,7 +28,7 @@ int tick_program_event(ktime_t expires, int force)
+ {
+ 	struct clock_event_device *dev = __this_cpu_read(tick_cpu_device.evtdev);
+ 
+-	if (unlikely(expires.tv64 == KTIME_MAX)) {
++	if (unlikely(expires == KTIME_MAX)) {
+ 		/*
+ 		 * We don't need the clock event device any more, stop it.
+ 		 */
+diff --git a/kernel/time/tick-sched.c b/kernel/time/tick-sched.c
+index 71496a2..2c115fd 100644
+--- a/kernel/time/tick-sched.c
++++ b/kernel/time/tick-sched.c
+@@ -58,21 +58,21 @@ static void tick_do_update_jiffies64(ktime_t now)
+ 	 * Do a quick check without holding jiffies_lock:
+ 	 */
+ 	delta = ktime_sub(now, last_jiffies_update);
+-	if (delta.tv64 < tick_period.tv64)
++	if (delta < tick_period)
+ 		return;
+ 
+ 	/* Reevaluate with jiffies_lock held */
+ 	write_seqlock(&jiffies_lock);
+ 
+ 	delta = ktime_sub(now, last_jiffies_update);
+-	if (delta.tv64 >= tick_period.tv64) {
++	if (delta >= tick_period) {
+ 
+ 		delta = ktime_sub(delta, tick_period);
+ 		last_jiffies_update = ktime_add(last_jiffies_update,
+ 						tick_period);
+ 
+ 		/* Slow path for long timeouts */
+-		if (unlikely(delta.tv64 >= tick_period.tv64)) {
++		if (unlikely(delta >= tick_period)) {
+ 			s64 incr = ktime_to_ns(tick_period);
+ 
+ 			ticks = ktime_divns(delta, incr);
+@@ -101,7 +101,7 @@ static ktime_t tick_init_jiffy_update(void)
+ 
+ 	write_seqlock(&jiffies_lock);
+ 	/* Did we start the jiffies update yet ? */
+-	if (last_jiffies_update.tv64 == 0)
++	if (last_jiffies_update == 0)
+ 		last_jiffies_update = tick_next_period;
+ 	period = last_jiffies_update;
+ 	write_sequnlock(&jiffies_lock);
+@@ -669,7 +669,7 @@ static ktime_t tick_nohz_stop_sched_tick(struct tick_sched *ts,
+ 	/* Read jiffies and the time when jiffies were updated last */
+ 	do {
+ 		seq = read_seqbegin(&jiffies_lock);
+-		basemono = last_jiffies_update.tv64;
++		basemono = last_jiffies_update;
+ 		basejiff = jiffies;
+ 	} while (read_seqretry(&jiffies_lock, seq));
+ 	ts->last_jiffies = basejiff;
+@@ -697,7 +697,7 @@ static ktime_t tick_nohz_stop_sched_tick(struct tick_sched *ts,
+ 	 */
+ 	delta = next_tick - basemono;
+ 	if (delta <= (u64)TICK_NSEC) {
+-		tick.tv64 = 0;
++		tick = 0;
+ 
+ 		/*
+ 		 * Tell the timer code that the base is not idle, i.e. undo
+@@ -764,10 +764,10 @@ static ktime_t tick_nohz_stop_sched_tick(struct tick_sched *ts,
+ 		expires = KTIME_MAX;
+ 
+ 	expires = min_t(u64, expires, next_tick);
+-	tick.tv64 = expires;
++	tick = expires;
+ 
+ 	/* Skip reprogram of event if its not changed */
+-	if (ts->tick_stopped && (expires == dev->next_event.tv64))
++	if (ts->tick_stopped && (expires == dev->next_event))
+ 		goto out;
+ 
+ 	/*
+@@ -864,7 +864,7 @@ static bool can_stop_idle_tick(int cpu, struct tick_sched *ts)
+ 	}
+ 
+ 	if (unlikely(ts->nohz_mode == NOHZ_MODE_INACTIVE)) {
+-		ts->sleep_length = (ktime_t) { .tv64 = NSEC_PER_SEC/HZ };
++		ts->sleep_length = NSEC_PER_SEC / HZ;
+ 		return false;
+ 	}
+ 
+@@ -914,7 +914,7 @@ static void __tick_nohz_idle_enter(struct tick_sched *ts)
+ 		ts->idle_calls++;
+ 
+ 		expires = tick_nohz_stop_sched_tick(ts, now, cpu);
+-		if (expires.tv64 > 0LL) {
++		if (expires > 0LL) {
+ 			ts->idle_sleeps++;
+ 			ts->idle_expires = expires;
+ 		}
+@@ -1051,7 +1051,7 @@ static void tick_nohz_handler(struct clock_event_device *dev)
+ 	struct pt_regs *regs = get_irq_regs();
+ 	ktime_t now = ktime_get();
+ 
+-	dev->next_event.tv64 = KTIME_MAX;
++	dev->next_event = KTIME_MAX;
+ 
+ 	tick_sched_do_timer(now);
+ 	tick_sched_handle(ts, regs);
+diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
+index f4152a6..db087d7e1 100644
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -104,7 +104,7 @@ static void tk_set_wall_to_mono(struct timekeeper *tk, struct timespec64 wtm)
+ 	 */
+ 	set_normalized_timespec64(&tmp, -tk->wall_to_monotonic.tv_sec,
+ 					-tk->wall_to_monotonic.tv_nsec);
+-	WARN_ON_ONCE(tk->offs_real.tv64 != timespec64_to_ktime(tmp).tv64);
++	WARN_ON_ONCE(tk->offs_real != timespec64_to_ktime(tmp));
+ 	tk->wall_to_monotonic = wtm;
+ 	set_normalized_timespec64(&tmp, -wtm.tv_sec, -wtm.tv_nsec);
+ 	tk->offs_real = timespec64_to_ktime(tmp);
+@@ -571,7 +571,7 @@ EXPORT_SYMBOL_GPL(pvclock_gtod_unregister_notifier);
+ static inline void tk_update_leap_state(struct timekeeper *tk)
+ {
+ 	tk->next_leap_ktime = ntp_get_next_leap();
+-	if (tk->next_leap_ktime.tv64 != KTIME_MAX)
++	if (tk->next_leap_ktime != KTIME_MAX)
+ 		/* Convert to monotonic time */
+ 		tk->next_leap_ktime = ktime_sub(tk->next_leap_ktime, tk->offs_real);
+ }
+@@ -2250,7 +2250,7 @@ ktime_t ktime_get_update_offsets_now(unsigned int *cwsseq, ktime_t *offs_real,
+ 		}
+ 
+ 		/* Handle leapsecond insertion adjustments */
+-		if (unlikely(base.tv64 >= tk->next_leap_ktime.tv64))
++		if (unlikely(base >= tk->next_leap_ktime))
+ 			*offs_real = ktime_sub(tk->offs_real, ktime_set(1, 0));
+ 
+ 	} while (read_seqcount_retry(&tk_core.seq, seq));
+diff --git a/lib/timerqueue.c b/lib/timerqueue.c
+index 782ae8c..adc6ee0 100644
+--- a/lib/timerqueue.c
++++ b/lib/timerqueue.c
+@@ -48,7 +48,7 @@ bool timerqueue_add(struct timerqueue_head *head, struct timerqueue_node *node)
+ 	while (*p) {
+ 		parent = *p;
+ 		ptr = rb_entry(parent, struct timerqueue_node, node);
+-		if (node->expires.tv64 < ptr->expires.tv64)
++		if (node->expires < ptr->expires)
+ 			p = &(*p)->rb_left;
+ 		else
+ 			p = &(*p)->rb_right;
+@@ -56,7 +56,7 @@ bool timerqueue_add(struct timerqueue_head *head, struct timerqueue_node *node)
+ 	rb_link_node(&node->node, parent, p);
+ 	rb_insert_color(&node->node, &head->head);
+ 
+-	if (!head->next || node->expires.tv64 < head->next->expires.tv64) {
++	if (!head->next || node->expires < head->next->expires) {
+ 		head->next = node;
+ 		return true;
+ 	}
+diff --git a/net/can/bcm.c b/net/can/bcm.c
+index 436a753..ab8ba1e 100644
+--- a/net/can/bcm.c
++++ b/net/can/bcm.c
+@@ -199,11 +199,11 @@ static int bcm_proc_show(struct seq_file *m, void *v)
+ 
+ 		seq_printf(m, "%c ", (op->flags & RX_CHECK_DLC) ? 'd' : ' ');
+ 
+-		if (op->kt_ival1.tv64)
++		if (op->kt_ival1)
+ 			seq_printf(m, "timeo=%lld ",
+ 				   (long long)ktime_to_us(op->kt_ival1));
+ 
+-		if (op->kt_ival2.tv64)
++		if (op->kt_ival2)
+ 			seq_printf(m, "thr=%lld ",
+ 				   (long long)ktime_to_us(op->kt_ival2));
+ 
+@@ -226,11 +226,11 @@ static int bcm_proc_show(struct seq_file *m, void *v)
+ 		else
+ 			seq_printf(m, "[%u] ", op->nframes);
+ 
+-		if (op->kt_ival1.tv64)
++		if (op->kt_ival1)
+ 			seq_printf(m, "t1=%lld ",
+ 				   (long long)ktime_to_us(op->kt_ival1));
+ 
+-		if (op->kt_ival2.tv64)
++		if (op->kt_ival2)
+ 			seq_printf(m, "t2=%lld ",
+ 				   (long long)ktime_to_us(op->kt_ival2));
+ 
+@@ -365,11 +365,11 @@ static void bcm_send_to_user(struct bcm_op *op, struct bcm_msg_head *head,
+ 
+ static void bcm_tx_start_timer(struct bcm_op *op)
+ {
+-	if (op->kt_ival1.tv64 && op->count)
++	if (op->kt_ival1 && op->count)
+ 		hrtimer_start(&op->timer,
+ 			      ktime_add(ktime_get(), op->kt_ival1),
+ 			      HRTIMER_MODE_ABS);
+-	else if (op->kt_ival2.tv64)
++	else if (op->kt_ival2)
+ 		hrtimer_start(&op->timer,
+ 			      ktime_add(ktime_get(), op->kt_ival2),
+ 			      HRTIMER_MODE_ABS);
+@@ -380,7 +380,7 @@ static void bcm_tx_timeout_tsklet(unsigned long data)
+ 	struct bcm_op *op = (struct bcm_op *)data;
+ 	struct bcm_msg_head msg_head;
+ 
+-	if (op->kt_ival1.tv64 && (op->count > 0)) {
++	if (op->kt_ival1 && (op->count > 0)) {
+ 
+ 		op->count--;
+ 		if (!op->count && (op->flags & TX_COUNTEVT)) {
+@@ -398,7 +398,7 @@ static void bcm_tx_timeout_tsklet(unsigned long data)
+ 		}
+ 		bcm_can_tx(op);
+ 
+-	} else if (op->kt_ival2.tv64)
++	} else if (op->kt_ival2)
+ 		bcm_can_tx(op);
+ 
+ 	bcm_tx_start_timer(op);
+@@ -459,7 +459,7 @@ static void bcm_rx_update_and_send(struct bcm_op *op,
+ 	lastdata->flags |= (RX_RECV|RX_THR);
+ 
+ 	/* throttling mode inactive ? */
+-	if (!op->kt_ival2.tv64) {
++	if (!op->kt_ival2) {
+ 		/* send RX_CHANGED to the user immediately */
+ 		bcm_rx_changed(op, lastdata);
+ 		return;
+@@ -470,7 +470,7 @@ static void bcm_rx_update_and_send(struct bcm_op *op,
+ 		return;
+ 
+ 	/* first reception with enabled throttling mode */
+-	if (!op->kt_lastmsg.tv64)
++	if (!op->kt_lastmsg)
+ 		goto rx_changed_settime;
+ 
+ 	/* got a second frame inside a potential throttle period? */
+@@ -537,7 +537,7 @@ static void bcm_rx_starttimer(struct bcm_op *op)
+ 	if (op->flags & RX_NO_AUTOTIMER)
+ 		return;
+ 
+-	if (op->kt_ival1.tv64)
++	if (op->kt_ival1)
+ 		hrtimer_start(&op->timer, op->kt_ival1, HRTIMER_MODE_REL);
+ }
+ 
+@@ -1005,7 +1005,7 @@ static int bcm_tx_setup(struct bcm_msg_head *msg_head, struct msghdr *msg,
+ 		op->kt_ival2 = bcm_timeval_to_ktime(msg_head->ival2);
+ 
+ 		/* disable an active timer due to zero values? */
+-		if (!op->kt_ival1.tv64 && !op->kt_ival2.tv64)
++		if (!op->kt_ival1 && !op->kt_ival2)
+ 			hrtimer_cancel(&op->timer);
+ 	}
+ 
+@@ -1189,7 +1189,7 @@ static int bcm_rx_setup(struct bcm_msg_head *msg_head, struct msghdr *msg,
+ 			op->kt_ival2 = bcm_timeval_to_ktime(msg_head->ival2);
+ 
+ 			/* disable an active timer due to zero value? */
+-			if (!op->kt_ival1.tv64)
++			if (!op->kt_ival1)
+ 				hrtimer_cancel(&op->timer);
+ 
+ 			/*
+@@ -1201,7 +1201,7 @@ static int bcm_rx_setup(struct bcm_msg_head *msg_head, struct msghdr *msg,
+ 			bcm_rx_thr_flush(op, 1);
+ 		}
+ 
+-		if ((op->flags & STARTTIMER) && op->kt_ival1.tv64)
++		if ((op->flags & STARTTIMER) && op->kt_ival1)
+ 			hrtimer_start(&op->timer, op->kt_ival1,
+ 				      HRTIMER_MODE_REL);
+ 	}
+diff --git a/net/can/gw.c b/net/can/gw.c
+index 4551687..a54ab0c 100644
+--- a/net/can/gw.c
++++ b/net/can/gw.c
+@@ -429,7 +429,7 @@ static void can_can_gw_rcv(struct sk_buff *skb, void *data)
+ 
+ 	/* clear the skb timestamp if not configured the other way */
+ 	if (!(gwj->flags & CGW_FLAGS_CAN_SRC_TSTAMP))
+-		nskb->tstamp.tv64 = 0;
++		nskb->tstamp = 0;
+ 
+ 	/* send to netdevice */
+ 	if (can_send(nskb, gwj->flags & CGW_FLAGS_CAN_ECHO))
+diff --git a/net/core/dev.c b/net/core/dev.c
+index 037ffd2..8db5a0b 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -1731,14 +1731,14 @@ EXPORT_SYMBOL(net_disable_timestamp);
+ 
+ static inline void net_timestamp_set(struct sk_buff *skb)
+ {
+-	skb->tstamp.tv64 = 0;
++	skb->tstamp = 0;
+ 	if (static_key_false(&netstamp_needed))
+ 		__net_timestamp(skb);
+ }
+ 
+ #define net_timestamp_check(COND, SKB)			\
+ 	if (static_key_false(&netstamp_needed)) {		\
+-		if ((COND) && !(SKB)->tstamp.tv64)	\
++		if ((COND) && !(SKB)->tstamp)	\
+ 			__net_timestamp(SKB);		\
+ 	}						\
+ 
+diff --git a/net/core/skbuff.c b/net/core/skbuff.c
+index e77f406..5a03730 100644
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -4368,7 +4368,7 @@ EXPORT_SYMBOL(skb_try_coalesce);
+  */
+ void skb_scrub_packet(struct sk_buff *skb, bool xnet)
+ {
+-	skb->tstamp.tv64 = 0;
++	skb->tstamp = 0;
+ 	skb->pkt_type = PACKET_HOST;
+ 	skb->skb_iif = 0;
+ 	skb->ignore_df = 0;
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 31a255b..1d5331a 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -1038,7 +1038,7 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
+ 	skb_shinfo(skb)->gso_size = tcp_skb_mss(skb);
+ 
+ 	/* Our usage of tstamp should remain private */
+-	skb->tstamp.tv64 = 0;
++	skb->tstamp = 0;
+ 
+ 	/* Cleanup our debris for IP stacks */
+ 	memset(skb->cb, 0, max(sizeof(struct inet_skb_parm),
+@@ -3203,7 +3203,7 @@ struct sk_buff *tcp_make_synack(const struct sock *sk, struct dst_entry *dst,
+ #endif
+ 
+ 	/* Do not fool tcpdump (if any), clean our debris */
+-	skb->tstamp.tv64 = 0;
++	skb->tstamp = 0;
+ 	return skb;
+ }
+ EXPORT_SYMBOL(tcp_make_synack);
+diff --git a/net/ipv6/exthdrs.c b/net/ipv6/exthdrs.c
+index 926818c..e419850 100644
+--- a/net/ipv6/exthdrs.c
++++ b/net/ipv6/exthdrs.c
+@@ -232,7 +232,7 @@ static bool ipv6_dest_hao(struct sk_buff *skb, int optoff)
+ 	ipv6h->saddr = hao->addr;
+ 	hao->addr = tmp_addr;
+ 
+-	if (skb->tstamp.tv64 == 0)
++	if (skb->tstamp == 0)
+ 		__net_timestamp(skb);
+ 
+ 	return true;
+diff --git a/net/ipx/af_ipx.c b/net/ipx/af_ipx.c
+index e07f22b..8a9219f 100644
+--- a/net/ipx/af_ipx.c
++++ b/net/ipx/af_ipx.c
+@@ -1809,7 +1809,7 @@ static int ipx_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
+ 	rc = skb_copy_datagram_msg(skb, sizeof(struct ipxhdr), msg, copied);
+ 	if (rc)
+ 		goto out_free;
+-	if (skb->tstamp.tv64)
++	if (skb->tstamp)
+ 		sk->sk_stamp = skb->tstamp;
+ 
+ 	if (sipx) {
+diff --git a/net/netfilter/nf_conntrack_core.c b/net/netfilter/nf_conntrack_core.c
+index 6a0bbfa..3a073cd 100644
+--- a/net/netfilter/nf_conntrack_core.c
++++ b/net/netfilter/nf_conntrack_core.c
+@@ -783,7 +783,7 @@ __nf_conntrack_confirm(struct sk_buff *skb)
+ 	/* set conntrack timestamp, if enabled. */
+ 	tstamp = nf_conn_tstamp_find(ct);
+ 	if (tstamp) {
+-		if (skb->tstamp.tv64 == 0)
++		if (skb->tstamp == 0)
+ 			__net_timestamp(skb);
+ 
+ 		tstamp->start = ktime_to_ns(skb->tstamp);
+diff --git a/net/netfilter/nfnetlink_log.c b/net/netfilter/nfnetlink_log.c
+index 200922b..08247bf 100644
+--- a/net/netfilter/nfnetlink_log.c
++++ b/net/netfilter/nfnetlink_log.c
+@@ -538,7 +538,7 @@ __build_packet_message(struct nfnl_log_net *log,
+ 			goto nla_put_failure;
+ 	}
+ 
+-	if (skb->tstamp.tv64) {
++	if (skb->tstamp) {
+ 		struct nfulnl_msg_packet_timestamp ts;
+ 		struct timespec64 kts = ktime_to_timespec64(skb->tstamp);
+ 		ts.sec = cpu_to_be64(kts.tv_sec);
+diff --git a/net/netfilter/nfnetlink_queue.c b/net/netfilter/nfnetlink_queue.c
+index be7627b..3ee0b8a 100644
+--- a/net/netfilter/nfnetlink_queue.c
++++ b/net/netfilter/nfnetlink_queue.c
+@@ -384,7 +384,7 @@ nfqnl_build_packet_message(struct net *net, struct nfqnl_instance *queue,
+ 		+ nla_total_size(sizeof(u_int32_t))	/* skbinfo */
+ 		+ nla_total_size(sizeof(u_int32_t));	/* cap_len */
+ 
+-	if (entskb->tstamp.tv64)
++	if (entskb->tstamp)
+ 		size += nla_total_size(sizeof(struct nfqnl_msg_packet_timestamp));
+ 
+ 	size += nfqnl_get_bridge_size(entry);
+@@ -555,7 +555,7 @@ nfqnl_build_packet_message(struct net *net, struct nfqnl_instance *queue,
+ 	if (nfqnl_put_bridge(entry, skb) < 0)
+ 		goto nla_put_failure;
+ 
+-	if (entskb->tstamp.tv64) {
++	if (entskb->tstamp) {
+ 		struct nfqnl_msg_packet_timestamp ts;
+ 		struct timespec64 kts = ktime_to_timespec64(entskb->tstamp);
+ 
+diff --git a/net/netfilter/xt_time.c b/net/netfilter/xt_time.c
+index 0ae55a3..1b01eec 100644
+--- a/net/netfilter/xt_time.c
++++ b/net/netfilter/xt_time.c
+@@ -168,7 +168,7 @@ time_mt(const struct sk_buff *skb, struct xt_action_param *par)
+ 	 * may happen that the same packet matches both rules if
+ 	 * it arrived at the right moment before 13:00.
+ 	 */
+-	if (skb->tstamp.tv64 == 0)
++	if (skb->tstamp == 0)
+ 		__net_timestamp((struct sk_buff *)skb);
+ 
+ 	stamp = ktime_to_ns(skb->tstamp);
+diff --git a/net/sched/sch_netem.c b/net/sched/sch_netem.c
+index b7e4097..bcfadfd 100644
+--- a/net/sched/sch_netem.c
++++ b/net/sched/sch_netem.c
+@@ -627,7 +627,7 @@ deliver:
+ 			 * from the network (tstamp will be updated).
+ 			 */
+ 			if (G_TC_FROM(skb->tc_verd) & AT_INGRESS)
+-				skb->tstamp.tv64 = 0;
++				skb->tstamp = 0;
+ #endif
+ 
+ 			if (q->qdisc) {
+diff --git a/net/socket.c b/net/socket.c
+index 5ff26c4..8487bf1 100644
+--- a/net/socket.c
++++ b/net/socket.c
+@@ -668,7 +668,7 @@ void __sock_recv_timestamp(struct msghdr *msg, struct sock *sk,
+ 
+ 	/* Race occurred between timestamp enabling and packet
+ 	   receiving.  Fill in the current time for now. */
+-	if (need_software_tstamp && skb->tstamp.tv64 == 0)
++	if (need_software_tstamp && skb->tstamp == 0)
+ 		__net_timestamp(skb);
+ 
+ 	if (need_software_tstamp) {
+diff --git a/net/sunrpc/svcsock.c b/net/sunrpc/svcsock.c
+index a3e85ee..de066ac 100644
+--- a/net/sunrpc/svcsock.c
++++ b/net/sunrpc/svcsock.c
+@@ -574,7 +574,7 @@ static int svc_udp_recvfrom(struct svc_rqst *rqstp)
+ 	}
+ 	len = svc_addr_len(svc_addr(rqstp));
+ 	rqstp->rq_addrlen = len;
+-	if (skb->tstamp.tv64 == 0) {
++	if (skb->tstamp == 0) {
+ 		skb->tstamp = ktime_get_real();
+ 		/* Don't enable netstamp, sunrpc doesn't
+ 		   need that much accuracy */
+diff --git a/sound/core/hrtimer.c b/sound/core/hrtimer.c
+index e2f2702..1ac0c42 100644
+--- a/sound/core/hrtimer.c
++++ b/sound/core/hrtimer.c
+@@ -58,7 +58,7 @@ static enum hrtimer_restart snd_hrtimer_callback(struct hrtimer *hrt)
+ 
+ 	/* calculate the drift */
+ 	delta = ktime_sub(hrt->base->get_time(), hrtimer_get_expires(hrt));
+-	if (delta.tv64 > 0)
++	if (delta > 0)
+ 		ticks += ktime_divns(delta, ticks * resolution);
+ 
+ 	snd_timer_interrupt(stime->timer, ticks);
+-- 
+cgit v1.1
+
