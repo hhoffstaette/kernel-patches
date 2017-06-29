@@ -1,4 +1,5 @@
 #!/bin/bash
+PATCHOPTS="-F0 -p1 -s"
 
 # make sure $PWD is a kernel tree
 [[ ! -f Kbuild ]] && echo "Error: no kernel tree found in current directory." && exit 1
@@ -24,8 +25,14 @@ echo -n "Applying patches from: "${PATCHDIR}".."
 
 for p in ${PATCHES}
 do
-	patch -p1 -s < ${p} >/dev/null
-	[[ $? != "0" ]] && echo && echo "ERROR: could not apply ${p}" && exit 1
+	# first a test run
+	patch --dry-run ${PATCHOPTS} < ${p} >/dev/null
+	if [[ $? == "0" ]] ; then
+		# looks good: now apply
+		patch ${PATCHOPTS} < ${p} >/dev/null
+	else
+		echo && echo "ERROR: could not apply ${p}" && exit 1
+	fi
 done
 
 echo "done! :)"
