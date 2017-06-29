@@ -27,7 +27,7 @@ diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
 index a713d9d..7221d66 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -1404,10 +1404,16 @@ static noinline int run_delalloc_nocow(struct inode *inode,
+@@ -1400,11 +1400,17 @@ next_slot:
  			 * this ensure that csum for a given extent are
  			 * either valid or do not exist.
  			 */
@@ -36,10 +36,9 @@ index a713d9d..7221d66 100644
 +				if (!nolock)
 +					btrfs_end_write_no_snapshoting(root);
  				goto out_check;
--			if (!btrfs_inc_nocow_writers(root->fs_info,
--						     disk_bytenr))
 +			}
-+			if (!btrfs_inc_nocow_writers(root->fs_info,
+ 			if (!btrfs_inc_nocow_writers(root->fs_info,
+-						     disk_bytenr))
 +						     disk_bytenr)) {
 +				if (!nolock)
 +					btrfs_end_write_no_snapshoting(root);

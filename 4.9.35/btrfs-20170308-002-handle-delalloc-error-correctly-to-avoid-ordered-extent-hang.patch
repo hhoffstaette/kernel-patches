@@ -105,7 +105,7 @@ diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
 index fe588bf30d02..d3bc68bbe0e7 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -113,8 +113,33 @@ static struct extent_map *create_pinned_em(struct inode *inode, u64 start,
+@@ -113,10 +113,35 @@ static struct extent_map *create_pinned_em(struct inode *inode, u64 start,
  					   u64 len, u64 orig_start,
  					   u64 block_start, u64 block_len,
  					   u64 orig_block_len, u64 ram_bytes,
@@ -139,6 +139,8 @@ index fe588bf30d02..d3bc68bbe0e7 100644
  static int btrfs_dirty_inode(struct inode *inode);
  
  #ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+ void btrfs_test_inode_set_ops(struct inode *inode)
+ {
 @@ -1536,6 +1561,8 @@ static int run_delalloc_range(struct inode *inode, struct page *locked_page,
  		ret = cow_file_range_async(inode, locked_page, start, end,
  					   page_started, nr_written);
@@ -229,6 +231,6 @@ index fe588bf30d02..d3bc68bbe0e7 100644
  					dio_data.unsubmitted_oe_range_start,
 -					0);
 +					false);
- 		} else if (ret >= 0 && (size_t)ret < count)
- 			btrfs_delalloc_release_space(inode, offset,
- 						     count - (size_t)ret);
+		} else if (ret >= 0 && (size_t)ret < count)
+			btrfs_delalloc_release_space(inode, offset,
+				     count - (size_t)ret, BTRFS_RESERVE_NORMAL);

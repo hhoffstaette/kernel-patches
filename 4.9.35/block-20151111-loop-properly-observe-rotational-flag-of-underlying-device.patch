@@ -50,10 +50,10 @@ index 423f4ca..2984aca 100644
 +
  static void loop_unprepare_queue(struct loop_device *lo)
  {
- 	flush_kthread_worker(&lo->worker);
+ 	kthread_flush_worker(&lo->worker);
 @@ -939,6 +957,7 @@ static int loop_set_fd(struct loop_device *lo, fmode_t mode,
  	if (!(lo_flags & LO_FLAGS_READ_ONLY) && file->f_op->fsync)
- 		blk_queue_flush(lo->lo_queue, REQ_FLUSH);
+ 		blk_queue_write_cache(lo->lo_queue, true, false);
  
 +	loop_update_rotational(lo);
  	loop_update_dio(lo);

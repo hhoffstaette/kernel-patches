@@ -27,8 +27,8 @@ index a426dc8..dd8014a 100644
 +		      struct extent_buffer **eb_ret, int level, int slot,
 +		      struct btrfs_key *key, u64 time_seq)
  {
- 	struct btrfs_fs_info *fs_info = root->fs_info;
  	u64 blocknr;
+ 	u64 gen;
 @@ -2870,8 +2869,8 @@ int btrfs_search_slot(struct btrfs_trans_handle *trans, struct btrfs_root
  				goto done;
  			}

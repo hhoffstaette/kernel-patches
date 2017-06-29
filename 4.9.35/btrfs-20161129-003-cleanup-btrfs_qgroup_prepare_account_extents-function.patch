@@ -101,8 +101,8 @@ index 99c879d..2c7f701 100644
 -int btrfs_qgroup_prepare_account_extents(struct btrfs_trans_handle *trans,
 -					 struct btrfs_fs_info *fs_info);
  /*
-  * Inform qgroup to trace one dirty extent, its info is recorded in @record.
-  * So qgroup can account it at commit trans time.
+  * Insert one dirty extent record into @delayed_refs, informing qgroup to
+  * account that extent at commit trans time.
 diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
 index 11e8f62..37adbf8 100644
 --- a/fs/btrfs/transaction.c

@@ -105,8 +105,8 @@ index b1b691e..2ced786 100644
 --- a/fs/btrfs/qgroup.c
 +++ b/fs/btrfs/qgroup.c
 @@ -2031,12 +2031,12 @@ int btrfs_qgroup_account_extents(struct btrfs_trans_handle *trans,
- 					goto cleanup;
- 			}
+ 			if (ret < 0)
+ 				goto cleanup;
  			/*
 -			 * Use (u64)-1 as time_seq to do special search, which
 +			 * Use SEQ_LAST as time_seq to do special search, which

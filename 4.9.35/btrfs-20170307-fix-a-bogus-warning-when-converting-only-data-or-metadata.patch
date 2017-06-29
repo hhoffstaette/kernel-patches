@@ -79,4 +79,4 @@ index 3645af2749f8..987f395ddec5 100644
 +			   meta_target, data_target);
  	}
  
- 	ret = insert_balance_item(fs_info, bctl);
+ 	if (bctl->sys.flags & BTRFS_BALANCE_ARGS_CONVERT) {

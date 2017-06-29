@@ -113,7 +113,7 @@ Signed-off-by: Jeff Mahoney <jeffm@suse.com>
 +			      bool enforce)
  {
  	int ret;
- 	
+ 
 @@ -2904,7 +2904,7 @@ int btrfs_qgroup_reserve_meta(struct btr
  	BUG_ON(num_bytes != round_down(num_bytes, root->nodesize));
 	trace_qgroup_meta_reserve(root->fs_info, root->objectid,
@@ -145,8 +145,8 @@ Signed-off-by: Jeff Mahoney <jeffm@suse.com>
 +		  unsigned int type, enum btrfs_reserve_flush_enum flush,
 +		  bool enforce_qgroups)
  {
- 	struct btrfs_fs_info *fs_info = root->fs_info;
- 
+ 	struct btrfs_trans_handle *h;
+ 	struct btrfs_transaction *cur_trans;
 @@ -505,9 +506,10 @@ start_transaction(struct btrfs_root *roo
  	 * Do the reservation before we join the transaction so we can do all
  	 * the appropriate flushing if need be.
@@ -234,5 +234,5 @@ Signed-off-by: Jeff Mahoney <jeffm@suse.com>
 -				  BTRFS_RESERVE_NO_FLUSH);
 +				  BTRFS_RESERVE_NO_FLUSH, true);
  	if (IS_ERR(trans) && PTR_ERR(trans) == -ENOENT)
- 		btrfs_wait_for_commit(root->fs_info, 0);
+ 		btrfs_wait_for_commit(root, 0);
  

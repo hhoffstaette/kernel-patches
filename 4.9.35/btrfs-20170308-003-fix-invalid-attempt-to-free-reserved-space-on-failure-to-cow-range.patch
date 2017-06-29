@@ -123,7 +123,7 @@ index 9b03eb9b..c8ce47a 100644
  
  	if (btrfs_is_free_space_inode(inode)) {
 @@ -990,14 +993,14 @@ static noinline int cow_file_range(struct inode *inode,
- 			start + num_bytes - 1, 0);
+ 	btrfs_drop_extent_cache(inode, start, start + num_bytes - 1, 0);
  
  	while (disk_num_bytes > 0) {
 -		unsigned long op;
@@ -137,11 +137,11 @@ index 9b03eb9b..c8ce47a 100644
 +		cur_alloc_size = ins.offset;
 +		extent_reserved = true;
  
- 		ram_size = ins.offset;
- 		em = create_io_em(inode, start, ins.offset, /* len */
+ 		em = alloc_extent_map();
+ 		if (!em) {
 @@ -1012,7 +1015,6 @@ static noinline int cow_file_range(struct inode *inode,
+ 		if (ret)
  			goto out_reserve;
- 		free_extent_map(em);
  
 -		cur_alloc_size = ins.offset;
  		ret = btrfs_add_ordered_extent(inode, start, ins.objectid,
@@ -174,8 +174,8 @@ index 9b03eb9b..c8ce47a 100644
  		/*
  		 * btrfs_reloc_clone_csums() error, since start is increased
 @@ -1080,12 +1083,35 @@ static noinline int cow_file_range(struct inode *inode,
- 	btrfs_dec_block_group_reservations(fs_info, ins.objectid);
- 	btrfs_free_reserved_extent(fs_info, ins.objectid, ins.offset, 1);
+ 	btrfs_dec_block_group_reservations(root->fs_info, ins.objectid);
+ 	btrfs_free_reserved_extent(root, ins.objectid, ins.offset, 1);
  out_unlock:
 +	clear_bits = EXTENT_LOCKED | EXTENT_DELALLOC | EXTENT_DEFRAG |
 +		EXTENT_CLEAR_META_RESV;
@@ -213,7 +213,7 @@ index 9b03eb9b..c8ce47a 100644
  	goto out;
  }
  
-@@ -1775,7 +1801,7 @@ static void btrfs_clear_bit_hook(struct btrfs_inode *inode,
+@@ -1775,7 +1801,7 @@ static void btrfs_clear_bit_hook(struct inode *inode,
  
  		if (*bits & EXTENT_FIRST_DELALLOC) {
  			*bits &= ~EXTENT_FIRST_DELALLOC;
@@ -222,7 +222,7 @@ index 9b03eb9b..c8ce47a 100644
  			spin_lock(&BTRFS_I(inode)->lock);
  			BTRFS_I(inode)->outstanding_extents -= num_extents;
  			spin_unlock(&BTRFS_I(inode)->lock);
-@@ -1786,7 +1812,7 @@ static void btrfs_clear_bit_hook(struct btrfs_inode *inode,
+@@ -1786,7 +1812,7 @@ static void btrfs_clear_bit_hook(struct inode *inode,
  		 * don't need to call dellalloc_release_metadata if there is an
  		 * error.
  		 */
@@ -230,8 +230,8 @@ index 9b03eb9b..c8ce47a 100644
 +		if (*bits & EXTENT_CLEAR_META_RESV &&
  		    root != root->fs_info->tree_root)
  			btrfs_delalloc_release_metadata(inode, len,
- 							reserve_type); 
-@@ -1794,9 +1820,8 @@ static void btrfs_clear_bit_hook(struct btrfs_inode *inode,
+ 							reserve_type);
+@@ -1794,10 +1820,9 @@ static void btrfs_clear_bit_hook(struct inode *inode,
  		if (btrfs_is_testing(root->fs_info))
  			return;
  
@@ -242,5 +242,6 @@ index 9b03eb9b..c8ce47a 100644
 +		if (root->root_key.objectid != BTRFS_DATA_RELOC_TREE_OBJECTID &&
 +		    do_list && !(state->state & EXTENT_NORESERVE) &&
 +		    (*bits & EXTENT_CLEAR_DATA_RESV))
- 			btrfs_free_reserved_data_space_noquota(inode,
- 					state->start, len);
+			btrfs_free_reserved_data_space_noquota(inode,
+					state->start, len);
+ 

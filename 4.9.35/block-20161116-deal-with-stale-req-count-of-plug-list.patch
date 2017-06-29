@@ -40,13 +40,13 @@ index eea246567884..473dd698effd 100644
 +		if (!request_count || list_empty(&plug->list))
  			trace_block_plug(q);
  		else {
- 			struct request *last = list_entry_rq(plug->list.prev);
+ 			struct request *first = list_entry_rq(plug->list.next);
 diff --git a/block/blk-mq.c b/block/blk-mq.c
 index ae8df5ec20d3..f39e69c732cc 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -1497,6 +1497,13 @@ static blk_qc_t blk_sq_make_request(struct request_queue *q, struct bio *bio)
- 		struct request *last = NULL;
+ 		struct request *first = NULL;
  
  		blk_mq_bio_to_request(rq, bio);
 +

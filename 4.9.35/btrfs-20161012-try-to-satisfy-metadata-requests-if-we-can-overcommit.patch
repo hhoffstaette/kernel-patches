@@ -68,7 +68,7 @@ index 661f039..c2e6871 100644
   * We count progress as clearing off tickets each time we have to loop.
 @@ -5006,6 +5047,8 @@ static void btrfs_async_reclaim_metadata_space(struct work_struct *work)
  		ret = flush_space(fs_info->fs_root, space_info, to_reclaim,
- 				  flush_state, reclaim_priority);
+ 			    to_reclaim, flush_state);
  		spin_lock(&space_info->lock);
 +		if (!ret)
 +			try_to_wake_tickets(fs_info->fs_root, space_info);

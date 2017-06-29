@@ -23,9 +23,9 @@ diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
 index 33d979e9ea2a..88b04742beea 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -4377,7 +4377,7 @@ static int should_alloc_chunk(struct btrfs_fs_info *fs_info,
+@@ -4377,7 +4377,7 @@ static int should_alloc_chunk(struct btrfs_root *root,
  {
- 	struct btrfs_block_rsv *global_rsv = &fs_info->global_block_rsv;
+ 	struct btrfs_block_rsv *global_rsv = &root->fs_info->global_block_rsv;
  	u64 num_bytes = sinfo->total_bytes - sinfo->bytes_readonly;
 -	u64 num_allocated = sinfo->bytes_used + sinfo->bytes_reserved;
 +	u64 num_allocated = sinfo->bytes_used + sinfo->bytes_reserved + sinfo->bytes_pinned;

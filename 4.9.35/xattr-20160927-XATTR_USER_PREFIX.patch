@@ -32,7 +32,7 @@ index 440e2a7..c377172 100644
 --- a/mm/shmem.c
 +++ b/mm/shmem.c
 @@ -2667,6 +2667,14 @@ static int shmem_xattr_handler_set(const struct xattr_handler *handler,
- 	struct shmem_inode_info *info = SHMEM_I(d_inode(dentry));
+ 	struct shmem_inode_info *info = SHMEM_I(inode);
  
  	name = xattr_full_name(handler, name);
 +

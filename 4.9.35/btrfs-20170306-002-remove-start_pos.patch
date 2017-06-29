@@ -18,8 +18,8 @@ index 0be837b..ef88e6d 100644
 --- a/fs/btrfs/file.c
 +++ b/fs/btrfs/file.c
 @@ -1814,7 +1814,6 @@ static ssize_t btrfs_file_write_iter(struct kiocb *iocb,
+ 	struct file *file = iocb->ki_filp;
  	struct inode *inode = file_inode(file);
- 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
  	struct btrfs_root *root = BTRFS_I(inode)->root;
 -	u64 start_pos;
  	u64 end_pos;

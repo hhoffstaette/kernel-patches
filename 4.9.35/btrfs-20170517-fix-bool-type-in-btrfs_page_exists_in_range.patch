@@ -23,4 +23,4 @@ index 5e71f1ea3391..85591d3f3ad9 100644
 +	bool found = false;
  	void **pagep = NULL;
  	struct page *page = NULL;
- 	int start_idx;
+ 	unsigned long start_idx;

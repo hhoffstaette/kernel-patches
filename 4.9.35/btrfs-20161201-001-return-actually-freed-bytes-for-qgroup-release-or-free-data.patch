@@ -55,7 +55,7 @@ index 1ad3be8..7263065 100644
 --- a/fs/btrfs/qgroup.c
 +++ b/fs/btrfs/qgroup.c
 @@ -2873,6 +2873,7 @@ static int __btrfs_qgroup_release_data(struct inode *inode, u64 start, u64 len,
- 	}
+ 		trace_op = QGROUP_FREE;
  	trace_btrfs_qgroup_release_data(inode, start, len,
  					changeset.bytes_changed, trace_op);
 +	ret = changeset.bytes_changed;

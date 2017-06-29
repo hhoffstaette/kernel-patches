@@ -78,7 +78,7 @@ index 0e0508f488b2..bd2890c2c9d3 100644
 -	if (lock && ACCESS_ONCE(cur_trans->state) == TRANS_STATE_BLOCKED) {
 +	if (lock && READ_ONCE(cur_trans->state) == TRANS_STATE_BLOCKED) {
  		if (throttle)
- 			return btrfs_commit_transaction(trans);
+ 			return btrfs_commit_transaction(trans, root);
  		else
 @@ -1940,7 +1940,7 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
  	int ret;
@@ -87,7 +87,7 @@ index 0e0508f488b2..bd2890c2c9d3 100644
 -	if (unlikely(ACCESS_ONCE(cur_trans->aborted))) {
 +	if (unlikely(READ_ONCE(cur_trans->aborted))) {
  		ret = cur_trans->aborted;
- 		btrfs_end_transaction(trans);
+ 		btrfs_end_transaction(trans, root);
  		return ret;
 @@ -2080,7 +2080,7 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
  		   atomic_read(&cur_trans->num_writers) == 1);
@@ -105,8 +105,8 @@ index 0e0508f488b2..bd2890c2c9d3 100644
 -	if (unlikely(ACCESS_ONCE(cur_trans->aborted))) {
 +	if (unlikely(READ_ONCE(cur_trans->aborted))) {
  		ret = cur_trans->aborted;
- 		mutex_unlock(&fs_info->tree_log_mutex);
- 		mutex_unlock(&fs_info->reloc_mutex);
+ 		mutex_unlock(&root->fs_info->tree_log_mutex);
+ 		mutex_unlock(&root->fs_info->reloc_mutex);
 diff --git a/fs/btrfs/tree-log.h b/fs/btrfs/tree-log.h
 index ab858e31ccbc..127eae01bb1b 100644
 --- a/fs/btrfs/tree-log.h

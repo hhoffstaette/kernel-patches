@@ -175,7 +175,7 @@ index e6811c4..a7193b1 100644
  			spin_unlock(&BTRFS_I(inode)->lock);
 @@ -1990,9 +1998,52 @@ static noinline int add_pending_csums(struct btrfs_trans_handle *trans,
  int btrfs_set_extent_delalloc(struct inode *inode, u64 start, u64 end,
- 			      struct extent_state **cached_state, int dedupe))
+ 			      struct extent_state **cached_state, int dedupe)
  {
 +	int ret;
 +	u64 num_extents = div64_u64(end - start + BTRFS_MAX_EXTENT_SIZE,

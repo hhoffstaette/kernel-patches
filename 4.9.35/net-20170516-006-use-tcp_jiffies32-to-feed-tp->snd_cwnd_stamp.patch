@@ -97,7 +97,7 @@ index 653bbd6..102b2c9 100644
 +	tp->snd_cwnd_stamp = tcp_jiffies32;
  }
  
- bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst)
+ bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst,
 diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
 index be9f8f4..4bd50f0 100644
 --- a/net/ipv4/tcp_output.c

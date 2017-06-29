@@ -59,8 +59,8 @@ index 26932a8a1993..96fc56ebf55a 100644
 --- a/fs/btrfs/qgroup.h
 +++ b/fs/btrfs/qgroup.h
 @@ -196,7 +196,6 @@ static inline void btrfs_qgroup_free_delayed_ref(struct btrfs_fs_info *fs_info,
- 	btrfs_qgroup_free_refroot(fs_info, ref_root, num_bytes);
  	trace_btrfs_qgroup_free_delayed_ref(fs_info, ref_root, num_bytes);
+ 	btrfs_qgroup_free_refroot(fs_info, ref_root, num_bytes);
  }
 -void assert_qgroups_uptodate(struct btrfs_trans_handle *trans);
  
@@ -100,18 +100,18 @@ index 61b807de3e16..9db3b4ca0264 100644
  	if (must_run_delayed_refs) {
 @@ -2223,7 +2221,6 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
  
- 	switch_commit_roots(cur_trans, fs_info);
+ 	switch_commit_roots(cur_trans, root->fs_info);
  
 -	assert_qgroups_uptodate(trans);
  	ASSERT(list_empty(&cur_trans->dirty_bgs));
  	ASSERT(list_empty(&cur_trans->io_bgs));
- 	update_super_roots(fs_info);
+ 	update_super_roots(root);
 diff --git a/fs/btrfs/transaction.h b/fs/btrfs/transaction.h
 index 5dfb5590fff6..2e560d2abdff 100644
 --- a/fs/btrfs/transaction.h
 +++ b/fs/btrfs/transaction.h
 @@ -125,8 +125,6 @@ struct btrfs_trans_handle {
- 	unsigned int type;
+ 	 */
  	struct btrfs_root *root;
  	struct btrfs_fs_info *fs_info;
 -	struct seq_list delayed_ref_elem;

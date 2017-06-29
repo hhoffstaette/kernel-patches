@@ -34,4 +34,4 @@ index b5ea036..40aca78 100644
 +	sk->sk_rx_dst = NULL;
  	tcp_saved_syn_free(tp);
  
- 	/* Clean up fastopen related fields */
+ 	WARN_ON(inet->inet_num && !icsk->icsk_bind_hash);

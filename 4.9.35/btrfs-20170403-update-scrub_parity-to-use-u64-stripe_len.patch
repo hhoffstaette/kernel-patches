@@ -28,7 +28,7 @@ index 48dd6f1..58c5864 100644
 -	int			stripe_len;
 +	u64			stripe_len;
  
- 	refcount_t		refs;
+ 	atomic_t		refs;
  
 @@ -2396,7 +2396,7 @@ static inline void __scrub_mark_bitmap(struct scrub_parity *sparity,
  				       unsigned long *bitmap,
@@ -37,7 +37,7 @@ index 48dd6f1..58c5864 100644
 -	u32 offset;
 +	u64 offset;
  	int nsectors;
- 	int sectorsize = sparity->sctx->fs_info->sectorsize;
+ 	int sectorsize = sparity->sctx->dev_root->sectorsize;
  
 @@ -2406,8 +2406,8 @@ static inline void __scrub_mark_bitmap(struct scrub_parity *sparity,
  	}

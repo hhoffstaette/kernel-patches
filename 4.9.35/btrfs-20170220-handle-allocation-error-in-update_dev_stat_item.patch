@@ -22,4 +22,4 @@ index 1fac98728814..64d6665f6eda 100644
 +		return -ENOMEM;
  	ret = btrfs_search_slot(trans, dev_root, &key, path, -1, 1);
  	if (ret < 0) {
- 		btrfs_warn_in_rcu(fs_info,
+ 		btrfs_warn_in_rcu(dev_root->fs_info,

@@ -129,7 +129,7 @@ index c8d46c1..d9023e8 100644
 --- a/net/ipv4/tcp.c
 +++ b/net/ipv4/tcp.c
 @@ -406,7 +406,6 @@ void tcp_init_sock(struct sock *sk)
- 	tp->mss_cache = TCP_MSS_DEFAULT;
+ 	u64_stats_init(&tp->syncp);
  
  	tp->reordering = sock_net(sk)->ipv4.sysctl_tcp_reordering;
 -	tcp_enable_early_retrans(tp);

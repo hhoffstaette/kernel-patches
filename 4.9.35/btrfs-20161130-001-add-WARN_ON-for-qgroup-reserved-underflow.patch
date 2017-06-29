@@ -93,7 +93,7 @@ index 11f4fff..368cdaf 100644
  
 @@ -2204,7 +2223,10 @@ void btrfs_qgroup_free_refroot(struct btrfs_fs_info *fs_info,
  
- 		qg = u64_to_ptr(unode->aux);
+ 		qg = unode_aux_to_qgroup(unode);
  
 -		qg->reserved -= num_bytes;
 +		if (WARN_ON(qg->reserved < num_bytes))

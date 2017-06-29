@@ -19,7 +19,7 @@ index 3714b5736fd3..204e81abce05 100644
 --- a/fs/xfs/xfs_file.c
 +++ b/fs/xfs/xfs_file.c
 @@ -1052,29 +1052,8 @@ xfs_find_get_desired_pgoff(
- 		want = min_t(pgoff_t, end - index, PAGEVEC_SIZE);
+ 		want = min_t(pgoff_t, end - index, PAGEVEC_SIZE - 1) + 1;
  		nr_pages = pagevec_lookup(&pvec, inode->i_mapping, index,
  					  want);
 -		/*

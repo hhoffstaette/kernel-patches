@@ -66,8 +66,8 @@ index 94e65fd..85d856b 100644
  	dst_release(old_dst);
  }
 @@ -1809,6 +1815,12 @@ struct dst_entry *__sk_dst_check(struct sock *sk, u32 cookie);
- 
- struct dst_entry *sk_dst_check(struct sock *sk, u32 cookie);
+ 	}
+ }
  
 +static inline void sk_dst_confirm(struct sock *sk)
 +{

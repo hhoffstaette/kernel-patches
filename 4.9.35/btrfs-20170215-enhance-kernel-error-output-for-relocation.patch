@@ -128,7 +128,7 @@ index 379711048fb0..6de5800e17bc 100644
  
  	rc->create_reloc_tree = 0;
 @@ -4158,6 +4185,10 @@ static noinline_for_stack int relocate_block_group(struct reloc_control *rc)
- 	btrfs_block_rsv_release(fs_info, rc->block_rsv, (u64)-1);
+ 	btrfs_block_rsv_release(rc->extent_root, rc->block_rsv, (u64)-1);
  
  	err = prepare_to_merge(rc, err);
 +	if (err < 0)
@@ -138,7 +138,7 @@ index 379711048fb0..6de5800e17bc 100644
  
  	merge_reloc_roots(rc);
  
-@@ -4336,6 +4367,9 @@ int btrfs_relocate_block_group(struct btrfs_fs_info *fs_info, u64 group_start)
+@@ -4336,6 +4367,9 @@ int btrfs_relocate_block_group(struct btrfs_root *extent_root, u64 group_start)
  
  	ret = btrfs_inc_block_group_ro(extent_root, rc->block_group);
  	if (ret) {
@@ -148,7 +148,7 @@ index 379711048fb0..6de5800e17bc 100644
  		err = ret;
  		goto out;
  	}
-@@ -4351,10 +4385,19 @@ int btrfs_relocate_block_group(struct btrfs_fs_info *fs_info, u64 group_start)
+@@ -4351,10 +4385,19 @@ int btrfs_relocate_block_group(struct btrfs_root *extent_root, u64 group_start)
  					path);
  	btrfs_free_path(path);
  
@@ -170,7 +170,7 @@ index 379711048fb0..6de5800e17bc 100644
  
  	if (ret && ret != -ENOENT) {
  		err = ret;
-@@ -4364,6 +4407,8 @@ int btrfs_relocate_block_group(struct btrfs_fs_info *fs_info, u64 group_start)
+@@ -4364,6 +4407,8 @@ int btrfs_relocate_block_group(struct btrfs_root *extent_root, u64 group_start)
  	rc->data_inode = create_reloc_inode(fs_info, rc->block_group);
  	if (IS_ERR(rc->data_inode)) {
  		err = PTR_ERR(rc->data_inode);
@@ -179,7 +179,7 @@ index 379711048fb0..6de5800e17bc 100644
  		rc->data_inode = NULL;
  		goto out;
  	}
-@@ -4394,6 +4439,9 @@ int btrfs_relocate_block_group(struct btrfs_fs_info *fs_info, u64 group_start)
+@@ -4394,6 +4439,9 @@ int btrfs_relocate_block_group(struct btrfs_root *extent_root, u64 group_start)
  			ret = btrfs_wait_ordered_range(rc->data_inode, 0,
  						       (u64)-1);
  			if (ret) {
@@ -189,7 +189,7 @@ index 379711048fb0..6de5800e17bc 100644
  				err = ret;
  				goto out;
  			}
-@@ -4407,6 +4455,11 @@ int btrfs_relocate_block_group(struct btrfs_fs_info *fs_info, u64 group_start)
+@@ -4407,6 +4455,11 @@ int btrfs_relocate_block_group(struct btrfs_root *extent_root, u64 group_start)
  	WARN_ON(rc->block_group->reserved > 0);
  	WARN_ON(btrfs_block_group_used(&rc->block_group->item) > 0);
  out:
@@ -199,5 +199,5 @@ index 379711048fb0..6de5800e17bc 100644
 +			  rc->block_group->key.objectid, err,
 +			  btrfs_decode_error(err));
  	if (err && rw)
- 		btrfs_dec_block_group_ro(rc->block_group);
+ 		btrfs_dec_block_group_ro(extent_root, rc->block_group);
  	iput(rc->data_inode);

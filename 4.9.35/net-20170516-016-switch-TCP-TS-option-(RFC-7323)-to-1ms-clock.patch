@@ -741,7 +741,7 @@ index d8fe25d..191b2f7 100644
  						  remaining, TCP_RTO_MAX);
  		} else {
 @@ -812,7 +813,7 @@ static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
- 	tcp_v4_send_ack(sk, skb,
+ 	tcp_v4_send_ack(sock_net(sk), skb,
  			tcptw->tw_snd_nxt, tcptw->tw_rcv_nxt,
  			tcptw->tw_rcv_wnd >> tw->tw_rcv_wscale,
 -			tcp_time_stamp + tcptw->tw_ts_offset,
@@ -750,7 +750,7 @@ index d8fe25d..191b2f7 100644
  			tw->tw_bound_dev_if,
  			tcp_twsk_md5_key(tcptw),
 @@ -840,7 +841,7 @@ static void tcp_v4_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
- 	tcp_v4_send_ack(sk, skb, seq,
+ 	tcp_v4_send_ack(sock_net(sk), skb, seq,
  			tcp_rsk(req)->rcv_nxt,
  			req->rsk_rcv_wnd >> inet_rsk(req)->rcv_wscale,
 -			tcp_time_stamp + tcp_rsk(req)->ts_off,

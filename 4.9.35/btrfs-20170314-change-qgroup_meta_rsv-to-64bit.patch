@@ -32,8 +32,8 @@ index 29b7fc2..c411590 100644
 -	atomic_t qgroup_meta_rsv;
 +	atomic64_t qgroup_meta_rsv;
  };
- static inline u32 btrfs_inode_sectorsize(const struct inode *inode)
- {
+ 
+ static inline u32 __BTRFS_LEAF_DATA_SIZE(u32 blocksize)
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
 index 08b74da..eb1ee7b 100644
 --- a/fs/btrfs/disk-io.c
@@ -82,6 +82,6 @@ index 6215264..3757902 100644
 -	atomic_sub(num_bytes, &root->qgroup_meta_rsv);
 +	WARN_ON(atomic64_read(&root->qgroup_meta_rsv) < num_bytes);
 +	atomic64_sub(num_bytes, &root->qgroup_meta_rsv);
- 	trace_qgroup_meta_reserve(root->fs_info, root->objectid,
- 				  -(s64)num_bytes);
- }
+	trace_qgroup_meta_reserve(root->fs_info, root->objectid,
+				  -(s64)num_bytes);
+	qgroup_free(root, num_bytes);

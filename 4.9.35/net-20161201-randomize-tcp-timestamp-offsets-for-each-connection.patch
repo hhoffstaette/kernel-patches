@@ -207,7 +207,7 @@ index 5555eb8..b50f059 100644
  	inet->inet_id = tp->write_seq ^ jiffies;
  
 @@ -824,7 +825,7 @@ static void tcp_v4_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
- 	tcp_v4_send_ack(sk, skb, seq,
+ 	tcp_v4_send_ack(sock_net(sk), skb, seq,
  			tcp_rsk(req)->rcv_nxt,
  			req->rsk_rcv_wnd >> inet_rsk(req)->rcv_wscale,
 -			tcp_time_stamp,

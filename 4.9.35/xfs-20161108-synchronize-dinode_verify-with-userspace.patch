@@ -27,7 +27,7 @@ index 134424f..54817f8 100644
 +	xfs_ino_t		ino,
  	struct xfs_dinode	*dip)
  {
- 	uint16_t		flags;
+ 	uint16_t		mode;
 @@ -401,7 +401,7 @@ xfs_dinode_verify(
  	if (!xfs_verify_cksum((char *)dip, mp->m_sb.sb_inodesize,
  			      XFS_DINODE_CRC_OFF))

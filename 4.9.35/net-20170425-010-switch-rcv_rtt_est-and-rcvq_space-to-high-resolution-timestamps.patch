@@ -78,8 +78,8 @@ index efc976a..059dad7 100644
 --- a/net/ipv4/tcp.c
 +++ b/net/ipv4/tcp.c
 @@ -2853,7 +2853,7 @@ void tcp_get_info(struct sock *sk, struct tcp_info *info)
- 	info->tcpi_snd_ssthresh = tp->snd_ssthresh;
  	info->tcpi_advmss = tp->advmss;
+ 	info->tcpi_reordering = tp->reordering;
  
 -	info->tcpi_rcv_rtt = jiffies_to_usecs(tp->rcv_rtt_est.rtt)>>3;
 +	info->tcpi_rcv_rtt = tp->rcv_rtt_est.rtt_us >> 3;

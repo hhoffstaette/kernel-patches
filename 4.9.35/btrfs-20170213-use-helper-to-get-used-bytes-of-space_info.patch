@@ -46,7 +46,7 @@ index 85109de..6a7f991 100644
  		struct btrfs_trans_handle *trans;
 @@ -4423,9 +4430,7 @@ void check_system_chunk(struct btrfs_trans_handle *trans,
  
- 	info = __find_space_info(fs_info, BTRFS_BLOCK_GROUP_SYSTEM);
+ 	info = __find_space_info(root->fs_info, BTRFS_BLOCK_GROUP_SYSTEM);
  	spin_lock(&info->lock);
 -	left = info->total_bytes - info->bytes_used - info->bytes_pinned -
 -		info->bytes_reserved - info->bytes_readonly -
@@ -54,10 +54,10 @@ index 85109de..6a7f991 100644
 +	left = info->total_bytes - btrfs_space_info_used(info, true);
  	spin_unlock(&info->lock);
  
- 	num_devs = get_profile_num_devs(fs_info, type);
+ 	num_devs = get_profile_num_devs(root, type);
 @@ -4608,8 +4613,7 @@ static int can_overcommit(struct btrfs_root *root,
- 		return 0;
- 
+ 	BUG_ON(root->fs_info == NULL);
+ 	global_rsv = &root->fs_info->global_block_rsv;
  	profile = btrfs_get_alloc_profile(root, 0);
 -	used = space_info->bytes_used + space_info->bytes_reserved +
 -		space_info->bytes_pinned + space_info->bytes_readonly;

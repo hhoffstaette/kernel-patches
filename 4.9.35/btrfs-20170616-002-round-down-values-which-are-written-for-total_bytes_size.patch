@@ -41,7 +41,7 @@ diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
 index e37f95976443..adf32f46a73f 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
-@@ -2387,7 +2387,8 @@ int btrfs_init_new_device(struct btrfs_fs_info *fs_info, const char *device_path
+@@ -2387,7 +2387,8 @@ int btrfs_init_new_device(struct btrfs_root *root, char *device_path)
  	device->io_width = root->sectorsize;
  	device->io_align = root->sectorsize;
  	device->sector_size = root->sectorsize;
@@ -51,7 +51,7 @@ index e37f95976443..adf32f46a73f 100644
  	device->disk_total_bytes = device->total_bytes;
  	device->commit_total_bytes = device->total_bytes;
  	device->dev_root = root->fs_info->dev_root;
-@@ -2424,7 +2425,7 @@ int btrfs_init_new_device(struct btrfs_fs_info *fs_info, const char *device_path
+@@ -2424,7 +2425,7 @@ int btrfs_init_new_device(struct btrfs_root *root, char *device_path)
  
  	tmp = btrfs_super_total_bytes(root->fs_info->super_copy);
  	btrfs_set_super_total_bytes(root->fs_info->super_copy,
@@ -59,7 +59,7 @@ index e37f95976443..adf32f46a73f 100644
 +		round_down(tmp + device->total_bytes, root->sectorsize));
  
  	tmp = btrfs_super_num_devices(root->fs_info->super_copy);
- 	btrfs_set_super_num_devices(root->fs_info->super_copy, tmp + 1);
+ 	btrfs_set_super_num_devices(root->fs_info->super_copy,
 @@ -2687,6 +2688,8 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
  	if (!device->writeable)
  		return -EACCES;
@@ -71,7 +71,7 @@ index e37f95976443..adf32f46a73f 100644
  	diff = new_size - device->total_bytes;
 @@ -2699,7 +2702,8 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
  
- 	fs_devices = fs_info->fs_devices;
+ 	fs_devices = device->dev_root->fs_info->fs_devices;
  
 -	btrfs_set_super_total_bytes(super_copy, old_total + diff);
 +	btrfs_set_super_total_bytes(super_copy,
@@ -80,7 +80,7 @@ index e37f95976443..adf32f46a73f 100644
  
  	btrfs_device_set_total_bytes(device, new_size);
 @@ -4389,7 +4393,10 @@ int btrfs_shrink_device(struct btrfs_device *device, u64 new_size)
- 	struct btrfs_super_block *super_copy = fs_info->super_copy;
+ 	struct btrfs_super_block *super_copy = root->fs_info->super_copy;
  	u64 old_total = btrfs_super_total_bytes(super_copy);
  	u64 old_size = btrfs_device_get_total_bytes(device);
 -	u64 diff = old_size - new_size;
@@ -92,7 +92,7 @@ index e37f95976443..adf32f46a73f 100644
  	if (device->is_tgtdev_for_dev_replace)
  		return -EINVAL;
 @@ -4516,7 +4523,8 @@ int btrfs_shrink_device(struct btrfs_device *device, u64 new_size)
- 			      &fs_info->fs_devices->resized_devices);
+ 			      &root->fs_info->fs_devices->resized_devices);
  
  	WARN_ON(diff > old_total);
 -	btrfs_set_super_total_bytes(super_copy, old_total - diff);

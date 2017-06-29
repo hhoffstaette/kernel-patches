@@ -187,7 +187,7 @@ index 451f899..c929760 100644
 +	ktime_t			comparetime = 0;
  	s64			runtime = 0;
  	unsigned long long	total_len = 0;
- 	u8			align = 0;
+ 
 diff --git a/drivers/gpu/drm/amd/amdgpu/dce_virtual.c b/drivers/gpu/drm/amd/amdgpu/dce_virtual.c
 index e4a5a5a..762f8e8 100644
 --- a/drivers/gpu/drm/amd/amdgpu/dce_virtual.c
@@ -251,7 +251,7 @@ index 9942b05..725dffa 100644
 +	tilcdc_crtc->last_vblank = 0;
  
  	tilcdc_crtc->enabled = false;
- 	mutex_unlock(&tilcdc_crtc->enable_lock);
+ }
 diff --git a/drivers/iio/trigger/iio-trig-hrtimer.c b/drivers/iio/trigger/iio-trig-hrtimer.c
 index 5e6d451..a1cad6c 100644
 --- a/drivers/iio/trigger/iio-trig-hrtimer.c
