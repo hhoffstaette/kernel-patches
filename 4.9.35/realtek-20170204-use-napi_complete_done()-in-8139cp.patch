@@ -1,0 +1,54 @@
+From ab1e7e1d26669365e49e8312f96f7a5fa0b703a9 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Sat, 4 Feb 2017 15:24:52 -0800
+Subject: 8139cp: use napi_complete_done()
+
+Use napi_complete_done() instead of __napi_complete() to :
+
+1) Get support of gro_flush_timeout if opt-in
+2) Not rearm interrupts for busy-polling users.
+3) use standard NAPI API.
+4) Eventually get rid of napi_gro_flush() in the future.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/8139cp.c | 11 ++---------
+ 1 file changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/8139cp.c b/drivers/net/ethernet/realtek/8139cp.c
+index 0b3cd58..672f6b6 100644
+--- a/drivers/net/ethernet/realtek/8139cp.c
++++ b/drivers/net/ethernet/realtek/8139cp.c
+@@ -465,10 +465,8 @@ static int cp_rx_poll(struct napi_struct *napi, int budget)
+ 	struct cp_private *cp = container_of(napi, struct cp_private, napi);
+ 	struct net_device *dev = cp->dev;
+ 	unsigned int rx_tail = cp->rx_tail;
+-	int rx;
++	int rx = 0;
+ 
+-	rx = 0;
+-rx_status_loop:
+ 	cpw16(IntrStatus, cp_rx_intr_mask);
+ 
+ 	while (rx < budget) {
+@@ -556,15 +554,10 @@ rx_next:
+ 	/* if we did not reach work limit, then we're done with
+ 	 * this round of polling
+ 	 */
+-	if (rx < budget) {
++	if (rx < budget && napi_complete_done(napi, rx)) {
+ 		unsigned long flags;
+ 
+-		if (cpr16(IntrStatus) & cp_rx_intr_mask)
+-			goto rx_status_loop;
+-
+-		napi_gro_flush(napi, false);
+ 		spin_lock_irqsave(&cp->lock, flags);
+-		__napi_complete(napi);
+ 		cpw16_f(IntrMask, cp_intr_mask);
+ 		spin_unlock_irqrestore(&cp->lock, flags);
+ 	}
+-- 
+cgit v1.1
+
