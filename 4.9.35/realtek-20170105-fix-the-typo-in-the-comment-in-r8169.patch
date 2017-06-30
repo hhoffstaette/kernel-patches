@@ -1,0 +1,29 @@
+From 9b60047a9c950e3fde186466774ffd1ab1104d4e Mon Sep 17 00:00:00 2001
+From: Zhu Yanjun <yanjun.zhu@oracle.com>
+Date: Thu, 5 Jan 2017 02:54:27 -0500
+Subject: r8169: fix the typo in the comment
+
+>From the realtek data sheet, the PID0 should be bit 0.
+
+Signed-off-by: Zhu Yanjun <yanjun.zhu@oracle.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 44389c9..8f1623b 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -696,7 +696,7 @@ enum rtl_tx_desc_bit_1 {
+ enum rtl_rx_desc_bit {
+ 	/* Rx private */
+ 	PID1		= (1 << 18), /* Protocol ID bit 1/2 */
+-	PID0		= (1 << 17), /* Protocol ID bit 2/2 */
++	PID0		= (1 << 17), /* Protocol ID bit 0/2 */
+ 
+ #define RxProtoUDP	(PID1)
+ #define RxProtoTCP	(PID0)
+-- 
+cgit v1.1
+
