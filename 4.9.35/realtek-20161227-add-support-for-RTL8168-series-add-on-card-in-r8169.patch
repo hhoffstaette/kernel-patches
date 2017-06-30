@@ -1,0 +1,28 @@
+From 610c908773d30907c950ca3b2ee8ac4b2813537b Mon Sep 17 00:00:00 2001
+From: Chun-Hao Lin <hau@realtek.com>
+Date: Tue, 27 Dec 2016 16:29:43 +0800
+Subject: r8169: add support for RTL8168 series add-on card.
+
+This chip is the same as RTL8168, but its device id is 0x8161.
+
+Signed-off-by: Chun-Hao Lin <hau@realtek.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index f9b97f5..44389c9 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -326,6 +326,7 @@ enum cfg_version {
+ static const struct pci_device_id rtl8169_pci_tbl[] = {
+ 	{ PCI_DEVICE(PCI_VENDOR_ID_REALTEK,	0x8129), 0, 0, RTL_CFG_0 },
+ 	{ PCI_DEVICE(PCI_VENDOR_ID_REALTEK,	0x8136), 0, 0, RTL_CFG_2 },
++	{ PCI_DEVICE(PCI_VENDOR_ID_REALTEK,	0x8161), 0, 0, RTL_CFG_1 },
+ 	{ PCI_DEVICE(PCI_VENDOR_ID_REALTEK,	0x8167), 0, 0, RTL_CFG_0 },
+ 	{ PCI_DEVICE(PCI_VENDOR_ID_REALTEK,	0x8168), 0, 0, RTL_CFG_1 },
+ 	{ PCI_DEVICE(PCI_VENDOR_ID_REALTEK,	0x8169), 0, 0, RTL_CFG_0 },
+-- 
+cgit v1.1
+
