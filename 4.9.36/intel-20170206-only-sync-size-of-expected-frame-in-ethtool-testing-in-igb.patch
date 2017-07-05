@@ -1,0 +1,41 @@
+From cb0ef1d1dc8739e307f70493b7eb1184685dbbde Mon Sep 17 00:00:00 2001
+From: Alexander Duyck <alexander.h.duyck@intel.com>
+Date: Mon, 6 Feb 2017 18:26:26 -0800
+Subject: igb: Only sync size of expected frame in ethtool testing
+
+We only need to sync the size of the frame that is read to test.  We don't
+need to sync the entire Rx buffer.  This way the testing is more consistent
+with how we handle things in the receive path.
+
+Signed-off-by: Alexander Duyck <alexander.h.duyck@intel.com>
+Tested-by: Aaron Brown <aaron.f.brown@intel.com>
+Signed-off-by: Jeff Kirsher <jeffrey.t.kirsher@intel.com>
+---
+ drivers/net/ethernet/intel/igb/igb_ethtool.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/intel/igb/igb_ethtool.c b/drivers/net/ethernet/intel/igb/igb_ethtool.c
+index 612cf13..d5966fe 100644
+--- a/drivers/net/ethernet/intel/igb/igb_ethtool.c
++++ b/drivers/net/ethernet/intel/igb/igb_ethtool.c
+@@ -1818,7 +1818,7 @@ static int igb_clean_test_rings(struct igb_ring *rx_ring,
+ 		/* sync Rx buffer for CPU read */
+ 		dma_sync_single_for_cpu(rx_ring->dev,
+ 					rx_buffer_info->dma,
+-					IGB_RX_BUFSZ,
++					size,
+ 					DMA_FROM_DEVICE);
+ 
+ 		/* verify contents of skb */
+@@ -1828,7 +1828,7 @@ static int igb_clean_test_rings(struct igb_ring *rx_ring,
+ 		/* sync Rx buffer for device write */
+ 		dma_sync_single_for_device(rx_ring->dev,
+ 					   rx_buffer_info->dma,
+-					   IGB_RX_BUFSZ,
++					   size,
+ 					   DMA_FROM_DEVICE);
+ 
+ 		/* unmap buffer on Tx side */
+-- 
+cgit v1.1
+
