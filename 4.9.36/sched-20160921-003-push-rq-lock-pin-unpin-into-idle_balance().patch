@@ -1,0 +1,110 @@
+From 46f69fa33712ad12ccaa723e46ed5929ee93589b Mon Sep 17 00:00:00 2001
+From: Matt Fleming <matt@codeblueprint.co.uk>
+Date: Wed, 21 Sep 2016 14:38:12 +0100
+Subject: sched/fair: Push rq lock pin/unpin into idle_balance()
+
+Future patches will emit warnings if rq_clock() is called before
+update_rq_clock() inside a rq_pin_lock()/rq_unpin_lock() pair.
+
+Since there is only one caller of idle_balance() we can push the
+unpin/repin there.
+
+Signed-off-by: Matt Fleming <matt@codeblueprint.co.uk>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Byungchul Park <byungchul.park@lge.com>
+Cc: Frederic Weisbecker <fweisbec@gmail.com>
+Cc: Jan Kara <jack@suse.cz>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Luca Abeni <luca.abeni@unitn.it>
+Cc: Mel Gorman <mgorman@techsingularity.net>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Mike Galbraith <umgwanakikbuti@gmail.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Petr Mladek <pmladek@suse.com>
+Cc: Rik van Riel <riel@redhat.com>
+Cc: Sergey Senozhatsky <sergey.senozhatsky.work@gmail.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Wanpeng Li <wanpeng.li@hotmail.com>
+Cc: Yuyang Du <yuyang.du@intel.com>
+Link: http://lkml.kernel.org/r/20160921133813.31976-7-matt@codeblueprint.co.uk
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/fair.c | 27 +++++++++++++++------------
+ 1 file changed, 15 insertions(+), 12 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 4904412..faf80e1 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -3424,7 +3424,7 @@ static inline unsigned long cfs_rq_load_avg(struct cfs_rq *cfs_rq)
+ 	return cfs_rq->avg.load_avg;
+ }
+ 
+-static int idle_balance(struct rq *this_rq);
++static int idle_balance(struct rq *this_rq, struct rq_flags *rf);
+ 
+ #else /* CONFIG_SMP */
+ 
+@@ -3453,7 +3453,7 @@ attach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se) {}
+ static inline void
+ detach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se) {}
+ 
+-static inline int idle_balance(struct rq *rq)
++static inline int idle_balance(struct rq *rq, struct rq_flags *rf)
+ {
+ 	return 0;
+ }
+@@ -6320,15 +6320,8 @@ simple:
+ 	return p;
+ 
+ idle:
+-	/*
+-	 * This is OK, because current is on_cpu, which avoids it being picked
+-	 * for load-balance and preemption/IRQs are still disabled avoiding
+-	 * further scheduler activity on it and we're being very careful to
+-	 * re-start the picking loop.
+-	 */
+-	rq_unpin_lock(rq, rf);
+-	new_tasks = idle_balance(rq);
+-	rq_repin_lock(rq, rf);
++	new_tasks = idle_balance(rq, rf);
++
+ 	/*
+ 	 * Because idle_balance() releases (and re-acquires) rq->lock, it is
+ 	 * possible for any higher priority task to appear. In that case we
+@@ -8297,7 +8290,7 @@ update_next_balance(struct sched_domain *sd, unsigned long *next_balance)
+  * idle_balance is called by schedule() if this_cpu is about to become
+  * idle. Attempts to pull tasks from other CPUs.
+  */
+-static int idle_balance(struct rq *this_rq)
++static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
+ {
+ 	unsigned long next_balance = jiffies + HZ;
+ 	int this_cpu = this_rq->cpu;
+@@ -8311,6 +8304,14 @@ static int idle_balance(struct rq *this_rq)
+ 	 */
+ 	this_rq->idle_stamp = rq_clock(this_rq);
+ 
++	/*
++	 * This is OK, because current is on_cpu, which avoids it being picked
++	 * for load-balance and preemption/IRQs are still disabled avoiding
++	 * further scheduler activity on it and we're being very careful to
++	 * re-start the picking loop.
++	 */
++	rq_unpin_lock(this_rq, rf);
++
+ 	if (this_rq->avg_idle < sysctl_sched_migration_cost ||
+ 	    !this_rq->rd->overload) {
+ 		rcu_read_lock();
+@@ -8388,6 +8389,8 @@ out:
+ 	if (pulled_task)
+ 		this_rq->idle_stamp = 0;
+ 
++	rq_repin_lock(this_rq, rf);
++
+ 	return pulled_task;
+ }
+ 
+-- 
+cgit v1.1
+
