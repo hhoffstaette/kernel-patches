@@ -1,0 +1,72 @@
+From 92509b732baf14c59ca702307270cfaa3a585ae7 Mon Sep 17 00:00:00 2001
+From: Matt Fleming <matt@codeblueprint.co.uk>
+Date: Wed, 21 Sep 2016 14:38:11 +0100
+Subject: sched/core: Reset RQCF_ACT_SKIP before unpinning rq->lock
+
+rq_clock() is called from sched_info_{depart,arrive}() after resetting
+RQCF_ACT_SKIP but prior to a call to update_rq_clock().
+
+In preparation for pending patches that check whether the rq clock has
+been updated inside of a pin context before rq_clock() is called, move
+the reset of rq->clock_skip_update immediately before unpinning the rq
+lock.
+
+This will avoid the new warnings which check if update_rq_clock() is
+being actively skipped.
+
+Signed-off-by: Matt Fleming <matt@codeblueprint.co.uk>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Byungchul Park <byungchul.park@lge.com>
+Cc: Frederic Weisbecker <fweisbec@gmail.com>
+Cc: Jan Kara <jack@suse.cz>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Luca Abeni <luca.abeni@unitn.it>
+Cc: Mel Gorman <mgorman@techsingularity.net>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Mike Galbraith <umgwanakikbuti@gmail.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Petr Mladek <pmladek@suse.com>
+Cc: Rik van Riel <riel@redhat.com>
+Cc: Sergey Senozhatsky <sergey.senozhatsky.work@gmail.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Wanpeng Li <wanpeng.li@hotmail.com>
+Cc: Yuyang Du <yuyang.du@intel.com>
+Link: http://lkml.kernel.org/r/20160921133813.31976-6-matt@codeblueprint.co.uk
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/core.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 41df935..311460b 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2887,6 +2887,9 @@ context_switch(struct rq *rq, struct task_struct *prev,
+ 		prev->active_mm = NULL;
+ 		rq->prev_mm = oldmm;
+ 	}
++
++	rq->clock_skip_update = 0;
++
+ 	/*
+ 	 * Since the runqueue lock will be released by the next
+ 	 * task (which is an invalid locking op but in the case
+@@ -3392,7 +3395,6 @@ static void __sched notrace __schedule(bool preempt)
+ 	next = pick_next_task(rq, prev, &rf);
+ 	clear_tsk_need_resched(prev);
+ 	clear_preempt_need_resched();
+-	rq->clock_skip_update = 0;
+ 
+ 	if (likely(prev != next)) {
+ 		rq->nr_switches++;
+@@ -3402,6 +3404,7 @@ static void __sched notrace __schedule(bool preempt)
+ 		trace_sched_switch(preempt, prev, next);
+ 		rq = context_switch(rq, prev, next, &rf); /* unlocks the rq */
+ 	} else {
++		rq->clock_skip_update = 0;
+ 		rq_unpin_lock(rq, &rf);
+ 		raw_spin_unlock_irq(&rq->lock);
+ 	}
+-- 
+cgit v1.1
+
