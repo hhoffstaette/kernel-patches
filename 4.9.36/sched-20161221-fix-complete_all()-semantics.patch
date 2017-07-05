@@ -1,0 +1,77 @@
+From da9647e076d440190fff4b4ee0f4b829dd6e8c4f Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Wed, 21 Dec 2016 09:05:02 +0100
+Subject: sched/completions: Fix complete_all() semantics
+
+Documentation/scheduler/completion.txt says this about complete_all():
+
+  "calls complete_all() to signal all current and future waiters."
+
+Which doesn't strictly match the current semantics. Currently
+complete_all() is equivalent to UINT_MAX/2 complete() invocations,
+which is distinctly less than 'all current and future waiters'
+(enumerable vs innumerable), although it has worked in practice.
+
+However, Dmitry had a weird case where it might matter, so change
+completions to use saturation semantics for complete()/complete_all().
+Once done hits UINT_MAX (and complete_all() sets it there) it will
+never again be decremented.
+
+Requested-by: Dmitry Torokhov <dmitry.torokhov@gmail.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: der.herr@hofr.at
+Cc: linux-kernel@vger.kernel.org
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/completion.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/sched/completion.c b/kernel/sched/completion.c
+index 8d0f35d..f063a25 100644
+--- a/kernel/sched/completion.c
++++ b/kernel/sched/completion.c
+@@ -31,7 +31,8 @@ void complete(struct completion *x)
+ 	unsigned long flags;
+ 
+ 	spin_lock_irqsave(&x->wait.lock, flags);
+-	x->done++;
++	if (x->done != UINT_MAX)
++		x->done++;
+ 	__wake_up_locked(&x->wait, TASK_NORMAL, 1);
+ 	spin_unlock_irqrestore(&x->wait.lock, flags);
+ }
+@@ -51,7 +52,7 @@ void complete_all(struct completion *x)
+ 	unsigned long flags;
+ 
+ 	spin_lock_irqsave(&x->wait.lock, flags);
+-	x->done += UINT_MAX/2;
++	x->done = UINT_MAX;
+ 	__wake_up_locked(&x->wait, TASK_NORMAL, 0);
+ 	spin_unlock_irqrestore(&x->wait.lock, flags);
+ }
+@@ -79,7 +80,8 @@ do_wait_for_common(struct completion *x,
+ 		if (!x->done)
+ 			return timeout;
+ 	}
+-	x->done--;
++	if (x->done != UINT_MAX)
++		x->done--;
+ 	return timeout ?: 1;
+ }
+ 
+@@ -280,7 +282,7 @@ bool try_wait_for_completion(struct completion *x)
+ 	spin_lock_irqsave(&x->wait.lock, flags);
+ 	if (!x->done)
+ 		ret = 0;
+-	else
++	else if (x->done != UINT_MAX)
+ 		x->done--;
+ 	spin_unlock_irqrestore(&x->wait.lock, flags);
+ 	return ret;
+-- 
+cgit v1.1
+
