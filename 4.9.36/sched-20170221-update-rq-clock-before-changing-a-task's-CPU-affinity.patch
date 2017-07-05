@@ -1,0 +1,62 @@
+From a499c3ead88ccf147fc50689e85a530ad923ce36 Mon Sep 17 00:00:00 2001
+From: Wanpeng Li <wanpeng.li@hotmail.com>
+Date: Tue, 21 Feb 2017 23:52:55 -0800
+Subject: sched/fair: Update rq clock before changing a task's CPU affinity
+
+This is triggered during boot when CONFIG_SCHED_DEBUG is enabled:
+
+ ------------[ cut here ]------------
+ WARNING: CPU: 6 PID: 81 at kernel/sched/sched.h:812 set_next_entity+0x11d/0x380
+ rq->clock_update_flags < RQCF_ACT_SKIP
+ CPU: 6 PID: 81 Comm: torture_shuffle Not tainted 4.10.0+ #1
+ Hardware name: LENOVO ThinkCentre M8500t-N000/SHARKBAY, BIOS FBKTC1AUS 02/16/2016
+ Call Trace:
+  dump_stack+0x85/0xc2
+  __warn+0xcb/0xf0
+  warn_slowpath_fmt+0x5f/0x80
+  set_next_entity+0x11d/0x380
+  set_curr_task_fair+0x2b/0x60
+  do_set_cpus_allowed+0x139/0x180
+  __set_cpus_allowed_ptr+0x113/0x260
+  set_cpus_allowed_ptr+0x10/0x20
+  torture_shuffle+0xfd/0x180
+  kthread+0x10f/0x150
+  ? torture_shutdown_init+0x60/0x60
+  ? kthread_create_on_node+0x60/0x60
+  ret_from_fork+0x31/0x40
+ ---[ end trace dd94d92344cea9c6 ]---
+
+The task is running && !queued, so there is no rq clock update before calling
+set_curr_task().
+
+This patch fixes it by updating rq clock after holding rq->lock/pi_lock
+just as what other dequeue + put_prev + enqueue + set_curr story does.
+
+Signed-off-by: Wanpeng Li <wanpeng.li@hotmail.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Matt Fleming <matt@codeblueprint.co.uk>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Link: http://lkml.kernel.org/r/1487749975-5994-1-git-send-email-wanpeng.li@hotmail.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/core.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 2d6e828..cc1e3e0 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -1087,6 +1087,7 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
+ 	int ret = 0;
+ 
+ 	rq = task_rq_lock(p, &rf);
++	update_rq_clock(rq);
+ 
+ 	if (p->flags & PF_KTHREAD) {
+ 		/*
+-- 
+cgit v1.1
+
