@@ -1,0 +1,41 @@
+From 3067a33d5fec856bb297d58e7f03411d060ccdee Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Fri, 21 Apr 2017 12:42:03 +0200
+Subject: sched/clock: Remove watchdog touching
+
+Commit:
+
+  2bacec8c318c ("sched: touch softlockup watchdog after idling")
+
+introduced the touch_softlockup_watchdog_sched() call without
+justification and I feel sched_clock management is not the right
+place, it should only be concerned with producing semi coherent time.
+
+If this causes watchdog thingies, we can find a better place.
+
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: linux-kernel@vger.kernel.org
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/clock.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/kernel/sched/clock.c b/kernel/sched/clock.c
+index 750a92c..c30c05f 100644
+--- a/kernel/sched/clock.c
++++ b/kernel/sched/clock.c
+@@ -418,7 +418,6 @@ void sched_clock_idle_wakeup_event(void)
+ 		return;
+ 
+ 	sched_clock_tick();
+-	touch_softlockup_watchdog_sched();
+ }
+ EXPORT_SYMBOL_GPL(sched_clock_idle_wakeup_event);
+ 
+-- 
+cgit v1.1
+
