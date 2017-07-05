@@ -1,0 +1,62 @@
+From 311191297125156319be8f86d546ea1c569f7e95 Mon Sep 17 00:00:00 2001
+From: WANG Cong <xiyou.wangcong@gmail.com>
+Date: Sat, 10 Dec 2016 14:22:42 -0800
+Subject: e1000: use disable_hardirq() for e1000_netpoll()
+
+In commit 02cea3958664 ("genirq: Provide disable_hardirq()")
+Peter introduced disable_hardirq() for netpoll, but it is forgotten
+to use it for e1000.
+
+This patch changes disable_irq() to disable_hardirq() for e1000.
+
+Reported-by: Dave Jones <davej@codemonkey.org.uk>
+Suggested-by: Sabrina Dubroca <sd@queasysnail.net>
+Cc: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Jeff Kirsher <jeffrey.t.kirsher@intel.com>
+Signed-off-by: Cong Wang <xiyou.wangcong@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/intel/e1000/e1000_main.c | 4 ++--
+ drivers/net/ethernet/intel/e1000e/netdev.c    | 8 ++++----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/net/ethernet/intel/e1000/e1000_main.c b/drivers/net/ethernet/intel/e1000/e1000_main.c
+index 33076fa..93fc6c6 100644
+--- a/drivers/net/ethernet/intel/e1000/e1000_main.c
++++ b/drivers/net/ethernet/intel/e1000/e1000_main.c
+@@ -5255,8 +5255,8 @@ static void e1000_netpoll(struct net_device *netdev)
+ {
+ 	struct e1000_adapter *adapter = netdev_priv(netdev);
+ 
+-	disable_irq(adapter->pdev->irq);
+-	e1000_intr(adapter->pdev->irq, netdev);
++	if (disable_hardirq(adapter->pdev->irq))
++		e1000_intr(adapter->pdev->irq, netdev);
+ 	enable_irq(adapter->pdev->irq);
+ }
+ #endif
+diff --git a/drivers/net/ethernet/intel/e1000e/netdev.c b/drivers/net/ethernet/intel/e1000e/netdev.c
+index 8759d92..ffcf35a 100644
+--- a/drivers/net/ethernet/intel/e1000e/netdev.c
++++ b/drivers/net/ethernet/intel/e1000e/netdev.c
+@@ -6755,13 +6755,13 @@ static void e1000_netpoll(struct net_device *netdev)
+ 		e1000_intr_msix(adapter->pdev->irq, netdev);
+ 		break;
+ 	case E1000E_INT_MODE_MSI:
+-		disable_irq(adapter->pdev->irq);
+-		e1000_intr_msi(adapter->pdev->irq, netdev);
++		if (disable_hardirq(adapter->pdev->irq))
++			e1000_intr_msi(adapter->pdev->irq, netdev);
+ 		enable_irq(adapter->pdev->irq);
+ 		break;
+ 	default:		/* E1000E_INT_MODE_LEGACY */
+-		disable_irq(adapter->pdev->irq);
+-		e1000_intr(adapter->pdev->irq, netdev);
++		if (disable_hardirq(adapter->pdev->irq))
++			e1000_intr(adapter->pdev->irq, netdev);
+ 		enable_irq(adapter->pdev->irq);
+ 		break;
+ 	}
+-- 
+cgit v1.1
+
