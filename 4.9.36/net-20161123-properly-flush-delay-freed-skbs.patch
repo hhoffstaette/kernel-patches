@@ -1,0 +1,70 @@
+From f52dffe049ee11ecc02588a118fbe4092672fbaa Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Wed, 23 Nov 2016 08:44:56 -0800
+Subject: net: properly flush delay-freed skbs
+
+Typical NAPI drivers use napi_consume_skb(skb) at TX completion time.
+This put skb in a percpu special queue, napi_alloc_cache, to get bulk
+frees.
+
+It turns out the queue is not flushed and hits the NAPI_SKB_CACHE_SIZE
+limit quite often, with skbs that were queued hundreds of usec earlier.
+I measured this can take ~6000 nsec to perform one flush.
+
+__kfree_skb_flush() can be called from two points right now :
+
+1) From net_tx_action(), but only for skbs that were queued to
+sd->completion_queue.
+
+ -> Irrelevant for NAPI drivers in normal operation.
+
+2) From net_rx_action(), but only under high stress or if RPS/RFS has a
+pending action.
+
+This patch changes net_rx_action() to perform the flush in all cases and
+after more urgent operations happened (like kicking remote CPUS for
+RPS/RFS).
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Cc: Jesper Dangaard Brouer <brouer@redhat.com>
+Cc: Alexander Duyck <alexander.h.duyck@intel.com>
+Acked-by: Alexander Duyck <alexander.h.duyck@intel.com>
+Acked-by: Jesper Dangaard Brouer <brouer@redhat.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/core/dev.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/net/core/dev.c b/net/core/dev.c
+index f71b34a..048b46b 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -5260,7 +5260,7 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
+ 
+ 		if (list_empty(&list)) {
+ 			if (!sd_has_rps_ipi_waiting(sd) && list_empty(&repoll))
+-				return;
++				goto out;
+ 			break;
+ 		}
+ 
+@@ -5278,7 +5278,6 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
+ 		}
+ 	}
+ 
+-	__kfree_skb_flush();
+ 	local_irq_disable();
+ 
+ 	list_splice_tail_init(&sd->poll_list, &list);
+@@ -5288,6 +5287,8 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
+ 		__raise_softirq_irqoff(NET_RX_SOFTIRQ);
+ 
+ 	net_rps_action_and_irq_enable(sd);
++out:
++	__kfree_skb_flush();
+ }
+ 
+ struct netdev_adjacent {
+-- 
+cgit v1.1
+
