@@ -26,11 +26,13 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - block: [throttled background writeback v8](http://marc.info/?l=linux-block&m=147751514819997) (*enabled* by default)
 - btrfs: fixes from 4.10+ (cleanups, correctness, error handling etc.)
 - ext4: patches from 4.10+ (performance, correctness)
+- intel: various fixes for Intel NICs from 4.10+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - mm: memory management fixes from 4.10+
 - muqss: [MuQSS v152+](http://ck-hack.blogspot.de/2017/02/linux-410-ck1-muqss-version-0152-for.html) (*disabled* by default)
 - net: [RACK loss detection](https://goo.gl/lwk7bq), high-precision [TCP timestamps](https://goo.gl/aBjwip) & timers for RACK/RTT/queue management
+- realtek: various fixes for Realtek NICs from 4.10+, resurrected [Byte Queue Limits](https://lwn.net/Articles/469652/) support for r8169
 - sched: CFS cpu scheduler fixes from 4.10+
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 4.10+
