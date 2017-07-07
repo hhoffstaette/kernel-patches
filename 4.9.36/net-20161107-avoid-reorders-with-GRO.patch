@@ -1,0 +1,53 @@
+From d61d072e87c8ee4938b2517818e7b6498923d6a4 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Mon, 7 Nov 2016 11:12:27 -0800
+Subject: net-gro: avoid reorders
+
+Receiving a GSO packet in dev_gro_receive() is not uncommon
+in stacked devices, or devices partially implementing LRO/GRO
+like bnx2x. GRO is implementing the aggregation the device
+was not able to do itself.
+
+Current code causes reorders, like in following case :
+
+For a given flow where sender sent 3 packets P1,P2,P3,P4
+
+Receiver might receive P1 as a single packet, stored in GRO engine.
+
+Then P2-P4 are received as a single GSO packet, immediately given to
+upper stack, while P1 is held in GRO engine.
+
+This patch will make sure P1 is given to upper stack, then P2-P4
+immediately after.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/core/dev.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/net/core/dev.c b/net/core/dev.c
+index 0260ad3..c9837fa 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -4482,7 +4482,7 @@ static enum gro_result dev_gro_receive(struct napi_struct *napi, struct sk_buff
+ 	if (!(skb->dev->features & NETIF_F_GRO))
+ 		goto normal;
+ 
+-	if (skb_is_gso(skb) || skb_has_frag_list(skb) || skb->csum_bad)
++	if (skb->csum_bad)
+ 		goto normal;
+ 
+ 	gro_list_prepare(napi, skb);
+@@ -4495,7 +4495,7 @@ static enum gro_result dev_gro_receive(struct napi_struct *napi, struct sk_buff
+ 		skb_set_network_header(skb, skb_gro_offset(skb));
+ 		skb_reset_mac_len(skb);
+ 		NAPI_GRO_CB(skb)->same_flow = 0;
+-		NAPI_GRO_CB(skb)->flush = 0;
++		NAPI_GRO_CB(skb)->flush = skb_is_gso(skb) || skb_has_frag_list(skb);
+ 		NAPI_GRO_CB(skb)->free = 0;
+ 		NAPI_GRO_CB(skb)->encap_mark = 0;
+ 		NAPI_GRO_CB(skb)->recursion_counter = 0;
+-- 
+cgit v1.1
+
