@@ -1,0 +1,85 @@
+From e44699d2c28067f69698ccb68dd3ddeacfebc434 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20Kube=C4=8Dek?= <mkubecek@suse.cz>
+Date: Thu, 29 Jun 2017 11:13:36 +0200
+Subject: net: handle NAPI_GRO_FREE_STOLEN_HEAD case also in napi_frags_finish()
+
+Recently I started seeing warnings about pages with refcount -1. The
+problem was traced to packets being reused after their head was merged into
+a GRO packet by skb_gro_receive(). While bisecting the issue pointed to
+commit c21b48cc1bbf ("net: adjust skb->truesize in ___pskb_trim()") and
+I have never seen it on a kernel with it reverted, I believe the real
+problem appeared earlier when the option to merge head frag in GRO was
+implemented.
+
+Handling NAPI_GRO_FREE_STOLEN_HEAD state was only added to GRO_MERGED_FREE
+branch of napi_skb_finish() so that if the driver uses napi_gro_frags()
+and head is merged (which in my case happens after the skb_condense()
+call added by the commit mentioned above), the skb is reused including the
+head that has been merged. As a result, we release the page reference
+twice and eventually end up with negative page refcount.
+
+To fix the problem, handle NAPI_GRO_FREE_STOLEN_HEAD in napi_frags_finish()
+the same way it's done in napi_skb_finish().
+
+[HH: removed secpath bits for 4.9.x++]
+Fixes: d7e8883cfcf4 ("net: make GRO aware of skb->head_frag")
+Signed-off-by: Michal Kubecek <mkubecek@suse.cz>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/core/dev.c | 24 +++++++++++++++++-------
+ 1 file changed, 17 insertions(+), 7 deletions(-)
+
+diff --git a/net/core/dev.c b/net/core/dev.c
+index 91bb550..416137c 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -4767,6 +4767,12 @@ struct packet_offload *gro_find_complete_by_type(__be16 type)
+ }
+ EXPORT_SYMBOL(gro_find_complete_by_type);
+ 
++static void napi_skb_free_stolen_head(struct sk_buff *skb)
++{
++	skb_dst_drop(skb);
++	kmem_cache_free(skbuff_head_cache, skb);
++}
++
+ static gro_result_t napi_skb_finish(gro_result_t ret, struct sk_buff *skb)
+ {
+ 	switch (ret) {
+@@ -4780,12 +4787,10 @@ static gro_result_t napi_skb_finish(gro_result_t ret, struct sk_buff *skb)
+ 		break;
+ 
+ 	case GRO_MERGED_FREE:
+-		if (NAPI_GRO_CB(skb)->free == NAPI_GRO_FREE_STOLEN_HEAD) {
+-			skb_dst_drop(skb);
+-			kmem_cache_free(skbuff_head_cache, skb);
+-		} else {
++		if (NAPI_GRO_CB(skb)->free == NAPI_GRO_FREE_STOLEN_HEAD)
++			napi_skb_free_stolen_head(skb);
++		else
+ 			__kfree_skb(skb);
+-		}
+ 		break;
+ 
+ 	case GRO_HELD:
+@@ -4858,10 +4862,16 @@ static gro_result_t napi_frags_finish(struct napi_struct *napi,
+ 		break;
+ 
+ 	case GRO_DROP:
+-	case GRO_MERGED_FREE:
+ 		napi_reuse_skb(napi, skb);
+ 		break;
+ 
++	case GRO_MERGED_FREE:
++		if (NAPI_GRO_CB(skb)->free == NAPI_GRO_FREE_STOLEN_HEAD)
++			napi_skb_free_stolen_head(skb);
++		else
++			napi_reuse_skb(napi, skb);
++		break;
++
+ 	case GRO_MERGED:
+ 		break;
+ 	}
+-- 
+cgit v1.1
+
