@@ -1,0 +1,39 @@
+From e89df813174d81abee8be8cabc047d69ef78c26d Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Fri, 13 Jan 2017 09:11:22 -0800
+Subject: netlink: do not enter direct reclaim from netlink_trim()
+
+In commit d35c99ff77ecb ("netlink: do not enter direct reclaim from
+netlink_dump()") we made sure to not trigger expensive memory reclaim.
+
+Problem is that a bit later, netlink_trim() might be called and
+trigger memory reclaim.
+
+netlink_trim() should be best effort, and really as fast as possible.
+Under memory pressure, it is fine to not trim this skb.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Alexei Starovoitov <ast@kernel.org>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/netlink/af_netlink.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/net/netlink/af_netlink.c b/net/netlink/af_netlink.c
+index 161b628..edcc1e1 100644
+--- a/net/netlink/af_netlink.c
++++ b/net/netlink/af_netlink.c
+@@ -1210,7 +1210,9 @@ static struct sk_buff *netlink_trim(struct sk_buff *skb, gfp_t allocation)
+ 		skb = nskb;
+ 	}
+ 
+-	if (!pskb_expand_head(skb, 0, -delta, allocation))
++	if (!pskb_expand_head(skb, 0, -delta,
++			      (allocation & ~__GFP_DIRECT_RECLAIM) |
++			      __GFP_NOWARN | __GFP_NORETRY))
+ 		skb->truesize -= delta;
+ 
+ 	return skb;
+-- 
+cgit v1.1
+
