@@ -1,0 +1,29 @@
+From ff95015648df445999c8483270905f7d3dec51e1 Mon Sep 17 00:00:00 2001
+From: Colin Ian King <colin.king@canonical.com>
+Date: Thu, 6 Jul 2017 15:28:45 -0400
+Subject: ext4: fix spelling mistake: "prellocated" -> "preallocated"
+
+Trivial fix to spelling mistake in mb_debug debug message
+
+Signed-off-by: Colin Ian King <colin.king@canonical.com>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ fs/ext4/mballoc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/ext4/mballoc.c b/fs/ext4/mballoc.c
+index 9542591..581e357 100644
+--- a/fs/ext4/mballoc.c
++++ b/fs/ext4/mballoc.c
+@@ -3567,7 +3567,7 @@ void ext4_mb_generate_from_pa(struct super_block *sb, void *bitmap,
+ 		ext4_set_bits(bitmap, start, len);
+ 		preallocated += len;
+ 	}
+-	mb_debug(1, "prellocated %u for group %u\n", preallocated, group);
++	mb_debug(1, "preallocated %u for group %u\n", preallocated, group);
+ }
+ 
+ static void ext4_mb_pa_callback(struct rcu_head *head)
+-- 
+cgit v1.1
+
