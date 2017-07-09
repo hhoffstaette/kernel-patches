@@ -1,0 +1,34 @@
+From 85c8f176a6111ecde9c158109989dbd445a0e59a Mon Sep 17 00:00:00 2001
+From: Andrew Perepechko <andrew.perepechko@seagate.com>
+Date: Sun, 30 Apr 2017 00:46:35 -0400
+Subject: ext4: preload block group descriptors
+
+With enabled meta_bg option block group descriptors
+reading IO is not sequential and requires optimization.
+
+Signed-off-by: Andrew Perepechko <andrew.perepechko@seagate.com>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ fs/ext4/super.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/fs/ext4/super.c b/fs/ext4/super.c
+index 9ec8963..9a40e0c 100644
+--- a/fs/ext4/super.c
++++ b/fs/ext4/super.c
+@@ -3879,6 +3879,12 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
+ 
+ 	bgl_lock_init(sbi->s_blockgroup_lock);
+ 
++	/* Pre-read the descriptors into the buffer cache */
++	for (i = 0; i < db_count; i++) {
++		block = descriptor_loc(sb, logical_sb_block, i);
++		sb_breadahead(sb, block);
++	}
++
+ 	for (i = 0; i < db_count; i++) {
+ 		block = descriptor_loc(sb, logical_sb_block, i);
+ 		sbi->s_group_desc[i] = sb_bread_unmovable(sb, block);
+-- 
+cgit v1.1
+
