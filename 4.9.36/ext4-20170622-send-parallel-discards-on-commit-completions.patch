@@ -1,0 +1,317 @@
+From b4dfd857b51e86e8ba10f843a5095171c1152abc Mon Sep 17 00:00:00 2001
+From: Daeho Jeong <daeho.jeong@samsung.com>
+Date: Thu, 22 Jun 2017 23:54:33 -0400
+Subject: ext4: send parallel discards on commit completions
+
+Now, when we mount ext4 filesystem with '-o discard' option, we have to
+issue all the discard commands for the blocks to be deallocated and
+wait for the completion of the commands on the commit complete phase.
+Because this procedure might involve a lot of sequential combinations of
+issuing discard commands and waiting for that, the delay of this
+procedure might be too much long, even to 17.0s in our test,
+and it results in long commit delay and fsync() performance degradation.
+
+To reduce this kind of delay, instead of adding callback for each
+extent and handling all of them in a sequential manner on commit phase,
+we instead add a separate list of extents to free to the superblock and
+then process this list at once after transaction commits so that
+we can issue all the discard commands in a parallel manner like XFS
+filesystem.
+
+Finally, we could enhance the discard command handling performance.
+The result was such that 17.0s delay of a single commit in the worst
+case has been enhanced to 4.8s.
+
+Signed-off-by: Daeho Jeong <daeho.jeong@samsung.com>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+Tested-by: Hobin Woo <hobin.woo@samsung.com>
+Tested-by: Kitae Lee <kitae87.lee@samsung.com>
+Reviewed-by: Jan Kara <jack@suse.cz>
+---
+ fs/ext4/ext4.h    |   3 ++
+ fs/ext4/mballoc.c | 141 +++++++++++++++++++++++++++++++++++-------------------
+ fs/ext4/mballoc.h |   6 +--
+ fs/ext4/super.c   |   3 ++
+ 4 files changed, 100 insertions(+), 53 deletions(-)
+
+diff --git a/fs/ext4/ext4.h b/fs/ext4/ext4.h
+index 68ddd24..9ebde0c 100644
+--- a/fs/ext4/ext4.h
++++ b/fs/ext4/ext4.h
+@@ -1445,6 +1445,8 @@ struct ext4_sb_info {
+ 	unsigned int *s_mb_maxs;
+ 	unsigned int s_group_info_size;
+ 	unsigned int s_mb_free_pending;
++	struct list_head s_freed_data_list;	/* List of blocks to be freed
++						   after commit completed */
+ 
+ 	/* tunables */
+ 	unsigned long s_stripe;
+@@ -2454,6 +2456,7 @@ extern int ext4_mb_add_groupinfo(struct super_block *sb,
+ extern int ext4_group_add_blocks(handle_t *handle, struct super_block *sb,
+ 				ext4_fsblk_t block, unsigned long count);
+ extern int ext4_trim_fs(struct super_block *, struct fstrim_range *);
++extern void ext4_process_freed_data(struct super_block *sb, tid_t commit_tid);
+ 
+ /* inode.c */
+ int ext4_inode_is_fast_symlink(struct inode *inode);
+diff --git a/fs/ext4/mballoc.c b/fs/ext4/mballoc.c
+index d109a2a..9542591 100644
+--- a/fs/ext4/mballoc.c
++++ b/fs/ext4/mballoc.c
+@@ -367,8 +367,6 @@ static void ext4_mb_generate_from_pa(struct super_block *sb, void *bitmap,
+ 					ext4_group_t group);
+ static void ext4_mb_generate_from_freelist(struct super_block *sb, void *bitmap,
+ 						ext4_group_t group);
+-static void ext4_free_data_callback(struct super_block *sb,
+-				struct ext4_journal_cb_entry *jce, int rc);
+ 
+ static inline void *mb_correct_addr_and_bit(int *bit, void *addr)
+ {
+@@ -2639,6 +2637,7 @@ int ext4_mb_init(struct super_block *sb)
+ 	spin_lock_init(&sbi->s_md_lock);
+ 	spin_lock_init(&sbi->s_bal_lock);
+ 	sbi->s_mb_free_pending = 0;
++	INIT_LIST_HEAD(&sbi->s_freed_data_list);
+ 
+ 	sbi->s_mb_max_to_scan = MB_DEFAULT_MAX_TO_SCAN;
+ 	sbi->s_mb_min_to_scan = MB_DEFAULT_MIN_TO_SCAN;
+@@ -2782,7 +2781,8 @@ int ext4_mb_release(struct super_block *sb)
+ }
+ 
+ static inline int ext4_issue_discard(struct super_block *sb,
+-		ext4_group_t block_group, ext4_grpblk_t cluster, int count)
++		ext4_group_t block_group, ext4_grpblk_t cluster, int count,
++		struct bio **biop)
+ {
+ 	ext4_fsblk_t discard_block;
+ 
+@@ -2791,18 +2791,18 @@ static inline int ext4_issue_discard(struct super_block *sb,
+ 	count = EXT4_C2B(EXT4_SB(sb), count);
+ 	trace_ext4_discard_blocks(sb,
+ 			(unsigned long long) discard_block, count);
+-	return sb_issue_discard(sb, discard_block, count, GFP_NOFS, 0);
++	if (biop) {
++		return __blkdev_issue_discard(sb->s_bdev,
++			(sector_t)discard_block << (sb->s_blocksize_bits - 9),
++			(sector_t)count << (sb->s_blocksize_bits - 9),
++			GFP_NOFS, 0, biop);
++	} else
++		return sb_issue_discard(sb, discard_block, count, GFP_NOFS, 0);
+ }
+ 
+-/*
+- * This function is called by the jbd2 layer once the commit has finished,
+- * so we know we can free the blocks that were released with that commit.
+- */
+-static void ext4_free_data_callback(struct super_block *sb,
+-				    struct ext4_journal_cb_entry *jce,
+-				    int rc)
++static void ext4_free_data_in_buddy(struct super_block *sb,
++				    struct ext4_free_data *entry)
+ {
+-	struct ext4_free_data *entry = (struct ext4_free_data *)jce;
+ 	struct ext4_buddy e4b;
+ 	struct ext4_group_info *db;
+ 	int err, count = 0, count2 = 0;
+@@ -2810,18 +2810,6 @@ static void ext4_free_data_callback(struct super_block *sb,
+ 	mb_debug(1, "gonna free %u blocks in group %u (0x%p):",
+ 		 entry->efd_count, entry->efd_group, entry);
+ 
+-	if (test_opt(sb, DISCARD)) {
+-		err = ext4_issue_discard(sb, entry->efd_group,
+-					 entry->efd_start_cluster,
+-					 entry->efd_count);
+-		if (err && err != -EOPNOTSUPP)
+-			ext4_msg(sb, KERN_WARNING, "discard request in"
+-				 " group:%d block:%d count:%d failed"
+-				 " with %d", entry->efd_group,
+-				 entry->efd_start_cluster,
+-				 entry->efd_count, err);
+-	}
+-
+ 	err = ext4_mb_load_buddy(sb, entry->efd_group, &e4b);
+ 	/* we expect to find existing buddy because it's pinned */
+ 	BUG_ON(err != 0);
+@@ -2862,6 +2850,56 @@ static void ext4_free_data_callback(struct super_block *sb,
+ 	mb_debug(1, "freed %u blocks in %u structures\n", count, count2);
+ }
+ 
++/*
++ * This function is called by the jbd2 layer once the commit has finished,
++ * so we know we can free the blocks that were released with that commit.
++ */
++void ext4_process_freed_data(struct super_block *sb, tid_t commit_tid)
++{
++	struct ext4_sb_info *sbi = EXT4_SB(sb);
++	struct ext4_free_data *entry, *tmp;
++	struct bio *discard_bio = NULL;
++	struct list_head freed_data_list;
++	struct list_head *cut_pos = NULL;
++	int err;
++
++	INIT_LIST_HEAD(&freed_data_list);
++
++	spin_lock(&sbi->s_md_lock);
++	list_for_each_entry(entry, &sbi->s_freed_data_list, efd_list) {
++		if (entry->efd_tid != commit_tid)
++			break;
++		cut_pos = &entry->efd_list;
++	}
++	if (cut_pos)
++		list_cut_position(&freed_data_list, &sbi->s_freed_data_list,
++				  cut_pos);
++	spin_unlock(&sbi->s_md_lock);
++
++	if (test_opt(sb, DISCARD)) {
++		list_for_each_entry(entry, &freed_data_list, efd_list) {
++			err = ext4_issue_discard(sb, entry->efd_group,
++						 entry->efd_start_cluster,
++						 entry->efd_count,
++						 &discard_bio);
++			if (err && err != -EOPNOTSUPP) {
++				ext4_msg(sb, KERN_WARNING, "discard request in"
++					 " group:%d block:%d count:%d failed"
++					 " with %d", entry->efd_group,
++					 entry->efd_start_cluster,
++					 entry->efd_count, err);
++			} else if (err == -EOPNOTSUPP)
++				break;
++		}
++
++		if (discard_bio)
++			submit_bio_wait(discard_bio);
++	}
++
++	list_for_each_entry_safe(entry, tmp, &freed_data_list, efd_list)
++		ext4_free_data_in_buddy(sb, entry);
++}
++
+ int __init ext4_init_mballoc(void)
+ {
+ 	ext4_pspace_cachep = KMEM_CACHE(ext4_prealloc_space,
+@@ -4583,14 +4621,28 @@ out:
+  * are contiguous, AND the extents were freed by the same transaction,
+  * AND the blocks are associated with the same group.
+  */
+-static int can_merge(struct ext4_free_data *entry1,
+-			struct ext4_free_data *entry2)
++static void ext4_try_merge_freed_extent(struct ext4_sb_info *sbi,
++					struct ext4_free_data *entry,
++					struct ext4_free_data *new_entry,
++					struct rb_root *entry_rb_root)
+ {
+-	if ((entry1->efd_tid == entry2->efd_tid) &&
+-	    (entry1->efd_group == entry2->efd_group) &&
+-	    ((entry1->efd_start_cluster + entry1->efd_count) == entry2->efd_start_cluster))
+-		return 1;
+-	return 0;
++	if ((entry->efd_tid != new_entry->efd_tid) ||
++	    (entry->efd_group != new_entry->efd_group))
++		return;
++	if (entry->efd_start_cluster + entry->efd_count ==
++	    new_entry->efd_start_cluster) {
++		new_entry->efd_start_cluster = entry->efd_start_cluster;
++		new_entry->efd_count += entry->efd_count;
++	} else if (new_entry->efd_start_cluster + new_entry->efd_count ==
++		   entry->efd_start_cluster) {
++		new_entry->efd_count += entry->efd_count;
++	} else
++		return;
++	spin_lock(&sbi->s_md_lock);
++	list_del(&entry->efd_list);
++	spin_unlock(&sbi->s_md_lock);
++	rb_erase(&entry->efd_node, entry_rb_root);
++	kmem_cache_free(ext4_free_data_cachep, entry);
+ }
+ 
+ static noinline_for_stack int
+@@ -4646,29 +4698,19 @@ ext4_mb_free_metadata(handle_t *handle, struct ext4_buddy *e4b,
+ 	node = rb_prev(new_node);
+ 	if (node) {
+ 		entry = rb_entry(node, struct ext4_free_data, efd_node);
+-		if (can_merge(entry, new_entry) &&
+-		    ext4_journal_callback_try_del(handle, &entry->efd_jce)) {
+-			new_entry->efd_start_cluster = entry->efd_start_cluster;
+-			new_entry->efd_count += entry->efd_count;
+-			rb_erase(node, &(db->bb_free_root));
+-			kmem_cache_free(ext4_free_data_cachep, entry);
+-		}
++		ext4_try_merge_freed_extent(sbi, entry, new_entry,
++					    &(db->bb_free_root));
+ 	}
+ 
+ 	node = rb_next(new_node);
+ 	if (node) {
+ 		entry = rb_entry(node, struct ext4_free_data, efd_node);
+-		if (can_merge(new_entry, entry) &&
+-		    ext4_journal_callback_try_del(handle, &entry->efd_jce)) {
+-			new_entry->efd_count += entry->efd_count;
+-			rb_erase(node, &(db->bb_free_root));
+-			kmem_cache_free(ext4_free_data_cachep, entry);
+-		}
++		ext4_try_merge_freed_extent(sbi, entry, new_entry,
++					    &(db->bb_free_root));
+ 	}
+-	/* Add the extent to transaction's private list */
+-	new_entry->efd_jce.jce_func = ext4_free_data_callback;
++
+ 	spin_lock(&sbi->s_md_lock);
+-	_ext4_journal_callback_add(handle, &new_entry->efd_jce);
++	list_add_tail(&new_entry->efd_list, &sbi->s_freed_data_list);
+ 	sbi->s_mb_free_pending += clusters;
+ 	spin_unlock(&sbi->s_md_lock);
+ 	return 0;
+@@ -4871,7 +4913,8 @@ do_more:
+ 		 * them with group lock_held
+ 		 */
+ 		if (test_opt(sb, DISCARD)) {
+-			err = ext4_issue_discard(sb, block_group, bit, count);
++			err = ext4_issue_discard(sb, block_group, bit, count,
++						 NULL);
+ 			if (err && err != -EOPNOTSUPP)
+ 				ext4_msg(sb, KERN_WARNING, "discard request in"
+ 					 " group:%d block:%d count:%lu failed"
+@@ -5094,7 +5137,7 @@ __acquires(bitlock)
+ 	 */
+ 	mb_mark_used(e4b, &ex);
+ 	ext4_unlock_group(sb, group);
+-	ret = ext4_issue_discard(sb, group, start, count);
++	ret = ext4_issue_discard(sb, group, start, count, NULL);
+ 	ext4_lock_group(sb, group);
+ 	mb_free_blocks(NULL, e4b, start, ex.fe_len);
+ 	return ret;
+diff --git a/fs/ext4/mballoc.h b/fs/ext4/mballoc.h
+index 2bed620..009300e 100644
+--- a/fs/ext4/mballoc.h
++++ b/fs/ext4/mballoc.h
+@@ -78,10 +78,8 @@ do {									\
+ 
+ 
+ struct ext4_free_data {
+-	/* MUST be the first member */
+-	struct ext4_journal_cb_entry	efd_jce;
+-
+-	/* ext4_free_data private data starts from here */
++	/* this links the free block information from sb_info */
++	struct list_head		efd_list;
+ 
+ 	/* this links the free block information from group_info */
+ 	struct rb_node			efd_node;
+diff --git a/fs/ext4/super.c b/fs/ext4/super.c
+index 1fec35b..cb9af5d 100644
+--- a/fs/ext4/super.c
++++ b/fs/ext4/super.c
+@@ -373,6 +373,9 @@ static void ext4_journal_commit_callback(journal_t *journal, transaction_t *txn)
+ 	struct ext4_journal_cb_entry	*jce;
+ 
+ 	BUG_ON(txn->t_state == T_FINISHED);
++
++	ext4_process_freed_data(sb, txn->t_tid);
++
+ 	spin_lock(&sbi->s_md_lock);
+ 	while (!list_empty(&txn->t_private_list)) {
+ 		jce = list_entry(txn->t_private_list.next,
+-- 
+cgit v1.1
+
