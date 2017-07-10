@@ -1,0 +1,49 @@
+From: Mel Gorman <mgorman@techsingularity.net>
+Subject: [PATCH 9/9] sched/numa: Hide numa_wake_affine() from UP build
+Date: Mon, 10 Jul 2017 13:37:52 +0100
+Cc: Mel Gorman <mgorman@techsingularity.net>
+To: Linux-Stable <stable@vger.kernel.org>
+
+From: Thomas Gleixner <tglx@linutronix.de>
+
+commit ff801b716effd652f420204eddb36f6e4a716819 upstream.
+
+Stephen reported the following build warning in UP:
+
+kernel/sched/fair.c:2657:9: warning: 'struct sched_domain' declared inside
+parameter list
+         ^
+/home/sfr/next/next/kernel/sched/fair.c:2657:9: warning: its scope is only this
+definition or declaration, which is probably not what you want
+
+Hide the numa_wake_affine() inline stub on UP builds to get rid of it.
+
+Fixes: 3fed382b46ba ("sched/numa: Implement NUMA node level wake_affine()")
+Reported-by: Stephen Rothwell <sfr@canb.auug.org.au>
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+Cc: Rik van Riel <riel@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Signed-off-by: Mel Gorman <mgorman@techsingularity.net>
+---
+ kernel/sched/fair.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 191f543847b8..611afc736427 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -2651,12 +2651,14 @@ static inline void account_numa_dequeue(struct rq *rq, struct task_struct *p)
+ {
+ }
+ 
++#ifdef CONFIG_SMP
+ static inline bool numa_wake_affine(struct sched_domain *sd,
+ 				    struct task_struct *p, int this_cpu,
+ 				    int prev_cpu, int sync)
+ {
+ 	return true;
+ }
++#endif /* !SMP */
+ #endif /* CONFIG_NUMA_BALANCING */
+ 
+ static void
