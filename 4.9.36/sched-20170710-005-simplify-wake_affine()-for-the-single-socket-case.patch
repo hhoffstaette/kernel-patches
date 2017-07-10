@@ -1,0 +1,65 @@
+From: Mel Gorman <mgorman@techsingularity.net>
+Subject: [PATCH 6/9] sched/fair: Simplify wake_affine() for the single socket case
+Date: Mon, 10 Jul 2017 13:37:49 +0100
+Cc: Mel Gorman <mgorman@techsingularity.net>
+To: Linux-Stable <stable@vger.kernel.org>
+
+From: Rik van Riel <riel@redhat.com>
+
+commit 7d894e6e34a5cdd12309c7e4a3f830277ad4b7bf upstream.
+
+Then 'this_cpu' and 'prev_cpu' are in the same socket, select_idle_sibling()
+will do its thing regardless of the return value of wake_affine().
+
+Just return true and don't look at all the other things.
+
+Signed-off-by: Rik van Riel <riel@redhat.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mel Gorman <mgorman@suse.de>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: jhladky@redhat.com
+Cc: linux-kernel@vger.kernel.org
+Link: http://lkml.kernel.org/r/20170623165530.22514-3-riel@redhat.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Signed-off-by: Mel Gorman <mgorman@techsingularity.net>
+---
+ kernel/sched/fair.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index bbf45ed4a370..c82ac75547d5 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5399,6 +5399,13 @@ static int wake_affine(struct sched_domain *sd, struct task_struct *p,
+ 	this_load = target_load(this_cpu, idx);
+ 
+ 	/*
++	 * Common case: CPUs are in the same socket, and select_idle_sibling()
++	 * will do its thing regardless of what we return:
++	 */
++	if (cpus_share_cache(prev_cpu, this_cpu))
++		return true;
++
++	/*
+ 	 * If sync wakeup then subtract the (maximum possible)
+ 	 * effect of the currently running task from the load
+ 	 * of the current CPU:
+@@ -6012,11 +6019,15 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
+ 
+ 	if (affine_sd) {
+ 		sd = NULL; /* Prefer wake_affine over balance flags */
+-		if (cpu != prev_cpu && wake_affine(affine_sd, p, prev_cpu, sync))
++		if (cpu == prev_cpu)
++			goto pick_cpu;
++
++		if (wake_affine(affine_sd, p, prev_cpu, sync))
+ 			new_cpu = cpu;
+ 	}
+ 
+ 	if (!sd) {
++ pick_cpu:
+ 		if (sd_flag & SD_BALANCE_WAKE) /* XXX always ? */
+ 			new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
+ 
