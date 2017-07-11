@@ -1,0 +1,48 @@
+From 2a98dc028f911a7c59c87d11d4eed6626be1605b Mon Sep 17 00:00:00 2001
+From: Matthew Wilcox <mawilcox@microsoft.com>
+Date: Mon, 10 Jul 2017 15:51:32 -0700
+Subject: include/linux/bitmap.h: turn bitmap_set and bitmap_clear into memset when possible
+
+Several callers have constant 'start' and an 'nbits' that is a multiple
+of 8, so we can turn them into calls to memset.  We don't need the
+entirety of 'start' and 'nbits' to be constant, we just need to know
+whether they're divisible by 8.
+
+Link: http://lkml.kernel.org/r/20170628153221.11322-4-willy@infradead.org
+Signed-off-by: Matthew Wilcox <mawilcox@microsoft.com>
+Acked-by: Rasmus Villemoes <linux@rasmusvillemoes.dk>
+Cc: Martin Schwidefsky <schwidefsky@de.ibm.com>
+Cc: Matthew Wilcox <willy@infradead.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ include/linux/bitmap.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/include/linux/bitmap.h b/include/linux/bitmap.h
+index 4e0f0c8..c04c9d1 100644
+--- a/include/linux/bitmap.h
++++ b/include/linux/bitmap.h
+@@ -319,6 +319,9 @@ static __always_inline void bitmap_set(unsigned long *map, unsigned int start,
+ {
+ 	if (__builtin_constant_p(nbits) && nbits == 1)
+ 		__set_bit(start, map);
++	else if (__builtin_constant_p(start & 7) && IS_ALIGNED(start, 8) &&
++		 __builtin_constant_p(nbits & 7) && IS_ALIGNED(nbits, 8))
++		memset((char *)map + start / 8, 0xff, nbits / 8);
+ 	else
+ 		__bitmap_set(map, start, nbits);
+ }
+@@ -328,6 +331,9 @@ static __always_inline void bitmap_clear(unsigned long *map, unsigned int start,
+ {
+ 	if (__builtin_constant_p(nbits) && nbits == 1)
+ 		__clear_bit(start, map);
++	else if (__builtin_constant_p(start & 7) && IS_ALIGNED(start, 8) &&
++		 __builtin_constant_p(nbits & 7) && IS_ALIGNED(nbits, 8))
++		memset((char *)map + start / 8, 0, nbits / 8);
+ 	else
+ 		__bitmap_clear(map, start, nbits);
+ }
+-- 
+cgit v1.1
+

@@ -1,0 +1,56 @@
+From 2c6deb01525ac11cc03c44fe31e3f45ce2cadaf9 Mon Sep 17 00:00:00 2001
+From: Matthew Wilcox <mawilcox@microsoft.com>
+Date: Mon, 10 Jul 2017 15:51:35 -0700
+Subject: bitmap: use memcmp optimisation in more situations
+
+Commit 7dd968163f7c ("bitmap: bitmap_equal memcmp optimization") was
+rather more restrictive than necessary; we can use memcmp() to implement
+bitmap_equal() as long as the number of bits can be proved to be a
+multiple of 8.  And architectures other than s390 may be able to make
+good use of this optimisation.
+
+[HH: minimal context fix in hunk#1 for 4.9.x]
+[arnd@arndb.de: fix build: add a memcmp() declaration]
+  Link: http://lkml.kernel.org/r/20170630153908.3439707-1-arnd@arndb.de
+Link: http://lkml.kernel.org/r/20170628153221.11322-5-willy@infradead.org
+Signed-off-by: Matthew Wilcox <mawilcox@microsoft.com>
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+Acked-by: Rasmus Villemoes <linux@rasmusvillemoes.dk>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ arch/arm/boot/compressed/decompress.c | 1 +
+ include/linux/bitmap.h                | 4 +---
+ 2 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/boot/compressed/decompress.c b/arch/arm/boot/compressed/decompress.c
+index ea78327..f3a4bed 100644
+--- a/arch/arm/boot/compressed/decompress.c
++++ b/arch/arm/boot/compressed/decompress.c
+@@ -33,6 +33,7 @@ extern void error(char *);
+ 
+ /* Not needed, but used in some headers pulled in by decompressors */
+ extern char * strstr(const char * s1, const char *s2);
++extern int memcmp(const void *cs, const void *ct, size_t count);
+ 
+ #ifdef CONFIG_KERNEL_GZIP
+ #include "../../../../lib/decompress_inflate.c"
+diff --git a/include/linux/bitmap.h b/include/linux/bitmap.h
+index c04c9d1..5797ca6 100644
+--- a/include/linux/bitmap.h
++++ b/include/linux/bitmap.h
+@@ -266,10 +266,8 @@ static inline int bitmap_equal(const unsigned long *src1,
+ {
+ 	if (small_const_nbits(nbits))
+ 		return !((*src1 ^ *src2) & BITMAP_LAST_WORD_MASK(nbits));
+-#ifdef CONFIG_S390
+-	if (__builtin_constant_p(nbits) && (nbits % BITS_PER_LONG) == 0)
++	if (__builtin_constant_p(nbits & 7) && IS_ALIGNED(nbits, 8))
+ 		return !memcmp(src1, src2, nbits / 8);
+-#endif
+ 	return __bitmap_equal(src1, src2, nbits);
+ }
+ 
+-- 
+cgit v1.1
+
