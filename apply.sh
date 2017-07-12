@@ -12,10 +12,16 @@ PATCHLEVEL=$(grep \^PATCHLEVEL Makefile | cut -d ' ' -f 3)
 SUBLEVEL=$(grep \^SUBLEVEL Makefile | cut -d ' ' -f 3)
 [[ -z ${SUBLEVEL} ]] && echo "Error: no SUBLEVEL found in Makefile." && exit 1
 
-# check kernel version againt patchset branch
-PATCHDIR=$(dirname $0)/${VERSION}.${PATCHLEVEL}.${SUBLEVEL}
+# check kernel series againt patchset branch
+PATCHDIR=$(dirname $0)/${VERSION}.${PATCHLEVEL}
 [[ ! -d ${PATCHDIR} ]] \
-	&& echo "Error: patchset does not match kernel version" ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} \
+	&& echo "Error: patchset does not match kernel series" ${VERSION}.${PATCHLEVEL} \
+	&& exit 1
+
+# check release version against patch series tag
+RELEASE=$(git -C $(dirname $0) tag --list --sort=version:refname | tail -n 1)
+[[ ${RELEASE} != ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} ]] \
+	&& echo "Error: patchset does not match kernel release" ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} \
 	&& exit 1
 
 # find the list of patches to apply
