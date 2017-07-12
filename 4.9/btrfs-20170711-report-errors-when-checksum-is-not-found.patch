@@ -1,0 +1,35 @@
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: report errors when checksum is not found
+Date:   Tue, 11 Jul 2017 14:43:16 -0600
+
+When btrfs fails the checksum check, it'll fill the whole page with
+"1".
+
+However, if %csum_expected is 0 (which means there is no checksum), then
+for some unknown reason, we just pretend that the read is correct, so
+userspace would be confused about the dilemma that read is successful but
+getting a page with all content being "1".
+
+This can happen due to a bug in btrfs-convert.
+
+This fixes it by always returning errors if checksum doesn't match.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/inode.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index ef3c98c..8a4d8ee 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -3151,8 +3151,6 @@ static int __readpage_endio_check(struct inode *inode,
+ 	memset(kaddr + pgoff, 1, len);
+ 	flush_dcache_page(page);
+ 	kunmap_atomic(kaddr);
+-	if (csum_expected == 0)
+-		return 0;
+ 	return -EIO;
+ }
+ 
