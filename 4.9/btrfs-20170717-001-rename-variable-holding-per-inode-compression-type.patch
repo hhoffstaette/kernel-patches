@@ -1,0 +1,135 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH 1/4] btrfs: rename variable holding per-inode compression type
+Date:   Mon, 17 Jul 2017 20:46:03 +0200
+
+This is preparatory for separating inode compression requested by defrag
+and set via properties. This will fix a usability bug when defrag will
+reset compression type to NONE. If the file has compression set via
+property, it will not apply anymore (until next mount or reset through
+command line).
+
+We're going to fix that by adding another variable just for the defrag
+call and won't touch the property. The defrag will have higher priority
+when deciding whether to compress the data.
+
+[HH: backported to 4.9.x]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/btrfs_inode.h |  4 ++--
+ fs/btrfs/inode.c       | 10 +++++-----
+ fs/btrfs/ioctl.c       |  4 ++--
+ fs/btrfs/props.c       |  6 +++---
+ 4 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/fs/btrfs/btrfs_inode.h b/fs/btrfs/btrfs_inode.h
+index b8622e4d1744..0c9ba8b96782 100644
+--- a/fs/btrfs/btrfs_inode.h
++++ b/fs/btrfs/btrfs_inode.h
+@@ -179,9 +179,9 @@ struct btrfs_inode {
+ 	unsigned reserved_extents;
+ 
+ 	/*
+-	 * always compress this one file
++	 * Cached values if inode properties
+ 	 */
+-	unsigned force_compress;
++	unsigned prop_compress;		/* per-file compression algorithm */
+ 
+ 	struct btrfs_delayed_node *delayed_node;
+ 
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index eb495e956d53..ece5362e7aff 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -404,7 +404,7 @@ static inline int inode_need_compress(struct inode *inode)
+ 		return 0;
+ 	if (btrfs_test_opt(root->fs_info, COMPRESS) ||
+ 	    BTRFS_I(inode)->flags & BTRFS_INODE_COMPRESS ||
+-	    BTRFS_I(inode)->force_compress)
++	    BTRFS_I(inode)->prop_compress)
+ 		return 1;
+ 	return 0;
+ }
+@@ -511,8 +511,8 @@ static noinline void compress_file_range(struct inode *inode,
+ 			goto cont;
+ 		}
+ 
+-		if (BTRFS_I(inode)->force_compress)
+-			compress_type = BTRFS_I(inode)->force_compress;
++		if (BTRFS_I(inode)->prop_compress)
++			compress_type = BTRFS_I(inode)->prop_compress;
+ 
+ 		/*
+ 		 * we need to call clear_page_dirty_for_io on each
+@@ -645,7 +645,7 @@ static noinline void compress_file_range(struct inode *inode,
+ 
+ 		/* flag the file so we don't compress in the future */
+ 		if (!btrfs_test_opt(root->fs_info, FORCE_COMPRESS) &&
+-		    !(BTRFS_I(inode)->force_compress)) {
++		    !(BTRFS_I(inode)->prop_compress)) {
+ 			BTRFS_I(inode)->flags |= BTRFS_INODE_NOCOMPRESS;
+ 		}
+ 	}
+@@ -9402,7 +9402,7 @@ struct inode *btrfs_alloc_inode(struct super_block *sb)
+ 	ei->reserved_extents = 0;
+ 
+ 	ei->runtime_flags = 0;
+-	ei->force_compress = BTRFS_COMPRESS_NONE;
++	ei->prop_compress = BTRFS_COMPRESS_NONE;
+ 
+ 	ei->delayed_node = NULL;
+ 
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index fa1b78cf25f6..571392cbd64c 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -1402,7 +1402,7 @@ int btrfs_defrag_file(struct inode *inode, struct file *file,
+ 
+ 		inode_lock(inode);
+ 		if (range->flags & BTRFS_DEFRAG_RANGE_COMPRESS)
+-			BTRFS_I(inode)->force_compress = compress_type;
++			BTRFS_I(inode)->prop_compress = compress_type;
+ 		ret = cluster_pages_for_defrag(inode, pages, i, cluster);
+ 		if (ret < 0) {
+ 			inode_unlock(inode);
+@@ -1473,7 +1473,7 @@ int btrfs_defrag_file(struct inode *inode, struct file *file,
+ out_ra:
+ 	if (range->flags & BTRFS_DEFRAG_RANGE_COMPRESS) {
+ 		inode_lock(inode);
+-		BTRFS_I(inode)->force_compress = BTRFS_COMPRESS_NONE;
++		BTRFS_I(inode)->prop_compress = BTRFS_COMPRESS_NONE;
+ 		inode_unlock(inode);
+ 	}
+ 	if (!file)
+diff --git a/fs/btrfs/props.c b/fs/btrfs/props.c
+index 4b23ae5d0e5c..916f5cf9b292 100644
+--- a/fs/btrfs/props.c
++++ b/fs/btrfs/props.c
+@@ -403,7 +403,7 @@ static int prop_compression_apply(struct inode *inode,
+ 	if (len == 0) {
+ 		BTRFS_I(inode)->flags |= BTRFS_INODE_NOCOMPRESS;
+ 		BTRFS_I(inode)->flags &= ~BTRFS_INODE_COMPRESS;
+-		BTRFS_I(inode)->force_compress = BTRFS_COMPRESS_NONE;
++		BTRFS_I(inode)->prop_compress = BTRFS_COMPRESS_NONE;
+ 
+ 		return 0;
+ 	}
+@@ -417,14 +417,14 @@ static int prop_compression_apply(struct inode *inode,
+ 
+ 	BTRFS_I(inode)->flags &= ~BTRFS_INODE_NOCOMPRESS;
+ 	BTRFS_I(inode)->flags |= BTRFS_INODE_COMPRESS;
+-	BTRFS_I(inode)->force_compress = type;
++	BTRFS_I(inode)->prop_compress = type;
+ 
+ 	return 0;
+ }
+ 
+ static const char *prop_compression_extract(struct inode *inode)
+ {
+-	switch (BTRFS_I(inode)->force_compress) {
++	switch (BTRFS_I(inode)->prop_compress) {
+ 	case BTRFS_COMPRESS_ZLIB:
+ 		return "zlib";
+ 	case BTRFS_COMPRESS_LZO:
