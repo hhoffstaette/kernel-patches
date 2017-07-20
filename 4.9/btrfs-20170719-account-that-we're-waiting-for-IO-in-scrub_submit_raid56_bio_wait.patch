@@ -1,0 +1,27 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH] btrfs: account that we're waiting for IO in scrub_submit_raid56_bio_wait
+Date:   Wed, 19 Jul 2017 19:56:40 +0200
+
+Correctly account for IO when waiting for a submitted bio in scrub. This
+only for the accounting purposes and should not change other behaviour.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/scrub.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index 0cebeb5eb5d0..0e6daf0582a1 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -1704,7 +1704,7 @@ static int scrub_submit_raid56_bio_wait(struct btrfs_fs_info *fs_info,
+ 	if (ret)
+ 		return ret;
+ 
+-	wait_for_completion(&done.event);
++	wait_for_completion_io(&done.event);
+ 	if (done.error)
+ 		return -EIO;
+ 
