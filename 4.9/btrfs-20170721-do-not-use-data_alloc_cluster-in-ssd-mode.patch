@@ -1,0 +1,252 @@
+From: Hans van Kranenburg <hans.van.kranenburg@mendix.com>
+To: linux-btrfs@vger.kernel.org
+Date: Fri, 21 Jul 2017 13:47:11 +0200
+Subject: Btrfs: Do not use data_alloc_cluster in ssd mode
+
+In the first year of btrfs development, around early 2008, btrfs
+gained a mount option which enables specific functionality for
+filesystems on solid state devices. The first occurance of this
+functionality is in commit e18e4809, labeled "Add mount -o ssd, which
+includes optimizations for seek free storage".
+
+The effect on allocating free space for doing (data) writes is to
+'cluster' writes together, writing them out in contiguous space, as
+opposed to a 'tetris' way of putting all separate writes into any free
+space fragment that fits (which is what the -o nossd behaviour does).
+
+A somewhat simplified explanation of what happens is that, when for
+example, the 'cluster' size is set to 2MiB, when we do some writes, the
+data allocator will search for a free space block that is 2MiB big, and
+put the writes in there. The ssd mode itself might allow a 2MiB cluster
+to be composed of multiple free space extents with some existing data in
+between, while the additional ssd_spread mount option kills off this
+option and requires fully free space.
+
+The idea behind this is (commit 536ac8ae): "The [...] clusters make it
+more likely a given IO will completely overwrite the ssd block, so it
+doesn't have to do an internal rwm cycle."; ssd block meaning nand erase
+block. So, effectively this means applying a "locality based algorithm"
+and trying to outsmart the actual ssd.
+
+Since then, various changes have been made to the involved code, but the
+basic idea is still present, and gets activated whenever the ssd mount
+option is active. This also happens by default, when the rotational flag
+as seen at /sys/block/<device>/queue/rotational is set to 0.
+
+    However, there's a number of problems with this approach.
+
+    First, what the optimization is trying to do is outsmart the ssd by
+assuming there is a relation between the physical address space of the
+block device as seen by btrfs and the actual physical storage of the
+ssd, and then adjusting data placement. However, since the introduction
+of the Flash Translation Layer (FTL) which is a part of the internal
+controller of an ssd, these attempts are futile. The use of good quality
+FTL in consumer ssd products might have been limited in 2008, but this
+situation has changed drastically soon after that time. Today, even the
+flash memory in your automatic cat feeding machine or your grandma's
+wheelchair has a full featured one.
+
+Second, the behaviour as described above results in the filesystem being
+filled up with badly fragmented free space extents because of relatively
+small pieces of space that are freed up by deletes, but not selected
+again as part of a 'cluster'. Since the algorithm prefers allocating a
+new chunk over going back to tetris mode, the end result is a filesystem
+in which all raw space is allocated, but which is composed of
+underutilized chunks with a 'shotgun blast' pattern of fragmented free
+space. Usually, the next problematic thing that happens is the
+filesystem wanting to allocate new space for metadata, which causes the
+filesystem to fail in spectacular ways.
+
+Third, the default mount options you get for an ssd ('ssd' mode enabled,
+'discard' not enabled), in combination with spreading out writes over
+the full address space and ignoring freed up space leads to worst case
+behaviour in providing information to the ssd itself, since it will
+never learn that all the free space left behind is actually free.  There
+are two ways to let an ssd know previously written data does not have to
+be preserved, which are sending explicit signals using discard or
+fstrim, or by simply overwriting the space with new data.  The worst
+case behaviour is the btrfs ssd_spread mount option in combination with
+not having discard enabled. It has a side effect of minimizing the reuse
+of free space previously written in.
+
+Fourth, the rotational flag in /sys/ does not reliably indicate if the
+device is a locally attached ssd. For example, iSCSI or NBD displays as
+non-rotational, while a loop device on an ssd shows up as rotational.
+
+The combination of the second and third problem effectively means that
+despite all the good intentions, the btrfs ssd mode reliably causes the
+ssd hardware and the filesystem structures and performance to be choked
+to death. The clickbait version of the title of this story would have
+been "Btrfs ssd optimizations condered harmful for ssds".
+
+The current nossd 'tetris' mode (even still without discard) allows a
+pattern of overwriting much more previously used space, causing many
+more implicit discards to happen because of the overwrite information
+the ssd gets. The actual location in the physical address space, as seen
+from the point of view of btrfs is irrelevant, because the actual writes
+to the low level flash are reordered anyway thanks to the FTL.
+
+    So what now...?
+
+The changes in here do the following:
+
+1. Throw out the current ssd_spread behaviour.
+2. Move the current ssd behaviour to the ssd_spread option.
+3. Make ssd mode data allocation identical to tetris mode, like nossd.
+4. Adjust and clean up filesystem mount messages so that we can easily
+identify if a kernel has this patch applied or not, when providing
+support to end users.
+
+Instead of directly cutting out all code related to the data cluster, it
+makes sense to take a gradual approach and allow users who are still
+able to find a valid reason to prefer the current ssd mode the means to
+do so by specifiying the additional ssd_spread option.
+
+Since there are other uses of the ssd mode, we keep the difference
+between nossd and ssd mode. However, the usage of the rotational
+attribute warrants some reconsideration in the future.
+
+Notes for whoever wants to backport this patch on their 4.9 LTS kernel:
+* First apply commit 8a83665a "btrfs: drop the nossd flag when
+  remounting with -o ssd", or fixup the differences manually.
+* The rest of the conflicts are because of the fs_info refactoring. So,
+  for example, instead of using fs_info, it's root->fs_info in
+  extent-tree.c
+
+[HH: backmassaged for 4.9.x++]
+Signed-off-by: Hans van Kranenburg <hans.van.kranenburg@mendix.com>
+---
+ fs/btrfs/ctree.h            |  4 ++--
+ fs/btrfs/disk-io.c          |  6 ++----
+ fs/btrfs/extent-tree.c      | 11 ++++++-----
+ fs/btrfs/free-space-cache.c | 11 ++++-------
+ fs/btrfs/super.c            | 16 +++++++++-------
+ 5 files changed, 23 insertions(+), 25 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 4f8f75d9e839..b091dd3f5b38 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -472,7 +472,7 @@ struct btrfs_block_rsv {
+ /*
+  * free clusters are used to claim free space in relatively large chunks,
+  * allowing us to do less seeky writes.  They are used for all metadata
+- * allocations and data allocations in ssd mode.
++ * allocations and data allocations in ssd_spread mode.
+  */
+ struct btrfs_free_cluster {
+ 	spinlock_t lock;
+@@ -976,7 +976,7 @@ struct btrfs_fs_info {
+ 
+ 	struct reloc_control *reloc_ctl;
+ 
+-	/* data_alloc_cluster is only used in ssd mode */
++	/* data_alloc_cluster is only used in ssd_spread mode */
+ 	struct btrfs_free_cluster data_alloc_cluster;
+ 
+ 	/* all metadata allocations go through this cluster */
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 5f678dcb20e6..97ede2de24a3 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -3061,11 +3061,9 @@ int open_ctree(struct super_block *sb,
+ 	if (IS_ERR(fs_info->transaction_kthread))
+ 		goto fail_cleaner;
+ 
+-	if (!btrfs_test_opt(tree_root->fs_info, SSD) &&
+-	    !btrfs_test_opt(tree_root->fs_info, NOSSD) &&
++	if (!btrfs_test_opt(tree_root->fs_info, NOSSD) &&
+ 	    !fs_info->fs_devices->rotating) {
+-		btrfs_info(fs_info, "detected SSD devices, enabling SSD mode");
+-		btrfs_set_opt(fs_info->mount_opt, SSD);
++		btrfs_set_and_info(fs_info, SSD, "enabling ssd optimizations");
+ 	}
+ 
+ 	/*
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 33d979e9ea2a..cb1855fede41 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -6609,19 +6609,20 @@ fetch_cluster_info(struct btrfs_root *root, struct btrfs_space_info *space_info,
+ 		   u64 *empty_cluster)
+ {
+ 	struct btrfs_free_cluster *ret = NULL;
+-	bool ssd = btrfs_test_opt(root->fs_info, SSD);
+ 
+ 	*empty_cluster = 0;
+ 	if (btrfs_mixed_space_info(space_info))
+ 		return ret;
+ 
+-	if (ssd)
+-		*empty_cluster = SZ_2M;
+ 	if (space_info->flags & BTRFS_BLOCK_GROUP_METADATA) {
+ 		ret = &root->fs_info->meta_alloc_cluster;
+-		if (!ssd)
++		if (btrfs_test_opt(root->fs_info, SSD))
++			*empty_cluster = SZ_2M;
++		else
+ 			*empty_cluster = SZ_64K;
+-	} else if ((space_info->flags & BTRFS_BLOCK_GROUP_DATA) && ssd) {
++	} else if ((space_info->flags & BTRFS_BLOCK_GROUP_DATA) &&
++		   btrfs_test_opt(root->fs_info, SSD_SPREAD)) {
++		*empty_cluster = SZ_2M;
+ 		ret = &root->fs_info->data_alloc_cluster;
+ 	}
+ 
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index c5e6180cdb8c..8ebbb182ba94 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -3034,14 +3034,11 @@ int btrfs_find_space_cluster(struct btrfs_fs_info *fs_info,
+ 	int ret;
+ 
+ 	/*
+-	 * Choose the minimum extent size we'll require for this
+-	 * cluster.  For SSD_SPREAD, don't allow any fragmentation.
+-	 * For metadata, allow allocates with smaller extents.  For
+-	 * data, keep it dense.
++	 * Choose the minimum extent size we'll require for this cluster.  For
++	 * metadata, allow allocates with smaller extents.  For data, keep it
++	 * dense.
+ 	 */
+-	if (btrfs_test_opt(root->fs_info, SSD_SPREAD)) {
+-		cont1_bytes = min_bytes = bytes + empty_size;
+-	} else if (block_group->flags & BTRFS_BLOCK_GROUP_METADATA) {
++	if (block_group->flags & BTRFS_BLOCK_GROUP_METADATA) {
+ 		cont1_bytes = bytes;
+ 		min_bytes = block_group->sectorsize;
+ 	} else {
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 4f1cdd5058f1..01ebc93f994a 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -548,20 +548,22 @@ int btrfs_parse_options(struct btrfs_fs_info *info, char *options,
+ 			break;
+ 		case Opt_ssd:
+ 			btrfs_set_and_info(info, SSD,
+-					   "use ssd allocation scheme");
++					   "enabling ssd optimizations");
+ 			btrfs_clear_opt(info->mount_opt, NOSSD);
+ 			break;
+ 		case Opt_ssd_spread:
++			btrfs_set_and_info(info, SSD,
++					   "enabling ssd optimizations");
+ 			btrfs_set_and_info(info, SSD_SPREAD,
+-					   "use spread ssd allocation scheme");
+-			btrfs_set_opt(info->mount_opt, SSD);
++					   "using legacy ssd allocation scheme");
+ 			btrfs_clear_opt(info->mount_opt, NOSSD);
+ 			break;
+ 		case Opt_nossd:
+-			btrfs_set_and_info(info, NOSSD,
+-					     "not using ssd allocation scheme");
+-			btrfs_clear_opt(info->mount_opt, SSD);
+-			btrfs_clear_opt(info->mount_opt, SSD_SPREAD);
++			btrfs_set_opt(info->mount_opt, NOSSD);
++			btrfs_clear_and_info(info, SSD,
++					     "not using ssd optimizations");
++			btrfs_clear_and_info(info, SSD_SPREAD,
++					     "not using legacy ssd allocation scheme");
+ 			break;
+ 		case Opt_barrier:
+ 			btrfs_clear_and_info(info, NOBARRIER,
