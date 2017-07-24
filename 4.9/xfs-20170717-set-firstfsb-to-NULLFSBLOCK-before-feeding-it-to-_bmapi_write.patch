@@ -1,0 +1,55 @@
+From 4c1a67bd3606540b9b42caff34a1d5cd94b1cf65 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Mon, 17 Jul 2017 14:30:51 -0700
+Subject: xfs: set firstfsb to NULLFSBLOCK before feeding it to _bmapi_write
+
+We must initialize the firstfsb parameter to _bmapi_write so that it
+doesn't incorrectly treat stack garbage as a restriction on which AGs
+it can search for free space.
+
+[HH: backported to 4.9.x]
+Fixes-coverity-id: 1402025
+Fixes-coverity-id: 1415167
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+---
+ fs/xfs/libxfs/xfs_bmap.c | 9 +++++++++
+ fs/xfs/xfs_reflink.c     | 2 +-
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
+index 0a98807..ee118ce 100644
+--- a/fs/xfs/libxfs/xfs_bmap.c
++++ b/fs/xfs/libxfs/xfs_bmap.c
+@@ -6499,6 +6499,15 @@ xfs_bmap_finish_one(
+ 	bmap.br_blockcount = blockcount;
+ 	bmap.br_state = state;
+ 
++	/*
++	 * firstfsb is tied to the transaction lifetime and is used to
++	 * ensure correct AG locking order and schedule work item
++	 * continuations.  XFS_BUI_MAX_FAST_EXTENTS (== 1) restricts us
++	 * to only making one bmap call per transaction, so it should
++	 * be safe to have it as a local variable here.
++	 */
++	firstfsb = NULLFSBLOCK;
++
+ 	trace_xfs_bmap_deferred(tp->t_mountp,
+ 			XFS_FSB_TO_AGNO(tp->t_mountp, startblock), type,
+ 			XFS_FSB_TO_AGBNO(tp->t_mountp, startblock),
+diff --git a/fs/xfs/xfs_reflink.c b/fs/xfs/xfs_reflink.c
+index ab2270a..d9b3d57 100644
+--- a/fs/xfs/xfs_reflink.c
++++ b/fs/xfs/xfs_reflink.c
+@@ -329,7 +329,7 @@ xfs_reflink_convert_cow_extent(
+ 	struct xfs_defer_ops		*dfops)
+ {
+ 	struct xfs_bmbt_irec		irec = *imap;
+-	xfs_fsblock_t			first_block;
++	xfs_fsblock_t			first_block = NULLFSBLOCK;
+ 	int				nimaps = 1;
+ 
+ 	if (imap->br_state == XFS_EXT_NORM)
+-- 
+cgit v1.1
+
