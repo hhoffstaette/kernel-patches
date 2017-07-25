@@ -1,0 +1,18 @@
+
+Stable-4.9.40 introduced a new reference to the ktime union, which we removed.
+Clean it up as well.
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+diff -rup linux-4.9.40/kernel/time/alarmtimer.c linux-4.9.40.new/kernel/time/alarmtimer.c
+--- linux-4.9.40/kernel/time/alarmtimer.c	2017-07-25 22:03:37.400685776 +0200
++++ linux-4.9.40.new/kernel/time/alarmtimer.c	2017-07-25 22:04:22.094383014 +0200
+@@ -662,7 +662,7 @@ static int alarm_timer_set(struct k_itim
+ 	 * Rate limit to the tick as a hot fix to prevent DOS. Will be
+ 	 * mopped up later.
+ 	 */
+-	if (timr->it.alarm.interval.tv64 &&
++	if (timr->it.alarm.interval &&
+ 			ktime_to_ns(timr->it.alarm.interval) < TICK_NSEC)
+ 		timr->it.alarm.interval = ktime_set(0, TICK_NSEC);
+ 
