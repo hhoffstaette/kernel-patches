@@ -1,9 +1,32 @@
-From: Hans van Kranenburg <hans.van.kranenburg@mendix.com>
-To: linux-btrfs@vger.kernel.org
-Date: Fri, 21 Jul 2017 13:47:11 +0200
-Subject: Btrfs: Do not use data_alloc_cluster in ssd mode
+From:   Hans van Kranenburg <hans.van.kranenburg@mendix.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH v2] Btrfs: Do not use data_alloc_cluster in ssd mode
+Date:   Wed, 26 Jul 2017 21:59:25 +0200
 
-In the first year of btrfs development, around early 2008, btrfs
+    The purpose of this patch is providing a band aid to improve the
+'out of the box' behaviour of btrfs for disks that are detected as being
+an ssd.  In a general purpose mixed workload scenario, the current ssd
+mode causes overallocation of available raw disk space for data, while
+leaving behind increasing amounts of unused fragmented free space. This
+situation leads to early ENOSPC problems which are harming user
+experience and adoption of btrfs as a general purpose filesystem.
+
+This patch modifies the data extent allocation behaviour of the ssd mode
+to make it behave identical to nossd mode.  The metadata behaviour and
+additional ssd_spread option stay untouched so far.
+
+Recommendations for future development are to reconsider the current
+oversimplified nossd / ssd distinction and the broken detection
+mechanism based on the rotational attribute in sysfs and provide
+experienced users with a more flexible way to choose allocator behaviour
+for data and metadata, optimized for certain use cases, while keeping
+sane 'out of the box' default settings.  The internals of the current
+btrfs code have more potential than what currently gets exposed to the
+user to choose from.
+
+    The SSD story...
+
+    In the first year of btrfs development, around early 2008, btrfs
 gained a mount option which enables specific functionality for
 filesystems on solid state devices. The first occurance of this
 functionality is in commit e18e4809, labeled "Add mount -o ssd, which
@@ -77,7 +100,7 @@ The combination of the second and third problem effectively means that
 despite all the good intentions, the btrfs ssd mode reliably causes the
 ssd hardware and the filesystem structures and performance to be choked
 to death. The clickbait version of the title of this story would have
-been "Btrfs ssd optimizations condered harmful for ssds".
+been "Btrfs ssd optimizations considered harmful for ssds".
 
 The current nossd 'tetris' mode (even still without discard) allows a
 pattern of overwriting much more previously used space, causing many
@@ -86,42 +109,35 @@ the ssd gets. The actual location in the physical address space, as seen
 from the point of view of btrfs is irrelevant, because the actual writes
 to the low level flash are reordered anyway thanks to the FTL.
 
-    So what now...?
+    Changes made in the code
 
-The changes in here do the following:
-
-1. Throw out the current ssd_spread behaviour.
-2. Move the current ssd behaviour to the ssd_spread option.
-3. Make ssd mode data allocation identical to tetris mode, like nossd.
-4. Adjust and clean up filesystem mount messages so that we can easily
+1. Make ssd mode data allocation identical to tetris mode, like nossd.
+2. Adjust and clean up filesystem mount messages so that we can easily
 identify if a kernel has this patch applied or not, when providing
-support to end users.
+support to end users. Also, make better use of the *_and_info helpers to
+only trigger messages on actual state changes.
 
-Instead of directly cutting out all code related to the data cluster, it
-makes sense to take a gradual approach and allow users who are still
-able to find a valid reason to prefer the current ssd mode the means to
-do so by specifiying the additional ssd_spread option.
+    Backporting notes
 
-Since there are other uses of the ssd mode, we keep the difference
-between nossd and ssd mode. However, the usage of the rotational
-attribute warrants some reconsideration in the future.
-
-Notes for whoever wants to backport this patch on their 4.9 LTS kernel:
-* First apply commit 8a83665a "btrfs: drop the nossd flag when
+Notes for whoever wants to backport this patch to their 4.9 LTS kernel:
+* First apply commit 951e7966 "btrfs: drop the nossd flag when
   remounting with -o ssd", or fixup the differences manually.
 * The rest of the conflicts are because of the fs_info refactoring. So,
   for example, instead of using fs_info, it's root->fs_info in
   extent-tree.c
 
+  Changes since v1:
+* Keep ssd_spread behaviour unchanged
+* Add summary at the beginning of the commit message
+
 [HH: backmassaged for 4.9.x++]
 Signed-off-by: Hans van Kranenburg <hans.van.kranenburg@mendix.com>
 ---
- fs/btrfs/ctree.h            |  4 ++--
- fs/btrfs/disk-io.c          |  6 ++----
- fs/btrfs/extent-tree.c      | 11 ++++++-----
- fs/btrfs/free-space-cache.c | 11 ++++-------
- fs/btrfs/super.c            | 16 +++++++++-------
- 5 files changed, 23 insertions(+), 25 deletions(-)
+ fs/btrfs/ctree.h       |  4 ++--
+ fs/btrfs/disk-io.c     |  6 ++----
+ fs/btrfs/extent-tree.c | 11 ++++++-----
+ fs/btrfs/super.c       | 16 +++++++++-------
+ 4 files changed, 19 insertions(+), 18 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
 index 4f8f75d9e839..b091dd3f5b38 100644
@@ -193,31 +209,8 @@ index 33d979e9ea2a..cb1855fede41 100644
  		ret = &root->fs_info->data_alloc_cluster;
  	}
  
-diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
-index c5e6180cdb8c..8ebbb182ba94 100644
---- a/fs/btrfs/free-space-cache.c
-+++ b/fs/btrfs/free-space-cache.c
-@@ -3034,14 +3034,11 @@ int btrfs_find_space_cluster(struct btrfs_fs_info *fs_info,
- 	int ret;
- 
- 	/*
--	 * Choose the minimum extent size we'll require for this
--	 * cluster.  For SSD_SPREAD, don't allow any fragmentation.
--	 * For metadata, allow allocates with smaller extents.  For
--	 * data, keep it dense.
-+	 * Choose the minimum extent size we'll require for this cluster.  For
-+	 * metadata, allow allocates with smaller extents.  For data, keep it
-+	 * dense.
- 	 */
--	if (btrfs_test_opt(root->fs_info, SSD_SPREAD)) {
--		cont1_bytes = min_bytes = bytes + empty_size;
--	} else if (block_group->flags & BTRFS_BLOCK_GROUP_METADATA) {
-+	if (block_group->flags & BTRFS_BLOCK_GROUP_METADATA) {
- 		cont1_bytes = bytes;
- 		min_bytes = block_group->sectorsize;
- 	} else {
 diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
-index 4f1cdd5058f1..01ebc93f994a 100644
+index 4f1cdd5058f1..63a3bcce6177 100644
 --- a/fs/btrfs/super.c
 +++ b/fs/btrfs/super.c
 @@ -548,20 +548,22 @@ int btrfs_parse_options(struct btrfs_fs_info *info, char *options,
@@ -234,7 +227,7 @@ index 4f1cdd5058f1..01ebc93f994a 100644
  			btrfs_set_and_info(info, SSD_SPREAD,
 -					   "use spread ssd allocation scheme");
 -			btrfs_set_opt(info->mount_opt, SSD);
-+					   "using legacy ssd allocation scheme");
++					   "using spread ssd allocation scheme");
  			btrfs_clear_opt(info->mount_opt, NOSSD);
  			break;
  		case Opt_nossd:
@@ -246,7 +239,7 @@ index 4f1cdd5058f1..01ebc93f994a 100644
 +			btrfs_clear_and_info(info, SSD,
 +					     "not using ssd optimizations");
 +			btrfs_clear_and_info(info, SSD_SPREAD,
-+					     "not using legacy ssd allocation scheme");
++					     "not using spread ssd allocation scheme");
  			break;
  		case Opt_barrier:
  			btrfs_clear_and_info(info, NOBARRIER,
