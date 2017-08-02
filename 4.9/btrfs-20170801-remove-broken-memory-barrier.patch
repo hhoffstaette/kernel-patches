@@ -1,0 +1,33 @@
+From:   Nikolay Borisov <nborisov@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     Nikolay Borisov <nborisov@suse.com>
+Subject: [PATCH] btrfs: remove broken memory barrier
+Date:   Tue,  1 Aug 2017 18:25:56 +0300
+
+Commit 38851cc19adb ("Btrfs: implement unlocked dio write") implemented
+unlocked dio write, allowing multiple dio writers to write to non-overlapping,
+and non-eof-extending regions. In doing so it also introduced a broken memory
+barrier. It is broken due to 2 things:
+
+1. Memory barriers _MUST_ always be paired, this is clearly not the case here
+
+2. Checkpatch actually produces a warning if a memory barrier is introduced that
+doesn't have a comment explaining how it's being paired.
+
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+---
+ fs/btrfs/inode.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 95c212037095..5e48d2c10152 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -8731,7 +8731,6 @@ static ssize_t btrfs_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
+ 		return 0;
+ 
+ 	inode_dio_begin(inode);
+-	smp_mb__after_atomic();
+ 
+ 	/*
+ 	 * The generic stuff only does filemap_write_and_wait_range, which
