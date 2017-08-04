@@ -1,0 +1,37 @@
+From: Filipe Manana <fdmanana@kernel.org>
+To: linux-btrfs@vger.kernel.org
+Subject: Btrfs: avoid unnecessarily locking inode when clearing a range
+Date: Thu, 27 Jul 2017 19:52:55 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+If the range being cleared was not marked for defrag and we are not
+about to clear the range from the defrag status, we don't need to
+lock and unlock the inode.
+
+[HH: backported to 4.9.x]
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Reviewed-by: Chris Mason <clm@fb.com>
+---
+ fs/btrfs/inode.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index eb495e956d53..51c45c0a8553 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -1797,10 +1797,11 @@ static void btrfs_clear_bit_hook(void *private_data,
+ 	u64 num_extents;
+ 	enum btrfs_metadata_reserve_type reserve_type = BTRFS_RESERVE_NORMAL;
+ 
+-	spin_lock(&BTRFS_I(inode)->lock);
+-	if ((state->state & EXTENT_DEFRAG) && (*bits & EXTENT_DEFRAG))
++	if ((state->state & EXTENT_DEFRAG) && (*bits & EXTENT_DEFRAG)) {
++		spin_lock(&BTRFS_I(inode)->lock);
+ 		BTRFS_I(inode)->defrag_bytes -= len;
+-	spin_unlock(&BTRFS_I(inode)->lock);
++		spin_unlock(&BTRFS_I(inode)->lock);
++	}
+ 
+ 	/*
+ 	 * set_bit and clear bit hooks normally require _irqsave/restore
