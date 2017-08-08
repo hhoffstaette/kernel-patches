@@ -1,0 +1,31 @@
+From 4e5620132144666ab41fc2799fbc055830187b7e Mon Sep 17 00:00:00 2001
+From: Maninder Singh <maninder1.s@samsung.com>
+Date: Sun, 6 Aug 2017 01:33:07 -0400
+Subject: ext4: fix copy paste error in ext4_swap_extents()
+
+This bug was found by a static code checker tool for copy paste
+problems.
+
+Signed-off-by: Maninder Singh <maninder1.s@samsung.com>
+Signed-off-by: Vaneet Narang <v.narang@samsung.com>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ fs/ext4/extents.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/ext4/extents.c b/fs/ext4/extents.c
+index 230ca74..97f0fd0 100644
+--- a/fs/ext4/extents.c
++++ b/fs/ext4/extents.c
+@@ -5836,7 +5836,7 @@ ext4_swap_extents(handle_t *handle, struct inode *inode1,
+ 			if (e1_blk > lblk1)
+ 				next1 = e1_blk;
+ 			if (e2_blk > lblk2)
+-				next2 = e1_blk;
++				next2 = e2_blk;
+ 			/* Do we have something to swap */
+ 			if (next1 == EXT_MAX_BLOCKS || next2 == EXT_MAX_BLOCKS)
+ 				goto finish;
+-- 
+cgit v1.1
+
