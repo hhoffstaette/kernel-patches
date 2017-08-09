@@ -22,6 +22,7 @@ increasing for same connection quadruple, i.e. PAWS will still work.
 
 Includes fixes from Eric Dumazet.
 
+[HH: updated for 4.9.42]
 Signed-off-by: Florian Westphal <fw@strlen.de>
 Acked-by: Eric Dumazet <edumazet@google.com>
 Acked-by: Yuchung Cheng <ycheng@google.com>
@@ -131,9 +132,9 @@ index 0dc6286..3e88467 100644
 --- a/net/ipv4/syncookies.c
 +++ b/net/ipv4/syncookies.c
 @@ -334,6 +334,7 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb)
- 	treq = tcp_rsk(req);
  	treq->rcv_isn		= ntohl(th->seq) - 1;
  	treq->snt_isn		= cookie;
+ 	treq->txhash		= net_tx_rndhash();
 +	treq->ts_off		= 0;
  	req->mss		= mss;
  	ireq->ir_num		= ntohs(th->dest);
@@ -255,9 +256,9 @@ index 97830a6..a4d4976 100644
 --- a/net/ipv6/syncookies.c
 +++ b/net/ipv6/syncookies.c
 @@ -209,6 +209,7 @@ struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb)
- 	treq->snt_synack.v64	= 0;
  	treq->rcv_isn = ntohl(th->seq) - 1;
  	treq->snt_isn = cookie;
+ 	treq->txhash = net_tx_rndhash();
 +	treq->ts_off = 0;
  
  	/*

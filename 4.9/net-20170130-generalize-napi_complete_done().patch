@@ -1572,9 +1572,9 @@ index 5795213..1073b27 100644
  	if (work_done < budget) {
 -		napi_complete(napi);
 +		napi_complete_done(napi, work_done);
- 		xenvif_napi_schedule_or_enable_events(queue);
- 	}
- 
+ 		/* If the queue is rate-limited, it shall be
+ 		 * rescheduled in the timer callback.
+ 		 */
 diff --git a/drivers/net/xen-netfront.c b/drivers/net/xen-netfront.c
 index 2c7c29f..cf82b5b 100644
 --- a/drivers/net/xen-netfront.c

@@ -26,6 +26,7 @@ discussed in IETF 97.
 
 [1] https://www.ietf.org/proceedings/97/slides/slides-97-tcpm-tcp-options-for-low-latency-00.pdf
 
+[HH: small context fix for 4.9.42]
 Signed-off-by: Eric Dumazet <edumazet@google.com>
 Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
 Signed-off-by: David S. Miller <davem@davemloft.net>
@@ -1063,7 +1064,7 @@ index 5abc369..97182335 100644
 +	treq->snt_synack	= 0;
  	treq->rcv_isn = ntohl(th->seq) - 1;
  	treq->snt_isn = cookie;
- 	treq->ts_off = 0;
+ 	treq->txhash = net_tx_rndhash();
 diff --git a/net/ipv6/tcp_ipv6.c b/net/ipv6/tcp_ipv6.c
 index 4f4310a..233edfa 100644
 --- a/net/ipv6/tcp_ipv6.c
