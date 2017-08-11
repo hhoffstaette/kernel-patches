@@ -9,6 +9,7 @@ tp->snd_cwnd_stamp.
 tcp_time_stamp will soon be a litle bit more expensive
 than simply reading 'jiffies'.
 
+[HH: small fixup for 4.9.43]
 Signed-off-by: Eric Dumazet <edumazet@google.com>
 Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
 Signed-off-by: David S. Miller <davem@davemloft.net>
@@ -50,8 +51,8 @@ index c0b3f90..6a15c9b 100644
  }
  
 @@ -2520,7 +2520,7 @@ static inline void tcp_end_cwnd_reduction(struct sock *sk)
- 	if (inet_csk(sk)->icsk_ca_state == TCP_CA_CWR ||
- 	    (tp->undo_marker && tp->snd_ssthresh < TCP_INFINITE_SSTHRESH)) {
+ 	if (tp->snd_ssthresh < TCP_INFINITE_SSTHRESH &&
+ 	    (inet_csk(sk)->icsk_ca_state == TCP_CA_CWR || tp->undo_marker)) {
  		tp->snd_cwnd = tp->snd_ssthresh;
 -		tp->snd_cwnd_stamp = tcp_time_stamp;
 +		tp->snd_cwnd_stamp = tcp_jiffies32;
