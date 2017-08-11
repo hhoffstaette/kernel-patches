@@ -1,9 +1,8 @@
-Subject: [PATCH 3/3] xfs: don't leak quotacheck dquots when cow recovery fails
+Date:   Fri, 11 Aug 2017 12:48:44 -0700
 From:   "Darrick J. Wong" <darrick.wong@oracle.com>
 To:     linux-xfs@vger.kernel.org
-Date:   Wed, 09 Aug 2017 22:23:58 -0700
-
-From: Darrick J. Wong <darrick.wong@oracle.com>
+Cc:     Christoph Hellwig <hch@infradead.org>
+Subject: [PATCH v3 3/3] xfs: don't leak quotacheck dquots when cow recovery fails
 
 If we fail a mount on account of cow recovery errors, it's possible that
 a previous quotacheck left some dquots in memory.  The bailout clause of
@@ -11,22 +10,22 @@ xfs_mountfs forgets to purge these, and so we leak them.  Fix that.
 
 Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
 ---
-v2: unmount quotas, then free all the quota information
+v3: move call to the same place as it is in unmountfs
+v2: move call below quota inode removal
 ---
  fs/xfs/xfs_mount.c |    2 ++
  1 file changed, 2 insertions(+)
 
-
 diff --git a/fs/xfs/xfs_mount.c b/fs/xfs/xfs_mount.c
-index 8da5155..d50f4a7 100644
+index d63a367..a46c9d7 100644
 --- a/fs/xfs/xfs_mount.c
 +++ b/fs/xfs/xfs_mount.c
-@@ -1057,6 +1057,8 @@ xfs_mountfs(
- 	xfs_fs_unreserve_ag_blocks(mp);
-  out_quota:
- 	xfs_qm_unmount_quotas(mp);
+@@ -1034,6 +1034,8 @@ xfs_mountfs(
+ 	IRELE(rip);
+ 	cancel_delayed_work_sync(&mp->m_reclaim_work);
+ 	xfs_reclaim_inodes(mp, SYNC_WAIT);
 +	/* Clean out dquots that might be in memory after quotacheck. */
 +	xfs_qm_unmount(mp);
-  out_rtunmount:
- 	xfs_rtunmount_inodes(mp);
-  out_rele_rip:
+  out_log_dealloc:
+ 	mp->m_flags |= XFS_MOUNT_UNMOUNTING;
+ 	xfs_log_mount_cancel(mp);
