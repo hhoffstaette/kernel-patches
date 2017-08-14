@@ -1,7 +1,7 @@
 From:   Carlos Maiolino <cmaiolino@redhat.com>
 To:     linux-xfs@vger.kernel.org
-Subject: [PATCH V2] Stop searching for free slots in an inode chunk when there are none
-Date:   Mon,  7 Aug 2017 12:17:10 +0200
+Subject: [PATCH] Stop searching for free slots in an inode chunk when there are none
+Date:   Mon, 14 Aug 2017 12:53:49 +0200
 
 In a filesystem without finobt, the Space manager selects an AG to alloc a new
 inode, where xfs_dialloc_ag_inobt() will search the AG for the free slot chunk.
@@ -10,7 +10,7 @@ When the new inode is in the samge AG as its parent, the btree will be searched
 starting on the parent's record, and then retried from the top if no slot is
 available beyond the parent's record.
 
-To exit this loop though, xfs_dialloc_ag_inobt(), relies on the fact that the
+To exit this loop though, xfs_dialloc_ag_inobt() relies on the fact that the
 btree must have a free slot available, once its callers relied on the
 agi->freecount when deciding how/where to allocate this new inode.
 
@@ -21,17 +21,26 @@ Add a way to stop the loop when a free slot is not found in the btree, making
 the function to fall into the whole AG scan which will then, be able to detect
 the corruption and shut the filesystem down.
 
+As pointed by Brian, this might impact performance, giving the fact we
+don't reset the search distance anymore when we reach the end of the
+tree, giving it fewer tries before falling back to the whole AG search, but
+it will only affect searches that start within 10 records to the end of the tree.
+
 Signed-off-by: Carlos Maiolino <cmaiolino@redhat.com>
 ---
+Changelog:
 
-V2: Use searchdistance variable to stop the infinite loop instead of adding a
-    new mechanism.
+	V3: - Move searchdistance state saving out of the while loop
+	    - Remove newino goto label
 
- fs/xfs/libxfs/xfs_ialloc.c | 34 ++++++++++++++++++----------------
- 1 file changed, 18 insertions(+), 16 deletions(-)
+	V2: - Use searchdistance variable to stop the infinite loop
+	      instead of adding a new mechanism
+
+ fs/xfs/libxfs/xfs_ialloc.c | 55 +++++++++++++++++++++++-----------------------
+ 1 file changed, 27 insertions(+), 28 deletions(-)
 
 diff --git a/fs/xfs/libxfs/xfs_ialloc.c b/fs/xfs/libxfs/xfs_ialloc.c
-index d41ade5d293e..8e535290390d 100644
+index d41ade5d293e..0e1cc51f05a1 100644
 --- a/fs/xfs/libxfs/xfs_ialloc.c
 +++ b/fs/xfs/libxfs/xfs_ialloc.c
 @@ -1123,6 +1123,7 @@ xfs_dialloc_ag_inobt(
@@ -50,7 +59,7 @@ index d41ade5d293e..8e535290390d 100644
  
  		error = xfs_inobt_lookup(cur, pagino, XFS_LOOKUP_LE, &i);
  		if (error)
-@@ -1210,10 +1210,10 @@ xfs_dialloc_ag_inobt(
+@@ -1210,21 +1210,9 @@ xfs_dialloc_ag_inobt(
  		/*
  		 * Loop until we find an inode chunk with a free inode.
  		 */
@@ -59,11 +68,21 @@ index d41ade5d293e..8e535290390d 100644
  			int	useleft;  /* using left inode chunk this time */
  
 -			if (!--searchdistance) {
-+			if (searchdistance <= 0) {
- 				/*
- 				 * Not in range - save last search
- 				 * location and allocate a new inode
-@@ -1268,19 +1268,21 @@ xfs_dialloc_ag_inobt(
+-				/*
+-				 * Not in range - save last search
+-				 * location and allocate a new inode
+-				 */
+-				xfs_btree_del_cursor(tcur, XFS_BTREE_NOERROR);
+-				pag->pagl_leftrec = trec.ir_startino;
+-				pag->pagl_rightrec = rec.ir_startino;
+-				pag->pagl_pagino = pagino;
+-				goto newino;
+-			}
+-
+ 			/* figure out the closer block if both are valid. */
+ 			if (!doneleft && !doneright) {
+ 				useleft = pagino -
+@@ -1268,26 +1256,37 @@ xfs_dialloc_ag_inobt(
  				goto error1;
  		}
  
@@ -80,7 +99,17 @@ index d41ade5d293e..8e535290390d 100644
 -		xfs_btree_del_cursor(tcur, XFS_BTREE_NOERROR);
 -		xfs_btree_del_cursor(cur, XFS_BTREE_NOERROR);
 -		goto restart_pagno;
-+		if (searchdistance > 0) {
++		if (searchdistance <= 0) {
++			/*
++			 * Not in range - save last search
++			 * location and allocate a new inode
++			 */
++			xfs_btree_del_cursor(tcur, XFS_BTREE_NOERROR);
++			pag->pagl_leftrec = trec.ir_startino;
++			pag->pagl_rightrec = rec.ir_startino;
++			pag->pagl_pagino = pagino;
++
++		} else {
 +			/*
 +			 * We've reached the end of the btree. because
 +			 * we are only searching a small chunk of the
@@ -98,3 +127,10 @@ index d41ade5d293e..8e535290390d 100644
  	}
  
  	/*
+ 	 * In a different AG from the parent.
+ 	 * See if the most recently allocated block has any free.
+ 	 */
+-newino:
+ 	if (agi->agi_newino != cpu_to_be32(NULLAGINO)) {
+ 		error = xfs_inobt_lookup(cur, be32_to_cpu(agi->agi_newino),
+ 					 XFS_LOOKUP_EQ, &i);
