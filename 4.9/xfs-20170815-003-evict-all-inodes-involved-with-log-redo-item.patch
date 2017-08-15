@@ -1,8 +1,11 @@
-Date:   Fri, 11 Aug 2017 12:50:10 -0700
+Subject: [PATCH 3/3] xfs: evict all inodes involved with log redo item
 From:   "Darrick J. Wong" <darrick.wong@oracle.com>
-To:     linux-xfs@vger.kernel.org
-Cc:     viro@ZenIV.linux.org.uk, Christoph Hellwig <hch@infradead.org>
-Subject: [PATCH v2 2/3] xfs: evict all inodes involved with log redo item recovery
+To:     darrick.wong@oracle.com
+Cc:     linux-xfs@vger.kernel.org, linux-fsdevel@vger.kernel.org,
+        viro@ZenIV.linux.org.uk
+Date:   Mon, 14 Aug 2017 15:07:19 -0700
+
+From: Darrick J. Wong <darrick.wong@oracle.com>
 
 When we introduced the bmap redo log items, we set MS_ACTIVE on the
 mountpoint and XFS_IRECOVERY on the inode to prevent unlinked inodes
@@ -17,17 +20,17 @@ is only cleaned out on unmount.
 Therefore, evict unreferenced inodes in the lru list immediately
 after clearing MS_ACTIVE.
 
+[HH: small context fixup for previous MS_READONLY fix]
 Fixes: 17c12bcd30 ("xfs: when replaying bmap operations, don't let unlinked inodes get reaped")
 Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
 Cc: viro@ZenIV.linux.org.uk
 ---
-v2: use the vfs evict_inodes instead of duplicating it
----
  fs/inode.c         |    1 +
  fs/internal.h      |    1 -
- fs/xfs/xfs_mount.c |   12 ++++++++++++
+ fs/xfs/xfs_log.c   |   12 ++++++++++++
  include/linux/fs.h |    1 +
  4 files changed, 14 insertions(+), 1 deletion(-)
+
 
 diff --git a/fs/inode.c b/fs/inode.c
 index 5037059..6a1626e 100644
@@ -53,12 +56,12 @@ index 9676fe1..fedfe94 100644
  extern int invalidate_inodes(struct super_block *, bool);
  
  /*
-diff --git a/fs/xfs/xfs_mount.c b/fs/xfs/xfs_mount.c
-index a46c9d7..351e2c3 100644
---- a/fs/xfs/xfs_mount.c
-+++ b/fs/xfs/xfs_mount.c
-@@ -956,10 +956,22 @@ xfs_mountfs(
- 	 * inodes.  Turn it off immediately after xfs_log_mount_finish
+diff --git a/fs/xfs/xfs_log.c b/fs/xfs/xfs_log.c
+index 4ebd0ba..1c594e3 100644
+--- a/fs/xfs/xfs_log.c
++++ b/fs/xfs/xfs_log.c
+@@ -757,12 +757,24 @@ xfs_log_mount_finish(
+ 	 * inodes.  Turn it off immediately after recovery finishes
  	 * so that we don't leak the quota inodes if subsequent mount
  	 * activities fail.
 +	 *
@@ -74,12 +77,14 @@ index a46c9d7..351e2c3 100644
 +	 * mount failure occurs.
  	 */
  	mp->m_super->s_flags |= MS_ACTIVE;
- 	error = xfs_log_mount_finish(mp);
+ 	error = xlog_recover_finish(mp->m_log);
+ 	if (!error)
+ 		xfs_log_work_queue(mp);
  	mp->m_super->s_flags &= ~MS_ACTIVE;
 +	evict_inodes(mp->m_super);
- 	if (error) {
- 		xfs_warn(mp, "log mount finish failed");
- 		goto out_rtunmount;
+ 
+ 	if (readonly)
+ 		mp->m_flags |= XFS_MOUNT_RDONLY;
 diff --git a/include/linux/fs.h b/include/linux/fs.h
 index 7b5d681..e730438 100644
 --- a/include/linux/fs.h
