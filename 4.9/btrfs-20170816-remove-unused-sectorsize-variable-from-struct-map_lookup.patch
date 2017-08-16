@@ -1,0 +1,49 @@
+From:   Nikolay Borisov <nborisov@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     dsterba@suse.cz, Nikolay Borisov <nborisov@suse.com>
+Subject: [PATCH] btrfs: Remove unused sectorsize variable from struct map_lookup
+Date:   Wed, 16 Aug 2017 18:41:44 +0300
+
+This variable was added in 1abe9b8a138c ("Btrfs: add initial tracepointi
+support for btrfs"), yet it never really got used, only assigned to. So let's
+remove it.
+
+[HH: backported for 4.9.x]
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+---
+ fs/btrfs/volumes.c | 2 --
+ fs/btrfs/volumes.h | 1 -
+ 2 files changed, 3 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index f93ac3d7e997..47a0cb1dcc5e 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -4836,7 +4836,6 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
+ 						   j * stripe_size;
+ 		}
+ 	}
+-	map->sector_size = extent_root->sectorsize;
+ 	map->stripe_len = raid_stripe_len;
+ 	map->io_align = raid_stripe_len;
+ 	map->io_width = raid_stripe_len;
+@@ -6491,7 +6490,6 @@ static int read_one_chunk(struct btrfs_fs_info *fs_info, struct btrfs_key *key,
+ 	map->num_stripes = num_stripes;
+ 	map->io_width = btrfs_chunk_io_width(leaf, chunk);
+ 	map->io_align = btrfs_chunk_io_align(leaf, chunk);
+-	map->sector_size = btrfs_chunk_sector_size(leaf, chunk);
+ 	map->stripe_len = btrfs_chunk_stripe_len(leaf, chunk);
+ 	map->type = btrfs_chunk_type(leaf, chunk);
+ 	map->sub_stripes = btrfs_chunk_sub_stripes(leaf, chunk);
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 6f45fd60d15a..d0193e795dc2 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -353,7 +353,6 @@ struct map_lookup {
+ 	int io_align;
+ 	int io_width;
+ 	u64 stripe_len;
+-	int sector_size;
+ 	int num_stripes;
+ 	int sub_stripes;
+ 	struct btrfs_bio_stripe stripes[];
