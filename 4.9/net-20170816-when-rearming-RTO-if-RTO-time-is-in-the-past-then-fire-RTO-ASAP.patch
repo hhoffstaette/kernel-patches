@@ -1,0 +1,41 @@
+From: Neal Cardwell <ncardwell@google.com>
+Subject: [PATCH net] tcp: when rearming RTO, if RTO time is in past then fire RTO ASAP
+Date: Wed, 16 Aug 2017 17:53:36 -0400
+Cc: netdev@vger.kernel.org, Neal Cardwell <ncardwell@google.com>,
+        Yuchung Cheng <ycheng@google.com>,
+        Eric Dumazet <edumazet@google.com>
+To: David Miller <davem@davemloft.net>
+
+In some situations tcp_send_loss_probe() can realize that it's unable
+to send a loss probe (TLP), and falls back to calling tcp_rearm_rto()
+to schedule an RTO timer. In such cases, sometimes tcp_rearm_rto()
+realizes that the RTO was eligible to fire immediately or at some
+point in the past (delta_us <= 0). Previously in such cases
+tcp_rearm_rto() was scheduling such "overdue" RTOs to happen at now +
+icsk_rto, which caused needless delays of hundreds of milliseconds
+(and non-linear behavior that made reproducible testing
+difficult). This commit changes the logic to schedule "overdue" RTOs
+ASAP, rather than at now + icsk_rto.
+
+Suggested-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/ipv4/tcp_input.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 53de1424c13c..bab7f0493098 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -3009,8 +3009,7 @@ void tcp_rearm_rto(struct sock *sk)
+ 			/* delta_us may not be positive if the socket is locked
+ 			 * when the retrans timer fires and is rescheduled.
+ 			 */
+-			if (delta_us > 0)
+-				rto = usecs_to_jiffies(delta_us);
++			rto = usecs_to_jiffies(max_t(int, delta_us, 1));
+ 		}
+ 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, rto,
+ 					  TCP_RTO_MAX);
