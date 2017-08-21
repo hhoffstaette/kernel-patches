@@ -1,0 +1,34 @@
+From: Wang Shilong <wangshilong1991@gmail.com>
+Subject: [PATCH 1/3] ext4: Do not unnecessarily allocate buffer in recently_deleted()
+Date: Sun, 20 Aug 2017 19:52:09 +0800
+Cc: Jan Kara <jack@suse.cz>
+To: linux-ext4@vger.kernel.org
+
+From: Jan Kara <jack@suse.cz>
+
+In recently_deleted() function we want to check whether inode is still
+cached in buffer cache. Use sb_find_get_block() for that instead of
+sb_getblk() to avoid unnecessary allocation of bdev page and buffer
+heads.
+
+Signed-off-by: Jan Kara <jack@suse.cz>
+---
+ fs/ext4/ialloc.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/ext4/ialloc.c b/fs/ext4/ialloc.c
+index 507bfb3..0d03e73 100644
+--- a/fs/ext4/ialloc.c
++++ b/fs/ext4/ialloc.c
+@@ -707,9 +707,9 @@ static int recently_deleted(struct super_block *sb, ext4_group_t group, int ino)
+ 	if (unlikely(!gdp))
+ 		return 0;
+ 
+-	bh = sb_getblk(sb, ext4_inode_table(sb, gdp) +
++	bh = sb_find_get_block(sb, ext4_inode_table(sb, gdp) +
+ 		       (ino / inodes_per_block));
+-	if (unlikely(!bh) || !buffer_uptodate(bh))
++	if (!bh || !buffer_uptodate(bh))
+ 		/*
+ 		 * If the block is not in the buffer cache, then it
+ 		 * must have been written out.
