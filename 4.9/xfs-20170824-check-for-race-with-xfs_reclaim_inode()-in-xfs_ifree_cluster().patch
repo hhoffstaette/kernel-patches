@@ -1,0 +1,84 @@
+From:   Omar Sandoval <osandov@osandov.com>
+To:     linux-xfs@vger.kernel.org
+Cc:     kernel-team@fb.com
+Subject: [PATCH] xfs: check for race with xfs_reclaim_inode() in xfs_ifree_cluster()
+Date:   Thu, 24 Aug 2017 16:50:09 -0700
+
+From: Omar Sandoval <osandov@fb.com>
+
+After xfs_ifree_cluster() finds an inode in the radix tree and verifies
+that the inode number is what it expected, xfs_reclaim_inode() can swoop
+in and free it. xfs_ifree_cluster() will then happily continue working
+on the freed inode. Most importantly, it will mark the inode stale,
+which will probably be overwritten when the inode slab object is
+reallocated, but if it has already been reallocated then we can end up
+with an inode spuriously marked stale.
+
+In 8a17d7ddedb4 ("xfs: mark reclaimed inodes invalid earlier") we added
+a second check to xfs_iflush_cluster() to detect this race, but the
+similar RCU lookup in xfs_ifree_cluster() needs the same treatment.
+
+Signed-off-by: Omar Sandoval <osandov@fb.com>
+---
+Based on v4.13-rc6. Let me know if my reasoning here is completely off,
+the XFS inode machinery makes my head spin.
+
+ fs/xfs/xfs_icache.c | 10 +++++-----
+ fs/xfs/xfs_inode.c  | 23 ++++++++++++++++++-----
+ 2 files changed, 23 insertions(+), 10 deletions(-)
+
+diff --git a/fs/xfs/xfs_icache.c b/fs/xfs/xfs_icache.c
+index 0a9e6985a0d0..34227115a5d6 100644
+--- a/fs/xfs/xfs_icache.c
++++ b/fs/xfs/xfs_icache.c
+@@ -1124,11 +1124,11 @@ xfs_reclaim_inode(
+ 	 * Because we use RCU freeing we need to ensure the inode always appears
+ 	 * to be reclaimed with an invalid inode number when in the free state.
+ 	 * We do this as early as possible under the ILOCK so that
+-	 * xfs_iflush_cluster() can be guaranteed to detect races with us here.
+-	 * By doing this, we guarantee that once xfs_iflush_cluster has locked
+-	 * XFS_ILOCK that it will see either a valid, flushable inode that will
+-	 * serialise correctly, or it will see a clean (and invalid) inode that
+-	 * it can skip.
++	 * xfs_iflush_cluster() and xfs_ifree_cluster() can be guaranteed to
++	 * detect races with us here. By doing this, we guarantee that once
++	 * xfs_iflush_cluster() or xfs_ifree_cluster() has locked XFS_ILOCK that
++	 * it will see either a valid inode that will serialise correctly, or it
++	 * will see an invalid inode that it can skip.
+ 	 */
+ 	spin_lock(&ip->i_flags_lock);
+ 	ip->i_flags = XFS_IRECLAIM;
+diff --git a/fs/xfs/xfs_inode.c b/fs/xfs/xfs_inode.c
+index ff48f0096810..97045e8dfed5 100644
+--- a/fs/xfs/xfs_inode.c
++++ b/fs/xfs/xfs_inode.c
+@@ -2359,11 +2359,24 @@ xfs_ifree_cluster(
+ 			 * already marked stale. If we can't lock it, back off
+ 			 * and retry.
+ 			 */
+-			if (ip != free_ip &&
+-			    !xfs_ilock_nowait(ip, XFS_ILOCK_EXCL)) {
+-				rcu_read_unlock();
+-				delay(1);
+-				goto retry;
++			if (ip != free_ip) {
++				if (!xfs_ilock_nowait(ip, XFS_ILOCK_EXCL)) {
++					rcu_read_unlock();
++					delay(1);
++					goto retry;
++				}
++
++				/*
++				 * Check the inode number again in case we're
++				 * racing with freeing in xfs_reclaim_inode().
++				 * See the comments in that function for more
++				 * information as to why the initial check is
++				 * not sufficient.
++				 */
++				if (ip->i_ino != inum + i) {
++					xfs_iunlock(ip, XFS_ILOCK_EXCL);
++					continue;
++				}
+ 			}
+ 			rcu_read_unlock();
+ 
