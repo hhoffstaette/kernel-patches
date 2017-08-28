@@ -10,6 +10,7 @@ with no correlation to tcp_jiffies32.
 We have to convert rto from jiffies to usec, compute a time difference
 in usec, then convert the delta to HZ units.
 
+[HH: upated for 4.9.46]
 Fixes: 9a568de4818d ("tcp: switch TCP TS option (RFC 7323) to 1ms clock")
 Signed-off-by: Eric Dumazet <edumazet@google.com>
 Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
@@ -22,7 +23,7 @@ diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
 index 9a5a9e8..aa1eef1 100644
 --- a/net/ipv4/tcp_input.c
 +++ b/net/ipv4/tcp_input.c
-@@ -3002,14 +3002,14 @@ void tcp_rearm_rto(struct sock *sk)
+@@ -3002,13 +3002,13 @@ void tcp_rearm_rto(struct sock *sk)
  		if (icsk->icsk_pending == ICSK_TIME_REO_TIMEOUT ||
  		    icsk->icsk_pending == ICSK_TIME_LOSS_PROBE) {
  			struct sk_buff *skb = tcp_write_queue_head(sk);
@@ -36,10 +37,8 @@ index 9a5a9e8..aa1eef1 100644
 +			/* delta_us may not be positive if the socket is locked
  			 * when the retrans timer fires and is rescheduled.
  			 */
--			if (delta > 0)
--				rto = delta;
-+			if (delta_us > 0)
-+				rto = usecs_to_jiffies(delta_us);
+-			rto = max(delta, 1);
++			rto = usecs_to_jiffies(max_t(int, delta_us, 1));
  		}
  		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, rto,
  					  TCP_RTO_MAX);
