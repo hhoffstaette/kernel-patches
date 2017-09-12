@@ -1,11 +1,5 @@
-From patchwork Thu Mar  9 20:15:01 2017
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
 Subject: [1/2] xfs: write unmount record for ro mounts
 From: Eric Sandeen <sandeen@sandeen.net>
-X-Patchwork-Id: 9614121
-Message-Id: <9a573fb1-0d4c-e393-b0b7-a0688b3849e5@sandeen.net>
 To: Eric Sandeen <sandeen@redhat.com>, linux-xfs <linux-xfs@vger.kernel.org>
 Date: Thu, 9 Mar 2017 14:15:01 -0600
 
@@ -36,12 +30,6 @@ writable.
 
 Signed-off-by: Eric Sandeen <sandeen@redhat.com>
 ---
-
-
---
-To unsubscribe from this list: send the line "unsubscribe linux-xfs" in
-the body of a message to majordomo@vger.kernel.org
-More majordomo info at  http://vger.kernel.org/majordomo-info.html
 
 diff --git a/fs/xfs/xfs_log.c b/fs/xfs/xfs_log.c
 index b1469f0..62176b8 100644

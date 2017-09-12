@@ -1,11 +1,5 @@
-From patchwork Thu Jul  6 18:27:25 2017
-Content-Type: text/plain; charset="utf-8"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
 Subject: mbcache: initialize entry->e_referenced in mb_cache_entry_create()
 From: Alexander Potapenko <glider@google.com>
-X-Patchwork-Id: 9828711
-Message-Id: <20170706182725.39194-1-glider@google.com>
 To: dvyukov@google.com, kcc@google.com, viro@zeniv.linux.org.uk,
  ebiggers@google.com, tytso@mit.edu
 Cc: linux-kernel@vger.kernel.org, linux-fsdevel@vger.kernel.org
