@@ -1,0 +1,45 @@
+Subject: btrfs: avoid null pointer dereference on fs_info when calling btrfs_crit
+From: Colin Ian King <colin.king@canonical.com>
+To: Chris Mason <clm@fb.com>, Josef Bacik <jbacik@fb.com>,
+ David Sterba <dsterba@suse.com>, linux-btrfs@vger.kernel.org
+Cc: kernel-janitors@vger.kernel.org, linux-kernel@vger.kernel.org
+Date: Mon, 11 Sep 2017 16:15:28 +0100
+
+From: Colin Ian King <colin.king@canonical.com>
+
+There are checks on fs_info in __btrfs_panic to avoid dereferencing a
+null fs_info, however, there is a call to btrfs_crit that may also
+dereference a null fs_info. Fix this by adding a check to see if fs_info
+is null and only print the s_id if fs_info is non-null.
+
+Detected by CoverityScan CID#401973 ("Dereference after null check")
+
+[HH: backported to 4.9.x]
+Fixes: efe120a067c8 ("Btrfs: convert printk to btrfs_ and fix BTRFS prefix")
+Signed-off-by: Colin Ian King <colin.king@canonical.com>
+---
+ fs/btrfs/super.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index e56a93f3113e..c669241f936e 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -202,7 +202,6 @@ static struct ratelimit_state printk_limits[] = {
+ 
+ void btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...)
+ {
+-	struct super_block *sb = fs_info->sb;
+ 	char lvl[4];
+ 	struct va_format vaf;
+ 	va_list args;
+@@ -228,7 +227,8 @@ void btrfs_printk(const struct btrfs_fs_info *fs_info, const char *fmt, ...)
+ 	vaf.va = &args;
+ 
+ 	if (__ratelimit(ratelimit))
+-		printk("%sBTRFS %s (device %s): %pV\n", lvl, type, sb->s_id, &vaf);
++		printk("%sBTRFS %s (device %s): %pV\n", lvl, type,
++			fs_info ? fs_info->sb->s_id : "<unknown>", &vaf);
+ 
+ 	va_end(args);
+ }
