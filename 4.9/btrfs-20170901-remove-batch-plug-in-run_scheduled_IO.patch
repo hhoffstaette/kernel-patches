@@ -1,0 +1,31 @@
+Subject: Btrfs: remove batch plug in run_scheduled_IO
+From: Liu Bo <bo.li.liu@oracle.com>
+To: linux-btrfs@vger.kernel.org
+Date: Fri,  1 Sep 2017 16:14:26 -0600
+
+Block layer has a limit on plug, ie. BLK_MAX_REQUEST_COUNT == 16, so
+we don't gain benefits by batching 64 bios here.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index e8b9a26..de55024 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -524,12 +524,6 @@ static noinline void run_scheduled_bios(struct btrfs_device *device)
+ 					 &device->work);
+ 			goto done;
+ 		}
+-		/* unplug every 64 requests just for good measure */
+-		if (batch_run % 64 == 0) {
+-			blk_finish_plug(&plug);
+-			blk_start_plug(&plug);
+-			sync_pending = 0;
+-		}
+ 	}
+ 
+ 	cond_resched();
