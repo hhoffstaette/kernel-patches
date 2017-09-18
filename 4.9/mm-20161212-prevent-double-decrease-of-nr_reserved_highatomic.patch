@@ -1,0 +1,81 @@
+From 4855e4a7f29d6d10b0b9c84e189c770c9a94e91e Mon Sep 17 00:00:00 2001
+From: Minchan Kim <minchan@kernel.org>
+Date: Mon, 12 Dec 2016 16:42:08 -0800
+Subject: mm: prevent double decrease of nr_reserved_highatomic
+
+There is race between page freeing and unreserved highatomic.
+
+ CPU 0				    CPU 1
+
+    free_hot_cold_page
+      mt = get_pfnblock_migratetype
+      set_pcppage_migratetype(page, mt)
+    				    unreserve_highatomic_pageblock
+    				    spin_lock_irqsave(&zone->lock)
+    				    move_freepages_block
+    				    set_pageblock_migratetype(page)
+    				    spin_unlock_irqrestore(&zone->lock)
+      free_pcppages_bulk
+        __free_one_page(mt) <- mt is stale
+
+By above race, a page on CPU 0 could go non-highorderatomic free list
+since the pageblock's type is changed.  By that, unreserve logic of
+highorderatomic can decrease reserved count on a same pageblock severak
+times and then it will make mismatch between nr_reserved_highatomic and
+the number of reserved pageblock.
+
+So, this patch verifies whether the pageblock is highatomic or not and
+decrease the count only if the pageblock is highatomic.
+
+Link: http://lkml.kernel.org/r/1476259429-18279-3-git-send-email-minchan@kernel.org
+Signed-off-by: Minchan Kim <minchan@kernel.org>
+Acked-by: Vlastimil Babka <vbabka@suse.cz>
+Acked-by: Mel Gorman <mgorman@techsingularity.net>
+Cc: Joonsoo Kim <iamjoonsoo.kim@lge.com>
+Cc: Sangseok Lee <sangseok.lee@lge.com>
+Cc: Michal Hocko <mhocko@suse.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/page_alloc.c | 24 ++++++++++++++++++------
+ 1 file changed, 18 insertions(+), 6 deletions(-)
+
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 9717013..8cbc38f 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -2085,13 +2085,25 @@ static void unreserve_highatomic_pageblock(const struct alloc_context *ac)
+ 				continue;
+ 
+ 			/*
+-			 * It should never happen but changes to locking could
+-			 * inadvertently allow a per-cpu drain to add pages
+-			 * to MIGRATE_HIGHATOMIC while unreserving so be safe
+-			 * and watch for underflows.
++			 * In page freeing path, migratetype change is racy so
++			 * we can counter several free pages in a pageblock
++			 * in this loop althoug we changed the pageblock type
++			 * from highatomic to ac->migratetype. So we should
++			 * adjust the count once.
+ 			 */
+-			zone->nr_reserved_highatomic -= min(pageblock_nr_pages,
+-				zone->nr_reserved_highatomic);
++			if (get_pageblock_migratetype(page) ==
++							MIGRATE_HIGHATOMIC) {
++				/*
++				 * It should never happen but changes to
++				 * locking could inadvertently allow a per-cpu
++				 * drain to add pages to MIGRATE_HIGHATOMIC
++				 * while unreserving so be safe and watch for
++				 * underflows.
++				 */
++				zone->nr_reserved_highatomic -= min(
++						pageblock_nr_pages,
++						zone->nr_reserved_highatomic);
++			}
+ 
+ 			/*
+ 			 * Convert to ac->migratetype and avoid the normal
+-- 
+cgit v1.1
+
