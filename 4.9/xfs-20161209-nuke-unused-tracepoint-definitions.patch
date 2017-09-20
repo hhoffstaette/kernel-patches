@@ -5,6 +5,7 @@ Subject: xfs: nuke unused tracepoint definitions
 
 This is all unused code, so remove it.
 
+[HH: updated for 4.9.51]
 Signed-off-by: Eric Sandeen <sandeen@redhat.com>
 Reviewed-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Dave Chinner <david@fromorbit.com>
@@ -25,8 +26,8 @@ index 0907752..69c5bcd 100644
  DEFINE_BUF_EVENT(xfs_buf_lock_done);
  DEFINE_BUF_EVENT(xfs_buf_trylock_fail);
 @@ -367,19 +366,15 @@ DEFINE_BUF_EVENT(xfs_buf_delwri_queue);
- DEFINE_BUF_EVENT(xfs_buf_delwri_queued);
  DEFINE_BUF_EVENT(xfs_buf_delwri_split);
+ DEFINE_BUF_EVENT(xfs_buf_delwri_pushbuf);
  DEFINE_BUF_EVENT(xfs_buf_get_uncached);
 -DEFINE_BUF_EVENT(xfs_bdstrat_shut);
  DEFINE_BUF_EVENT(xfs_buf_item_relse);
