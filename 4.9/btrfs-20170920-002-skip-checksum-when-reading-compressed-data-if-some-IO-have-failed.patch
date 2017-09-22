@@ -1,0 +1,50 @@
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH 2/2] Btrfs: skip checksum when reading compressed data if some IO have failed
+Date:   Wed, 20 Sep 2017 17:50:19 -0600
+
+Currently even if the underlying disk reports failure on IO,
+compressed read endio still gets to verify checksum and reports it as
+a checksum error.
+
+In fact, if some IO have failed during reading a compressed data
+extent , there's no way the checksum could match, therefore, we can
+skip that in order to return error quickly to the upper layer.
+
+Please note that we need to do this after recording the failed mirror
+index so that read-repair in the upper layer's endio can work
+properly.
+
+[HH: backported to 4.9.x]
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/compression.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/compression.c b/fs/btrfs/compression.c
+index 9a4ccdf..d8d4678 100644
+--- a/fs/btrfs/compression.c
++++ b/fs/btrfs/compression.c
+@@ -108,7 +108,7 @@ static void end_compressed_bio_read(struct bio *bio)
+ 	struct page *page;
+ 	unsigned long index;
+ 	unsigned int mirror = btrfs_io_bio(bio)->mirror_num;
+-	int ret;
++	int ret = 0;
+ 
+ 	if (bio->bi_error)
+ 		cb->errors = 1;
+@@ -127,6 +127,13 @@ static void end_compressed_bio_read(struct bio *bio)
+ 	btrfs_io_bio(cb->orig_bio)->mirror_num = mirror;
+ 	cb->mirror_num = mirror;
+ 
++	/*
++	 * Some IO in this cb have failed, just skip checksum as there
++	 * is no way it could be correct.
++	 */
++	if (cb->errors == 1)
++		goto csum_failed;
++
+ 	inode = cb->inode;
+ 	ret = check_compressed_csum(inode, cb,
+ 				    (u64)bio->bi_iter.bi_sector << 9);
