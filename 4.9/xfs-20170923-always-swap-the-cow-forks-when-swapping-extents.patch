@@ -1,0 +1,57 @@
+Subject: xfs: always swap the cow forks when swapping extents
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+To: xfs <linux-xfs@vger.kernel.org>
+Date: Sat, 23 Sep 2017 00:12:08 -0700
+
+Since the CoW fork exists as a secondary data structure to the data
+fork, we must always swap cow forks during swapext.  We also need to
+swap the extent counts and reset the cowblocks tags.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+ fs/xfs/xfs_bmap_util.c |   24 ++++++++++++++++++++++--
+ 1 file changed, 22 insertions(+), 2 deletions(-)
+
+--
+To unsubscribe from this list: send the line "unsubscribe linux-xfs" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+diff --git a/fs/xfs/xfs_bmap_util.c b/fs/xfs/xfs_bmap_util.c
+index bc6c6e1..e9db7fc 100644
+--- a/fs/xfs/xfs_bmap_util.c
++++ b/fs/xfs/xfs_bmap_util.c
+@@ -2122,11 +2122,31 @@ xfs_swap_extents(
+ 		ip->i_d.di_flags2 |= tip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK;
+ 		tip->i_d.di_flags2 &= ~XFS_DIFLAG2_REFLINK;
+ 		tip->i_d.di_flags2 |= f & XFS_DIFLAG2_REFLINK;
++	}
++
++	/* Swap the cow forks. */
++	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
++		xfs_extnum_t	extnum;
++
++		ASSERT(ip->i_cformat == XFS_DINODE_FMT_EXTENTS);
++		ASSERT(tip->i_cformat == XFS_DINODE_FMT_EXTENTS);
++
++		extnum = ip->i_cnextents;
++		ip->i_cnextents = tip->i_cnextents;
++		tip->i_cnextents = extnum;
++
+ 		cowfp = ip->i_cowfp;
+ 		ip->i_cowfp = tip->i_cowfp;
+ 		tip->i_cowfp = cowfp;
+-		xfs_inode_set_cowblocks_tag(ip);
+-		xfs_inode_set_cowblocks_tag(tip);
++
++		if (ip->i_cowfp && ip->i_cnextents)
++			xfs_inode_set_cowblocks_tag(ip);
++		else
++			xfs_inode_clear_cowblocks_tag(ip);
++		if (tip->i_cowfp && tip->i_cnextents)
++			xfs_inode_set_cowblocks_tag(tip);
++		else
++			xfs_inode_clear_cowblocks_tag(tip);
+ 	}
+ 
+ 	xfs_trans_log_inode(tp, ip,  src_log_flags);
