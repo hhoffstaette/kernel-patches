@@ -1,0 +1,77 @@
+From: Yuchung Cheng <ycheng@google.com>
+Subject: [PATCH net-next 2/3] tcp: more efficient RACK loss detection
+Date: Wed,  4 Oct 2017 12:59:59 -0700
+Cc: netdev@vger.kernel.org, Yuchung Cheng <ycheng@google.com>,
+        Neal Cardwell <ncardwell@google.com>,
+        Eric Dumazet <edumazet@google.com>
+To: davem@davemloft.net
+
+Use the new time-ordered list to speed up RACK. The detection
+logic is identical. But since the list is chronologically ordered
+by skb_mstamp and contains only skbs not yet acked or sacked,
+RACK can abort the loop upon hitting skbs that were sent more
+recently. On YouTube servers this patch reduces the iterations on
+write queue by 40x. The improvement is even bigger with large
+BDP networks.
+
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/ipv4/tcp_recovery.c | 20 +++++---------------
+ 1 file changed, 5 insertions(+), 15 deletions(-)
+
+diff --git a/net/ipv4/tcp_recovery.c b/net/ipv4/tcp_recovery.c
+index 449cd914d58e..8aa56caefde8 100644
+--- a/net/ipv4/tcp_recovery.c
++++ b/net/ipv4/tcp_recovery.c
+@@ -45,7 +45,7 @@ static bool tcp_rack_sent_after(u64 t1, u64 t2, u32 seq1, u32 seq2)
+ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
+-	struct sk_buff *skb;
++	struct sk_buff *skb, *n;
+ 	u32 reo_wnd;
+ 
+ 	*reo_timeout = 0;
+@@ -58,17 +58,10 @@ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
+ 	if ((tp->rack.reord || !tp->lost_out) && tcp_min_rtt(tp) != ~0U)
+ 		reo_wnd = max(tcp_min_rtt(tp) >> 2, reo_wnd);
+ 
+-	tcp_for_write_queue(skb, sk) {
++	list_for_each_entry_safe(skb, n, &tp->tsorted_sent_queue,
++				 tcp_tsorted_anchor) {
+ 		struct tcp_skb_cb *scb = TCP_SKB_CB(skb);
+ 
+-		if (skb == tcp_send_head(sk))
+-			break;
+-
+-		/* Skip ones already (s)acked */
+-		if (!after(scb->end_seq, tp->snd_una) ||
+-		    scb->sacked & TCPCB_SACKED_ACKED)
+-			continue;
+-
+ 		if (tcp_rack_sent_after(tp->rack.mstamp, skb->skb_mstamp,
+ 					tp->rack.end_seq, scb->end_seq)) {
+ 			/* Step 3 in draft-cheng-tcpm-rack-00.txt:
+@@ -81,6 +74,7 @@ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
+ 
+ 			if (remaining < 0) {
+ 				tcp_rack_mark_skb_lost(sk, skb);
++				list_del_init(&skb->tcp_tsorted_anchor);
+ 				continue;
+ 			}
+ 
+@@ -91,11 +85,7 @@ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
+ 
+ 			/* Record maximum wait time (+1 to avoid 0) */
+ 			*reo_timeout = max_t(u32, *reo_timeout, 1 + remaining);
+-
+-		} else if (!(scb->sacked & TCPCB_RETRANS)) {
+-			/* Original data are sent sequentially so stop early
+-			 * b/c the rest are all sent after rack_sent
+-			 */
++		} else {
+ 			break;
+ 		}
+ 	}
