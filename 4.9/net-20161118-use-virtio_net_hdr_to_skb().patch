@@ -10,6 +10,7 @@ missed, maybe because it is split in two parts of the source code.
 Interim comparisons of 'vnet_hdr->gso_type' still work as both the
 vnet_hdr and skb notion of gso_type is zero when there is no gso.
 
+[HH: updated for 4.9.55]
 Fixes: fd2a0437dc ("virtio_net: introduce virtio_net_hdr_{from,to}_skb")
 Signed-off-by: Jarno Rajahalme <jarno@ovn.org>
 Signed-off-by: David S. Miller <davem@davemloft.net>
@@ -101,7 +102,7 @@ index abe6c0b..1816b77 100644
 @@ -2914,7 +2869,7 @@ static int packet_snd(struct socket *sock, struct msghdr *msg, size_t len)
  	packet_pick_tx_queue(dev, skb);
  
- 	if (po->has_vnet_hdr) {
+ 	if (has_vnet_hdr) {
 -		err = packet_snd_vnet_gso(skb, &vnet_hdr);
 +		err = virtio_net_hdr_to_skb(skb, &vnet_hdr, vio_le());
  		if (err)
