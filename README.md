@@ -32,7 +32,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - mm: memory management fixes from 4.10+
 - muqss: [MuQSS v152+](http://ck-hack.blogspot.de/2017/02/linux-410-ck1-muqss-version-0152-for.html) (*disabled* by default)
 - net: [RACK loss detection](https://goo.gl/lwk7bq), high-precision [TCP timestamps](https://goo.gl/aBjwip) & timers for RACK/RTT/queue management
-- realtek: fixes for Realtek NICs from 4.10+, resurrected [Byte Queue Limits](https://lwn.net/Articles/469652/), [xmit_more](https://lwn.net/Articles/615238/) and interrupt coalescing support for r8169
+- realtek: fixes for Realtek NICs from 4.10+, configurable interrupt coalescing for r8169
 - sched: CFS cpu scheduler fixes from 4.10+
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 4.10+
