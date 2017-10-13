@@ -1,7 +1,7 @@
 From:   Brian Foster <bfoster@redhat.com>
 To:     linux-xfs@vger.kernel.org
-Subject: [PATCH] xfs: trim writepage mapping to within eof
-Date:   Thu, 12 Oct 2017 07:47:54 -0400
+Subject: [PATCH v2] xfs: trim writepage mapping to within eof
+Date:   Fri, 13 Oct 2017 08:38:26 -0400
 
 The writeback rework in commit fbcc02561359 ("xfs: Introduce
 writeback context for writepages") introduced a subtle change in
@@ -39,13 +39,13 @@ Consider the following sequence of events:
   data to an incorrect location on disk (and where the file offset is
   still backed by a delalloc extent).
 
-This problem is reproduced by xfstests test generic/463, which
+This problem is reproduced by xfstests test generic/464, which
 triggers racing writes, appends, open/closes and writeback requests.
 
 To address this problem, trim the mapping used during writeback to
-within EOF when the mapping is created. This ensures the mapping is
-revalidated for any pages encountered beyond EOF as of the time the
-current mapping was cached.
+within EOF when the mapping is validated. This ensures the mapping
+is revalidated for any pages encountered beyond EOF as of the time
+the current mapping was cached or last validated.
 
 Reported-by: Eryu Guan <eguan@redhat.com>
 Diagnosed-by: Eryu Guan <eguan@redhat.com>
@@ -54,25 +54,24 @@ Signed-off-by: Brian Foster <bfoster@redhat.com>
 
 Hi all,
 
-This is a followup to the issue Eryu tracked down, described here[1].
-
-Note that this patch will not deal with any writeback mapping validity
-issues not associated with eofblocks management. Dave is working on a
-more generic approach to deal with such problems. This patch is intended
-to be a targeted and backportable fix for the regression in the
-writeback code.
+Here's a v2 with the validation changes suggested against v1. This
+survives 16 iterations of Eryu's test. Additional testing is in progress
+now...
 
 Brian
 
-[1] https://marc.info/?l=linux-xfs&m=150406724427829&w=2
+v2:
+- Perform eof extent trim on each validation of the cached imap instead
+  of only when the mapping is first cached.
+v1: https://marc.info/?l=linux-xfs&m=150780887829820&w=2
 
  fs/xfs/libxfs/xfs_bmap.c | 11 +++++++++++
  fs/xfs/libxfs/xfs_bmap.h |  1 +
- fs/xfs/xfs_aops.c        |  6 ++++--
- 3 files changed, 16 insertions(+), 2 deletions(-)
+ fs/xfs/xfs_aops.c        | 13 +++++++++++++
+ 3 files changed, 25 insertions(+)
 
 diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
-index 044a363..dd3fb7b 100644
+index def32fa1..8926379 100644
 --- a/fs/xfs/libxfs/xfs_bmap.c
 +++ b/fs/xfs/libxfs/xfs_bmap.c
 @@ -3852,6 +3852,17 @@ xfs_trim_extent(
@@ -106,26 +105,26 @@ index 851982a..502e0d8 100644
  void	xfs_bmap_local_to_extents_empty(struct xfs_inode *ip, int whichfork);
  void	xfs_bmap_add_free(struct xfs_mount *mp, struct xfs_defer_ops *dfops,
 diff --git a/fs/xfs/xfs_aops.c b/fs/xfs/xfs_aops.c
-index 1dbc5cf..3ab6d9d 100644
+index f18e593..3d1d88a 100644
 --- a/fs/xfs/xfs_aops.c
 +++ b/fs/xfs/xfs_aops.c
-@@ -423,7 +423,7 @@ xfs_map_blocks(
- 				imap);
- 		if (!error)
- 			trace_xfs_map_blocks_alloc(ip, offset, count, type, imap);
--		return error;
-+		goto out_trim;
- 	}
+@@ -446,6 +446,19 @@ xfs_imap_valid(
+ {
+ 	offset >>= inode->i_blkbits;
  
- #ifdef DEBUG
-@@ -435,7 +435,9 @@ xfs_map_blocks(
- #endif
- 	if (nimaps)
- 		trace_xfs_map_blocks_found(ip, offset, count, type, imap);
--	return 0;
-+out_trim:
-+	xfs_trim_extent_eof(imap, ip);
-+	return error;
++	/*
++	 * We have to make sure the cached mapping is within EOF to protect
++	 * against eofblocks trimming on file release leaving us with a stale
++	 * mapping. Otherwise, a page for a subsequent file extending buffered
++	 * write could get picked up by this writeback cycle and written to the
++	 * wrong blocks.
++	 *
++	 * Note that what we really want here is a generic mapping invalidation
++	 * mechanism to protect us from arbitrary extent modifying contexts, not
++	 * just eofblocks.
++	 */
++	xfs_trim_extent_eof(imap, XFS_I(inode));
++
+ 	return offset >= imap->br_startoff &&
+ 		offset < imap->br_startoff + imap->br_blockcount;
  }
- 
- STATIC bool
