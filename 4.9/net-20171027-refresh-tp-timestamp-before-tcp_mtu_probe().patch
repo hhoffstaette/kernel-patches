@@ -1,0 +1,40 @@
+From: Eric Dumazet <eric.dumazet@gmail.com>
+Subject: [PATCH net] tcp: refresh tp timestamp before tcp_mtu_probe()
+Date: Thu, 26 Oct 2017 21:21:40 -0700
+Cc: netdev <netdev@vger.kernel.org>
+To: David Miller <davem@davemloft.net>
+
+From: Eric Dumazet <edumazet@google.com>
+
+In the unlikely event tcp_mtu_probe() is sending a packet, we
+want tp->tcp_mstamp being as accurate as possible. 
+
+This means we need to call tcp_mstamp_refresh() a bit earlier in
+tcp_write_xmit().
+
+Fixes: 385e20706fac ("tcp: use tp->tcp_mstamp in output path")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/ipv4/tcp_output.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 1151870018e345592853b035a0902121c41e268d..ae60dd3faed0adc71731bc686f878afd4c628d32 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -2239,6 +2239,7 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
+ 
+ 	sent_pkts = 0;
+ 
++	tcp_mstamp_refresh(tp);
+ 	if (!push_one) {
+ 		/* Do MTU probing. */
+ 		result = tcp_mtu_probe(sk);
+@@ -2250,7 +2251,6 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
+ 	}
+ 
+ 	max_segs = tcp_tso_segs(sk, mss_now);
+-	tcp_mstamp_refresh(tp);
+ 	while ((skb = tcp_send_head(sk))) {
+ 		unsigned int limit;
+ 
