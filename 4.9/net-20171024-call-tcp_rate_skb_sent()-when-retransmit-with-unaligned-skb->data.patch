@@ -1,10 +1,6 @@
 From: Yousuk Seung <ysseung@google.com>
-Subject: [PATCH net] tcp: call tcp_rate_skb_sent() when retransmit with unaligned skb->data
 Date: Tue, 24 Oct 2017 16:44:42 -0700
-Cc: netdev@vger.kernel.org, Yousuk Seung <ysseung@google.com>,
-        Neal Cardwell <ncardwell@google.com>,
-        Soheil Hassas Yeganeh <soheil@google.com>
-To: David Miller <davem@davemloft.net>
+Subject: tcp: call tcp_rate_skb_sent() when retransmit with unaligned skb->data
 
 Current implementation calls tcp_rate_skb_sent() when tcp_transmit_skb()
 is called when it clones skb only. Not calling tcp_rate_skb_sent() is OK
@@ -17,21 +13,22 @@ Signed-off-by: Yousuk Seung <ysseung@google.com>
 Signed-off-by: Neal Cardwell <ncardwell@google.com>
 Signed-off-by: Soheil Hassas Yeganeh <soheil@google.com>
 Acked-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
 ---
  net/ipv4/tcp_output.c | 4 +++-
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
-index 973befc36fd4..1151870018e3 100644
+index 973befc..1151870 100644
 --- a/net/ipv4/tcp_output.c
 +++ b/net/ipv4/tcp_output.c
 @@ -2843,8 +2843,10 @@ int __tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb, int segs)
- 				     -ENOBUFS;
- 		} tcp_skb_tsorted_restore(skb);
- 
+ 		nskb = __pskb_copy(skb, MAX_TCP_HEADER, GFP_ATOMIC);
+ 		err = nskb ? tcp_transmit_skb(sk, nskb, 0, GFP_ATOMIC) :
+ 			     -ENOBUFS;
 -		if (!err)
 +		if (!err) {
- 			tcp_update_skb_after_send(tp, skb);
+ 			skb->skb_mstamp = tp->tcp_mstamp;
 +			tcp_rate_skb_sent(sk, skb);
 +		}
  	} else {
