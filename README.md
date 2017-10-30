@@ -10,8 +10,8 @@ additional features and performance/scalability improvements to the entire kerne
 
 To apply over a release:
 
-- check out the branch you want, or use master for the current stable version
-- run the `../kernel-patches/apply.sh` script when in the kernel directory
+- check out the branch for the kernel you want (see `git branch -l`)
+- run the `kernel-patches/apply.sh` script when in the kernel directory
 - build as usual
 
 All patches of a series must be applied, as some have interdependencies
