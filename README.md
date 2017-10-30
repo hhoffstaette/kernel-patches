@@ -10,7 +10,7 @@ additional features and performance/scalability improvements to the entire kerne
 
 To apply over a release:
 
-- check out the branch for the kernel you want (see `git branch -l')
+- check out the branch for the kernel you want (see `git branch -l`)
 - run the `kernel-patches/apply.sh` script when in the kernel directory
 - build as usual
 
@@ -21,19 +21,14 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS series: 4.9**
+**LTS series: 4.14**
 
-- block: [throttled background writeback v8](http://marc.info/?l=linux-block&m=147751514819997) (*enabled* by default)
-- btrfs: fixes from 4.10+ (cleanups, correctness, error handling etc.)
-- ext4: patches from 4.10+ (performance, correctness)
-- intel: various fixes for Intel NICs from 4.10+
+- btrfs: fixes from 4.15+ (cleanups, correctness, error handling etc.)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
-- mm: memory management fixes from 4.10+
-- muqss: [MuQSS v152+](http://ck-hack.blogspot.de/2017/02/linux-410-ck1-muqss-version-0152-for.html) (*disabled* by default)
-- net: [RACK loss detection](https://goo.gl/lwk7bq), high-precision [TCP timestamps](https://goo.gl/aBjwip) & timers for RACK/RTT/queue management
-- realtek: fixes for Realtek NICs from 4.10+, configurable interrupt coalescing for r8169
-- sched: CFS cpu scheduler fixes from 4.10+
+- mm: memory management fixes/improvements from 4.15+
+- net: networking fixes/improvements from 4.15+
+- realtek: configurable interrupt coalescing for r8169
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: selected fixes from 4.10+
+- xfs: selected fixes from 4.15+
 
