@@ -1,0 +1,62 @@
+From adfb69af7d8cb6a3958f75aad1ef4bc96891d116 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Wed, 11 Oct 2017 12:46:18 +0800
+Subject: btrfs: add_missing_dev() should return the actual error
+
+add_missing_dev() can return device pointer so that IS_ERR/PTR_ERR can
+be used to check for the actual error that occurred in the function.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Reviewed-by: Liu Bo <bo.li.liu@oracle.com>
+[ minor error message adjustment ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 763d04b..23b628c 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6238,7 +6238,7 @@ static struct btrfs_device *add_missing_dev(struct btrfs_fs_devices *fs_devices,
+ 
+ 	device = btrfs_alloc_device(NULL, &devid, dev_uuid);
+ 	if (IS_ERR(device))
+-		return NULL;
++		return device;
+ 
+ 	list_add(&device->dev_list, &fs_devices->devices);
+ 	device->fs_devices = fs_devices;
+@@ -6443,9 +6443,12 @@ static int read_one_chunk(struct btrfs_fs_info *fs_info, struct btrfs_key *key,
+ 			map->stripes[i].dev =
+ 				add_missing_dev(fs_info->fs_devices, devid,
+ 						uuid);
+-			if (!map->stripes[i].dev) {
++			if (IS_ERR(map->stripes[i].dev)) {
+ 				free_extent_map(em);
+-				return -EIO;
++				btrfs_err(fs_info,
++					"failed to init missing dev %llu: %ld",
++					devid, PTR_ERR(map->stripes[i].dev));
++				return PTR_ERR(map->stripes[i].dev);
+ 			}
+ 			btrfs_report_missing_device(fs_info, devid, uuid);
+ 		}
+@@ -6571,8 +6574,12 @@ static int read_one_dev(struct btrfs_fs_info *fs_info,
+ 		}
+ 
+ 		device = add_missing_dev(fs_devices, devid, dev_uuid);
+-		if (!device)
+-			return -ENOMEM;
++		if (IS_ERR(device)) {
++			btrfs_err(fs_info,
++				"failed to add missing dev %llu: %ld",
++				devid, PTR_ERR(device));
++			return PTR_ERR(device);
++		}
+ 		btrfs_report_missing_device(fs_info, devid, dev_uuid);
+ 	} else {
+ 		if (!device->bdev) {
+-- 
+cgit v1.1
+
