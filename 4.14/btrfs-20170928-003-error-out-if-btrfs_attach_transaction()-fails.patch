@@ -1,0 +1,65 @@
+From 7132a262595a43abd483f1c5139afc038c67fbbb Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Thu, 28 Sep 2017 14:51:11 +0800
+Subject: btrfs: error out if btrfs_attach_transaction() fails
+
+btrfs_init_new_device() calls btrfs_attach_transaction() to
+commit sys chunks, and it should error out if it fails.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Reviewed-by: Qu Wenruo <quwenruo.btrfs@gmx.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 911bee9..9f26c57 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -2318,6 +2318,7 @@ int btrfs_init_new_device(struct btrfs_fs_info *fs_info, const char *device_path
+ 	u64 tmp;
+ 	int seeding_dev = 0;
+ 	int ret = 0;
++	bool unlocked = false;
+ 
+ 	if (sb_rdonly(sb) && !fs_info->fs_devices->seeding)
+ 		return -EROFS;
+@@ -2477,6 +2478,7 @@ int btrfs_init_new_device(struct btrfs_fs_info *fs_info, const char *device_path
+ 	if (seeding_dev) {
+ 		mutex_unlock(&uuid_mutex);
+ 		up_write(&sb->s_umount);
++		unlocked = true;
+ 
+ 		if (ret) /* transaction commit */
+ 			return ret;
+@@ -2489,7 +2491,9 @@ int btrfs_init_new_device(struct btrfs_fs_info *fs_info, const char *device_path
+ 		if (IS_ERR(trans)) {
+ 			if (PTR_ERR(trans) == -ENOENT)
+ 				return 0;
+-			return PTR_ERR(trans);
++			ret = PTR_ERR(trans);
++			trans = NULL;
++			goto error_sysfs;
+ 		}
+ 		ret = btrfs_commit_transaction(trans);
+ 	}
+@@ -2503,12 +2507,13 @@ error_sysfs:
+ error_trans:
+ 	if (seeding_dev)
+ 		sb->s_flags |= MS_RDONLY;
+-	btrfs_end_transaction(trans);
++	if (trans)
++		btrfs_end_transaction(trans);
+ 	rcu_string_free(device->name);
+ 	kfree(device);
+ error:
+ 	blkdev_put(bdev, FMODE_EXCL);
+-	if (seeding_dev) {
++	if (seeding_dev && !unlocked) {
+ 		mutex_unlock(&uuid_mutex);
+ 		up_write(&sb->s_umount);
+ 	}
+-- 
+cgit v1.1
+
