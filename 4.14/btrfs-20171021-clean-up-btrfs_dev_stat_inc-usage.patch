@@ -1,0 +1,56 @@
+From 5620fe908ab6a6548cc23068f481b1893448468e Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Sat, 21 Oct 2017 01:45:33 +0800
+Subject: btrfs: clean up btrfs_dev_stat_inc usage
+
+btrfs_end_bio() is using btrfs_dev_stat_inc() and then
+btrfs_dev_stat_print_on_error() separately instead use
+btrfs_dev_stat_inc_and_print() directly.
+
+As of now there isn't any bio in btrfs which is - a non-empty write and
+also the REQ_PREFLUSH flag is set. So in actual the condition
+
+   if (bio->bi_opf & REQ_PREFLUSH)
+
+is never true in btrfs_end_bio(), and so there won't be any redundant
+error log by using btrfs_dev_stat_inc_and_print() separately one for
+write and another for flush.
+
+This consolidation will help to add the device critical error handles in
+the function btrfs_dev_stat_inc_and_print() and which can be renamed as
+needed.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 239f38f..b2dc689 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -5981,15 +5981,14 @@ static void btrfs_end_bio(struct bio *bio)
+ 			dev = bbio->stripes[stripe_index].dev;
+ 			if (dev->bdev) {
+ 				if (bio_op(bio) == REQ_OP_WRITE)
+-					btrfs_dev_stat_inc(dev,
++					btrfs_dev_stat_inc_and_print(dev,
+ 						BTRFS_DEV_STAT_WRITE_ERRS);
+ 				else
+-					btrfs_dev_stat_inc(dev,
++					btrfs_dev_stat_inc_and_print(dev,
+ 						BTRFS_DEV_STAT_READ_ERRS);
+ 				if (bio->bi_opf & REQ_PREFLUSH)
+-					btrfs_dev_stat_inc(dev,
++					btrfs_dev_stat_inc_and_print(dev,
+ 						BTRFS_DEV_STAT_FLUSH_ERRS);
+-				btrfs_dev_stat_print_on_error(dev);
+ 			}
+ 		}
+ 	}
+-- 
+cgit v1.1
+
