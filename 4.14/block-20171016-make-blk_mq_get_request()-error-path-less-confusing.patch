@@ -1,0 +1,58 @@
+From 21e768b442bb587123ea924620e74d6e5655d717 Mon Sep 17 00:00:00 2001
+From: Bart Van Assche <bart.vanassche@wdc.com>
+Date: Mon, 16 Oct 2017 16:32:26 -0700
+Subject: blk-mq: Make blk_mq_get_request() error path less confusing
+
+blk_mq_get_tag() can modify data->ctx. This means that in the
+error path of blk_mq_get_request() data->ctx should be passed to
+blk_mq_put_ctx() instead of local_ctx. Note: since blk_mq_put_ctx()
+ignores its argument, this patch does not change any functionality.
+
+References: commit 1ad43c0078b7 ("blk-mq: don't leak preempt counter/q_usage_counter when allocating rq failed")
+Reviewed-by: Ming Lei <ming.lei@redhat.com>
+Reviewed-by: Hannes Reinecke <hare@suse.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Reviewed-by: Johannes Thumshirn <jthumshirn@suse.de>
+Signed-off-by: Bart Van Assche <bart.vanassche@wdc.com>
+Cc: Ming Lei <ming.lei@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 9eea67c..13cdcce 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -337,12 +337,14 @@ static struct request *blk_mq_get_request(struct request_queue *q,
+ 	struct elevator_queue *e = q->elevator;
+ 	struct request *rq;
+ 	unsigned int tag;
+-	struct blk_mq_ctx *local_ctx = NULL;
++	bool put_ctx_on_error = false;
+ 
+ 	blk_queue_enter_live(q);
+ 	data->q = q;
+-	if (likely(!data->ctx))
+-		data->ctx = local_ctx = blk_mq_get_ctx(q);
++	if (likely(!data->ctx)) {
++		data->ctx = blk_mq_get_ctx(q);
++		put_ctx_on_error = true;
++	}
+ 	if (likely(!data->hctx))
+ 		data->hctx = blk_mq_map_queue(q, data->ctx->cpu);
+ 	if (op & REQ_NOWAIT)
+@@ -361,8 +363,8 @@ static struct request *blk_mq_get_request(struct request_queue *q,
+ 
+ 	tag = blk_mq_get_tag(data);
+ 	if (tag == BLK_MQ_TAG_FAIL) {
+-		if (local_ctx) {
+-			blk_mq_put_ctx(local_ctx);
++		if (put_ctx_on_error) {
++			blk_mq_put_ctx(data->ctx);
+ 			data->ctx = NULL;
+ 		}
+ 		blk_queue_exit(q);
+-- 
+cgit v1.1
+
