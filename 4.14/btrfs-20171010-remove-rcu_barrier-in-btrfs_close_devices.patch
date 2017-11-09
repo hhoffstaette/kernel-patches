@@ -1,0 +1,44 @@
+From 37fbbcb82343139e6f238d02d98b12a9c83f3a74 Mon Sep 17 00:00:00 2001
+From: Liu Bo <bo.li.liu@oracle.com>
+Date: Tue, 10 Oct 2017 15:51:02 -0600
+Subject: Btrfs: remove rcu_barrier in btrfs_close_devices
+
+It was introduced because btrfs used to do blkdev_put in a deferred
+work, now that btrfs has blkdev_put in place, this rcu_barrier can be
+removed.
+
+modprobe -r btrfs will do btrfs_cleanup_fs_uuids(), where it cleanup
+every %fs_devices on the list, but when we do btrfs_close_devices(), we
+have replaced the devices on the list with dummy ones which only have
+the same name and uuid, so modprobe -r btrfs will free those instead of
+what we were using, this change won't cause a problem for it.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+Reviewed-by: Anand Jain <anand.jain@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+[ copied 2nd paragraph from mailinglist discussion ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 34316e7..ea8b208 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -932,12 +932,6 @@ int btrfs_close_devices(struct btrfs_fs_devices *fs_devices)
+ 		__btrfs_close_devices(fs_devices);
+ 		free_fs_devices(fs_devices);
+ 	}
+-	/*
+-	 * Wait for rcu kworkers under __btrfs_close_devices
+-	 * to finish all blkdev_puts so device is really
+-	 * free when umount is done.
+-	 */
+-	rcu_barrier();
+ 	return ret;
+ }
+ 
+-- 
+cgit v1.1
+
