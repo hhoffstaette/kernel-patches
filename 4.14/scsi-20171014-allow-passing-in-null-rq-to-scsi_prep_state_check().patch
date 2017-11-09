@@ -1,0 +1,40 @@
+From aeec77629a4ac6f8c248f3a82e80d4170a881f22 Mon Sep 17 00:00:00 2001
+From: Ming Lei <ming.lei@redhat.com>
+Date: Sat, 14 Oct 2017 17:22:31 +0800
+Subject: scsi: allow passing in null rq to scsi_prep_state_check()
+
+In the following patch, we will implement scsi_get_budget()
+which need to call scsi_prep_state_check() when rq isn't
+dequeued yet.
+
+Signed-off-by: Ming Lei <ming.lei@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ drivers/scsi/scsi_lib.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/scsi/scsi_lib.c b/drivers/scsi/scsi_lib.c
+index 9cf6a80..d159bb0 100644
+--- a/drivers/scsi/scsi_lib.c
++++ b/drivers/scsi/scsi_lib.c
+@@ -1301,7 +1301,7 @@ scsi_prep_state_check(struct scsi_device *sdev, struct request *req)
+ 			/*
+ 			 * If the devices is blocked we defer normal commands.
+ 			 */
+-			if (!(req->rq_flags & RQF_PREEMPT))
++			if (req && !(req->rq_flags & RQF_PREEMPT))
+ 				ret = BLKPREP_DEFER;
+ 			break;
+ 		default:
+@@ -1310,7 +1310,7 @@ scsi_prep_state_check(struct scsi_device *sdev, struct request *req)
+ 			 * special commands.  In particular any user initiated
+ 			 * command is not allowed.
+ 			 */
+-			if (!(req->rq_flags & RQF_PREEMPT))
++			if (req && !(req->rq_flags & RQF_PREEMPT))
+ 				ret = BLKPREP_KILL;
+ 			break;
+ 		}
+-- 
+cgit v1.1
+
