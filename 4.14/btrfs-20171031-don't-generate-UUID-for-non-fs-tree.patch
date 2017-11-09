@@ -1,0 +1,50 @@
+From 1155fbb2d5e08a07adee37c2d01641e4249329f4 Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <wqu@suse.com>
+Date: Tue, 31 Oct 2017 14:08:16 +0800
+Subject: btrfs: Don't generate UUID for non-fs tree
+
+btrfs_create_tree() will unconditionally generate UUID for any root.
+So for quota tree and data reloc tree created by kernel, they will have
+unique UUIDs.
+
+However UUID in root item is only referred by UUID tree, which only
+records UUID for fs trees.  This makes unique UUIDs for quota/data reloc
+tree meaningless.
+
+Leave the UUID as zero for non-fs tree, making btrfs-debug-tree output
+less confusing.
+
+Reported-by: Misono Tomohiro <misono.tomohiro@jp.fujitsu.com>
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index efce9a2..5713c50 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1243,7 +1243,7 @@ struct btrfs_root *btrfs_create_tree(struct btrfs_trans_handle *trans,
+ 	struct btrfs_root *root;
+ 	struct btrfs_key key;
+ 	int ret = 0;
+-	uuid_le uuid;
++	uuid_le uuid = { 0 };
+ 
+ 	root = btrfs_alloc_root(fs_info, GFP_KERNEL);
+ 	if (!root)
+@@ -1284,7 +1284,8 @@ struct btrfs_root *btrfs_create_tree(struct btrfs_trans_handle *trans,
+ 	btrfs_set_root_used(&root->root_item, leaf->len);
+ 	btrfs_set_root_last_snapshot(&root->root_item, 0);
+ 	btrfs_set_root_dirid(&root->root_item, 0);
+-	uuid_le_gen(&uuid);
++	if (is_fstree(objectid))
++		uuid_le_gen(&uuid);
+ 	memcpy(root->root_item.uuid, uuid.b, BTRFS_UUID_SIZE);
+ 	root->root_item.drop_level = 0;
+ 
+-- 
+cgit v1.1
+
