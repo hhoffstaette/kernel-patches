@@ -1,0 +1,60 @@
+From c9162bdfd6174edeaa276a4c235851113625c555 Mon Sep 17 00:00:00 2001
+From: Omar Sandoval <osandov@fb.com>
+Date: Tue, 22 Aug 2017 23:46:04 -0700
+Subject: Btrfs: make some volumes.c functions static
+
+These aren't used outside of volumes.c.
+
+Signed-off-by: Omar Sandoval <osandov@fb.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index b92e82d..533b417 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -541,7 +541,7 @@ static void pending_bios_fn(struct btrfs_work *work)
+ }
+ 
+ 
+-void btrfs_free_stale_device(struct btrfs_device *cur_dev)
++static void btrfs_free_stale_device(struct btrfs_device *cur_dev)
+ {
+ 	struct btrfs_fs_devices *fs_devs;
+ 	struct btrfs_device *dev;
+@@ -1062,14 +1062,15 @@ int btrfs_open_devices(struct btrfs_fs_devices *fs_devices,
+ 	return ret;
+ }
+ 
+-void btrfs_release_disk_super(struct page *page)
++static void btrfs_release_disk_super(struct page *page)
+ {
+ 	kunmap(page);
+ 	put_page(page);
+ }
+ 
+-int btrfs_read_disk_super(struct block_device *bdev, u64 bytenr,
+-		struct page **page, struct btrfs_super_block **disk_super)
++static int btrfs_read_disk_super(struct block_device *bdev, u64 bytenr,
++				 struct page **page,
++				 struct btrfs_super_block **disk_super)
+ {
+ 	void *p;
+ 	pgoff_t index;
+@@ -1811,8 +1812,8 @@ static int btrfs_check_raid_min_devices(struct btrfs_fs_info *fs_info,
+ 	return 0;
+ }
+ 
+-struct btrfs_device *btrfs_find_next_active_device(struct btrfs_fs_devices *fs_devs,
+-					struct btrfs_device *device)
++static struct btrfs_device * btrfs_find_next_active_device(
++		struct btrfs_fs_devices *fs_devs, struct btrfs_device *device)
+ {
+ 	struct btrfs_device *next_device;
+ 
+-- 
+cgit v1.1
+
