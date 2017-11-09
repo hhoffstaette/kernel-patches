@@ -1,0 +1,50 @@
+From 8cf466602028196b939255f1eb4e9817efd1db6d Mon Sep 17 00:00:00 2001
+From: Omar Sandoval <osandov@fb.com>
+Date: Wed, 11 Oct 2017 10:39:15 -0700
+Subject: kyber: fix hang on domain token wait queue
+
+When we're getting a domain token, if we fail to get a token on our
+first attempt, we put the current hardware queue on a wait queue and
+then try again just in case a token was freed after our initial attempt
+but before we got on the wait queue. If this second attempt succeeds, we
+currently leave the hardware queue on the wait queue. Usually this is
+okay; we'll just run the hardware queue one extra time when another
+token is freed. However, if the hardware queue doesn't have any other
+requests waiting, then when it it gets the extra wakeup, it won't have
+anything to free and therefore won't wake up any other hardware queues.
+If tokens are limited, then we won't make forward progress and the
+device will hang.
+
+Reported-by: Bin Zha <zhabin.zb@alibaba-inc.com>
+Signed-off-by: Omar Sandoval <osandov@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/kyber-iosched.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/block/kyber-iosched.c b/block/kyber-iosched.c
+index f58cab8..db5bfc6 100644
+--- a/block/kyber-iosched.c
++++ b/block/kyber-iosched.c
+@@ -541,9 +541,17 @@ static int kyber_get_domain_token(struct kyber_queue_data *kqd,
+ 
+ 		/*
+ 		 * Try again in case a token was freed before we got on the wait
+-		 * queue.
++		 * queue. The waker may have already removed the entry from the
++		 * wait queue, but list_del_init() is okay with that.
+ 		 */
+ 		nr = __sbitmap_queue_get(domain_tokens);
++		if (nr >= 0) {
++			unsigned long flags;
++
++			spin_lock_irqsave(&ws->wait.lock, flags);
++			list_del_init(&wait->entry);
++			spin_unlock_irqrestore(&ws->wait.lock, flags);
++		}
+ 	}
+ 	return nr;
+ }
+-- 
+cgit v1.1
+
