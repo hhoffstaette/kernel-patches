@@ -1,0 +1,32 @@
+From a67914b38e928938fc64555868eb545c30184900 Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <nborisov@suse.com>
+Date: Fri, 20 Oct 2017 18:10:59 +0300
+Subject: btrfs: Remove unused function
+
+It's sole callsite was removed in a previous patch so just nuke it for good.
+
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.h | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 177814a..294c4eb 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -488,11 +488,6 @@ int btrfs_finish_chunk_alloc(struct btrfs_trans_handle *trans,
+ int btrfs_remove_chunk(struct btrfs_trans_handle *trans,
+ 		       struct btrfs_fs_info *fs_info, u64 chunk_offset);
+ 
+-static inline int btrfs_dev_stats_dirty(struct btrfs_device *dev)
+-{
+-	return atomic_read(&dev->dev_stats_ccnt);
+-}
+-
+ static inline void btrfs_dev_stat_inc(struct btrfs_device *dev,
+ 				      int index)
+ {
+-- 
+cgit v1.1
+
