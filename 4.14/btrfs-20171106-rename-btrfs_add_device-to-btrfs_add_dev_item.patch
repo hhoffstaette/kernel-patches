@@ -1,0 +1,40 @@
+From aec0ff125a9cee299658a41169a0e60fad467213 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Mon, 6 Nov 2017 16:36:15 +0800
+Subject: btrfs: rename btrfs_add_device to btrfs_add_dev_item
+
+Function btrfs_add_device() is adding the device item so rename to
+reflect that in the function. Similarly we have btrfs_rm_dev_item().
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index e890694..1b43f76 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1641,7 +1641,7 @@ error:
+  * the device information is stored in the chunk root
+  * the btrfs_device struct should be fully filled in
+  */
+-static int btrfs_add_device(struct btrfs_trans_handle *trans,
++static int btrfs_add_dev_item(struct btrfs_trans_handle *trans,
+ 			    struct btrfs_fs_info *fs_info,
+ 			    struct btrfs_device *device)
+ {
+@@ -2429,7 +2429,7 @@ int btrfs_init_new_device(struct btrfs_fs_info *fs_info, const char *device_path
+ 		}
+ 	}
+ 
+-	ret = btrfs_add_device(trans, fs_info, device);
++	ret = btrfs_add_dev_item(trans, fs_info, device);
+ 	if (ret) {
+ 		btrfs_abort_transaction(trans, ret);
+ 		goto error_sysfs;
+-- 
+cgit v1.1
+
