@@ -1,0 +1,69 @@
+From 19f5a26e6b224eb170926c3404e59544f4e81e03 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Mon, 6 Nov 2017 10:28:00 +0800
+Subject: btrfs: move volume_mutex into the btrfs_rm_device()
+
+A cleanup patch no functional change, we hold volume_mutex before
+calling btrfs_rm_device, so move it into the function itself.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ioctl.c   | 4 ----
+ fs/btrfs/volumes.c | 2 ++
+ 2 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index fd172a9..aa76e3d 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -2675,14 +2675,12 @@ static long btrfs_ioctl_rm_dev_v2(struct file *file, void __user *arg)
+ 		goto out;
+ 	}
+ 
+-	mutex_lock(&fs_info->volume_mutex);
+ 	if (vol_args->flags & BTRFS_DEVICE_SPEC_BY_ID) {
+ 		ret = btrfs_rm_device(fs_info, NULL, vol_args->devid);
+ 	} else {
+ 		vol_args->name[BTRFS_SUBVOL_NAME_MAX] = '\0';
+ 		ret = btrfs_rm_device(fs_info, vol_args->name, 0);
+ 	}
+-	mutex_unlock(&fs_info->volume_mutex);
+ 	clear_bit(BTRFS_FS_EXCL_OP, &fs_info->flags);
+ 
+ 	if (!ret) {
+@@ -2726,9 +2724,7 @@ static long btrfs_ioctl_rm_dev(struct file *file, void __user *arg)
+ 	}
+ 
+ 	vol_args->name[BTRFS_PATH_NAME_MAX] = '\0';
+-	mutex_lock(&fs_info->volume_mutex);
+ 	ret = btrfs_rm_device(fs_info, vol_args->name, 0);
+-	mutex_unlock(&fs_info->volume_mutex);
+ 
+ 	if (!ret)
+ 		btrfs_info(fs_info, "disk deleted %s", vol_args->name);
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index ea8b208..e890694 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1838,6 +1838,7 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info, const char *device_path,
+ 	u64 num_devices;
+ 	int ret = 0;
+ 
++	mutex_lock(&fs_info->volume_mutex);
+ 	mutex_lock(&uuid_mutex);
+ 
+ 	num_devices = fs_info->fs_devices->num_devices;
+@@ -1952,6 +1953,7 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info, const char *device_path,
+ 
+ out:
+ 	mutex_unlock(&uuid_mutex);
++	mutex_unlock(&fs_info->volume_mutex);
+ 	return ret;
+ 
+ error_undo:
+-- 
+cgit v1.1
+
