@@ -1,0 +1,39 @@
+From:   Liu Bo <bo.li.liu@oracle.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: set plug for fsync
+Date:   Thu,  9 Nov 2017 17:16:16 -0700
+
+Setting plug can merge adjacent IOs before dispatching IOs to the disk
+driver.
+
+Without plug, it'd not be a problem for single disk usecases, but for
+multiple disks using raid profile, a large IO can be split to several
+IOs of stripe length, and plug can be helpful to bring them together
+for each disk so that we can save several disk access.
+
+Moreover, fsync issues synchronous writes, so plug can really take
+effect.
+
+Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
+---
+ fs/btrfs/file.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index e43da6c..063180b 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2018,10 +2018,13 @@ int btrfs_release_file(struct inode *inode, struct file *filp)
+ static int start_ordered_ops(struct inode *inode, loff_t start, loff_t end)
+ {
+ 	int ret;
++	struct blk_plug plug;
+ 
++	blk_start_plug(&plug);
+ 	atomic_inc(&BTRFS_I(inode)->sync_writers);
+ 	ret = btrfs_fdatawrite_range(inode, start, end);
+ 	atomic_dec(&BTRFS_I(inode)->sync_writers);
++	blk_finish_plug(&plug);
+ 
+ 	return ret;
+ }
