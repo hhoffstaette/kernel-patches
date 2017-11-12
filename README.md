@@ -24,11 +24,12 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **LTS series: 4.14**
 
 - btrfs: fixes from 4.15+ (cleanups, correctness, error handling etc.)
+- block: fixes from 4.15+ (blk-mq correctness/performance, scheduling, suspend/resume)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - mm: memory management fixes/improvements from 4.15+
 - net: networking fixes/improvements from 4.15+
 - realtek: configurable interrupt coalescing for r8169
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: selected fixes from 4.15+
+- xfs: fixes from 4.15+
 
