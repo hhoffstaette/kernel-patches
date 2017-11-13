@@ -22,3 +22,10 @@ release on [kernel.org](https://www.kernel.org/); if it does not then **please**
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
 Enjoy!
+
+**Current status (2017-11-13)**
+
+- 4.14 is the current production series; it's significantly better than 4.9 in every way.
+- 4.9 will receive one more update until 4.9.63.
+- all other branches are EOL.
+
