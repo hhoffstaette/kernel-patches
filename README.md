@@ -25,6 +25,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - btrfs: fixes from 4.15+ (cleanups, correctness, error handling etc.)
 - block: fixes from 4.15+ (blk-mq correctness/performance, scheduling, suspend/resume)
+- ext4: fixes from 4.15+ (correctness, performance)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - mm: memory management fixes/improvements from 4.15+
