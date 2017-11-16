@@ -19,7 +19,10 @@ All patches of a series must be applied, as some have interdependencies
 
 A patch series should apply cleanly to the *latest* version of the respective -stable
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
-a bug here on Github. Older release series will only see sporadic updates, if any.
+a bug here on Github.
+
+**NOTE:** This branch will no longer receive updates!
+-----------------------------------------------------
 
 **LTS series: 4.9**
 
