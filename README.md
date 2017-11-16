@@ -23,9 +23,8 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2017-11-13)**
+**Current status (2017-11-16)**
 
-- 4.14 is the current production series; it's significantly better than 4.9 in every way.
-- 4.9 will receive one more update until 4.9.63.
+- 4.14 is the current production series.
 - all other branches are EOL.
 
