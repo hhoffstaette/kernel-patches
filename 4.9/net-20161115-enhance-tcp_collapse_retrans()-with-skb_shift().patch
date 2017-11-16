@@ -58,6 +58,7 @@ Following packetdrill test now passes :
 +.001 < . 1:1(0) ack 201 win 257 <nop,nop,sack 1001:1401>
    +0 > P. 201:1001(800) ack 1
 
+[HH: fixed to apply to 4.9.63]
 Signed-off-by: Eric Dumazet <edumazet@google.com>
 Cc: Neal Cardwell <ncardwell@google.com>
 Cc: Yuchung Cheng <ycheng@google.com>
@@ -105,7 +106,7 @@ index f57b5aa51b59cf0a58975fe34a7dcdb886ea8c50..19105b46a30436ebb85fe97ee43089e7
 +		else if (!skb_shift(skb, next_skb, next_skb_size))
 +			return false;
 +	}
- 	tcp_highest_sack_combine(sk, next_skb, skb);
+ 	tcp_highest_sack_replace(sk, next_skb, skb);
  
  	tcp_unlink_write_queue(next_skb, sk);
  
