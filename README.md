@@ -30,7 +30,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - loop: observe rotational property of underlying device
 - mm: memory management fixes/improvements from 4.15+
 - net: networking fixes/improvements from 4.15+
-- pds: [PDS-mq 0.98e](https://cchalpha.blogspot.de/2017/11/pds-098d-release.html) CPU scheduler (**disabled** by default)
+- pds: [PDS-mq 0.98f](http://cchalpha.blogspot.de/2017/11/pds-098f-release.html) CPU scheduler (**disabled** by default)
 - realtek: configurable interrupt coalescing for r8169
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: fixes from 4.15+ (log recovery, suspend/resume)
