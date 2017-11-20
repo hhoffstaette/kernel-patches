@@ -1,0 +1,143 @@
+From a6da0024ffc19e0d47712bb5ca4fd083f76b07df Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Sun, 5 Nov 2017 09:16:09 -0700
+Subject: blktrace: fix unlocked registration of tracepoints
+
+We need to ensure that tracepoints are registered and unregistered
+with the users of them. The existing atomic count isn't enough for
+that. Add a lock around the tracepoints, so we serialize access
+to them.
+
+This fixes cases where we have multiple users setting up and
+tearing down tracepoints, like this:
+
+CPU: 0 PID: 2995 Comm: syzkaller857118 Not tainted
+4.14.0-rc5-next-20171018+ #36
+Hardware name: Google Google Compute Engine/Google Compute Engine, BIOS
+Google 01/01/2011
+Call Trace:
+  __dump_stack lib/dump_stack.c:16 [inline]
+  dump_stack+0x194/0x257 lib/dump_stack.c:52
+  panic+0x1e4/0x41c kernel/panic.c:183
+  __warn+0x1c4/0x1e0 kernel/panic.c:546
+  report_bug+0x211/0x2d0 lib/bug.c:183
+  fixup_bug+0x40/0x90 arch/x86/kernel/traps.c:177
+  do_trap_no_signal arch/x86/kernel/traps.c:211 [inline]
+  do_trap+0x260/0x390 arch/x86/kernel/traps.c:260
+  do_error_trap+0x120/0x390 arch/x86/kernel/traps.c:297
+  do_invalid_op+0x1b/0x20 arch/x86/kernel/traps.c:310
+  invalid_op+0x18/0x20 arch/x86/entry/entry_64.S:905
+RIP: 0010:tracepoint_add_func kernel/tracepoint.c:210 [inline]
+RIP: 0010:tracepoint_probe_register_prio+0x397/0x9a0 kernel/tracepoint.c:283
+RSP: 0018:ffff8801d1d1f6c0 EFLAGS: 00010293
+RAX: ffff8801d22e8540 RBX: 00000000ffffffef RCX: ffffffff81710f07
+RDX: 0000000000000000 RSI: ffffffff85b679c0 RDI: ffff8801d5f19818
+RBP: ffff8801d1d1f7c8 R08: ffffffff81710c10 R09: 0000000000000004
+R10: ffff8801d1d1f6b0 R11: 0000000000000003 R12: ffffffff817597f0
+R13: 0000000000000000 R14: 00000000ffffffff R15: ffff8801d1d1f7a0
+  tracepoint_probe_register+0x2a/0x40 kernel/tracepoint.c:304
+  register_trace_block_rq_insert include/trace/events/block.h:191 [inline]
+  blk_register_tracepoints+0x1e/0x2f0 kernel/trace/blktrace.c:1043
+  do_blk_trace_setup+0xa10/0xcf0 kernel/trace/blktrace.c:542
+  blk_trace_setup+0xbd/0x180 kernel/trace/blktrace.c:564
+  sg_ioctl+0xc71/0x2d90 drivers/scsi/sg.c:1089
+  vfs_ioctl fs/ioctl.c:45 [inline]
+  do_vfs_ioctl+0x1b1/0x1520 fs/ioctl.c:685
+  SYSC_ioctl fs/ioctl.c:700 [inline]
+  SyS_ioctl+0x8f/0xc0 fs/ioctl.c:691
+  entry_SYSCALL_64_fastpath+0x1f/0xbe
+RIP: 0033:0x444339
+RSP: 002b:00007ffe05bb5b18 EFLAGS: 00000206 ORIG_RAX: 0000000000000010
+RAX: ffffffffffffffda RBX: 00000000006d66c0 RCX: 0000000000444339
+RDX: 000000002084cf90 RSI: 00000000c0481273 RDI: 0000000000000009
+RBP: 0000000000000082 R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: 0000000000000206 R12: ffffffffffffffff
+R13: 00000000c0481273 R14: 0000000000000000 R15: 0000000000000000
+
+since we can now run these in parallel. Ensure that the exported helpers
+for doing this are grabbing the queue trace mutex.
+
+Reported-by: Steven Rostedt <rostedt@goodmis.org>
+Tested-by: Dmitry Vyukov <dvyukov@google.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ kernel/trace/blktrace.c | 32 ++++++++++++++++++++++----------
+ 1 file changed, 22 insertions(+), 10 deletions(-)
+
+diff --git a/kernel/trace/blktrace.c b/kernel/trace/blktrace.c
+index ea57dd9..206e0e2 100644
+--- a/kernel/trace/blktrace.c
++++ b/kernel/trace/blktrace.c
+@@ -66,7 +66,8 @@ static struct tracer_flags blk_tracer_flags = {
+ };
+ 
+ /* Global reference count of probes */
+-static atomic_t blk_probes_ref = ATOMIC_INIT(0);
++static DEFINE_MUTEX(blk_probe_mutex);
++static int blk_probes_ref;
+ 
+ static void blk_register_tracepoints(void);
+ static void blk_unregister_tracepoints(void);
+@@ -329,11 +330,26 @@ static void blk_trace_free(struct blk_trace *bt)
+ 	kfree(bt);
+ }
+ 
++static void get_probe_ref(void)
++{
++	mutex_lock(&blk_probe_mutex);
++	if (++blk_probes_ref == 1)
++		blk_register_tracepoints();
++	mutex_unlock(&blk_probe_mutex);
++}
++
++static void put_probe_ref(void)
++{
++	mutex_lock(&blk_probe_mutex);
++	if (!--blk_probes_ref)
++		blk_unregister_tracepoints();
++	mutex_unlock(&blk_probe_mutex);
++}
++
+ static void blk_trace_cleanup(struct blk_trace *bt)
+ {
+ 	blk_trace_free(bt);
+-	if (atomic_dec_and_test(&blk_probes_ref))
+-		blk_unregister_tracepoints();
++	put_probe_ref();
+ }
+ 
+ static int __blk_trace_remove(struct request_queue *q)
+@@ -549,8 +565,7 @@ static int do_blk_trace_setup(struct request_queue *q, char *name, dev_t dev,
+ 	if (cmpxchg(&q->blk_trace, NULL, bt))
+ 		goto err;
+ 
+-	if (atomic_inc_return(&blk_probes_ref) == 1)
+-		blk_register_tracepoints();
++	get_probe_ref();
+ 
+ 	ret = 0;
+ err:
+@@ -1596,9 +1611,7 @@ static int blk_trace_remove_queue(struct request_queue *q)
+ 	if (bt == NULL)
+ 		return -EINVAL;
+ 
+-	if (atomic_dec_and_test(&blk_probes_ref))
+-		blk_unregister_tracepoints();
+-
++	put_probe_ref();
+ 	blk_trace_free(bt);
+ 	return 0;
+ }
+@@ -1629,8 +1642,7 @@ static int blk_trace_setup_queue(struct request_queue *q,
+ 	if (cmpxchg(&q->blk_trace, NULL, bt))
+ 		goto free_bt;
+ 
+-	if (atomic_inc_return(&blk_probes_ref) == 1)
+-		blk_register_tracepoints();
++	get_probe_ref();
+ 	return 0;
+ 
+ free_bt:
+-- 
+cgit v0.11.2
+
