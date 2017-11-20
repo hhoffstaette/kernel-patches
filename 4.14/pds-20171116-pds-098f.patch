@@ -831,7 +831,7 @@ index 3c1faaa2af4a..993f8efbe58c 100644
 +          TEST so these options are disabled.
 +
 +          Say Y here.
-+	default y
++	default n
 +
 +
  config BROKEN
