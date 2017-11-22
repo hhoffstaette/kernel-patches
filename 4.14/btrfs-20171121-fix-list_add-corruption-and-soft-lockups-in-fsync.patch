@@ -1,7 +1,8 @@
 From:   Liu Bo <bo.li.liu@oracle.com>
 To:     linux-btrfs@vger.kernel.org
-Subject: [PATCH] Btrfs: fix list_add corruption and soft lockups in fsync
-Date:   Mon, 13 Nov 2017 10:57:24 -0700
+Cc:     Filipe Manana <fdmanana@suse.com>
+Subject: [PATCH v2] Btrfs: fix list_add corruption and soft lockups in fsync
+Date:   Tue, 21 Nov 2017 14:35:40 -0700
 
 Xfstests btrfs/146 revealed this corruption,
 
@@ -39,24 +40,47 @@ patch set[1].
 [1]: https://www.spinics.net/lists/linux-btrfs/msg65308.html
 "btrfs list corruption and soft lockups while testing writeback error handling"
 
+Fixes: 8407f553268a4611f254 ("Btrfs: fix data corruption after fast fsync and writeback error")
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 ---
- fs/btrfs/file.c     | 1 +
+v2:
+- Initialize ctx at the very beginning of fsync so that we can check
+  if list is empty at out label
+
+ fs/btrfs/file.c     | 5 +++--
  fs/btrfs/tree-log.c | 2 +-
- 2 files changed, 2 insertions(+), 1 deletion(-)
+ 2 files changed, 4 insertions(+), 3 deletions(-)
 
 diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
-index 063180b..db70eaa 100644
+index 504e96d..1e6956b 100644
 --- a/fs/btrfs/file.c
 +++ b/fs/btrfs/file.c
-@@ -2241,6 +2241,7 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
- 	if (ctx.io_err) {
- 		btrfs_end_transaction(trans);
- 		ret = ctx.io_err;
-+		ASSERT(list_empty(&ctx.list));
- 		goto out;
- 	}
+@@ -2066,6 +2066,8 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
+ 	len = (u64)end - (u64)start + 1;
+ 	trace_btrfs_sync_file(file, datasync);
  
++	btrfs_init_log_ctx(&ctx, inode);
++
+ 	/*
+ 	 * We write the dirty pages in the range and wait until they complete
+ 	 * out of the ->i_mutex. If so, we can flush the dirty pages by
+@@ -2212,8 +2214,6 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
+ 	}
+ 	trans->sync = true;
+ 
+-	btrfs_init_log_ctx(&ctx, inode);
+-
+ 	ret = btrfs_log_dentry_safe(trans, root, dentry, start, end, &ctx);
+ 	if (ret < 0) {
+ 		/* Fallthrough and commit/free transaction. */
+@@ -2271,6 +2271,7 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
+ 		ret = btrfs_end_transaction(trans);
+ 	}
+ out:
++	ASSERT(list_empty(&ctx.list));
+ 	err = file_check_and_advance_wb_err(file);
+ 	if (!ret)
+ 		ret = err;
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
 index c800d06..d300284 100644
 --- a/fs/btrfs/tree-log.c
