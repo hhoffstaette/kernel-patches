@@ -1,0 +1,42 @@
+From: Ming Lei <ming.lei@redhat.com>
+Subject: [PATCH V2 2/2] block: drain blkcg part of request_queue in blk_cleanup_queue()
+Date: Thu, 23 Nov 2017 12:48:00 +0800
+Cc: Omar Sandoval <osandov@fb.com>,
+        Bart Van Assche <bart.vanassche@sandisk.com>,
+        Hannes Reinecke <hare@suse.com>,
+        Wen Xiong <wenxiong@us.ibm.com>,
+        Mauricio Faria de Oliveira <mauricfo@linux.vnet.ibm.com>,
+        Ming Lei <ming.lei@redhat.com>
+To: Jens Axboe <axboe@fb.com>, linux-block@vger.kernel.org,
+        Christoph Hellwig <hch@infradead.org>
+
+Now once blk_freeze_queue() returns, all requests(in-queue and pending)
+can be drained, but we still need to drain blkcg part of request_queue
+for both blk-mq and legacy, so this patch calls blkcg_drain_queue()
+explicitely in blk_cleanup_queue() to do that.
+
+Then the __blk_drain_queue() in blk_cleanup_queue() can be covered by both
+blk_freeze_queue() and blkcg_drain_queue(), and tasks blocked in get_request()
+are waken up in blk_set_queue_dying() too, so remove it from blk_cleanup_queue().
+
+Cc: Wen Xiong <wenxiong@us.ibm.com>
+Cc: Mauricio Faria de Oliveira <mauricfo@linux.vnet.ibm.com>
+Signed-off-by: Ming Lei <ming.lei@redhat.com>
+---
+ block/blk-core.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 1038706edd87..f3f6f11a5b31 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -689,8 +689,7 @@ void blk_cleanup_queue(struct request_queue *q)
+ 	 */
+ 	blk_freeze_queue(q);
+ 	spin_lock_irq(lock);
+-	if (!q->mq_ops)
+-		__blk_drain_queue(q, true);
++	blkcg_drain_queue(q);
+ 	queue_flag_set(QUEUE_FLAG_DEAD, q);
+ 	spin_unlock_irq(lock);
+ 
