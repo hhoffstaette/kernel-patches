@@ -1,0 +1,17 @@
+
+Disable PDS by default to avoid surprises.
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+diff -rup linux-4.14.2.orig/init/Kconfig linux-4.14.2/init/Kconfig
+--- linux-4.14.2.orig/init/Kconfig	2017-11-25 22:06:53.518385069 +0100
++++ linux-4.14.2/init/Kconfig	2017-11-25 22:07:19.158600200 +0100
+@@ -50,7 +50,7 @@ config SCHED_PDS
+           TEST so these options are disabled.
+ 
+           Say Y here.
+-	default y
++	default n
+ 
+ 
+ config BROKEN
