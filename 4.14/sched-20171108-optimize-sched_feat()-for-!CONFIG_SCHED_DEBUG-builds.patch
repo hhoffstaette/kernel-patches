@@ -1,0 +1,176 @@
+From 765cc3a4b224e22bf524fabe40284a524f37cdd0 Mon Sep 17 00:00:00 2001
+From: Patrick Bellasi <patrick.bellasi@arm.com>
+Date: Wed, 8 Nov 2017 18:41:01 +0000
+Subject: sched/core: Optimize sched_feat() for !CONFIG_SCHED_DEBUG builds
+
+When the kernel is compiled with !CONFIG_SCHED_DEBUG support, we expect that
+all SCHED_FEAT are turned into compile time constants being propagated
+to support compiler optimizations.
+
+Specifically, we expect that code blocks like this:
+
+   if (sched_feat(FEATURE_NAME) [&& <other_conditions>]) {
+	/* FEATURE CODE */
+   }
+
+are turned into dead-code in case FEATURE_NAME defaults to FALSE, and thus
+being removed by the compiler from the finale image.
+
+For this mechanism to properly work it's required for the compiler to
+have full access, from each translation unit, to whatever is the value
+defined by the sched_feat macro. This macro is defined as:
+
+   #define sched_feat(x) (sysctl_sched_features & (1UL << __SCHED_FEAT_##x))
+
+and thus, the compiler can optimize that code only if the value of
+sysctl_sched_features is visible within each translation unit.
+
+Since:
+
+   029632fbb ("sched: Make separate sched*.c translation units")
+
+the scheduler code has been split into separate translation units
+however the definition of sysctl_sched_features is part of
+kernel/sched/core.c while, for all the other scheduler modules, it is
+visible only via kernel/sched/sched.h as an:
+
+   extern const_debug unsigned int sysctl_sched_features
+
+Unfortunately, an extern reference does not allow the compiler to apply
+constants propagation. Thus, on !CONFIG_SCHED_DEBUG kernel we still end up
+with code to load a memory reference and (eventually) doing an unconditional
+jump of a chunk of code.
+
+This mechanism is unavoidable when sched_features can be turned on and off at
+run-time. However, this is not the case for "production" kernels compiled with
+!CONFIG_SCHED_DEBUG. In this case, sysctl_sched_features is just a constant value
+which cannot be changed at run-time and thus memory loads and jumps can be
+avoided altogether.
+
+This patch fixes the case of !CONFIG_SCHED_DEBUG kernel by declaring a local version
+of the sysctl_sched_features constant for each translation unit. This will
+ultimately allow the compiler to perform constants propagation and dead-code
+pruning.
+
+Tests have been done, with !CONFIG_SCHED_DEBUG on a v4.14-rc8 with and without
+the patch, by running 30 iterations of:
+
+   perf bench sched messaging --pipe --thread --group 4 --loop 50000
+
+on a 40 cores Intel(R) Xeon(R) CPU E5-2690 v2 @ 3.00GHz using the
+powersave governor to rule out variations due to frequency scaling.
+
+Statistics on the reported completion time:
+
+                   count     mean       std     min       99%     max
+  v4.14-rc8         30.0  15.7831  0.176032  15.442  16.01226  16.014
+  v4.14-rc8+patch   30.0  15.5033  0.189681  15.232  15.93938  15.962
+
+... show a 1.8% speedup on average completion time and 0.5% speedup in the
+99 percentile.
+
+Signed-off-by: Patrick Bellasi <patrick.bellasi@arm.com>
+Signed-off-by: Chris Redpath <chris.redpath@arm.com>
+Reviewed-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Reviewed-by: Brendan Jackman <brendan.jackman@arm.com>
+Acked-by: Peter Zijlstra <peterz@infradead.org>
+Cc: Juri Lelli <juri.lelli@redhat.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Morten Rasmussen <morten.rasmussen@arm.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Vincent Guittot <vincent.guittot@linaro.org>
+Link: http://lkml.kernel.org/r/20171108184101.16006-1-patrick.bellasi@arm.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/core.c  |  9 ++++++---
+ kernel/sched/sched.h | 25 ++++++++++++++++++++++---
+ 2 files changed, 28 insertions(+), 6 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 1a55c84..a39a081 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -43,18 +43,21 @@
+ 
+ DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+ 
++#if defined(CONFIG_SCHED_DEBUG) && defined(HAVE_JUMP_LABEL)
+ /*
+  * Debugging: various feature bits
++ *
++ * If SCHED_DEBUG is disabled, each compilation unit has its own copy of
++ * sysctl_sched_features, defined in sched.h, to allow constants propagation
++ * at compile time and compiler optimization based on features default.
+  */
+-
+ #define SCHED_FEAT(name, enabled)	\
+ 	(1UL << __SCHED_FEAT_##name) * enabled |
+-
+ const_debug unsigned int sysctl_sched_features =
+ #include "features.h"
+ 	0;
+-
+ #undef SCHED_FEAT
++#endif
+ 
+ /*
+  * Number of tasks to iterate in a single balance run.
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 58787e3..45ab0bf 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1233,8 +1233,6 @@ static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
+ # define const_debug const
+ #endif
+ 
+-extern const_debug unsigned int sysctl_sched_features;
+-
+ #define SCHED_FEAT(name, enabled)	\
+ 	__SCHED_FEAT_##name ,
+ 
+@@ -1246,6 +1244,13 @@ enum {
+ #undef SCHED_FEAT
+ 
+ #if defined(CONFIG_SCHED_DEBUG) && defined(HAVE_JUMP_LABEL)
++
++/*
++ * To support run-time toggling of sched features, all the translation units
++ * (but core.c) reference the sysctl_sched_features defined in core.c.
++ */
++extern const_debug unsigned int sysctl_sched_features;
++
+ #define SCHED_FEAT(name, enabled)					\
+ static __always_inline bool static_branch_##name(struct static_key *key) \
+ {									\
+@@ -1253,13 +1258,27 @@ static __always_inline bool static_branch_##name(struct static_key *key) \
+ }
+ 
+ #include "features.h"
+-
+ #undef SCHED_FEAT
+ 
+ extern struct static_key sched_feat_keys[__SCHED_FEAT_NR];
+ #define sched_feat(x) (static_branch_##x(&sched_feat_keys[__SCHED_FEAT_##x]))
++
+ #else /* !(SCHED_DEBUG && HAVE_JUMP_LABEL) */
++
++/*
++ * Each translation unit has its own copy of sysctl_sched_features to allow
++ * constants propagation at compile time and compiler optimization based on
++ * features default.
++ */
++#define SCHED_FEAT(name, enabled)	\
++	(1UL << __SCHED_FEAT_##name) * enabled |
++static const_debug __maybe_unused unsigned int sysctl_sched_features =
++#include "features.h"
++	0;
++#undef SCHED_FEAT
++
+ #define sched_feat(x) (sysctl_sched_features & (1UL << __SCHED_FEAT_##x))
++
+ #endif /* SCHED_DEBUG && HAVE_JUMP_LABEL */
+ 
+ extern struct static_key_false sched_numa_balancing;
+-- 
+cgit v1.1
+
