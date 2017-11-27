@@ -1,0 +1,82 @@
+From 54b933c6c954a8b7b0c2b40a1c4d3f7279d11e22 Mon Sep 17 00:00:00 2001
+From: Cheng Jian <cj.chengjian@huawei.com>
+Date: Wed, 25 Oct 2017 19:28:27 +0800
+Subject: sched/idle: Micro-optimize the idle loop
+
+Move the loop-invariant calculation of 'cpu' in do_idle() out of the loop body,
+because the current CPU is always constant.
+
+This improves the generated code both on x86-64 and ARM64:
+
+x86-64:
+
+Before patch (execution in loop):
+	864:       0f ae e8                lfence
+	867:       65 8b 05 c2 38 f1 7e    mov %gs:0x7ef138c2(%rip),%eax
+	86e:       89 c0                   mov %eax,%eax
+	870:       48 0f a3 05 68 19 08    bt  %rax,0x1081968(%rip)
+	877:	   01
+
+After patch (execution in loop):
+	872:       0f ae e8                lfence
+	875:       4c 0f a3 25 63 19 08    bt  %r12,0x1081963(%rip)
+	87c:       01
+
+ARM64:
+
+Before patch (execution in loop):
+	c58:       d5033d9f        dsb     ld
+	c5c:       d538d080        mrs     x0, tpidr_el1
+	c60:       b8606a61        ldr     w1, [x19,x0]
+	c64:       1100fc20        add     w0, w1, #0x3f
+	c68:       7100003f        cmp     w1, #0x0
+	c6c:       1a81b000        csel    w0, w0, w1, lt
+	c70:       13067c00        asr     w0, w0, #6
+	c74:       93407c00        sxtw    x0, w0
+	c78:       f8607a80        ldr     x0, [x20,x0,lsl #3]
+	c7c:       9ac12401        lsr     x1, x0, x1
+	c80:       36000581        tbz     w1, #0, d30 <do_idle+0x128>
+
+After patch (execution in loop):
+	c84:       d5033d9f        dsb     ld
+	c88:       f9400260        ldr     x0, [x19]
+	c8c:       ea14001f        tst     x0, x20
+	c90:       54000580        b.eq    d40 <do_idle+0x138>
+
+Signed-off-by: Cheng Jian <cj.chengjian@huawei.com>
+[ Rewrote the title and the changelog. ]
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: huawei.libin@huawei.com
+Cc: xiexiuqi@huawei.com
+Link: http://lkml.kernel.org/r/1508930907-107755-1-git-send-email-cj.chengjian@huawei.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/idle.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/idle.c b/kernel/sched/idle.c
+index b2e8f0a..7dae9eb 100644
+--- a/kernel/sched/idle.c
++++ b/kernel/sched/idle.c
+@@ -209,6 +209,7 @@ exit_idle:
+  */
+ static void do_idle(void)
+ {
++	int cpu = smp_processor_id();
+ 	/*
+ 	 * If the arch has a polling bit, we maintain an invariant:
+ 	 *
+@@ -225,7 +226,7 @@ static void do_idle(void)
+ 		check_pgt_cache();
+ 		rmb();
+ 
+-		if (cpu_is_offline(smp_processor_id())) {
++		if (cpu_is_offline(cpu)) {
+ 			cpuhp_report_idle_dead();
+ 			arch_cpu_idle_dead();
+ 		}
+-- 
+cgit v1.1
+
