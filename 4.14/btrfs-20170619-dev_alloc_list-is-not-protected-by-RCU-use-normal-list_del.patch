@@ -1,0 +1,38 @@
+From 619c47f3d4cd7a60576fd15e133a2eee4fcc0c4e Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Mon, 19 Jun 2017 14:14:22 +0200
+Subject: btrfs: dev_alloc_list is not protected by RCU, use normal list_del
+
+The dev_alloc_list list could be protected by various mutexes,
+depending on the context. The list tracks devices that can take part of
+allocating new chunks, so the closest mutex is chunk_mutex. Adding a new
+device from inside the ADD_DEV ioctl will need device_list_mutex and
+registering a new device from the ioctl needs uuid_mutex.
+
+All mutexes naturally guarantee exclusivity against the same context.
+The device ownership can move between the contexts and the exclusivity
+is guaranteed by other means, eg. during the mount with the uuid_mutex.
+
+There's no RCU involved for dev_alloc_list.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index b5c67dd5..d48b24e 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -2002,7 +2002,7 @@ void btrfs_rm_dev_replace_remove_srcdev(struct btrfs_fs_info *fs_info,
+ 	fs_devices = srcdev->fs_devices;
+ 
+ 	list_del_rcu(&srcdev->dev_list);
+-	list_del_rcu(&srcdev->dev_alloc_list);
++	list_del(&srcdev->dev_alloc_list);
+ 	fs_devices->num_devices--;
+ 	if (srcdev->missing)
+ 		fs_devices->missing_devices--;
+-- 
+cgit v1.1
+
