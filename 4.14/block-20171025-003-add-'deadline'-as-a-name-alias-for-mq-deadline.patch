@@ -1,0 +1,32 @@
+From 4d740bc9f0319229410d11e445017f47e425dbe0 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 25 Oct 2017 09:47:20 -0600
+Subject: mq-deadline: add 'deadline' as a name alias
+
+The scheduler framework now supports looking up the appropriate
+scheduler with the {name,mq} tupple. We can register mq-deadline
+with the alias of 'deadline', so that switching to 'deadline'
+will do the right thing based on the type of driver attached to
+it.
+
+Reviewed-by: Omar Sandoval <osandov@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/mq-deadline.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/block/mq-deadline.c b/block/mq-deadline.c
+index a1cad43..0179e48 100644
+--- a/block/mq-deadline.c
++++ b/block/mq-deadline.c
+@@ -657,6 +657,7 @@ static struct elevator_type mq_deadline = {
+ #endif
+ 	.elevator_attrs = deadline_attrs,
+ 	.elevator_name = "mq-deadline",
++	.elevator_alias = "deadline",
+ 	.elevator_owner = THIS_MODULE,
+ };
+ MODULE_ALIAS("mq-deadline-iosched");
+-- 
+cgit v1.1
+
