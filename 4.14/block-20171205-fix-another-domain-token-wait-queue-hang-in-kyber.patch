@@ -1,6 +1,6 @@
 From: Omar Sandoval <osandov@osandov.com>
-Subject: [PATCH] kyber: fix another domain token wait queue hang
-Date: Mon,  4 Dec 2017 15:12:15 -0800
+Subject: [PATCH v2] kyber: fix another domain token wait queue hang
+Date: Tue,  5 Dec 2017 22:57:43 -0800
 Cc: Jens Axboe <axboe@fb.com>, kernel-team@fb.com
 To: linux-block@vger.kernel.org
 
@@ -26,14 +26,17 @@ since this is always called from process context with irqs enabled.
 
 Signed-off-by: Omar Sandoval <osandov@fb.com>
 ---
-I have another, rarer hang I'm still working out, but I can get this one
-out of the way.
+Changes from v1:
+- Fixed the unintentional change from add_wait_queue() to
+  add_wait_queue_exclusive(). This is likely the second bug I was
+  chasing, but my stress run is still going.
+- Fixed a commit message typo.
 
- block/kyber-iosched.c | 39 +++++++++++++++++++++++++--------------
- 1 file changed, 25 insertions(+), 14 deletions(-)
+ block/kyber-iosched.c | 37 ++++++++++++++++++++++++-------------
+ 1 file changed, 24 insertions(+), 13 deletions(-)
 
 diff --git a/block/kyber-iosched.c b/block/kyber-iosched.c
-index b4df317c2916..00cf624ce3ed 100644
+index b4df317c2916..f95c60774ce8 100644
 --- a/block/kyber-iosched.c
 +++ b/block/kyber-iosched.c
 @@ -100,9 +100,13 @@ struct kyber_hctx_data {
@@ -78,9 +81,8 @@ index b4df317c2916..00cf624ce3ed 100644
 +	if (nr < 0 && list_empty_careful(&wait->entry)) {
  		ws = sbq_wait_ptr(domain_tokens,
  				  &khd->wait_index[sched_domain]);
--		add_wait_queue(&ws->wait, wait);
 +		khd->domain_ws[sched_domain] = ws;
-+		add_wait_queue_exclusive(&ws->wait, wait);
+ 		add_wait_queue(&ws->wait, wait);
  
  		/*
  		 * Try again in case a token was freed before we got on the wait
