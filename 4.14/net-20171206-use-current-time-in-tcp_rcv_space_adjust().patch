@@ -1,0 +1,36 @@
+From: Eric Dumazet <eric.dumazet@gmail.com>
+Subject: [PATCH net] tcp: use current time in tcp_rcv_space_adjust()
+Date: Wed, 06 Dec 2017 11:08:19 -0800
+Cc: netdev <netdev@vger.kernel.org>, Wei Wang <weiwan@google.com>,
+        Neal Cardwell <ncardwell@google.com>,
+        Yuchung Cheng <ycheng@google.com>
+To: David Miller <davem@davemloft.net>
+
+From: Eric Dumazet <edumazet@google.com>
+
+When I switched rcv_rtt_est to high resolution timestamps, I forgot
+that tp->tcp_mstamp needed to be refreshed in tcp_rcv_space_adjust()
+
+Using an old timestamp leads to autotuning lags.
+
+Fixes: 645f4c6f2ebd ("tcp: switch rcv_rtt_est and rcvq_space to high resolution timestamps")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Cc: Wei Wang <weiwan@google.com>
+Cc: Neal Cardwell <ncardwell@google.com>
+Cc: Yuchung Cheng <ycheng@google.com>
+---
+ net/ipv4/tcp_input.c |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 734cfc8ff76edf3453921b50620be2986bfcfdb9..514c00732988b7e71f121953dabf88911b2324d6 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -579,6 +579,7 @@ void tcp_rcv_space_adjust(struct sock *sk)
+ 	int time;
+ 	int copied;
+ 
++	tcp_mstamp_refresh(tp);
+ 	time = tcp_stamp_us_delta(tp->tcp_mstamp, tp->rcvq_space.time);
+ 	if (time < (tp->rcv_rtt_est.rtt_us >> 3) || tp->rcv_rtt_est.rtt_us == 0)
+ 		return;
