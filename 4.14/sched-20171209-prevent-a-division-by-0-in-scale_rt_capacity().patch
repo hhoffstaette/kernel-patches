@@ -1,0 +1,71 @@
+From: Filippo Sironi <sironi@amazon.de>
+Subject: [PATCH] sched/fair: Prevent a division by 0 in scale_rt_capacity()
+Date: Sat,  9 Dec 2017 09:03:49 +0100
+Cc: Filippo Sironi <sironi@amazon.de>
+To: linux-kernel@vger.kernel.org, mingo@redhat.com,
+        peterz@infradead.org
+
+... since total = sched_avg_period() + delta can yield 0x100000000,
+which results in a division by 0, given that div_u64() takes a u32
+divisor.  Use div64_u64() instead.
+
+divide error: 0000 [#1] SMP
+CPU: 7 PID: 0 Comm: swapper/7 Not tainted 4.9.58 #1
+Hardware name: ...
+task: ffff8800a24e2800 task.stack: ffffc9000074c000
+RIP: 0010:[<ffffffff810d36ae>] [<ffffffff810d36ae>] update_group_capacity+0x16e/0x1c0
+RSP: 0018:ffff8800a74e3c18 EFLAGS: 00010246
+RAX: 0000000000445ced RBX: 0000000000000007 RCX: 000000000000024d
+RDX: 0000000000000000 RSI: 0000000000000000 RDI: 00000000000160c0
+RBP: ffff8800a74e3c38 R08: ffff8800a17d5ac0 R09: ffff8800a74e0000
+R10: 0000000000000000 R11: 0000000000000000 R12: ffff8800a297e400
+R13: ffff8800a17d5ac0 R14: 0000000000000000 R15: ffff8800a17d5ac0
+FS: 0000000000000000(0000) GS:ffff8800a74e0000(0000) knlGS:0000000000000000
+CS: 0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00000000006f3580 CR3: 0000000001607000 CR4: 00000000007426e0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+PKRU: 55555554
+Stack:
+ffff8800a17d5180 ffff8800a74e3e00 ffff8800a17d5a01 ffff8800a74e3c68
+ffff8800a74e3d90 ffffffff810d37e6 fffffffffffffff8 0000002300010c40
+0000000000000040 ffff8800a17d5ad8 0000000000000000 0000000000000000
+Call Trace:
+<IRQ> [162553.008569] [<ffffffff810d37e6>] find_busiest_group+0xe6/0x950
+[<ffffffff810d41d8>] load_balance+0x188/0xa70
+[<ffffffff810c1093>] ? update_rq_clock.part.88+0x13/0x30
+[<ffffffff810d5110>] rebalance_domains+0x210/0x290
+[<ffffffff810d5340>] run_rebalance_domains+0x1b0/0x1d0
+[<ffffffff810a45d9>] __do_softirq+0x89/0x2b0
+[<ffffffff810a494b>] irq_exit+0xab/0xb0
+[<ffffffff8108462e>] smp_reschedule_interrupt+0x2e/0x30
+[<ffffffff8139d594>] reschedule_interrupt+0x84/0x90
+<EOI> [162553.008603] [<ffffffff813407bf>] ? cpuidle_enter_state+0x12f/0x2c0
+[<ffffffff81340972>] cpuidle_enter+0x12/0x20
+[<ffffffff810dab22>] cpu_startup_entry+0x1a2/0x1f0
+[<ffffffff810851ad>] start_secondary+0x12d/0x140
+Code: 0f 00 4c 8b 96 48 09 00 00 48 8b 86 40 09 00 00 48 8b b6 b0 08 00 00 48 d1 ea 4c 29 d6 41 ba 00 00 00 00 49 0f 48 f2 01 d6 31 d2 <48> f7 f6 ba 00 04 00 00 48 29 c2 48 3d ff 03 00 00 b8 01 00 00
+RIP [<ffffffff810d36ae>] update_group_capacity+0x16e/0x1c0
+RSP <ffff8800a74e3c18>
+
+Cc: Ingo Molnar <mingo@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: linux-kernel@vger.kernel.org
+Signed-off-by: Filippo Sironi <sironi@amazon.de>
+---
+ kernel/sched/fair.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 4037e19bbca2..04b6f847a241 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7517,7 +7517,7 @@ static unsigned long scale_rt_capacity(int cpu)
+ 
+ 	total = sched_avg_period() + delta;
+ 
+-	used = div_u64(avg, total);
++	used = div64_u64(avg, total);
+ 
+ 	if (likely(used < SCHED_CAPACITY_SCALE))
+ 		return SCHED_CAPACITY_SCALE - used;
