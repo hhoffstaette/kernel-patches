@@ -1,0 +1,122 @@
+From:   Tejun Heo <tj@kernel.org>
+To:     jack@suse.cz, axboe@kernel.dk, clm@fb.com, jbacik@fb.com
+Cc:     kernel-team@fb.com, linux-kernel@vger.kernel.org,
+        linux-btrfs@vger.kernel.org, peterz@infradead.org,
+        jianchao.w.wang@oracle.com, Bart.VanAssche@wdc.com,
+        Tejun Heo <tj@kernel.org>
+Subject: [PATCH 5/7] blk-mq: remove REQ_ATOM_COMPLETE usages from blk-mq
+Date:   Sat, 16 Dec 2017 04:07:24 -0800
+
+After the recent updates to use generation number and state based
+synchronization, blk-mq no longer depends on REQ_ATOM_COMPLETE except
+to avoid firing the same timeout multiple times.
+
+Remove all REQ_ATOM_COMPLETE usages and use a new rq_flags flag
+RQF_MQ_TIMEOUT_EXPIRED to avoid firing the same timeout multiple
+times.  This removes atomic bitops from hot paths too.
+
+v2: Removed blk_clear_rq_complete() from blk_mq_rq_timed_out().
+
+v3: Added RQF_MQ_TIMEOUT_EXPIRED flag.
+
+Signed-off-by: Tejun Heo <tj@kernel.org>
+Cc: "jianchao.wang" <jianchao.w.wang@oracle.com>
+---
+ block/blk-mq.c         | 18 ++++++++----------
+ block/blk-timeout.c    |  1 +
+ include/linux/blkdev.h |  2 ++
+ 3 files changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 88baa82..47e722b 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -607,14 +607,12 @@ void blk_mq_complete_request(struct request *rq)
+ 	 */
+ 	if (!(hctx->flags & BLK_MQ_F_BLOCKING)) {
+ 		rcu_read_lock();
+-		if (blk_mq_rq_aborted_gstate(rq) != rq->gstate &&
+-		    !blk_mark_rq_complete(rq))
++		if (blk_mq_rq_aborted_gstate(rq) != rq->gstate)
+ 			__blk_mq_complete_request(rq);
+ 		rcu_read_unlock();
+ 	} else {
+ 		srcu_idx = srcu_read_lock(hctx->queue_rq_srcu);
+-		if (blk_mq_rq_aborted_gstate(rq) != rq->gstate &&
+-		    !blk_mark_rq_complete(rq))
++		if (blk_mq_rq_aborted_gstate(rq) != rq->gstate)
+ 			__blk_mq_complete_request(rq);
+ 		srcu_read_unlock(hctx->queue_rq_srcu, srcu_idx);
+ 	}
+@@ -665,8 +663,6 @@ void blk_mq_start_request(struct request *rq)
+ 	preempt_enable();
+ 
+ 	set_bit(REQ_ATOM_STARTED, &rq->atomic_flags);
+-	if (test_bit(REQ_ATOM_COMPLETE, &rq->atomic_flags))
+-		clear_bit(REQ_ATOM_COMPLETE, &rq->atomic_flags);
+ 
+ 	if (q->dma_drain_size && blk_rq_bytes(rq)) {
+ 		/*
+@@ -817,6 +813,8 @@ static void blk_mq_rq_timed_out(struct request *req, bool reserved)
+ 	if (!test_bit(REQ_ATOM_STARTED, &req->atomic_flags))
+ 		return;
+ 
++	req->rq_flags |= RQF_MQ_TIMEOUT_EXPIRED;
++
+ 	if (ops->timeout)
+ 		ret = ops->timeout(req, reserved);
+ 
+@@ -832,7 +830,6 @@ static void blk_mq_rq_timed_out(struct request *req, bool reserved)
+ 		 */
+ 		blk_mq_rq_update_aborted_gstate(req, 0);
+ 		blk_add_timer(req);
+-		blk_clear_rq_complete(req);
+ 		break;
+ 	case BLK_EH_NOT_HANDLED:
+ 		break;
+@@ -851,7 +848,8 @@ static void blk_mq_check_expired(struct blk_mq_hw_ctx *hctx,
+ 
+ 	might_sleep();
+ 
+-	if (!test_bit(REQ_ATOM_STARTED, &rq->atomic_flags))
++	if ((rq->rq_flags & RQF_MQ_TIMEOUT_EXPIRED) ||
++	    !test_bit(REQ_ATOM_STARTED, &rq->atomic_flags))
+ 		return;
+ 
+ 	/* read coherent snapshots of @rq->state_gen and @rq->deadline */
+@@ -886,8 +884,8 @@ static void blk_mq_terminate_expired(struct blk_mq_hw_ctx *hctx,
+ 	 * now guaranteed to see @rq->aborted_gstate and yield.  If
+ 	 * @rq->aborted_gstate still matches @rq->gstate, @rq is ours.
+ 	 */
+-	if (READ_ONCE(rq->gstate) == rq->aborted_gstate &&
+-	    !blk_mark_rq_complete(rq))
++	if (!(rq->rq_flags & RQF_MQ_TIMEOUT_EXPIRED) &&
++	    READ_ONCE(rq->gstate) == rq->aborted_gstate)
+ 		blk_mq_rq_timed_out(rq, reserved);
+ }
+ 
+diff --git a/block/blk-timeout.c b/block/blk-timeout.c
+index d580af3..25c4ffa 100644
+--- a/block/blk-timeout.c
++++ b/block/blk-timeout.c
+@@ -209,6 +209,7 @@ void blk_add_timer(struct request *req)
+ 		req->timeout = q->rq_timeout;
+ 
+ 	req->deadline = jiffies + req->timeout;
++	req->rq_flags &= ~RQF_MQ_TIMEOUT_EXPIRED;
+ 
+ 	/*
+ 	 * Only the non-mq case needs to add the request to a protected list.
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index 2d6fd11..13186a7 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -123,6 +123,8 @@ typedef __u32 __bitwise req_flags_t;
+ /* Look at ->special_vec for the actual data payload instead of the
+    bio chain. */
+ #define RQF_SPECIAL_PAYLOAD	((__force req_flags_t)(1 << 18))
++/* timeout is expired */
++#define RQF_MQ_TIMEOUT_EXPIRED	((__force req_flags_t)(1 << 19))
+ 
+ /* flags that prevent us from merging requests: */
+ #define RQF_NOMERGE_FLAGS \
