@@ -1,0 +1,39 @@
+From 428aec5e69fa17d223e1495f395833c50770f7ae Mon Sep 17 00:00:00 2001
+From: Yuchung Cheng <ycheng@google.com>
+Date: Thu, 7 Dec 2017 11:33:32 -0800
+Subject: tcp: fix off-by-one bug in RACK
+
+RACK should mark a packet lost when remaining wait time is zero.
+
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Reviewed-by: Neal Cardwell <ncardwell@google.com>
+Reviewed-by: Priyaranjan Jha <priyarjha@google.com>
+Reviewed-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_recovery.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/net/ipv4/tcp_recovery.c b/net/ipv4/tcp_recovery.c
+index 3143664..0c18230 100644
+--- a/net/ipv4/tcp_recovery.c
++++ b/net/ipv4/tcp_recovery.c
+@@ -80,12 +80,12 @@ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
+ 		 */
+ 		remaining = tp->rack.rtt_us + reo_wnd -
+ 			    tcp_stamp_us_delta(tp->tcp_mstamp, skb->skb_mstamp);
+-		if (remaining < 0) {
++		if (remaining <= 0) {
+ 			tcp_rack_mark_skb_lost(sk, skb);
+ 			list_del_init(&skb->tcp_tsorted_anchor);
+ 		} else {
+-			/* Record maximum wait time (+1 to avoid 0) */
+-			*reo_timeout = max_t(u32, *reo_timeout, 1 + remaining);
++			/* Record maximum wait time */
++			*reo_timeout = max_t(u32, *reo_timeout, remaining);
+ 		}
+ 	}
+ }
+-- 
+cgit v1.1
+

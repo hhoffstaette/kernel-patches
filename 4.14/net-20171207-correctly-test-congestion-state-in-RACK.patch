@@ -1,0 +1,39 @@
+From 0ce294d88457bccd7f9991f883fec80022a1ddbd Mon Sep 17 00:00:00 2001
+From: Yuchung Cheng <ycheng@google.com>
+Date: Thu, 7 Dec 2017 11:33:30 -0800
+Subject: tcp: correctly test congestion state in RACK
+
+RACK does not test the loss recovery state correctly to compute
+the reordering window. It assumes if lost_out is zero then TCP is
+not in loss recovery. But it can be zero during recovery before
+calling tcp_rack_detect_loss(): when an ACK acknowledges all
+packets marked lost before receiving this ACK, but has not yet
+to discover new ones by tcp_rack_detect_loss(). The fix is to
+simply test the congestion state directly.
+
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Reviewed-by: Neal Cardwell <ncardwell@google.com>
+Reviewed-by: Priyaranjan Jha <priyarjha@google.com>
+Reviewed-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_recovery.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp_recovery.c b/net/ipv4/tcp_recovery.c
+index d3ea890..3143664 100644
+--- a/net/ipv4/tcp_recovery.c
++++ b/net/ipv4/tcp_recovery.c
+@@ -55,7 +55,8 @@ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
+ 	 * to queuing or delayed ACKs.
+ 	 */
+ 	reo_wnd = 1000;
+-	if ((tp->rack.reord || !tp->lost_out) && min_rtt != ~0U) {
++	if ((tp->rack.reord || inet_csk(sk)->icsk_ca_state < TCP_CA_Recovery) &&
++	    min_rtt != ~0U) {
+ 		reo_wnd = max((min_rtt >> 2) * tp->rack.reo_wnd_steps, reo_wnd);
+ 		reo_wnd = min(reo_wnd, tp->srtt_us >> 3);
+ 	}
+-- 
+cgit v1.1
+

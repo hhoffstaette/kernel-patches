@@ -1,0 +1,35 @@
+From cd1fc85b4399d47e3d6626301741ba8c38cd475a Mon Sep 17 00:00:00 2001
+From: Yuchung Cheng <ycheng@google.com>
+Date: Thu, 7 Dec 2017 11:33:31 -0800
+Subject: tcp: always evaluate losses in RACK upon undo
+
+When sender detects spurious retransmission, all packets
+marked lost are remarked to be in-flight. However some may
+be considered lost based on its timestamps in RACK. This patch
+forces RACK to re-evaluate, which may be skipped previously if
+the ACK does not advance RACK timestamp.
+
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Reviewed-by: Neal Cardwell <ncardwell@google.com>
+Reviewed-by: Priyaranjan Jha <priyarjha@google.com>
+Reviewed-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_input.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 075c559..9550cc4 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -2329,6 +2329,7 @@ static void tcp_undo_cwnd_reduction(struct sock *sk, bool unmark_loss)
+ 	}
+ 	tp->snd_cwnd_stamp = tcp_jiffies32;
+ 	tp->undo_marker = 0;
++	tp->rack.advanced = 1; /* Force RACK to re-exam losses */
+ }
+ 
+ static inline bool tcp_may_undo(const struct tcp_sock *tp)
+-- 
+cgit v1.1
+
