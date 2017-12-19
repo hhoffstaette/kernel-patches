@@ -1,0 +1,238 @@
+From 1f2556916d974cfb62b6af51660186b5f58bd869 Mon Sep 17 00:00:00 2001
+From: Priyaranjan Jha <priyarjha@google.com>
+Date: Fri, 3 Nov 2017 16:38:48 -0700
+Subject: tcp: higher throughput under reordering with adaptive RACK reordering wnd
+
+Currently TCP RACK loss detection does not work well if packets are
+being reordered beyond its static reordering window (min_rtt/4).Under
+such reordering it may falsely trigger loss recoveries and reduce TCP
+throughput significantly.
+
+This patch improves that by increasing and reducing the reordering
+window based on DSACK, which is now supported in major TCP implementations.
+It makes RACK's reo_wnd adaptive based on DSACK and no. of recoveries.
+
+- If DSACK is received, increment reo_wnd by min_rtt/4 (upper bounded
+  by srtt), since there is possibility that spurious retransmission was
+  due to reordering delay longer than reo_wnd.
+
+- Persist the current reo_wnd value for TCP_RACK_RECOVERY_THRESH (16)
+  no. of successful recoveries (accounts for full DSACK-based loss
+  recovery undo). After that, reset it to default (min_rtt/4).
+
+- At max, reo_wnd is incremented only once per rtt. So that the new
+  DSACK on which we are reacting, is due to the spurious retx (approx)
+  after the reo_wnd has been updated last time.
+
+- reo_wnd is tracked in terms of steps (of min_rtt/4), rather than
+  absolute value to account for change in rtt.
+
+In our internal testing, we observed significant increase in throughput,
+in scenarios where reordering exceeds min_rtt/4 (previous static value).
+
+[HH: backported to 4.14.x]
+Signed-off-by: Priyaranjan Jha <priyarjha@google.com>
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ Documentation/networking/ip-sysctl.txt |  1 +
+ include/linux/tcp.h                    |  9 +++++--
+ include/net/tcp.h                      |  2 ++
+ net/ipv4/tcp.c                         |  1 +
+ net/ipv4/tcp_input.c                   |  7 +++++
+ net/ipv4/tcp_minisocks.c               |  4 +++
+ net/ipv4/tcp_recovery.c                | 48 ++++++++++++++++++++++++++++++++--
+ 7 files changed, 68 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/networking/ip-sysctl.txt b/Documentation/networking/ip-sysctl.txt
+index e6661b2..54410a1 100644
+--- a/Documentation/networking/ip-sysctl.txt
++++ b/Documentation/networking/ip-sysctl.txt
+@@ -454,6 +454,7 @@ tcp_recovery - INTEGER
+ 
+ 	RACK: 0x1 enables the RACK loss detection for fast detection of lost
+ 	      retransmissions and tail drops.
++	RACK: 0x2 makes RACK's reordering window static (min_rtt/4).
+ 
+ 	Default: 0x1
+ 
+diff --git a/include/linux/tcp.h b/include/linux/tcp.h
+index 8c43138..22f40c9 100644
+--- a/include/linux/tcp.h
++++ b/include/linux/tcp.h
+@@ -210,8 +210,13 @@ struct tcp_sock {
+ 		u64 mstamp; /* (Re)sent time of the skb */
+ 		u32 rtt_us;  /* Associated RTT */
+ 		u32 end_seq; /* Ending TCP sequence of the skb */
+-		u8 advanced; /* mstamp advanced since last lost marking */
+-		u8 reord;    /* reordering detected */
++		u32 last_delivered; /* tp->delivered at last reo_wnd adj */
++		u8 reo_wnd_steps;   /* Allowed reordering window */
++#define TCP_RACK_RECOVERY_THRESH 16
++		u8 reo_wnd_persist:5, /* No. of recovery since last adj */
++		   dsack_seen:1, /* Whether DSACK seen after last adj */
++		   advanced:1,	 /* mstamp advanced since last lost marking */
++		   reord:1;	 /* reordering detected */
+ 	} rack;
+ 	u16	advmss;		/* Advertised MSS			*/
+ 	u32	chrono_start;	/* Start time in jiffies of a TCP chrono */
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index c2bf2a8..babfd4d 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -246,6 +246,7 @@ extern int sysctl_tcp_wmem[3];
+ extern int sysctl_tcp_early_retrans;
+ extern int sysctl_tcp_recovery;
+ #define TCP_RACK_LOSS_DETECTION  0x1 /* Use RACK to detect losses */
++#define TCP_RACK_STATIC_REO_WND  0x2 /* Use static RACK reo wnd */
+ 
+ extern int sysctl_tcp_limit_output_bytes;
+ extern int sysctl_tcp_challenge_ack_limit;
+@@ -1901,6 +1902,7 @@ extern void tcp_rack_mark_lost(struct sock *sk);
+ extern void tcp_rack_advance(struct tcp_sock *tp, u8 sacked, u32 end_seq,
+ 			     u64 xmit_time);
+ extern void tcp_rack_reo_timeout(struct sock *sk);
++extern void tcp_rack_update_reo_wnd(struct sock *sk, struct rate_sample *rs);
+ 
+ /* At how many usecs into the future should the RTO fire? */
+ static inline s64 tcp_rto_delta_us(const struct sock *sk)
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index a7a0f31..c4cb19e 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -447,6 +447,7 @@ void tcp_init_sock(struct sock *sk)
+ 	tcp_assign_congestion_control(sk);
+ 
+ 	tp->tsoffset = 0;
++	tp->rack.reo_wnd_steps = 1;
+ 
+ 	sk->sk_state = TCP_CLOSE;
+ 
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 8393b40..0ada8bf 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -856,6 +856,7 @@ void tcp_disable_fack(struct tcp_sock *tp)
+ static void tcp_dsack_seen(struct tcp_sock *tp)
+ {
+ 	tp->rx_opt.sack_ok |= TCP_DSACK_SEEN;
++	tp->rack.dsack_seen = 1;
+ }
+ 
+ static void tcp_update_reordering(struct sock *sk, const int metric,
+@@ -2408,6 +2409,8 @@ static bool tcp_try_undo_recovery(struct sock *sk)
+ 			mib_idx = LINUX_MIB_TCPFULLUNDO;
+ 
+ 		NET_INC_STATS(sock_net(sk), mib_idx);
++	} else if (tp->rack.reo_wnd_persist) {
++		tp->rack.reo_wnd_persist--;
+ 	}
+ 	if (tp->snd_una == tp->high_seq && tcp_is_reno(tp)) {
+ 		/* Hold old state until something *above* high_seq
+@@ -2427,6 +2430,8 @@ static bool tcp_try_undo_dsack(struct sock *sk)
+ 	struct tcp_sock *tp = tcp_sk(sk);
+ 
+ 	if (tp->undo_marker && !tp->undo_retrans) {
++		tp->rack.reo_wnd_persist = min(TCP_RACK_RECOVERY_THRESH,
++					       tp->rack.reo_wnd_persist + 1);
+ 		DBGUNDO(sk, "D-SACK");
+ 		tcp_undo_cwnd_reduction(sk, false);
+ 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPDSACKUNDO);
+@@ -3644,6 +3649,8 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
+ 	flag |= tcp_clean_rtx_queue(sk, prior_fackets, prior_snd_una, &acked,
+ 				    &sack_state);
+ 
++	tcp_rack_update_reo_wnd(sk, &rs);
++
+ 	if (tp->tlp_high_seq)
+ 		tcp_process_tlp_ack(sk, ack, flag);
+ 	/* If needed, reset TLP/RTO timer; RACK may later override this. */
+diff --git a/net/ipv4/tcp_minisocks.c b/net/ipv4/tcp_minisocks.c
+index 3c65c1a..4bb8658 100644
+--- a/net/ipv4/tcp_minisocks.c
++++ b/net/ipv4/tcp_minisocks.c
+@@ -551,6 +551,10 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
+ 		newtp->syn_data_acked = 0;
+ 		newtp->rack.mstamp = 0;
+ 		newtp->rack.advanced = 0;
++		newtp->rack.reo_wnd_steps = 1;
++		newtp->rack.last_delivered = 0;
++		newtp->rack.reo_wnd_persist = 0;
++		newtp->rack.dsack_seen = 0;
+ 
+ 		__TCP_INC_STATS(sock_net(sk), TCP_MIB_PASSIVEOPENS);
+ 	}
+diff --git a/net/ipv4/tcp_recovery.c b/net/ipv4/tcp_recovery.c
+index ac3e9c6..d3ea890 100644
+--- a/net/ipv4/tcp_recovery.c
++++ b/net/ipv4/tcp_recovery.c
+@@ -44,6 +44,7 @@ static bool tcp_rack_sent_after(u64 t1, u64 t2, u32 seq1, u32 seq2)
+ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
++	u32 min_rtt = tcp_min_rtt(tp);
+ 	struct sk_buff *skb, *n;
+ 	u32 reo_wnd;
+ 
+@@ -54,8 +55,10 @@ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
+ 	 * to queuing or delayed ACKs.
+ 	 */
+ 	reo_wnd = 1000;
+-	if ((tp->rack.reord || !tp->lost_out) && tcp_min_rtt(tp) != ~0U)
+-		reo_wnd = max(tcp_min_rtt(tp) >> 2, reo_wnd);
++	if ((tp->rack.reord || !tp->lost_out) && min_rtt != ~0U) {
++		reo_wnd = max((min_rtt >> 2) * tp->rack.reo_wnd_steps, reo_wnd);
++		reo_wnd = min(reo_wnd, tp->srtt_us >> 3);
++	}
+ 
+ 	list_for_each_entry_safe(skb, n, &tp->tsorted_sent_queue,
+ 				 tcp_tsorted_anchor) {
+@@ -160,3 +163,44 @@ void tcp_rack_reo_timeout(struct sock *sk)
+ 	if (inet_csk(sk)->icsk_pending != ICSK_TIME_RETRANS)
+ 		tcp_rearm_rto(sk);
+ }
++
++/* Updates the RACK's reo_wnd based on DSACK and no. of recoveries.
++ *
++ * If DSACK is received, increment reo_wnd by min_rtt/4 (upper bounded
++ * by srtt), since there is possibility that spurious retransmission was
++ * due to reordering delay longer than reo_wnd.
++ *
++ * Persist the current reo_wnd value for TCP_RACK_RECOVERY_THRESH (16)
++ * no. of successful recoveries (accounts for full DSACK-based loss
++ * recovery undo). After that, reset it to default (min_rtt/4).
++ *
++ * At max, reo_wnd is incremented only once per rtt. So that the new
++ * DSACK on which we are reacting, is due to the spurious retx (approx)
++ * after the reo_wnd has been updated last time.
++ *
++ * reo_wnd is tracked in terms of steps (of min_rtt/4), rather than
++ * absolute value to account for change in rtt.
++ */
++void tcp_rack_update_reo_wnd(struct sock *sk, struct rate_sample *rs)
++{
++	struct tcp_sock *tp = tcp_sk(sk);
++
++	if ((sysctl_tcp_recovery & TCP_RACK_STATIC_REO_WND) ||
++	    !rs->prior_delivered)
++		return;
++
++	/* Disregard DSACK if a rtt has not passed since we adjusted reo_wnd */
++	if (before(rs->prior_delivered, tp->rack.last_delivered))
++		tp->rack.dsack_seen = 0;
++
++	/* Adjust the reo_wnd if update is pending */
++	if (tp->rack.dsack_seen) {
++		tp->rack.reo_wnd_steps = min_t(u32, 0xFF,
++					       tp->rack.reo_wnd_steps + 1);
++		tp->rack.dsack_seen = 0;
++		tp->rack.last_delivered = tp->delivered;
++		tp->rack.reo_wnd_persist = TCP_RACK_RECOVERY_THRESH;
++	} else if (!tp->rack.reo_wnd_persist) {
++		tp->rack.reo_wnd_steps = 1;
++	}
++}
+-- 
+cgit v1.1
+
