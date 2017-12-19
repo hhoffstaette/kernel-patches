@@ -1,0 +1,305 @@
+From e2080072ed2d98a55ae69d95dea60ff7a17cddd5 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Wed, 4 Oct 2017 12:59:58 -0700
+Subject: tcp: new list for sent but unacked skbs for RACK recovery
+
+This patch adds a new queue (list) that tracks the sent but not yet
+acked or SACKed skbs for a TCP connection. The list is chronologically
+ordered by skb->skb_mstamp (the head is the oldest sent skb).
+
+This list will be used to optimize TCP Rack recovery, which checks
+an skb's timestamp to judge if it has been lost and needs to be
+retransmitted. Since TCP write queue is ordered by sequence instead
+of sent time, RACK has to scan over the write queue to catch all
+eligible packets to detect lost retransmission, and iterates through
+SACKed skbs repeatedly.
+
+Special cares for rare events:
+1. TCP repair fakes skb transmission so the send queue needs adjusted
+2. SACK reneging would require re-inserting SACKed skbs into the
+   send queue. For now I believe it's not worth the complexity to
+   make RACK work perfectly on SACK reneging, so we do nothing here.
+3. Fast Open: currently for non-TFO, send-queue correctly queues
+   the pure SYN packet. For TFO which queues a pure SYN and
+   then a data packet, send-queue only queues the data packet but
+   not the pure SYN due to the structure of TFO code. This is okay
+   because the SYN receiver would never respond with a SACK on a
+   missing SYN (i.e. SYN is never fast-retransmitted by SACK/RACK).
+
+In order to not grow sk_buff, we use an union for the new list and
+_skb_refdst/destructor fields. This is a bit complicated because
+we need to make sure _skb_refdst and destructor are properly zeroed
+before skb is cloned/copied at transmit, and before being freed.
+
+[HH: backported to 4.14.x]
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ include/linux/skbuff.h   | 11 +++++++++--
+ include/linux/tcp.h      |  1 +
+ include/net/tcp.h        | 24 +++++++++++++++++++++++-
+ net/ipv4/tcp.c           |  2 ++
+ net/ipv4/tcp_input.c     |  9 +++++++--
+ net/ipv4/tcp_minisocks.c |  1 +
+ net/ipv4/tcp_output.c    | 42 +++++++++++++++++++++++++++++++-----------
+ 7 files changed, 74 insertions(+), 16 deletions(-)
+
+diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
+index ada8214..01a9859 100644
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -617,6 +617,7 @@ typedef unsigned char *sk_buff_data_t;
+  *	@nf_trace: netfilter packet trace flag
+  *	@protocol: Packet protocol from driver
+  *	@destructor: Destruct function
++ *	@tcp_tsorted_anchor: list structure for TCP (tp->tsorted_sent_queue)
+  *	@_nfct: Associated connection, if any (with nfctinfo bits)
+  *	@nf_bridge: Saved data about a bridged frame - see br_netfilter.c
+  *	@skb_iif: ifindex of device we arrived on
+@@ -686,8 +687,14 @@ struct sk_buff {
+ 	 */
+ 	char			cb[48] __aligned(8);
+ 
+-	unsigned long		_skb_refdst;
+-	void			(*destructor)(struct sk_buff *skb);
++	union {
++		struct {
++			unsigned long	_skb_refdst;
++			void		(*destructor)(struct sk_buff *skb);
++		};
++		struct list_head	tcp_tsorted_anchor;
++	};
++
+ #ifdef CONFIG_XFRM
+ 	struct	sec_path	*sp;
+ #endif
+diff --git a/include/linux/tcp.h b/include/linux/tcp.h
+index 4aa40ef..1d2c44e 100644
+--- a/include/linux/tcp.h
++++ b/include/linux/tcp.h
+@@ -191,6 +191,7 @@ struct tcp_sock {
+ 	u32	tsoffset;	/* timestamp offset */
+ 
+ 	struct list_head tsq_node; /* anchor in tsq_tasklet.head list */
++	struct list_head tsorted_sent_queue; /* time-sorted sent but un-SACKed skbs */
+ 
+ 	u32	snd_wl1;	/* Sequence for window update		*/
+ 	u32	snd_wnd;	/* The window we expect to receive	*/
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 426c2e9..3b16f35 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -1589,14 +1589,34 @@ enum tcp_chrono {
+ void tcp_chrono_start(struct sock *sk, const enum tcp_chrono type);
+ void tcp_chrono_stop(struct sock *sk, const enum tcp_chrono type);
+ 
++/* This helper is needed, because skb->tcp_tsorted_anchor uses
++ * the same memory storage than skb->destructor/_skb_refdst
++ */
++static inline void tcp_skb_tsorted_anchor_cleanup(struct sk_buff *skb)
++{
++	skb->destructor = NULL;
++	skb->_skb_refdst = 0UL;
++}
++
++#define tcp_skb_tsorted_save(skb) {		\
++	unsigned long _save = skb->_skb_refdst;	\
++	skb->_skb_refdst = 0UL;
++
++#define tcp_skb_tsorted_restore(skb)		\
++	skb->_skb_refdst = _save;		\
++}
++
+ /* write queue abstraction */
+ static inline void tcp_write_queue_purge(struct sock *sk)
+ {
+ 	struct sk_buff *skb;
+ 
+ 	tcp_chrono_stop(sk, TCP_CHRONO_BUSY);
+-	while ((skb = __skb_dequeue(&sk->sk_write_queue)) != NULL)
++	while ((skb = __skb_dequeue(&sk->sk_write_queue)) != NULL) {
++		tcp_skb_tsorted_anchor_cleanup(skb);
+ 		sk_wmem_free_skb(sk, skb);
++	}
++	INIT_LIST_HEAD(&tcp_sk(sk)->tsorted_sent_queue);
+ 	sk_mem_reclaim(sk);
+ 	tcp_clear_all_retrans_hints(tcp_sk(sk));
+ }
+@@ -1711,6 +1731,8 @@ static inline void tcp_insert_write_queue_before(struct sk_buff *new,
+ 
+ static inline void tcp_unlink_write_queue(struct sk_buff *skb, struct sock *sk)
+ {
++	list_del(&skb->tcp_tsorted_anchor);
++	tcp_skb_tsorted_anchor_cleanup(skb);
+ 	__skb_unlink(skb, &sk->sk_write_queue);
+ }
+ 
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index c115e37..8cf742f 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -415,6 +415,7 @@ void tcp_init_sock(struct sock *sk)
+ 	tp->out_of_order_queue = RB_ROOT;
+ 	tcp_init_xmit_timers(sk);
+ 	INIT_LIST_HEAD(&tp->tsq_node);
++	INIT_LIST_HEAD(&tp->tsorted_sent_queue);
+ 
+ 	icsk->icsk_rto = TCP_TIMEOUT_INIT;
+ 	tp->mdev_us = jiffies_to_usecs(TCP_TIMEOUT_INIT);
+@@ -881,6 +882,7 @@ struct sk_buff *sk_stream_alloc_skb(struct sock *sk, int size, gfp_t gfp,
+ 			 * available to the caller, no more, no less.
+ 			 */
+ 			skb->reserved_tailroom = skb->end - skb->tail - size;
++			INIT_LIST_HEAD(&skb->tcp_tsorted_anchor);
+ 			return skb;
+ 		}
+ 		__kfree_skb(skb);
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index c5b8d61..fb0d7ed 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -1593,6 +1593,8 @@ static struct sk_buff *tcp_sacktag_walk(struct sk_buff *skb, struct sock *sk,
+ 						tcp_skb_pcount(skb),
+ 						skb->skb_mstamp);
+ 			tcp_rate_skb_delivered(sk, skb, state->rate);
++			if (TCP_SKB_CB(skb)->sacked & TCPCB_SACKED_ACKED)
++				list_del_init(&skb->tcp_tsorted_anchor);
+ 
+ 			if (!before(TCP_SKB_CB(skb)->seq,
+ 				    tcp_highest_sack_seq(tp)))
+@@ -3054,8 +3056,11 @@ static void tcp_ack_tstamp(struct sock *sk, struct sk_buff *skb,
+ 
+ 	shinfo = skb_shinfo(skb);
+ 	if (!before(shinfo->tskey, prior_snd_una) &&
+-	    before(shinfo->tskey, tcp_sk(sk)->snd_una))
+-		__skb_tstamp_tx(skb, NULL, sk, SCM_TSTAMP_ACK);
++	    before(shinfo->tskey, tcp_sk(sk)->snd_una)) {
++		tcp_skb_tsorted_save(skb) {
++			__skb_tstamp_tx(skb, NULL, sk, SCM_TSTAMP_ACK);
++		} tcp_skb_tsorted_restore(skb);
++	}
+ }
+ 
+ /* Remove acknowledged frames from the retransmission queue. If our packet
+diff --git a/net/ipv4/tcp_minisocks.c b/net/ipv4/tcp_minisocks.c
+index 188a6f3..2341b9f 100644
+--- a/net/ipv4/tcp_minisocks.c
++++ b/net/ipv4/tcp_minisocks.c
+@@ -446,6 +446,7 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
+ 		newtp->snd_nxt = newtp->snd_up = treq->snt_isn + 1;
+ 
+ 		INIT_LIST_HEAD(&newtp->tsq_node);
++		INIT_LIST_HEAD(&newtp->tsorted_sent_queue);
+ 
+ 		tcp_init_wl(newtp, treq->rcv_isn);
+ 
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 0bc9e46..8162e28 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -971,6 +971,12 @@ static void tcp_internal_pacing(struct sock *sk, const struct sk_buff *skb)
+ 		      HRTIMER_MODE_ABS_PINNED);
+ }
+ 
++static void tcp_update_skb_after_send(struct tcp_sock *tp, struct sk_buff *skb)
++{
++	skb->skb_mstamp = tp->tcp_mstamp;
++	list_move_tail(&skb->tcp_tsorted_anchor, &tp->tsorted_sent_queue);
++}
++
+ /* This routine actually transmits TCP packets queued in by
+  * tcp_do_sendmsg().  This is used by both the initial
+  * transmission and possible later retransmissions.
+@@ -1003,10 +1009,14 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
+ 		TCP_SKB_CB(skb)->tx.in_flight = TCP_SKB_CB(skb)->end_seq
+ 			- tp->snd_una;
+ 		oskb = skb;
+-		if (unlikely(skb_cloned(skb)))
+-			skb = pskb_copy(skb, gfp_mask);
+-		else
+-			skb = skb_clone(skb, gfp_mask);
++
++		tcp_skb_tsorted_save(oskb) {
++			if (unlikely(skb_cloned(oskb)))
++				skb = pskb_copy(oskb, gfp_mask);
++			else
++				skb = skb_clone(oskb, gfp_mask);
++		} tcp_skb_tsorted_restore(oskb);
++
+ 		if (unlikely(!skb))
+ 			return -ENOBUFS;
+ 	}
+@@ -1127,7 +1137,7 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
+ 		err = net_xmit_eval(err);
+ 	}
+ 	if (!err && oskb) {
+-		oskb->skb_mstamp = tp->tcp_mstamp;
++		tcp_update_skb_after_send(tp, oskb);
+ 		tcp_rate_skb_sent(sk, oskb);
+ 	}
+ 	return err;
+@@ -1328,6 +1338,7 @@ int tcp_fragment(struct sock *sk, struct sk_buff *skb, u32 len,
+ 	/* Link BUFF into the send queue. */
+ 	__skb_header_release(buff);
+ 	tcp_insert_write_queue_after(skb, buff, sk);
++	list_add(&buff->tcp_tsorted_anchor, &skb->tcp_tsorted_anchor);
+ 
+ 	return 0;
+ }
+@@ -2260,7 +2271,7 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
+ 
+ 		if (unlikely(tp->repair) && tp->repair_queue == TCP_SEND_QUEUE) {
+ 			/* "skb_mstamp" is used as a start point for the retransmit timer */
+-			skb->skb_mstamp = tp->tcp_mstamp;
++			tcp_update_skb_after_send(tp, skb);
+ 			goto repair; /* Skip network transmission */
+ 		}
+ 
+@@ -2838,11 +2849,14 @@ int __tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb, int segs)
+ 		     skb_headroom(skb) >= 0xFFFF)) {
+ 		struct sk_buff *nskb;
+ 
+-		nskb = __pskb_copy(skb, MAX_TCP_HEADER, GFP_ATOMIC);
+-		err = nskb ? tcp_transmit_skb(sk, nskb, 0, GFP_ATOMIC) :
+-			     -ENOBUFS;
++		tcp_skb_tsorted_save(skb) {
++			nskb = __pskb_copy(skb, MAX_TCP_HEADER, GFP_ATOMIC);
++			err = nskb ? tcp_transmit_skb(sk, nskb, 0, GFP_ATOMIC) :
++				     -ENOBUFS;
++		} tcp_skb_tsorted_restore(skb);
++
+ 		if (!err) {
+-			skb->skb_mstamp = tp->tcp_mstamp;
++			tcp_update_skb_after_send(tp, skb);
+ 			tcp_rate_skb_sent(sk, skb);
+ 		}
+ 	} else {
+@@ -3023,6 +3037,7 @@ coalesce:
+ 				goto coalesce;
+ 			return;
+ 		}
++		INIT_LIST_HEAD(&skb->tcp_tsorted_anchor);
+ 		skb_reserve(skb, MAX_TCP_HEADER);
+ 		sk_forced_mem_schedule(sk, skb->truesize);
+ 		/* FIN eats a sequence byte, write_seq advanced by tcp_queue_skb(). */
+@@ -3078,9 +3093,14 @@ int tcp_send_synack(struct sock *sk)
+ 	}
+ 	if (!(TCP_SKB_CB(skb)->tcp_flags & TCPHDR_ACK)) {
+ 		if (skb_cloned(skb)) {
+-			struct sk_buff *nskb = skb_copy(skb, GFP_ATOMIC);
++			struct sk_buff *nskb;
++
++			tcp_skb_tsorted_save(skb) {
++				nskb = skb_copy(skb, GFP_ATOMIC);
++			} tcp_skb_tsorted_restore(skb);
+ 			if (!nskb)
+ 				return -ENOMEM;
++			INIT_LIST_HEAD(&nskb->tcp_tsorted_anchor);
+ 			tcp_unlink_write_queue(skb, sk);
+ 			__skb_header_release(nskb);
+ 			__tcp_add_write_queue_head(sk, nskb);
+-- 
+cgit v1.1
+
