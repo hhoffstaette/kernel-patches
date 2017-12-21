@@ -1,0 +1,34 @@
+From 4ccafe032005e9b96acbef2e389a4de5b1254add Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 20 Dec 2017 13:13:58 -0700
+Subject: block: unalign call_single_data in struct request
+
+A previous change blindly added massive alignment to the
+call_single_data structure in struct request. This ballooned it in size
+from 296 to 320 bytes on my setup, for no valid reason at all.
+
+Use the unaligned struct __call_single_data variant instead.
+
+Fixes: 966a967116e69 ("smp: Avoid using two cache lines for struct call_single_data")
+Cc: stable@vger.kernel.org # v4.14
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/linux/blkdev.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index 100d0df..0ce8a37 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -135,7 +135,7 @@ typedef __u32 __bitwise req_flags_t;
+ struct request {
+ 	struct list_head queuelist;
+ 	union {
+-		call_single_data_t csd;
++		struct __call_single_data csd;
+ 		u64 fifo_time;
+ 	};
+ 
+-- 
+cgit v1.1
+
