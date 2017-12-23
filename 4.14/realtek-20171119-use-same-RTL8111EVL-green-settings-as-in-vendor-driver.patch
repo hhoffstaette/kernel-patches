@@ -1,0 +1,33 @@
+From b399a3944d53fb8f39b202da9830e8daa1336e19 Mon Sep 17 00:00:00 2001
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Date: Sun, 19 Nov 2017 11:15:46 +0100
+Subject: r8169: use same RTL8111EVL green settings as in vendor driver
+
+Adjust the code to use the same green settings as in the latest
+vendor driver.
+
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 19f3074..2cb3622 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -3810,6 +3810,11 @@ static void rtl8168e_2_hw_phy_config(struct rtl8169_private *tp)
+ 	rtl_w0w1_phy(tp, 0x19, 0x0001, 0x0000);
+ 	rtl_w0w1_phy(tp, 0x10, 0x0400, 0x0000);
+ 	rtl_writephy(tp, 0x1f, 0x0000);
++	rtl_writephy(tp, 0x1f, 0x0005);
++	rtl_w0w1_phy(tp, 0x01, 0x0100, 0x0000);
++	rtl_writephy(tp, 0x1f, 0x0000);
++	/* soft-reset phy */
++	rtl_writephy(tp, MII_BMCR, BMCR_RESET | BMCR_ANENABLE | BMCR_ANRESTART);
+ 
+ 	/* Broken BIOS workaround: feed GigaMAC registers with MAC address. */
+ 	rtl_rar_exgmac_set(tp, tp->dev->dev_addr);
+-- 
+cgit v1.1
+
