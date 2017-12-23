@@ -23,6 +23,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **LTS series: 4.14**
 
+- aquantia: fixes for aQuantia Atlantic 2.5/5/10Gb NIC from 4.15+
 - btrfs: fixes from 4.15+ (cleanups, correctness, error handling etc.)
 - block: fixes from 4.15+ (blk-mq correctness/performance, scheduling, suspend/resume)
 - ext4: fixes from 4.15+ (correctness, performance)

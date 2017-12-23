@@ -1,0 +1,47 @@
+From d4c242d4ba5730b62579969804cd8fcf58b9c84f Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Thu, 14 Dec 2017 12:34:48 +0300
+Subject: net: aquantia: Increment driver version
+
+Add a suffix to distinguish kernel mainline version and aquantia releases
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_cfg.h | 3 ++-
+ drivers/net/ethernet/aquantia/atlantic/ver.h    | 6 ++++--
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h b/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h
+index 73b93a7..105fdb9 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h
+@@ -80,6 +80,7 @@
+ #define AQ_CFG_DRV_VERSION	__stringify(NIC_MAJOR_DRIVER_VERSION)"."\
+ 				__stringify(NIC_MINOR_DRIVER_VERSION)"."\
+ 				__stringify(NIC_BUILD_DRIVER_VERSION)"."\
+-				__stringify(NIC_REVISION_DRIVER_VERSION)
++				__stringify(NIC_REVISION_DRIVER_VERSION) \
++				AQ_CFG_DRV_VERSION_SUFFIX
+ 
+ #endif /* AQ_CFG_H */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/ver.h b/drivers/net/ethernet/aquantia/atlantic/ver.h
+index 0de858d..9009f26 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/ver.h
++++ b/drivers/net/ethernet/aquantia/atlantic/ver.h
+@@ -11,8 +11,10 @@
+ #define VER_H
+ 
+ #define NIC_MAJOR_DRIVER_VERSION           1
+-#define NIC_MINOR_DRIVER_VERSION           5
+-#define NIC_BUILD_DRIVER_VERSION           345
++#define NIC_MINOR_DRIVER_VERSION           6
++#define NIC_BUILD_DRIVER_VERSION           13
+ #define NIC_REVISION_DRIVER_VERSION        0
+ 
++#define AQ_CFG_DRV_VERSION_SUFFIX "-kern"
++
+ #endif /* VER_H */
+-- 
+cgit v1.1
+

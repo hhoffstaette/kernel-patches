@@ -1,0 +1,41 @@
+From 98bc036de40489416d61ab175bb417c094e7783c Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Thu, 14 Dec 2017 12:34:47 +0300
+Subject: net: aquantia: Fix typo in ethtool statistics names
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_ethtool.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_ethtool.c b/drivers/net/ethernet/aquantia/atlantic/aq_ethtool.c
+index 70efb74..f2d8063 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_ethtool.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_ethtool.c
+@@ -66,14 +66,14 @@ static const char aq_ethtool_stat_names[][ETH_GSTRING_LEN] = {
+ 	"OutUCast",
+ 	"OutMCast",
+ 	"OutBCast",
+-	"InUCastOctects",
+-	"OutUCastOctects",
+-	"InMCastOctects",
+-	"OutMCastOctects",
+-	"InBCastOctects",
+-	"OutBCastOctects",
+-	"InOctects",
+-	"OutOctects",
++	"InUCastOctets",
++	"OutUCastOctets",
++	"InMCastOctets",
++	"OutMCastOctets",
++	"InBCastOctets",
++	"OutBCastOctets",
++	"InOctets",
++	"OutOctets",
+ 	"InPacketsDma",
+ 	"OutPacketsDma",
+ 	"InOctetsDma",
+-- 
+cgit v1.1
+

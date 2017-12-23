@@ -1,0 +1,249 @@
+From be08d839d9ef1c9b0e4ed809ec852ff100f9970d Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Thu, 14 Dec 2017 12:34:42 +0300
+Subject: net: aquantia: Extend stat counters to 64bit values
+
+Device hardware provides only 32bit counters. Using these directly
+causes byte counters to overflow soon. A separate nic level structure
+with 64 bit counters is now used to collect incrementally all the stats
+and report these counters to ethtool stats and ndev stats.
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_hw.h     | 25 ++++++-
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.c    | 35 ++++++++--
+ .../aquantia/atlantic/hw_atl/hw_atl_utils.c        | 80 +++++++---------------
+ .../aquantia/atlantic/hw_atl/hw_atl_utils.h        |  6 +-
+ 4 files changed, 79 insertions(+), 67 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+index 4ebd53b..b3825de 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+@@ -46,6 +46,28 @@ struct aq_hw_link_status_s {
+ 	unsigned int mbps;
+ };
+ 
++struct aq_stats_s {
++	u64 uprc;
++	u64 mprc;
++	u64 bprc;
++	u64 erpt;
++	u64 uptc;
++	u64 mptc;
++	u64 bptc;
++	u64 erpr;
++	u64 mbtc;
++	u64 bbtc;
++	u64 mbrc;
++	u64 bbrc;
++	u64 ubrc;
++	u64 ubtc;
++	u64 dpc;
++	u64 dma_pkt_rc;
++	u64 dma_pkt_tc;
++	u64 dma_oct_rc;
++	u64 dma_oct_tc;
++};
++
+ #define AQ_HW_IRQ_INVALID 0U
+ #define AQ_HW_IRQ_LEGACY  1U
+ #define AQ_HW_IRQ_MSI     2U
+@@ -166,8 +188,7 @@ struct aq_hw_ops {
+ 
+ 	int (*hw_update_stats)(struct aq_hw_s *self);
+ 
+-	int (*hw_get_hw_stats)(struct aq_hw_s *self, u64 *data,
+-			       unsigned int *p_count);
++	struct aq_stats_s *(*hw_get_hw_stats)(struct aq_hw_s *self);
+ 
+ 	int (*hw_get_fw_version)(struct aq_hw_s *self, u32 *fw_version);
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+index a360ccc..28cbe9d 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+@@ -750,16 +750,40 @@ int aq_nic_get_regs_count(struct aq_nic_s *self)
+ 
+ void aq_nic_get_stats(struct aq_nic_s *self, u64 *data)
+ {
+-	struct aq_vec_s *aq_vec = NULL;
+ 	unsigned int i = 0U;
+ 	unsigned int count = 0U;
+-	int err = 0;
++	struct aq_vec_s *aq_vec = NULL;
++	struct aq_stats_s *stats = self->aq_hw_ops.hw_get_hw_stats(self->aq_hw);
+ 
+-	err = self->aq_hw_ops.hw_get_hw_stats(self->aq_hw, data, &count);
+-	if (err < 0)
++	if (!stats)
+ 		goto err_exit;
+ 
+-	data += count;
++	data[i] = stats->uprc + stats->mprc + stats->bprc;
++	data[++i] = stats->uprc;
++	data[++i] = stats->mprc;
++	data[++i] = stats->bprc;
++	data[++i] = stats->erpt;
++	data[++i] = stats->uptc + stats->mptc + stats->bptc;
++	data[++i] = stats->uptc;
++	data[++i] = stats->mptc;
++	data[++i] = stats->bptc;
++	data[++i] = stats->ubrc;
++	data[++i] = stats->ubtc;
++	data[++i] = stats->mbrc;
++	data[++i] = stats->mbtc;
++	data[++i] = stats->bbrc;
++	data[++i] = stats->bbtc;
++	data[++i] = stats->ubrc + stats->mbrc + stats->bbrc;
++	data[++i] = stats->ubtc + stats->mbtc + stats->bbtc;
++	data[++i] = stats->dma_pkt_rc;
++	data[++i] = stats->dma_pkt_tc;
++	data[++i] = stats->dma_oct_rc;
++	data[++i] = stats->dma_oct_tc;
++	data[++i] = stats->dpc;
++
++	i++;
++
++	data += i;
+ 	count = 0U;
+ 
+ 	for (i = 0U, aq_vec = self->aq_vec[0];
+@@ -769,7 +793,6 @@ void aq_nic_get_stats(struct aq_nic_s *self, u64 *data)
+ 	}
+ 
+ err_exit:;
+-	(void)err;
+ }
+ 
+ void aq_nic_get_link_ksettings(struct aq_nic_s *self,
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+index 1fe016f..f2ce12e 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+@@ -503,73 +503,43 @@ int hw_atl_utils_update_stats(struct aq_hw_s *self)
+ 	struct hw_atl_s *hw_self = PHAL_ATLANTIC;
+ 	struct hw_aq_atl_utils_mbox mbox;
+ 
+-	if (!self->aq_link_status.mbps)
+-		return 0;
+-
+ 	hw_atl_utils_mpi_read_stats(self, &mbox);
+ 
+ #define AQ_SDELTA(_N_) (hw_self->curr_stats._N_ += \
+ 			mbox.stats._N_ - hw_self->last_stats._N_)
+-
+-	AQ_SDELTA(uprc);
+-	AQ_SDELTA(mprc);
+-	AQ_SDELTA(bprc);
+-	AQ_SDELTA(erpt);
+-
+-	AQ_SDELTA(uptc);
+-	AQ_SDELTA(mptc);
+-	AQ_SDELTA(bptc);
+-	AQ_SDELTA(erpr);
+-
+-	AQ_SDELTA(ubrc);
+-	AQ_SDELTA(ubtc);
+-	AQ_SDELTA(mbrc);
+-	AQ_SDELTA(mbtc);
+-	AQ_SDELTA(bbrc);
+-	AQ_SDELTA(bbtc);
+-	AQ_SDELTA(dpc);
+-
++	if (self->aq_link_status.mbps) {
++		AQ_SDELTA(uprc);
++		AQ_SDELTA(mprc);
++		AQ_SDELTA(bprc);
++		AQ_SDELTA(erpt);
++
++		AQ_SDELTA(uptc);
++		AQ_SDELTA(mptc);
++		AQ_SDELTA(bptc);
++		AQ_SDELTA(erpr);
++
++		AQ_SDELTA(ubrc);
++		AQ_SDELTA(ubtc);
++		AQ_SDELTA(mbrc);
++		AQ_SDELTA(mbtc);
++		AQ_SDELTA(bbrc);
++		AQ_SDELTA(bbtc);
++		AQ_SDELTA(dpc);
++	}
+ #undef AQ_SDELTA
++	hw_self->curr_stats.dma_pkt_rc = stats_rx_dma_good_pkt_counterlsw_get(self);
++	hw_self->curr_stats.dma_pkt_tc = stats_tx_dma_good_pkt_counterlsw_get(self);
++	hw_self->curr_stats.dma_oct_rc = stats_rx_dma_good_octet_counterlsw_get(self);
++	hw_self->curr_stats.dma_oct_tc = stats_tx_dma_good_octet_counterlsw_get(self);
+ 
+ 	memcpy(&hw_self->last_stats, &mbox.stats, sizeof(mbox.stats));
+ 
+ 	return 0;
+ }
+ 
+-int hw_atl_utils_get_hw_stats(struct aq_hw_s *self,
+-			      u64 *data, unsigned int *p_count)
++struct aq_stats_s *hw_atl_utils_get_hw_stats(struct aq_hw_s *self)
+ {
+-	struct hw_atl_s *hw_self = PHAL_ATLANTIC;
+-	struct hw_atl_stats_s *stats = &hw_self->curr_stats;
+-	int i = 0;
+-
+-	data[i] = stats->uprc + stats->mprc + stats->bprc;
+-	data[++i] = stats->uprc;
+-	data[++i] = stats->mprc;
+-	data[++i] = stats->bprc;
+-	data[++i] = stats->erpt;
+-	data[++i] = stats->uptc + stats->mptc + stats->bptc;
+-	data[++i] = stats->uptc;
+-	data[++i] = stats->mptc;
+-	data[++i] = stats->bptc;
+-	data[++i] = stats->ubrc;
+-	data[++i] = stats->ubtc;
+-	data[++i] = stats->mbrc;
+-	data[++i] = stats->mbtc;
+-	data[++i] = stats->bbrc;
+-	data[++i] = stats->bbtc;
+-	data[++i] = stats->ubrc + stats->mbrc + stats->bbrc;
+-	data[++i] = stats->ubtc + stats->mbtc + stats->bbtc;
+-	data[++i] = stats_rx_dma_good_pkt_counterlsw_get(self);
+-	data[++i] = stats_tx_dma_good_pkt_counterlsw_get(self);
+-	data[++i] = stats_rx_dma_good_octet_counterlsw_get(self);
+-	data[++i] = stats_tx_dma_good_octet_counterlsw_get(self);
+-	data[++i] = stats->dpc;
+-
+-	if (p_count)
+-		*p_count = ++i;
+-
+-	return 0;
++	return &PHAL_ATLANTIC->curr_stats;
+ }
+ 
+ static const u32 hw_atl_utils_hw_mac_regs[] = {
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h
+index c99cc69..21aeca6 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h
+@@ -129,7 +129,7 @@ struct __packed hw_aq_atl_utils_mbox {
+ struct __packed hw_atl_s {
+ 	struct aq_hw_s base;
+ 	struct hw_atl_stats_s last_stats;
+-	struct hw_atl_stats_s curr_stats;
++	struct aq_stats_s curr_stats;
+ 	u64 speed;
+ 	unsigned int chip_features;
+ 	u32 fw_ver_actual;
+@@ -207,8 +207,6 @@ int hw_atl_utils_get_fw_version(struct aq_hw_s *self, u32 *fw_version);
+ 
+ int hw_atl_utils_update_stats(struct aq_hw_s *self);
+ 
+-int hw_atl_utils_get_hw_stats(struct aq_hw_s *self,
+-			      u64 *data,
+-			      unsigned int *p_count);
++struct aq_stats_s *hw_atl_utils_get_hw_stats(struct aq_hw_s *self);
+ 
+ #endif /* HW_ATL_UTILS_H */
+-- 
+cgit v1.1
+

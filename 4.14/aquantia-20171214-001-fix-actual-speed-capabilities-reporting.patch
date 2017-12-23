@@ -1,0 +1,158 @@
+From e4d02ca04c6d48ab2226342a1c4ed54f1dbb72bd Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Thu, 14 Dec 2017 12:34:40 +0300
+Subject: net: aquantia: Fix actual speed capabilities reporting
+
+Different hardware device Ids correspond to different maximum speed
+available. Extra checks were added for devices D108 and D109 to
+remove unsupported speeds from these device capabilities list.
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_hw.h            |  4 +++-
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.c           |  7 ++++---
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.h           |  2 +-
+ drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c      |  5 +++--
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c | 13 ++++++++++++-
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c | 13 ++++++++++++-
+ 6 files changed, 35 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+index 0207927..4ebd53b 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+@@ -85,7 +85,9 @@ struct aq_hw_ops {
+ 	void (*destroy)(struct aq_hw_s *self);
+ 
+ 	int (*get_hw_caps)(struct aq_hw_s *self,
+-			   struct aq_hw_caps_s *aq_hw_caps);
++			   struct aq_hw_caps_s *aq_hw_caps,
++			   unsigned short device,
++			   unsigned short subsystem_device);
+ 
+ 	int (*hw_ring_tx_xmit)(struct aq_hw_s *self, struct aq_ring_s *aq_ring,
+ 			       unsigned int frags);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+index 78dfb2a..a360ccc 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+@@ -222,7 +222,7 @@ static struct net_device *aq_nic_ndev_alloc(void)
+ 
+ struct aq_nic_s *aq_nic_alloc_cold(const struct net_device_ops *ndev_ops,
+ 				   const struct ethtool_ops *et_ops,
+-				   struct device *dev,
++				   struct pci_dev *pdev,
+ 				   struct aq_pci_func_s *aq_pci_func,
+ 				   unsigned int port,
+ 				   const struct aq_hw_ops *aq_hw_ops)
+@@ -242,7 +242,7 @@ struct aq_nic_s *aq_nic_alloc_cold(const struct net_device_ops *ndev_ops,
+ 	ndev->netdev_ops = ndev_ops;
+ 	ndev->ethtool_ops = et_ops;
+ 
+-	SET_NETDEV_DEV(ndev, dev);
++	SET_NETDEV_DEV(ndev, &pdev->dev);
+ 
+ 	ndev->if_port = port;
+ 	self->ndev = ndev;
+@@ -254,7 +254,8 @@ struct aq_nic_s *aq_nic_alloc_cold(const struct net_device_ops *ndev_ops,
+ 
+ 	self->aq_hw = self->aq_hw_ops.create(aq_pci_func, self->port,
+ 						&self->aq_hw_ops);
+-	err = self->aq_hw_ops.get_hw_caps(self->aq_hw, &self->aq_hw_caps);
++	err = self->aq_hw_ops.get_hw_caps(self->aq_hw, &self->aq_hw_caps,
++					  pdev->device, pdev->subsystem_device);
+ 	if (err < 0)
+ 		goto err_exit;
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
+index 4309983..3c9f8db 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
+@@ -71,7 +71,7 @@ struct aq_nic_cfg_s {
+ 
+ struct aq_nic_s *aq_nic_alloc_cold(const struct net_device_ops *ndev_ops,
+ 				   const struct ethtool_ops *et_ops,
+-				   struct device *dev,
++				   struct pci_dev *pdev,
+ 				   struct aq_pci_func_s *aq_pci_func,
+ 				   unsigned int port,
+ 				   const struct aq_hw_ops *aq_hw_ops);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
+index cadaa64..58c29d0 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
+@@ -51,7 +51,8 @@ struct aq_pci_func_s *aq_pci_func_alloc(struct aq_hw_ops *aq_hw_ops,
+ 	pci_set_drvdata(pdev, self);
+ 	self->pdev = pdev;
+ 
+-	err = aq_hw_ops->get_hw_caps(NULL, &self->aq_hw_caps);
++	err = aq_hw_ops->get_hw_caps(NULL, &self->aq_hw_caps, pdev->device,
++				     pdev->subsystem_device);
+ 	if (err < 0)
+ 		goto err_exit;
+ 
+@@ -59,7 +60,7 @@ struct aq_pci_func_s *aq_pci_func_alloc(struct aq_hw_ops *aq_hw_ops,
+ 
+ 	for (port = 0; port < self->ports; ++port) {
+ 		struct aq_nic_s *aq_nic = aq_nic_alloc_cold(ndev_ops, eth_ops,
+-							    &pdev->dev, self,
++							    pdev, self,
+ 							    port, aq_hw_ops);
+ 
+ 		if (!aq_nic) {
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+index 07b3c49..b0abd18 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+@@ -18,9 +18,20 @@
+ #include "hw_atl_a0_internal.h"
+ 
+ static int hw_atl_a0_get_hw_caps(struct aq_hw_s *self,
+-				 struct aq_hw_caps_s *aq_hw_caps)
++				 struct aq_hw_caps_s *aq_hw_caps,
++				 unsigned short device,
++				 unsigned short subsystem_device)
+ {
+ 	memcpy(aq_hw_caps, &hw_atl_a0_hw_caps_, sizeof(*aq_hw_caps));
++
++	if (device == HW_ATL_DEVICE_ID_D108 && subsystem_device == 0x0001)
++		aq_hw_caps->link_speed_msk &= ~HW_ATL_A0_RATE_10G;
++
++	if (device == HW_ATL_DEVICE_ID_D109 && subsystem_device == 0x0001) {
++		aq_hw_caps->link_speed_msk &= ~HW_ATL_A0_RATE_10G;
++		aq_hw_caps->link_speed_msk &= ~HW_ATL_A0_RATE_5G;
++	}
++
+ 	return 0;
+ }
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index ec68c20..e4e3b8e 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -18,9 +18,20 @@
+ #include "hw_atl_b0_internal.h"
+ 
+ static int hw_atl_b0_get_hw_caps(struct aq_hw_s *self,
+-				 struct aq_hw_caps_s *aq_hw_caps)
++				 struct aq_hw_caps_s *aq_hw_caps,
++				 unsigned short device,
++				 unsigned short subsystem_device)
+ {
+ 	memcpy(aq_hw_caps, &hw_atl_b0_hw_caps_, sizeof(*aq_hw_caps));
++
++	if (device == HW_ATL_DEVICE_ID_D108 && subsystem_device == 0x0001)
++		aq_hw_caps->link_speed_msk &= ~HW_ATL_B0_RATE_10G;
++
++	if (device == HW_ATL_DEVICE_ID_D109 && subsystem_device == 0x0001) {
++		aq_hw_caps->link_speed_msk &= ~HW_ATL_B0_RATE_10G;
++		aq_hw_caps->link_speed_msk &= ~HW_ATL_B0_RATE_5G;
++	}
++
+ 	return 0;
+ }
+ 
+-- 
+cgit v1.1
+

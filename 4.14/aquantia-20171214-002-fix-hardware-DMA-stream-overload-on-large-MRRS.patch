@@ -1,0 +1,85 @@
+From 1e366161510f266516107a69db91f1f2edaea11c Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Thu, 14 Dec 2017 12:34:41 +0300
+Subject: net: aquantia: Fix hardware DMA stream overload on large MRRS
+
+Systems with large MRRS on device (2K, 4K) with high data rates and/or
+large MTU, atlantic observes DMA packet buffer overflow. On some systems
+that causes PCIe transaction errors, hardware NMIs or datapath freeze.
+This patch
+1) Limits MRRS from device side to 2K (thats maximum our hardware supports)
+2) Limit maximum size of outstanding TX DMA data read requests. This makes
+hardware buffers running fine.
+
+Signed-off-by: Pavel Belous <pavel.belous@aquantia.com>
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c    | 12 ++++++++++++
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_llh_internal.h  |  6 ++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index e4e3b8e..36fddb1 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -16,6 +16,7 @@
+ #include "hw_atl_utils.h"
+ #include "hw_atl_llh.h"
+ #include "hw_atl_b0_internal.h"
++#include "hw_atl_llh_internal.h"
+ 
+ static int hw_atl_b0_get_hw_caps(struct aq_hw_s *self,
+ 				 struct aq_hw_caps_s *aq_hw_caps,
+@@ -368,6 +369,7 @@ static int hw_atl_b0_hw_init(struct aq_hw_s *self,
+ 	};
+ 
+ 	int err = 0;
++	u32 val;
+ 
+ 	self->aq_nic_cfg = aq_nic_cfg;
+ 
+@@ -385,6 +387,16 @@ static int hw_atl_b0_hw_init(struct aq_hw_s *self,
+ 	hw_atl_b0_hw_rss_set(self, &aq_nic_cfg->aq_rss);
+ 	hw_atl_b0_hw_rss_hash_set(self, &aq_nic_cfg->aq_rss);
+ 
++	/* Force limit MRRS on RDM/TDM to 2K */
++	val = aq_hw_read_reg(self, pci_reg_control6_adr);
++	aq_hw_write_reg(self, pci_reg_control6_adr, (val & ~0x707) | 0x404);
++
++	/* TX DMA total request limit. B0 hardware is not capable to
++	 * handle more than (8K-MRRS) incoming DMA data.
++	 * Value 24 in 256byte units
++	 */
++	aq_hw_write_reg(self, tx_dma_total_req_limit_adr, 24);
++
+ 	err = aq_hw_err_from_flags(self);
+ 	if (err < 0)
+ 		goto err_exit;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_llh_internal.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_llh_internal.h
+index 5527fc0..93450ec 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_llh_internal.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_llh_internal.h
+@@ -2343,6 +2343,9 @@
+ #define tx_dma_desc_base_addrmsw_adr(descriptor) \
+ 			(0x00007c04u + (descriptor) * 0x40)
+ 
++/* tx dma total request limit */
++#define tx_dma_total_req_limit_adr 0x00007b20u
++
+ /* tx interrupt moderation control register definitions
+  * Preprocessor definitions for TX Interrupt Moderation Control Register
+  * Base Address: 0x00008980
+@@ -2369,6 +2372,9 @@
+ /* default value of bitfield reg_res_dsbl */
+ #define pci_reg_res_dsbl_default 0x1
+ 
++/* PCI core control register */
++#define pci_reg_control6_adr 0x1014u
++
+ /* global microprocessor scratch pad definitions */
+ #define glb_cpu_scratch_scp_adr(scratch_scp) (0x00000300u + (scratch_scp) * 0x4)
+ 
+-- 
+cgit v1.1
+
