@@ -1143,10 +1143,10 @@ index 14d2dbf97c53..4cd474999b6c 100644
  	task_cputime(p, &cputime.utime, &cputime.stime);
 diff --git a/kernel/sched/pds.c b/kernel/sched/pds.c
 new file mode 100644
-index 000000000000..326a9b6b8065
+index 000000000000..e3cad6674c12
 --- /dev/null
 +++ b/kernel/sched/pds.c
-@@ -0,0 +1,6471 @@
+@@ -0,0 +1,6484 @@
 +/*
 + *  kernel/sched/pds.c, was kernel/sched.c
 + *
@@ -1245,7 +1245,7 @@ index 000000000000..326a9b6b8065
 +
 +static inline void print_scheduler_version(void)
 +{
-+	printk(KERN_INFO "pds: PDS-mq CPU Scheduler 0.98g by Alfred Chen.\n");
++	printk(KERN_INFO "pds: PDS-mq CPU Scheduler 0.98h by Alfred Chen.\n");
 +}
 +
 +/* task_struct::on_rq states: */
@@ -3451,7 +3451,9 @@ index 000000000000..326a9b6b8065
 +		if (idleprio_task(p) || batch_task(p)) {
 +			rq->curr->time_slice /= 2;
 +			p->time_slice = rq->curr->time_slice;
++#ifdef CONFIG_SCHED_HRTICK
 +			hrtick_start(rq, rq->curr->time_slice);
++#endif
 +		} else
 +			p->time_slice = rq->curr->time_slice / 2;
 +
@@ -6982,18 +6984,18 @@ index 000000000000..326a9b6b8065
 +
 +	rq->stop = stop;
 +}
++
++static void set_rq_offline(struct rq *rq)
++{
++	if (rq->online)
++		rq->online = false;
++}
 +#endif /* CONFIG_HOTPLUG_CPU */
 +
 +static void set_rq_online(struct rq *rq)
 +{
 +	if (!rq->online)
 +		rq->online = true;
-+}
-+
-+static void set_rq_offline(struct rq *rq)
-+{
-+	if (rq->online)
-+		rq->online = false;
 +}
 +
 +#ifdef CONFIG_SCHED_DEBUG
@@ -7304,7 +7306,16 @@ index 000000000000..326a9b6b8065
 +		per_cpu(sd_llc_id, cpu) =
 +			cpumask_first(cpu_coregroup_mask(cpu));
 +
++#ifdef CONFIG_SCHED_MC
 +		cpumask_complement(&tmp, cpu_coregroup_mask(cpu));
++#else
++#ifdef CONFIG_SCHED_SMT
++		cpumask_complement(&tmp, topology_sibling_cpumask(cpu));
++#else
++		cpumask_setall(&tmp);
++		cpumask_clear_cpu(cpu, &tmp);
++#endif
++#endif
 +		if (cpumask_and(&tmp, &tmp, topology_core_cpumask(cpu))) {
 +			printk(KERN_INFO "pds: sched_cpu_affinity_chk_masks[%d] core 0x%08lx",
 +			       cpu, tmp.bits[0]);
@@ -7419,8 +7430,10 @@ index 000000000000..326a9b6b8065
 +		rq->iso_refractory = 0;
 +		init_rq_hrtick(rq);
 +	}
++#ifdef CONFIG_SMP
 +	/* Set rq->online for cpu 0 */
 +	cpu_rq(0)->online = true;
++#endif
 +
 +	/*
 +	 * The boot idle thread does lazy MMU switching as well:
