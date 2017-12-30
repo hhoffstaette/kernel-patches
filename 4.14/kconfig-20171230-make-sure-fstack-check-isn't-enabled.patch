@@ -1,0 +1,50 @@
+From 4689f2971534dad4b6ce1a50aa9a616580272e07 Mon Sep 17 00:00:00 2001
+From: Alice Ferrazzi <alicef@gentoo.org>
+Date: Sat, 30 Dec 2017 12:11:39 +0000
+Subject: [PATCH] Make sure -fstack-check isn't enabled
+
+On Fri, Dec 29, 2017 at 5:00 PM, Linus Torvalds
+<torvalds@linux-foundation.org> wrote:
+>
+> Good. I was not feeling so happy about this bug report, but now I can
+> firmly just blame the gentoo compiler for having some shit-for-brains
+> "feature".
+
+Looks like I can generate similar bad code with the F26 version of
+gcc, it's just not enabled by default.
+
+So all gentoo did was change the default options.
+
+I suspect we should just add a
+
+    KBUILD_CFLAGS  += $(call cc-option,-fno-stack-check,)
+
+    somewhere to the main Makefile, just to make sure.
+
+    Maybe like the appended?
+
+    Toralf, Alexander, does this make things JustWork(tm) for you?
+
+                    Linus
+
+---
+ Makefile | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index 9edfb78836a9..930fa93f397d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -802,6 +802,9 @@ KBUILD_CFLAGS += $(call cc-disable-warning, pointer-sign)
+ # disable invalid "can't wrap" optimizations for signed / pointers
+ KBUILD_CFLAGS	+= $(call cc-option,-fno-strict-overflow)
+ 
++# Make sure -fstack-check isn't enabled (like gentoo apparently did)
++KBUILD_CFLAGS  += $(call cc-option,-fno-stack-check,)
++
+ # conserve stack if available
+ KBUILD_CFLAGS   += $(call cc-option,-fconserve-stack)
+ 
+-- 
+2.13.6
+
