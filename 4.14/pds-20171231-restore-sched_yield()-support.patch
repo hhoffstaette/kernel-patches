@@ -1,0 +1,157 @@
+
+reverted:
+https://github.com/cchalpha/linux-gc/commit/493d8652b2dde694ab3d7f3abbb2047d79aa33f3
+
+[HH: also fixed sched_yield_type to be 1 by default, not 0]
+
+--- b/Documentation/sysctl/kernel.txt
++++ a/Documentation/sysctl/kernel.txt
+@@ -96,6 +96,7 @@
+ - unknown_nmi_panic
+ - watchdog
+ - watchdog_thresh
++- yield_type
+ - version
+ 
+ ==============================================================
+@@ -1086,3 +1087,13 @@
+ tunable to zero will disable lockup detection altogether.
+ 
+ ==============================================================
++
++yield_type: (MuQSS/VRQ CPU scheduler only)
++
++This determines what type of yield calls to sched_yield will perform.
++
++   0 - No yield.
++   1 - Yield only to better priority/deadline tasks. (default)
++   2 - Expire timeslice and recalculate deadline.
++
++==============================================================
+reverted:
+--- b/kernel/sched/pds.c
++++ a/kernel/sched/pds.c
+@@ -158,6 +158,14 @@
+  */
+ int sched_iso_cpu __read_mostly = 70;
+ 
++/**
++ * sched_yield_type - Choose what sort of yield sched_yield will perform.
++ * 0: No yield.
++ * 1: Yield only to better priority/deadline tasks. (default)
++ * 2: Expire timeslice and recalculate deadline.
++ */
++int sched_yield_type __read_mostly = 1;
++
+ /*
+  * The quota handed out to tasks of all priority levels when refilling their
+  * time_slice.
+@@ -5172,6 +5180,32 @@
+  */
+ SYSCALL_DEFINE0(sched_yield)
+ {
++	struct rq *rq;
++
++	if (unlikely(!sched_yield_type))
++		return 0;
++
++	local_irq_disable();
++	rq = this_rq();
++	raw_spin_lock(&rq->lock);
++
++	if (unlikely(sched_yield_type > 1)) {
++		time_slice_expired(current, rq);
++		requeue_task(current, rq);
++	}
++	schedstat_inc(rq->yld_count);
++
++	/*
++	 * Since we are going to call schedule() anyway, there's
++	 * no need to preempt or enable interrupts:
++	 */
++	__release(&rq->lock);
++	spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
++	do_raw_spin_unlock(&rq->lock);
++	sched_preempt_enable_no_resched();
++
++	schedule();
++
+ 	return 0;
+ }
+ 
+@@ -5268,7 +5302,7 @@
+  * It's the caller's job to ensure that the target task struct
+  * can't go away on us before we can do any checks.
+  *
++ * In PDS, only accelerate the thread toward the processor it's on.
+- * In PDS, yield_to is not supported.
+  *
+  * Return:
+  *	true (>0) if we indeed boosted the target task.
+@@ -5277,7 +5311,38 @@
+  */
+ int __sched yield_to(struct task_struct *p, bool preempt)
+ {
++	struct rq *rq;
++	struct task_struct *rq_curr;
++	raw_spinlock_t *lock;
++	unsigned long flags;
++	int yielded = 0;
++
++	rq = task_access_lock_irqsave(p, &lock, &flags);
++
++	if (task_running(p) || p->state) {
++		yielded = -ESRCH;
++		goto out_unlock;
++	}
++
++	rq_curr = rq->curr;
++	yielded = 1;
++	p->time_slice += rq_curr->time_slice;
++	if (p->time_slice > timeslice())
++		p->time_slice = timeslice();
++	time_slice_expired(rq_curr, rq);
++	requeue_task(rq_curr, rq);
++
++	if (p->deadline > rq_curr->deadline) {
++		p->deadline = rq_curr->deadline;
++		update_task_priodl(p);
++		requeue_task(p, rq);
++	}
++	if (preempt && cpu_of(rq) != smp_processor_id())
++		resched_curr(rq);
++out_unlock:
++	task_access_unlock_irqrestore(p, lock, &flags);
++
++	return yielded;
+-	return 0;
+ }
+ EXPORT_SYMBOL_GPL(yield_to);
+ 
+reverted:
+--- b/kernel/sysctl.c
++++ a/kernel/sysctl.c
+@@ -131,6 +131,7 @@
+ #ifdef CONFIG_SCHED_PDS
+ extern int rr_interval;
+ extern int sched_iso_cpu;
++extern int sched_yield_type;
+ #endif
+ #ifdef CONFIG_PRINTK
+ static int ten_thousand = 10000;
+@@ -1048,6 +1049,15 @@
+ 		.extra1		= &zero,
+ 		.extra2		= &one_hundred,
+ 	},
++	{
++		.procname	= "yield_type",
++		.data		= &sched_yield_type,
++		.maxlen		= sizeof (int),
++		.mode		= 0644,
++		.proc_handler	= &proc_dointvec_minmax,
++		.extra1		= &zero,
++		.extra2		= &two,
++	},
+ #endif
+ #if defined(CONFIG_S390) && defined(CONFIG_SMP)
+ 	{
