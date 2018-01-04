@@ -1,0 +1,51 @@
+From: Mike Galbraith <efault-Mmb7MZpHnFY@public.gmane.org>
+Subject: [patch] fs/nfs: Add a resched point to nfs_commit_release_pages()
+Date: Tue, 02 Jan 2018 21:29:57 +0100
+Cc: "linux-kernel-u79uwXL29TY76Z2rM5mHXA@public.gmane.org" <linux-kernel-u79uwXL29TY76Z2rM5mHXA@public.gmane.org>,
+        "linux-nfs-u79uwXL29TY76Z2rM5mHXA@public.gmane.org" <linux-nfs-u79uwXL29TY76Z2rM5mHXA@public.gmane.org>,
+        "jlayton-DgEjT+Ai2ygdnm+yROfE0A@public.gmane.org" <jlayton-DgEjT+Ai2ygdnm+yROfE0A@public.gmane.org>
+To: Trond Myklebust <trondmy-7I+n7zu2hftEKMMhf/gKZA@public.gmane.org>,
+        "bfields-uC3wQj2KruNg9hUCZPvPmw@public.gmane.org" <bfields-uC3wQj2KruNg9hUCZPvPmw@public.gmane.org>
+
+On Mon, 2017-12-18 at 17:24 +0000, Trond Myklebust wrote:
+> On Mon, 2017-12-18 at 18:00 +0100, Mike Galbraith wrote:
+> > On Mon, 2017-12-18 at 11:35 -0500, J. Bruce Fields wrote:
+> > > 
+> > > Like I say, I don't really understand the issues here, so it's more
+> > > a
+> > > question than an objection....  (I don't know any reason a
+> > > cond_resched() would be bad there.)
+> > 
+> > Think of it this way: what all can be queued up behind that kworker
+> > that is hogging CPU for huge swaths of time?  It's not only userspace
+> > that suffers.
+> > 
+> 
+> Any cond_sched() belongs in the loop in nfs_commit_release_pages()
+> (where it can be mitigated) rather than in a function whose purpose is
+> to free memory. There is no reason to call it from the writeback or
+> readpages code.
+
+Just in case NFS folks are expecting a patchlet, trash otherwise.
+
+fs/nfs: Add a resched point to nfs_commit_release_pages()
+
+During heavy NFS write, kworkers can do very large amounts of work
+without scheduling (82ms traced).  Add a resched point.
+
+Signed-off-by: Mike Galbraith <efault-Mmb7MZpHnFY@public.gmane.org>
+Suggested-by: Trond Myklebust <trondmy-7I+n7zu2hftEKMMhf/gKZA@public.gmane.org>
+---
+ fs/nfs/write.c |    1 +
+ 1 file changed, 1 insertion(+)
+
+--- a/fs/nfs/write.c
++++ b/fs/nfs/write.c
+@@ -1837,6 +1837,7 @@ static void nfs_commit_release_pages(str
+ 		set_bit(NFS_CONTEXT_RESEND_WRITES, &req->wb_context->flags);
+ 	next:
+ 		nfs_unlock_and_release_request(req);
++		cond_resched();
+ 	}
+ 	nfss = NFS_SERVER(data->inode);
+ 	if (atomic_long_read(&nfss->writeback) < NFS_CONGESTION_OFF_THRESH)
