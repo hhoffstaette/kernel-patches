@@ -1,0 +1,53 @@
+From b4d8ad7fd3a18e6d92d4ebe858185c704604a57d Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Fri, 22 Dec 2017 13:14:34 -0800
+Subject: xfs: fix s_maxbytes overflow problems
+
+Fix some integer overflow problems if offset + count happen to be large
+enough to cause an integer overflow.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+---
+ fs/xfs/xfs_aops.c  | 4 ++--
+ fs/xfs/xfs_iomap.c | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/xfs/xfs_aops.c b/fs/xfs/xfs_aops.c
+index 21e2d70..4fc526a 100644
+--- a/fs/xfs/xfs_aops.c
++++ b/fs/xfs/xfs_aops.c
+@@ -399,7 +399,7 @@ xfs_map_blocks(
+ 	       (ip->i_df.if_flags & XFS_IFEXTENTS));
+ 	ASSERT(offset <= mp->m_super->s_maxbytes);
+ 
+-	if ((xfs_ufsize_t)offset + count > mp->m_super->s_maxbytes)
++	if (offset > mp->m_super->s_maxbytes - count)
+ 		count = mp->m_super->s_maxbytes - offset;
+ 	end_fsb = XFS_B_TO_FSB(mp, (xfs_ufsize_t)offset + count);
+ 	offset_fsb = XFS_B_TO_FSBT(mp, offset);
+@@ -1312,7 +1312,7 @@ xfs_get_blocks(
+ 	lockmode = xfs_ilock_data_map_shared(ip);
+ 
+ 	ASSERT(offset <= mp->m_super->s_maxbytes);
+-	if ((xfs_ufsize_t)offset + size > mp->m_super->s_maxbytes)
++	if (offset > mp->m_super->s_maxbytes - size)
+ 		size = mp->m_super->s_maxbytes - offset;
+ 	end_fsb = XFS_B_TO_FSB(mp, (xfs_ufsize_t)offset + size);
+ 	offset_fsb = XFS_B_TO_FSBT(mp, offset);
+diff --git a/fs/xfs/xfs_iomap.c b/fs/xfs/xfs_iomap.c
+index 7ab52a8..66e1edb 100644
+--- a/fs/xfs/xfs_iomap.c
++++ b/fs/xfs/xfs_iomap.c
+@@ -1006,7 +1006,7 @@ xfs_file_iomap_begin(
+ 	}
+ 
+ 	ASSERT(offset <= mp->m_super->s_maxbytes);
+-	if ((xfs_fsize_t)offset + length > mp->m_super->s_maxbytes)
++	if (offset > mp->m_super->s_maxbytes - length)
+ 		length = mp->m_super->s_maxbytes - offset;
+ 	offset_fsb = XFS_B_TO_FSBT(mp, offset);
+ 	end_fsb = XFS_B_TO_FSB(mp, offset + length);
+-- 
+cgit v1.1
+
