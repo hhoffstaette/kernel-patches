@@ -14,6 +14,7 @@ tree meaningless.
 Leave the UUID as zero for non-fs tree, making btrfs-debug-tree output
 less confusing.
 
+[HH: added proper UUID initialization]
 Reported-by: Misono Tomohiro <misono.tomohiro@jp.fujitsu.com>
 Signed-off-by: Qu Wenruo <wqu@suse.com>
 Reviewed-by: David Sterba <dsterba@suse.com>
@@ -31,7 +32,7 @@ index efce9a2..5713c50 100644
  	struct btrfs_key key;
  	int ret = 0;
 -	uuid_le uuid;
-+	uuid_le uuid = { 0 };
++	uuid_le uuid = NULL_UUID_LE;
  
  	root = btrfs_alloc_root(fs_info, GFP_KERNEL);
  	if (!root)
