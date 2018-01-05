@@ -29,7 +29,6 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - ext4: fixes from 4.15+ (correctness, performance)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
-- mm: memory management fixes/improvements from 4.15+
 - net: networking fixes/improvements from 4.15+
 - pds: [PDS-mq 0.98h](http://cchalpha.blogspot.de/2017/12/pds-098h-release.html) CPU scheduler (**disabled** by default)
 - realtek: configurable interrupt coalescing for r8169
