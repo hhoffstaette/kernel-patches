@@ -165,7 +165,7 @@ index 565f17925128..8f58faba7429 100644
  	tbuf->shm_cpid	= shp->shm_cprid;
  	tbuf->shm_lpid	= shp->shm_lprid;
  	tbuf->shm_nattch = shp->shm_nattch;
-+ 
++
 +	ipc_unlock_object(&shp->shm_perm);
  	rcu_read_unlock();
 -	return result;
