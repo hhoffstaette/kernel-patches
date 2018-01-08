@@ -1,8 +1,8 @@
 From:   Nikolay Borisov <nborisov@suse.com>
-To:     linux-btrfs@vger.kernel.org
-Cc:     Nikolay Borisov <nborisov@suse.com>
-Subject: [PATCH] btrfs: handle failure of add_pending_csums
-Date:   Tue,  5 Dec 2017 13:51:43 +0200
+To:     dsterba@suse.cz
+Cc:     linux-btrfs@vger.kernel.org, Nikolay Borisov <nborisov@suse.com>
+Subject: [PATCH v2] btrfs: handle failure of add_pending_csums
+Date:   Mon,  8 Jan 2018 10:59:43 +0200
 
 add_pending_csums was added as part of the new data=ordered implementation in
 e6dcd2dc9c48 ("Btrfs: New data=ordered implementation"). Even back then it
@@ -12,17 +12,21 @@ write the checksums for a particular extent and not detect this. On read this
 could lead to the filesystem erroring out due to crc mismatch. Fix it by
 propagating failure from add_pending_csums and handling them
 
-[HH: small context fixup for 4.14]
+[HH: fixups for true/false -> 0/1 in 4.14]
 Signed-off-by: Nikolay Borisov <nborisov@suse.com>
 ---
+
+V2: 
+ Moves the if/ret part after setting ->adding_csums to 0. 
+
  fs/btrfs/inode.c | 11 +++++++++--
  1 file changed, 9 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index e87ec11c0986..432bffdbb02f 100644
+index eebfe2615428..029399593049 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
-@@ -2039,11 +2039,14 @@ static noinline int add_pending_csums(struct btrfs_trans_handle *trans,
+@@ -2039,12 +2039,15 @@ static noinline int add_pending_csums(struct btrfs_trans_handle *trans,
  			     struct inode *inode, struct list_head *list)
  {
  	struct btrfs_ordered_sum *sum;
@@ -33,12 +37,13 @@ index e87ec11c0986..432bffdbb02f 100644
 -		btrfs_csum_file_blocks(trans,
 +		ret = btrfs_csum_file_blocks(trans,
  		       BTRFS_I(inode)->root->fs_info->csum_root, sum);
+ 		trans->adding_csums = 0;
 +		if (ret)
 +			return ret;
- 		trans->adding_csums = 0;
  	}
  	return 0;
-@@ -3051,7 +3054,11 @@ static int btrfs_finish_ordered_io(struct btrfs_ordered_extent *ordered_extent)
+ }
+@@ -3058,7 +3061,11 @@ static int btrfs_finish_ordered_io(struct btrfs_ordered_extent *ordered_extent)
  		goto out;
  	}
  
