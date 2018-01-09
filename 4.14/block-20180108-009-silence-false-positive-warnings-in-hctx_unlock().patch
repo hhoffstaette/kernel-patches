@@ -1,0 +1,46 @@
+From: Jens Axboe <axboe@kernel.dk>
+Date: Tue, 9 Jan 2018 09:32:25 -0700
+Subject: blk-mq: silence false positive warnings in hctx_unlock()
+
+In some stupider versions of gcc, it complains:
+
+block/blk-mq.c: In function ‘blk_mq_complete_request’:
+./include/linux/srcu.h:175:2: warning: ‘srcu_idx’ may be used uninitialized in this function [-Wmaybe-uninitialized]
+  __srcu_read_unlock(sp, idx);
+  ^
+block/blk-mq.c:620:6: note: ‘srcu_idx’ was declared here
+  int srcu_idx;
+      ^
+
+which is completely bogus, since we only use srcu_idx when
+hctx->flags & BLK_MQ_F_BLOCKING is set, and that's the case where
+hctx_lock() has initialized it.
+
+Just set it to '0' in the normal path in hctx_lock() to silence
+this annoying warning.
+
+Fixes: 04ced159cec8 ("blk-mq: move hctx lock/unlock into a helper")
+Fixes: 5197c05e16b4 ("blk-mq: protect completion path with RCU")
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 0269d44..8de3546 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -569,9 +569,11 @@ static void hctx_unlock(struct blk_mq_hw_ctx *hctx, int srcu_idx)
+ 
+ static void hctx_lock(struct blk_mq_hw_ctx *hctx, int *srcu_idx)
+ {
+-	if (!(hctx->flags & BLK_MQ_F_BLOCKING))
++	if (!(hctx->flags & BLK_MQ_F_BLOCKING)) {
++		/* shut up gcc false positive */
++		*srcu_idx = 0;
+ 		rcu_read_lock();
+-	else
++	} else
+ 		*srcu_idx = srcu_read_lock(hctx->srcu);
+ }
+ 

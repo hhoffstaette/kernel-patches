@@ -3,12 +3,12 @@ To:     jack@suse.cz, axboe@kernel.dk, clm@fb.com, jbacik@fb.com
 Cc:     kernel-team@fb.com, linux-kernel@vger.kernel.org,
         linux-btrfs@vger.kernel.org, peterz@infradead.org,
         jianchao.w.wang@oracle.com, Bart.VanAssche@wdc.com,
-        Tejun Heo <tj@kernel.org>,
+        linux-block@vger.kernel.org, Tejun Heo <tj@kernel.org>,
         Asai Thambi SP <asamymuthupa@micron.com>,
         Stefan Haberland <sth@linux.vnet.ibm.com>,
         Jan Hoeppner <hoeppner@linux.vnet.ibm.com>
-Subject: [PATCH 4/7] blk-mq: make blk_abort_request() trigger timeout path
-Date:   Sat, 16 Dec 2017 04:07:23 -0800
+Subject: [PATCH 5/8] blk-mq: make blk_abort_request() trigger timeout path
+Date:   Mon,  8 Jan 2018 11:15:39 -0800
 
 With issue/complete and timeout paths now using the generation number
 and state based synchronization, blk_abort_request() is the only one
@@ -38,10 +38,10 @@ Cc: Jan Hoeppner <hoeppner@linux.vnet.ibm.com>
  3 files changed, 5 insertions(+), 7 deletions(-)
 
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 643a38d..88baa82 100644
+index 41bfd27..bed4cb8 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
-@@ -800,7 +800,7 @@ struct blk_mq_timeout_data {
+@@ -814,7 +814,7 @@ struct blk_mq_timeout_data {
  	unsigned int nr_expired;
  };
  

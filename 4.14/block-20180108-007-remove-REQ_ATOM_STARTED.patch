@@ -3,9 +3,9 @@ To:     jack@suse.cz, axboe@kernel.dk, clm@fb.com, jbacik@fb.com
 Cc:     kernel-team@fb.com, linux-kernel@vger.kernel.org,
         linux-btrfs@vger.kernel.org, peterz@infradead.org,
         jianchao.w.wang@oracle.com, Bart.VanAssche@wdc.com,
-        Tejun Heo <tj@kernel.org>
-Subject: [PATCH 6/7] blk-mq: remove REQ_ATOM_STARTED
-Date:   Sat, 16 Dec 2017 04:07:25 -0800
+        linux-block@vger.kernel.org, Tejun Heo <tj@kernel.org>
+Subject: [PATCH 7/8] blk-mq: remove REQ_ATOM_STARTED
+Date:   Mon,  8 Jan 2018 11:15:41 -0800
 
 After the recent updates to use generation number and state based
 synchronization, we can easily replace REQ_ATOM_STARTED usages by
@@ -55,7 +55,7 @@ index b56a4f3..8adc837 100644
  					 list_entry_rq(&rq->queuelist));
  }
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 47e722b..724d340 100644
+index 050d982..54ecb2c 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -483,7 +483,6 @@ void blk_mq_free_request(struct request *rq)
@@ -74,7 +74,7 @@ index 47e722b..724d340 100644
  
  	if (rq->internal_tag != -1)
  		blk_mq_sched_completed_request(rq);
-@@ -621,7 +621,7 @@ EXPORT_SYMBOL(blk_mq_complete_request);
+@@ -636,7 +636,7 @@ EXPORT_SYMBOL(blk_mq_complete_request);
  
  int blk_mq_request_started(struct request *rq)
  {
@@ -83,7 +83,7 @@ index 47e722b..724d340 100644
  }
  EXPORT_SYMBOL_GPL(blk_mq_request_started);
  
-@@ -640,7 +640,6 @@ void blk_mq_start_request(struct request *rq)
+@@ -655,7 +655,6 @@ void blk_mq_start_request(struct request *rq)
  	}
  
  	WARN_ON_ONCE(blk_mq_rq_state(rq) != MQ_RQ_IDLE);
@@ -91,7 +91,7 @@ index 47e722b..724d340 100644
  
  	/*
  	 * Mark @rq in-flight which also advances the generation number,
-@@ -662,8 +661,6 @@ void blk_mq_start_request(struct request *rq)
+@@ -677,8 +676,6 @@ void blk_mq_start_request(struct request *rq)
  	write_seqcount_end(&rq->gstate_seq);
  	preempt_enable();
  
@@ -100,7 +100,7 @@ index 47e722b..724d340 100644
  	if (q->dma_drain_size && blk_rq_bytes(rq)) {
  		/*
  		 * Make sure space for the drain appears.  We know we can do
-@@ -676,13 +673,9 @@ void blk_mq_start_request(struct request *rq)
+@@ -691,13 +688,9 @@ void blk_mq_start_request(struct request *rq)
  EXPORT_SYMBOL(blk_mq_start_request);
  
  /*
@@ -117,7 +117,7 @@ index 47e722b..724d340 100644
   */
  static void __blk_mq_requeue_request(struct request *rq)
  {
-@@ -694,7 +687,7 @@ static void __blk_mq_requeue_request(struct request *rq)
+@@ -709,7 +702,7 @@ static void __blk_mq_requeue_request(struct request *rq)
  	wbt_requeue(q->rq_wb, &rq->issue_stat);
  	blk_mq_sched_requeue_request(rq);
  
@@ -126,7 +126,7 @@ index 47e722b..724d340 100644
  		blk_mq_rq_update_state(rq, MQ_RQ_IDLE);
  		if (q->dma_drain_size && blk_rq_bytes(rq))
  			rq->nr_phys_segments--;
-@@ -801,18 +794,6 @@ static void blk_mq_rq_timed_out(struct request *req, bool reserved)
+@@ -816,18 +809,6 @@ static void blk_mq_rq_timed_out(struct request *req, bool reserved)
  	const struct blk_mq_ops *ops = req->q->mq_ops;
  	enum blk_eh_timer_return ret = BLK_EH_RESET_TIMER;
  
@@ -145,7 +145,7 @@ index 47e722b..724d340 100644
  	req->rq_flags |= RQF_MQ_TIMEOUT_EXPIRED;
  
  	if (ops->timeout)
-@@ -848,8 +829,7 @@ static void blk_mq_check_expired(struct blk_mq_hw_ctx *hctx,
+@@ -863,8 +844,7 @@ static void blk_mq_check_expired(struct blk_mq_hw_ctx *hctx,
  
  	might_sleep();
  
@@ -155,7 +155,7 @@ index 47e722b..724d340 100644
  		return;
  
  	/* read coherent snapshots of @rq->state_gen and @rq->deadline */
-@@ -2971,8 +2951,7 @@ static bool blk_mq_poll_hybrid_sleep(struct request_queue *q,
+@@ -3015,8 +2995,7 @@ static bool blk_mq_poll_hybrid_sleep(struct request_queue *q,
  
  	hrtimer_init_sleeper(&hs, current);
  	do {

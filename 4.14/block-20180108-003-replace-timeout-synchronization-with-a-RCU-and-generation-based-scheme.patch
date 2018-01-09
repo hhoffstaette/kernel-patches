@@ -3,9 +3,10 @@ To:     jack@suse.cz, axboe@kernel.dk, clm@fb.com, jbacik@fb.com
 Cc:     kernel-team@fb.com, linux-kernel@vger.kernel.org,
         linux-btrfs@vger.kernel.org, peterz@infradead.org,
         jianchao.w.wang@oracle.com, Bart.VanAssche@wdc.com,
-        Tejun Heo <tj@kernel.org>
-Subject: [PATCH 2/7] blk-mq: replace timeout synchronization with a RCU and generation based scheme
-Date:   Sat, 16 Dec 2017 04:07:21 -0800
+        linux-block@vger.kernel.org, Tejun Heo <tj@kernel.org>,
+        Christoph Hellwig <hch@lst.de>
+Subject: [PATCH 3/8] blk-mq: replace timeout synchronization with a RCU and generation based scheme
+Date:   Mon,  8 Jan 2018 11:15:37 -0800
 
 Currently, blk-mq timeout path synchronizes against the usual
 issue/completion path using a complex scheme involving atomic
@@ -76,22 +77,26 @@ v3: - Fixed possible extended seqcount / u64_stats_sync read looping
     - MQ_RQ_IDLE was incorrectly being set in complete_request instead
       of free_request.  Fixed.
 
+v4: - Rebased on top of hctx_lock() refactoring patch.
+    - Added comment explaining the use of hctx_lock() in completion path.
+
 [HH: backported to 4.14.x]
 Signed-off-by: Tejun Heo <tj@kernel.org>
 Cc: "jianchao.wang" <jianchao.w.wang@oracle.com>
 Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Christoph Hellwig <hch@lst.de>
 ---
  block/blk-core.c       |   2 +
- block/blk-mq.c         | 220 +++++++++++++++++++++++++++++++++----------------
- block/blk-mq.h         |  46 +++++++++++
+ block/blk-mq.c         | 223 +++++++++++++++++++++++++++++++++----------------
+ block/blk-mq.h         |  46 ++++++++++
  block/blk-timeout.c    |   2 +-
  block/blk.h            |   6 --
  include/linux/blk-mq.h |   1 +
- include/linux/blkdev.h |  23 ++++++
- 7 files changed, 220 insertions(+), 80 deletions(-)
+ include/linux/blkdev.h |  23 +++++
+ 7 files changed, 224 insertions(+), 79 deletions(-)
 
 diff --git a/block/blk-core.c b/block/blk-core.c
-index b888175..6034623 100644
+index 2e0d041..f843ae4f 100644
 --- a/block/blk-core.c
 +++ b/block/blk-core.c
 @@ -126,6 +126,8 @@ void blk_rq_init(struct request_queue *q, struct request *rq)
@@ -104,7 +109,7 @@ index b888175..6034623 100644
  EXPORT_SYMBOL(blk_rq_init);
  
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index acf4fbb..abd5d01 100644
+index 6741c3e..6587f0c 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -483,6 +483,7 @@ void blk_mq_free_request(struct request *rq)
@@ -124,8 +129,8 @@ index acf4fbb..abd5d01 100644
  	if (rq->internal_tag != -1)
  		blk_mq_sched_completed_request(rq);
  	if (rq->rq_flags & RQF_STATS) {
-@@ -557,6 +560,30 @@ static void __blk_mq_complete_request(struct request *rq)
- 	put_cpu();
+@@ -573,6 +576,30 @@ static void hctx_lock(struct blk_mq_hw_ctx *hctx, int *srcu_idx)
+ 		*srcu_idx = srcu_read_lock(hctx->queue_rq_srcu);
  }
  
 +static void blk_mq_rq_update_aborted_gstate(struct request *rq, u64 gstate)
@@ -155,31 +160,29 @@ index acf4fbb..abd5d01 100644
  /**
   * blk_mq_complete_request - end I/O on a request
   * @rq:		the request being processed
-@@ -574,14 +601,21 @@ void blk_mq_complete_request(struct request *rq)
+@@ -590,8 +617,20 @@ void blk_mq_complete_request(struct request *rq)
  	if (unlikely(blk_should_fake_timeout(q)))
  		return;
  
 +	/*
 +	 * If @rq->aborted_gstate equals the current instance, timeout is
-+	 * claiming @rq and we lost.  This is synchronized through RCU.
-+	 * See blk_mq_timeout_work() for details.
++	 * claiming @rq and we lost.  This is synchronized through
++	 * hctx_lock().  See blk_mq_timeout_work() for details.
++	 *
++	 * Completion path never blocks and we can directly use RCU here
++	 * instead of hctx_lock() which can be either RCU or SRCU.
++	 * However, that would complicate paths which want to synchronize
++	 * against us.  Let stay in sync with the issue path so that
++	 * hctx_lock() covers both issue and completion paths.
 +	 */
- 	if (!(hctx->flags & BLK_MQ_F_BLOCKING)) {
- 		rcu_read_lock();
--		if (!blk_mark_rq_complete(rq))
-+		if (blk_mq_rq_aborted_gstate(rq) != rq->gstate &&
-+		    !blk_mark_rq_complete(rq))
- 			__blk_mq_complete_request(rq);
- 		rcu_read_unlock();
- 	} else {
- 		srcu_idx = srcu_read_lock(hctx->queue_rq_srcu);
--		if (!blk_mark_rq_complete(rq))
-+		if (blk_mq_rq_aborted_gstate(rq) != rq->gstate &&
-+		    !blk_mark_rq_complete(rq))
- 			__blk_mq_complete_request(rq);
- 		srcu_read_unlock(hctx->queue_rq_srcu, srcu_idx);
- 	}
-@@ -608,34 +642,32 @@ void blk_mq_start_request(struct request *rq)
+ 	hctx_lock(hctx, &srcu_idx);
+-	if (!blk_mark_rq_complete(rq))
++	if (blk_mq_rq_aborted_gstate(rq) != rq->gstate &&
++	    !blk_mark_rq_complete(rq))
+ 		__blk_mq_complete_request(rq);
+ 	hctx_unlock(hctx, srcu_idx);
+ }
+@@ -617,34 +656,32 @@ void blk_mq_start_request(struct request *rq)
  		wbt_issue(q->rq_wb, &rq->issue_stat);
  	}
  
@@ -233,7 +236,7 @@ index acf4fbb..abd5d01 100644
  
  	if (q->dma_drain_size && blk_rq_bytes(rq)) {
  		/*
-@@ -668,6 +700,7 @@ static void __blk_mq_requeue_request(struct request *rq)
+@@ -677,6 +714,7 @@ static void __blk_mq_requeue_request(struct request *rq)
  	blk_mq_sched_requeue_request(rq);
  
  	if (test_and_clear_bit(REQ_ATOM_STARTED, &rq->atomic_flags)) {
@@ -241,7 +244,7 @@ index acf4fbb..abd5d01 100644
  		if (q->dma_drain_size && blk_rq_bytes(rq))
  			rq->nr_phys_segments--;
  	}
-@@ -765,6 +798,7 @@ EXPORT_SYMBOL(blk_mq_tag_to_rq);
+@@ -774,6 +812,7 @@ EXPORT_SYMBOL(blk_mq_tag_to_rq);
  struct blk_mq_timeout_data {
  	unsigned long next;
  	unsigned int next_set;
@@ -249,7 +252,7 @@ index acf4fbb..abd5d01 100644
  };
  
  void blk_mq_rq_timed_out(struct request *req, bool reserved)
-@@ -792,6 +826,12 @@ void blk_mq_rq_timed_out(struct request *req, bool reserved)
+@@ -801,6 +840,12 @@ void blk_mq_rq_timed_out(struct request *req, bool reserved)
  		__blk_mq_complete_request(req);
  		break;
  	case BLK_EH_RESET_TIMER:
@@ -262,7 +265,7 @@ index acf4fbb..abd5d01 100644
  		blk_add_timer(req);
  		blk_clear_rq_complete(req);
  		break;
-@@ -807,50 +847,51 @@ static void blk_mq_check_expired(struct blk_mq_hw_ctx *hctx,
+@@ -816,50 +861,51 @@ static void blk_mq_check_expired(struct blk_mq_hw_ctx *hctx,
  		struct request *rq, void *priv, bool reserved)
  {
  	struct blk_mq_timeout_data *data = priv;
@@ -347,7 +350,7 @@ index acf4fbb..abd5d01 100644
  static void blk_mq_timeout_work(struct work_struct *work)
  {
  	struct request_queue *q =
-@@ -858,7 +899,9 @@ static void blk_mq_timeout_work(struct work_struct *work)
+@@ -867,7 +913,9 @@ static void blk_mq_timeout_work(struct work_struct *work)
  	struct blk_mq_timeout_data data = {
  		.next		= 0,
  		.next_set	= 0,
@@ -357,7 +360,7 @@ index acf4fbb..abd5d01 100644
  	int i;
  
  	/* A deadlock might occur if a request is stuck requiring a
-@@ -877,14 +920,40 @@ static void blk_mq_timeout_work(struct work_struct *work)
+@@ -886,14 +934,40 @@ static void blk_mq_timeout_work(struct work_struct *work)
  	if (!percpu_ref_tryget(&q->q_usage_counter))
  		return;
  
@@ -400,7 +403,7 @@ index acf4fbb..abd5d01 100644
  		queue_for_each_hw_ctx(q, hctx, i) {
  			/* the hctx may be unmapped, so check it here */
  			if (blk_mq_hw_queue_mapped(hctx))
-@@ -1879,6 +1948,22 @@ static size_t order_to_size(unsigned int order)
+@@ -1893,6 +1967,22 @@ static size_t order_to_size(unsigned int order)
  	return (size_t)PAGE_SIZE << order;
  }
  
@@ -423,7 +426,7 @@ index acf4fbb..abd5d01 100644
  int blk_mq_alloc_rqs(struct blk_mq_tag_set *set, struct blk_mq_tags *tags,
  		     unsigned int hctx_idx, unsigned int depth)
  {
-@@ -1940,12 +2025,9 @@ int blk_mq_alloc_rqs(struct blk_mq_tag_set *set, struct blk_mq_tags *tags,
+@@ -1954,12 +2044,9 @@ int blk_mq_alloc_rqs(struct blk_mq_tag_set *set, struct blk_mq_tags *tags,
  			struct request *rq = p;
  
  			tags->static_rqs[i] = rq;
@@ -439,7 +442,7 @@ index acf4fbb..abd5d01 100644
  			}
  
  			p += rq_size;
-@@ -2084,9 +2166,7 @@ static int blk_mq_init_hctx(struct request_queue *q,
+@@ -2098,9 +2185,7 @@ static int blk_mq_init_hctx(struct request_queue *q,
  	if (!hctx->fq)
  		goto sched_exit_hctx;
  
@@ -540,7 +543,7 @@ index 95c9a5c..460798d 100644
  	struct hlist_node	cpuhp_dead;
  	struct kobject		kobj;
 diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index 8089ca1..2d6fd11 100644
+index 46e606f..2206607 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
 @@ -27,6 +27,8 @@
@@ -552,7 +555,7 @@ index 8089ca1..2d6fd11 100644
  
  struct module;
  struct scsi_ioctl_command;
-@@ -228,6 +230,27 @@ struct request {
+@@ -230,6 +232,27 @@ struct request {
  
  	unsigned short write_hint;
  
