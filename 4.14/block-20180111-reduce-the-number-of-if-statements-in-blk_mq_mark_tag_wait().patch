@@ -1,0 +1,119 @@
+From: Bart Van Assche <bart.vanassche@wdc.com>
+Subject: [PATCH v3 1/2] blk-mq: Reduce the number of if-statements in blk_mq_mark_tag_wait()
+Date: Wed, 10 Jan 2018 13:41:21 -0800
+Cc: linux-block@vger.kernel.org, Christoph Hellwig <hch@lst.de>,
+        Bart Van Assche <bart.vanassche@wdc.com>,
+        Omar Sandoval <osandov@fb.com>, Hannes Reinecke <hare@suse.de>,
+        Johannes Thumshirn <jthumshirn@suse.de>
+To: Jens Axboe <axboe@kernel.dk>
+
+This patch does not change any functionality but makes the
+blk_mq_mark_tag_wait() code slightly easier to read.
+
+Signed-off-by: Bart Van Assche <bart.vanassche@wdc.com>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Omar Sandoval <osandov@fb.com>
+Cc: Hannes Reinecke <hare@suse.de>
+Cc: Johannes Thumshirn <jthumshirn@suse.de>
+---
+ block/blk-mq.c | 69 +++++++++++++++++++++++++++++-----------------------------
+ 1 file changed, 35 insertions(+), 34 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 1d705e25852e..f27bcb6f6751 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1181,58 +1181,59 @@ static bool blk_mq_mark_tag_wait(struct blk_mq_hw_ctx **hctx,
+ 				 struct request *rq)
+ {
+ 	struct blk_mq_hw_ctx *this_hctx = *hctx;
+-	bool shared_tags = (this_hctx->flags & BLK_MQ_F_TAG_SHARED) != 0;
+ 	struct sbq_wait_state *ws;
+ 	wait_queue_entry_t *wait;
+ 	bool ret;
+ 
+-	if (!shared_tags) {
++	if (!(this_hctx->flags & BLK_MQ_F_TAG_SHARED)) {
+ 		if (!test_bit(BLK_MQ_S_SCHED_RESTART, &this_hctx->state))
+ 			set_bit(BLK_MQ_S_SCHED_RESTART, &this_hctx->state);
+-	} else {
+-		wait = &this_hctx->dispatch_wait;
+-		if (!list_empty_careful(&wait->entry))
+-			return false;
+ 
+-		spin_lock(&this_hctx->lock);
+-		if (!list_empty(&wait->entry)) {
+-			spin_unlock(&this_hctx->lock);
+-			return false;
+-		}
++		/*
++		 * It's possible that a tag was freed in the window between the
++		 * allocation failure and adding the hardware queue to the wait
++		 * queue.
++		 *
++		 * Don't clear RESTART here, someone else could have set it.
++		 * At most this will cost an extra queue run.
++		 */
++		return blk_mq_get_driver_tag(rq, hctx, false);
++	}
++
++	wait = &this_hctx->dispatch_wait;
++	if (!list_empty_careful(&wait->entry))
++		return false;
+ 
+-		ws = bt_wait_ptr(&this_hctx->tags->bitmap_tags, this_hctx);
+-		add_wait_queue(&ws->wait, wait);
++	spin_lock(&this_hctx->lock);
++	if (!list_empty(&wait->entry)) {
++		spin_unlock(&this_hctx->lock);
++		return false;
+ 	}
+ 
++	ws = bt_wait_ptr(&this_hctx->tags->bitmap_tags, this_hctx);
++	add_wait_queue(&ws->wait, wait);
++
+ 	/*
+ 	 * It's possible that a tag was freed in the window between the
+ 	 * allocation failure and adding the hardware queue to the wait
+ 	 * queue.
+ 	 */
+ 	ret = blk_mq_get_driver_tag(rq, hctx, false);
+-
+-	if (!shared_tags) {
+-		/*
+-		 * Don't clear RESTART here, someone else could have set it.
+-		 * At most this will cost an extra queue run.
+-		 */
+-		return ret;
+-	} else {
+-		if (!ret) {
+-			spin_unlock(&this_hctx->lock);
+-			return false;
+-		}
+-
+-		/*
+-		 * We got a tag, remove ourselves from the wait queue to ensure
+-		 * someone else gets the wakeup.
+-		 */
+-		spin_lock_irq(&ws->wait.lock);
+-		list_del_init(&wait->entry);
+-		spin_unlock_irq(&ws->wait.lock);
++	if (!ret) {
+ 		spin_unlock(&this_hctx->lock);
+-		return true;
++		return false;
+ 	}
++
++	/*
++	 * We got a tag, remove ourselves from the wait queue to ensure
++	 * someone else gets the wakeup.
++	 */
++	spin_lock_irq(&ws->wait.lock);
++	list_del_init(&wait->entry);
++	spin_unlock_irq(&ws->wait.lock);
++	spin_unlock(&this_hctx->lock);
++
++	return true;
+ }
+ 
+ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
