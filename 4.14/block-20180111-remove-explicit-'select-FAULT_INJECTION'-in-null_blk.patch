@@ -1,0 +1,95 @@
+From 33f782c49a95aac0c88203b29e4e276c2b12dad6 Mon Sep 17 00:00:00 2001
+From: Arnd Bergmann <arnd@arndb.de>
+Date: Thu, 11 Jan 2018 11:31:25 +0100
+Subject: null_blk: remove explicit 'select FAULT_INJECTION'
+
+Selecting FAULT_INJECTION causes a Kconfig warning when CONFIG_DEBUG_KERNEL
+is not set:
+
+warning: (BLK_DEV_NULL_BLK && DRM_I915_SELFTEST) selects FAULT_INJECTION which has unmet direct dependencies (DEBUG_KERNEL)
+
+The other drivers that use FAULT_INJECTION tend to have a separate
+Kconfig symbol for turning on that feature, so let's do the same
+thing here. This may add a bit more complexity than we like, but
+it avoids the warning and is more consistent with the rest of the
+kernel.
+
+Fixes: 93b570464cce ("null_blk: add option for managing IO timeouts")
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ drivers/block/Kconfig    | 5 ++++-
+ drivers/block/null_blk.c | 8 ++++++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/block/Kconfig b/drivers/block/Kconfig
+index 622d9a2..ad9b687 100644
+--- a/drivers/block/Kconfig
++++ b/drivers/block/Kconfig
+@@ -19,7 +19,10 @@ if BLK_DEV
+ config BLK_DEV_NULL_BLK
+ 	tristate "Null test block driver"
+ 	select CONFIGFS_FS
+-	select FAULT_INJECTION
++
++config BLK_DEV_NULL_BLK_FAULT_INJECTION
++	bool "Support fault injection for Null test block driver"
++	depends on BLK_DEV_NULL_BLK && FAULT_INJECTION
+ 
+ config BLK_DEV_FD
+ 	tristate "Normal floppy disk support"
+diff --git a/drivers/block/null_blk.c b/drivers/block/null_blk.c
+index 30ec0ac..5b94e53 100644
+--- a/drivers/block/null_blk.c
++++ b/drivers/block/null_blk.c
+@@ -27,7 +27,9 @@
+ #define TICKS_PER_SEC		50ULL
+ #define TIMER_INTERVAL		(NSEC_PER_SEC / TICKS_PER_SEC)
+ 
++#ifdef CONFIG_BLK_DEV_NULL_BLK_FAULT_INJECTION
+ static DECLARE_FAULT_ATTR(null_timeout_attr);
++#endif
+ 
+ static inline u64 mb_per_tick(int mbps)
+ {
+@@ -165,8 +167,10 @@ static int g_home_node = NUMA_NO_NODE;
+ module_param_named(home_node, g_home_node, int, S_IRUGO);
+ MODULE_PARM_DESC(home_node, "Home node for the device");
+ 
++#ifdef CONFIG_BLK_DEV_NULL_BLK_FAULT_INJECTION
+ static char g_timeout_str[80];
+ module_param_string(timeout, g_timeout_str, sizeof(g_timeout_str), S_IRUGO);
++#endif
+ 
+ static int g_queue_mode = NULL_Q_MQ;
+ 
+@@ -1372,8 +1376,10 @@ static int null_rq_prep_fn(struct request_queue *q, struct request *req)
+ 
+ static bool should_timeout_request(struct request *rq)
+ {
++#ifdef CONFIG_BLK_DEV_NULL_BLK_FAULT_INJECTION
+ 	if (g_timeout_str[0])
+ 		return should_fail(&null_timeout_attr, 1);
++#endif
+ 
+ 	return false;
+ }
+@@ -1655,6 +1661,7 @@ static void null_validate_conf(struct nullb_device *dev)
+ 
+ static bool null_setup_fault(void)
+ {
++#ifdef CONFIG_BLK_DEV_NULL_BLK_FAULT_INJECTION
+ 	if (!g_timeout_str[0])
+ 		return true;
+ 
+@@ -1662,6 +1669,7 @@ static bool null_setup_fault(void)
+ 		return false;
+ 
+ 	null_timeout_attr.verbose = 0;
++#endif
+ 	return true;
+ }
+ 
+-- 
+cgit v1.1
+
