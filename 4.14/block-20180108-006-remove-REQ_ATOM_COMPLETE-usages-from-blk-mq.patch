@@ -19,7 +19,6 @@ v2: Removed blk_clear_rq_complete() from blk_mq_rq_timed_out().
 
 v3: Added RQF_MQ_TIMEOUT_EXPIRED flag.
 
-[HH: backported to 4.14.x]
 Signed-off-by: Tejun Heo <tj@kernel.org>
 Cc: "jianchao.wang" <jianchao.w.wang@oracle.com>
 ---
@@ -106,9 +105,9 @@ index 2206607..e2a4afc 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
 @@ -125,6 +125,8 @@ typedef __u32 __bitwise req_flags_t;
- /* Look at ->special_vec for the actual data payload instead of the
-    bio chain. */
  #define RQF_SPECIAL_PAYLOAD	((__force req_flags_t)(1 << 18))
+ /* The per-zone write lock is held for this request */
+ #define RQF_ZONE_WRITE_LOCKED	((__force req_flags_t)(1 << 19))
 +/* timeout is expired */
 +#define RQF_MQ_TIMEOUT_EXPIRED	((__force req_flags_t)(1 << 20))
  

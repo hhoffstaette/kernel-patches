@@ -8,7 +8,6 @@ specific hardware queue. That's not how mq-deadline works, the state
 for determining which request to serve next is shared across all
 hardware queues for a device.
 
-[HH: backported to 4.14.x]
 Reviewed-by: Omar Sandoval <osandov@fb.com>
 Reviewed-by: Ming Lei <ming.lei@redhat.com>
 Signed-off-by: Jens Axboe <axboe@kernel.dk>
@@ -28,7 +27,7 @@ index d56972e..c56f211 100644
 +static struct request *__dd_dispatch_request(struct deadline_data *dd)
  {
 -	struct deadline_data *dd = hctx->queue->elevator->elevator_data;
- 	struct request *rq;
+ 	struct request *rq, *next_rq;
  	bool reads, writes;
  	int data_dir;
 @@ -372,13 +371,19 @@ done:

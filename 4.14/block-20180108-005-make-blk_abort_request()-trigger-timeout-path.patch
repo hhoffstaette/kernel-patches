@@ -67,7 +67,7 @@ diff --git a/block/blk-timeout.c b/block/blk-timeout.c
 index 6427be7..d580af3 100644
 --- a/block/blk-timeout.c
 +++ b/block/blk-timeout.c
-@@ -156,12 +156,12 @@ void blk_timeout_work(struct work_struct *work)
+@@ -156,12 +156,17 @@ void blk_timeout_work(struct work_struct *work)
   */
  void blk_abort_request(struct request *req)
  {
@@ -76,6 +76,11 @@ index 6427be7..d580af3 100644
 -
  	if (req->q->mq_ops) {
 -		blk_mq_rq_timed_out(req, false);
++		/*
++		 * All we need to ensure is that timeout scan takes place
++		 * immediately and that scan sees the new timeout value.
++		 * No need for fancy synchronizations.
++		 */
 +		req->deadline = jiffies;
 +		mod_timer(&req->q->timeout, 0);
  	} else {
