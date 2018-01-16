@@ -30,7 +30,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - net: networking fixes/improvements from 4.15+
-- pds: [PDS-mq 0.98h](http://cchalpha.blogspot.de/2017/12/pds-098h-release.html) CPU scheduler (**disabled** by default)
+- pds: [PDS-mq 0.98i](http://cchalpha.blogspot.de/2018/01/pds-098i-release.html) CPU scheduler (**disabled** by default)
 - realtek: configurable interrupt coalescing for r8169
 - timekeeping: improve stability of system clock
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
