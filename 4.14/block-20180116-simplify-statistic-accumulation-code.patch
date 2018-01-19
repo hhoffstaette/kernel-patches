@@ -1,0 +1,54 @@
+From ddc212313f16cd65fcf5e8d9ae223f8374822e4d Mon Sep 17 00:00:00 2001
+From: Arnd Bergmann <arnd@arndb.de>
+Date: Tue, 16 Jan 2018 16:01:36 +0100
+Subject: blkcg: simplify statistic accumulation code
+
+Some older compilers (gcc-4.4 through 4.6 in particular) struggle
+with the way that blkg_rwstat_read() returns a structure, leading
+to excessive stack usage and rather inefficient code:
+
+block/blk-cgroup.c: In function 'blkg_destroy':
+block/blk-cgroup.c:354:1: error: the frame size of 1296 bytes is larger than 1024 bytes [-Werror=frame-larger-than=]
+block/cfq-iosched.c: In function 'cfqg_stats_add_aux':
+block/cfq-iosched.c:753:1: error: the frame size of 1928 bytes is larger than 1024 bytes [-Werror=frame-larger-than=]
+block/bfq-cgroup.c: In function 'bfqg_stats_add_aux':
+block/bfq-cgroup.c:299:1: error: the frame size of 1928 bytes is larger than 1024 bytes [-Werror=frame-larger-than=]
+
+I also notice that there is no point in using atomic accesses
+for the local variables, so storing the temporaries in simple 'u64'
+variables not only avoids the stack usage on older compilers but
+also improves the object code on modern versions.
+
+Fixes: e6269c445467 ("blkcg: add blkg_[rw]stat->aux_cnt and replace cfq_group->dead_stats with it")
+Acked-by: Tejun Heo <tj@kernel.org>
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/linux/blk-cgroup.h | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/include/linux/blk-cgroup.h b/include/linux/blk-cgroup.h
+index e9825ff..69bea82 100644
+--- a/include/linux/blk-cgroup.h
++++ b/include/linux/blk-cgroup.h
+@@ -660,12 +660,14 @@ static inline void blkg_rwstat_reset(struct blkg_rwstat *rwstat)
+ static inline void blkg_rwstat_add_aux(struct blkg_rwstat *to,
+ 				       struct blkg_rwstat *from)
+ {
+-	struct blkg_rwstat v = blkg_rwstat_read(from);
++	u64 sum[BLKG_RWSTAT_NR];
+ 	int i;
+ 
+ 	for (i = 0; i < BLKG_RWSTAT_NR; i++)
+-		atomic64_add(atomic64_read(&v.aux_cnt[i]) +
+-			     atomic64_read(&from->aux_cnt[i]),
++		sum[i] = percpu_counter_sum_positive(&from->cpu_cnt[i]);
++
++	for (i = 0; i < BLKG_RWSTAT_NR; i++)
++		atomic64_add(sum[i] + atomic64_read(&from->aux_cnt[i]),
+ 			     &to->aux_cnt[i]);
+ }
+ 
+-- 
+cgit v1.1
+
