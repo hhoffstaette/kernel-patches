@@ -1,0 +1,157 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH 2/2] Btrfs: fix space leak after fallocate and zero range operations
+Date:   Thu, 18 Jan 2018 11:34:31 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+If we do a buffered write after a zero range operation that has an
+unaligned (with the filesystem's sector size) end which also falls within
+an unwritten (prealloc) extent that is currently beyond the inode's
+i_size, and the zero range operation has the flag FALLOC_FL_KEEP_SIZE,
+we end up leaking data and metadata space. This happens because when
+zeroing a range we call btrfs_truncate_block(), which does delalloc
+(loads the page and partially zeroes its content), and in the buffered
+write path we only clear existing delalloc space reservation for the
+range we are writing into if that range starts at an offset smaller then
+the inode's i_size, which makes sense since we can not have delalloc
+extents beyond the i_size, only unwritten extents are allowed.
+
+Example reproducer:
+
+ $ mkfs.btrfs -f /dev/sdb
+ $ mount /dev/sdb /mnt
+ $ xfs_io -f -c "falloc -k 428K 4K" /mnt/foobar
+ $ xfs_io -c "fzero -k 0 430K" /mnt/foobar
+ $ xfs_io -c "pwrite -S 0xaa 428K 4K" /mnt/foobar
+ $ umount /mnt
+
+After the unmount we get the metadata and data space leaks reported in
+dmesg/syslog:
+
+(..snip..)
+ [95794.974353] WARNING: CPU: 0 PID: 31496 at fs/btrfs/extent-tree.c:9953 btrfs_free_block_groups+0x2bc/0x36a [btrfs]
+ [95794.980163] Modules linked in: btrfs xfs ppdev ghash_clmulni_intel pcbc aesni_intel aes_x86_64 crypto_simd cryptd glue_helper parport_pc psmouse sg i2c_piix4 parport i2c_core evdev pcspkr button serio_raw sunrpc loop autofs4 ext4 crc16 mbcache jbd2 zstd_decompress zstd_compress xxhash raid10 raid456 async_raid6_recov async_memcpy async_pq async_xor async_tx xor raid6_pq libcrc32c crc32c_generic raid1 raid0 multipath linear md_mod sd_mod virtio_scsi ata_generic crc32c_intel ata_piix floppy virtio_pci virtio_ring virtio libata scsi_mod e1000 [last unloaded: btrfs]
+ [95794.986461] CPU: 0 PID: 31496 Comm: umount Tainted: G        W       4.14.0-rc6-btrfs-next-54+ #1
+ [95794.987591] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.10.2-0-g5f4c7b1-prebuilt.qemu-project.org 04/01/2014
+ [95794.988929] task: ffff880075aa0240 task.stack: ffffc90001734000
+ [95794.989922] RIP: 0010:btrfs_free_block_groups+0x2bc/0x36a [btrfs]
+ [95794.990715] RSP: 0018:ffffc90001737d70 EFLAGS: 00010206
+ [95794.991431] RAX: ffff88020f6e70e8 RBX: ffff88006145c000 RCX: ffffffff8115a906
+ [95794.992455] RDX: ffffffff8115a902 RSI: ffff880075aa0b40 RDI: ffff880075aa0b40
+ [95794.993535] RBP: ffffc90001737d98 R08: 0000000000000020 R09: fffffffffffffff7
+ [95794.994573] R10: 00000000ffffffc4 R11: ffff8800633b1bc0 R12: ffff88020f6e70e8
+ [95794.996250] R13: 0000000000000038 R14: ffff88006145e598 R15: 0000000000000000
+ [95794.997233] FS:  00007fa6793c92c0(0000) GS:ffff88023fc00000(0000) knlGS:0000000000000000
+ [95794.998592] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+ [95794.999484] CR2: 000056338670d048 CR3: 00000000610dc005 CR4: 00000000001606f0
+ [95795.000542] Call Trace:
+ [95795.001138]  close_ctree+0x1db/0x2b8 [btrfs]
+ [95795.001885]  ? evict_inodes+0x132/0x141
+ [95795.002407]  btrfs_put_super+0x15/0x17 [btrfs]
+ [95795.003093]  generic_shutdown_super+0x6a/0x10b
+ [95795.003720]  kill_anon_super+0x12/0x1c
+ [95795.004353]  btrfs_kill_super+0x16/0x21 [btrfs]
+ [95795.005095]  deactivate_locked_super+0x30/0x68
+ [95795.005716]  deactivate_super+0x36/0x39
+ [95795.006388]  cleanup_mnt+0x49/0x67
+ [95795.006939]  __cleanup_mnt+0x12/0x14
+ [95795.007512]  task_work_run+0x82/0xa6
+ [95795.008124]  prepare_exit_to_usermode+0xe1/0x10c
+ [95795.008994]  syscall_return_slowpath+0x18c/0x1af
+ [95795.009831]  entry_SYSCALL_64_fastpath+0xab/0xad
+ [95795.010610] RIP: 0033:0x7fa678cb99a7
+ [95795.011193] RSP: 002b:00007ffccf0aaed8 EFLAGS: 00000246 ORIG_RAX: 00000000000000a6
+ [95795.012327] RAX: 0000000000000000 RBX: 0000563386706030 RCX: 00007fa678cb99a7
+ [95795.013432] RDX: 0000000000000001 RSI: 0000000000000000 RDI: 000056338670ca90
+ [95795.014558] RBP: 000056338670ca90 R08: 000056338670c740 R09: 0000000000000015
+ [95795.015577] R10: 00000000000006b4 R11: 0000000000000246 R12: 00007fa6791bae64
+ [95795.016569] R13: 0000000000000000 R14: 0000563386706210 R15: 00007ffccf0ab160
+ [95795.017662] Code: 00 00 00 4c 8b a3 98 25 00 00 49 83 bc 24 60 ff ff ff 00 75 16 49 83 bc 24 68 ff ff ff 00 75 0b 49 83 bc 24 70 ff ff ff 00 74 16 <0f> ff 49 8d b4 24 18 ff ff ff 31 c9 31 d2 48 89 df e8 93 7a ff
+ [95795.020538] ---[ end trace e95877675c6ec00d ]---
+ [95795.021259] BTRFS info (device sdi): space_info 4 has 1072775168 free, is not full
+ [95795.022390] BTRFS info (device sdi): space_info total=1073741824, used=114688, pinned=0, reserved=0, may_use=786432, readonly=65536
+
+Fix this by ensuring the zero range operation does not call
+btrfs_truncate_block() if the corresponding extent is an unwritten one
+(it's pointless anyway, since reading from an unwritten extent yields
+zeroes).
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/file.c | 26 ++++++++++++++++++++------
+ 1 file changed, 20 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 9ad0465d2e8e..c8b9ac2a73ed 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2852,12 +2852,18 @@ static int btrfs_fallocate_update_isize(struct inode *inode,
+ 	return ret ? ret : ret2;
+ }
+ 
++enum {
++	RANGE_BOUNDARY_WRITTEN_EXTENT = 0,
++	RANGE_BOUNDARY_PREALLOC_EXTENT = 1,
++	RANGE_BOUNDARY_HOLE = 2,
++};
++
+ static int btrfs_zero_range_check_range_boundary(struct inode *inode,
+ 						 u64 offset)
+ {
+ 	const u64 sectorsize = btrfs_inode_sectorsize(inode);
+ 	struct extent_map *em;
+-	int ret = 0;
++	int ret;
+ 
+ 	offset = round_down(offset, sectorsize);
+ 	em = btrfs_get_extent(BTRFS_I(inode), NULL, 0, offset, sectorsize, 0);
+@@ -2865,7 +2871,11 @@ static int btrfs_zero_range_check_range_boundary(struct inode *inode,
+ 		return PTR_ERR(em);
+ 
+ 	if (em->block_start == EXTENT_MAP_HOLE)
+-		ret = 1;
++		ret = RANGE_BOUNDARY_HOLE;
++	else if (test_bit(EXTENT_FLAG_PREALLOC, &em->flags))
++		ret = RANGE_BOUNDARY_PREALLOC_EXTENT;
++	else
++		ret = RANGE_BOUNDARY_WRITTEN_EXTENT;
+ 
+ 	free_extent_map(em);
+ 	return ret;
+@@ -2974,13 +2984,15 @@ static int btrfs_zero_range(struct inode *inode,
+ 		ret = btrfs_zero_range_check_range_boundary(inode, offset);
+ 		if (ret < 0)
+ 			goto out;
+-		if (ret) {
++		if (ret == RANGE_BOUNDARY_HOLE) {
+ 			alloc_start = round_down(offset, sectorsize);
+ 			ret = 0;
+-		} else {
++		} else if (ret == RANGE_BOUNDARY_WRITTEN_EXTENT) {
+ 			ret = btrfs_truncate_block(inode, offset, 0, 0);
+ 			if (ret)
+ 				goto out;
++		} else {
++			ret = 0;
+ 		}
+ 	}
+ 
+@@ -2989,13 +3001,15 @@ static int btrfs_zero_range(struct inode *inode,
+ 							    offset + len);
+ 		if (ret < 0)
+ 			goto out;
+-		if (ret) {
++		if (ret == RANGE_BOUNDARY_HOLE) {
+ 			alloc_end = round_up(offset + len, sectorsize);
+ 			ret = 0;
+-		} else {
++		} else if (ret == RANGE_BOUNDARY_WRITTEN_EXTENT) {
+ 			ret = btrfs_truncate_block(inode, offset + len, 0, 1);
+ 			if (ret)
+ 				goto out;
++		} else {
++			ret = 0;
+ 		}
+ 	}
+ 
