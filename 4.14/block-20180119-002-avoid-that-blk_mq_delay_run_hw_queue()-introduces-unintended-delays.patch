@@ -1,0 +1,45 @@
+From ae943d20624de0a6aac7dd0597616dce2c498029 Mon Sep 17 00:00:00 2001
+From: Bart Van Assche <bart.vanassche@wdc.com>
+Date: Fri, 19 Jan 2018 08:58:55 -0800
+Subject: blk-mq: Avoid that blk_mq_delay_run_hw_queue() introduces unintended delays
+
+Make sure that calling blk_mq_run_hw_queue() or
+blk_mq_kick_requeue_list() triggers a queue run without delay even
+if blk_mq_delay_run_hw_queue() has been called recently and if its
+delay has not yet expired.
+
+Reviewed-by: Mike Snitzer <snitzer@redhat.com>
+Signed-off-by: Bart Van Assche <bart.vanassche@wdc.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 0fc6c95..43e7449 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -785,7 +785,7 @@ EXPORT_SYMBOL(blk_mq_add_to_requeue_list);
+ 
+ void blk_mq_kick_requeue_list(struct request_queue *q)
+ {
+-	kblockd_schedule_delayed_work(&q->requeue_work, 0);
++	kblockd_mod_delayed_work_on(WORK_CPU_UNBOUND, &q->requeue_work, 0);
+ }
+ EXPORT_SYMBOL(blk_mq_kick_requeue_list);
+ 
+@@ -1401,9 +1401,8 @@ static void __blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async,
+ 		put_cpu();
+ 	}
+ 
+-	kblockd_schedule_delayed_work_on(blk_mq_hctx_next_cpu(hctx),
+-					 &hctx->run_work,
+-					 msecs_to_jiffies(msecs));
++	kblockd_mod_delayed_work_on(blk_mq_hctx_next_cpu(hctx), &hctx->run_work,
++				    msecs_to_jiffies(msecs));
+ }
+ 
+ void blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, unsigned long msecs)
+-- 
+cgit v1.1
+
