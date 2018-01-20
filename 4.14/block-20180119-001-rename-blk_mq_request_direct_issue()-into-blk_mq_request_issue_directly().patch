@@ -1,0 +1,69 @@
+From c77ff7fd03ddca8face268c4cf093c0edf4bcf1f Mon Sep 17 00:00:00 2001
+From: Bart Van Assche <bart.vanassche@wdc.com>
+Date: Fri, 19 Jan 2018 08:58:54 -0800
+Subject: blk-mq: Rename blk_mq_request_direct_issue() into blk_mq_request_issue_directly()
+
+Most blk-mq functions have a name that follows the pattern blk_mq_${action}.
+However, the function name blk_mq_request_direct_issue is an exception.
+Hence rename this function. This patch does not change any functionality.
+
+Reviewed-by: Mike Snitzer <snitzer@redhat.com>
+Signed-off-by: Bart Van Assche <bart.vanassche@wdc.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-core.c | 2 +-
+ block/blk-mq.c   | 4 ++--
+ block/blk-mq.h   | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index c21a16e..1645a1e 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -2520,7 +2520,7 @@ blk_status_t blk_insert_cloned_request(struct request_queue *q, struct request *
+ 		 * bypass a potential scheduler on the bottom device for
+ 		 * insert.
+ 		 */
+-		return blk_mq_request_direct_issue(rq);
++		return blk_mq_request_issue_directly(rq);
+ 	}
+ 
+ 	spin_lock_irqsave(q->queue_lock, flags);
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 74a4f23..0fc6c95 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1785,7 +1785,7 @@ static blk_status_t __blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
+ 	 * RCU or SRCU read lock is needed before checking quiesced flag.
+ 	 *
+ 	 * When queue is stopped or quiesced, ignore 'bypass_insert' from
+-	 * blk_mq_request_direct_issue(), and return BLK_STS_OK to caller,
++	 * blk_mq_request_issue_directly(), and return BLK_STS_OK to caller,
+ 	 * and avoid driver to try to dispatch again.
+ 	 */
+ 	if (blk_mq_hctx_stopped(hctx) || blk_queue_quiesced(q)) {
+@@ -1833,7 +1833,7 @@ static void blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
+ 	hctx_unlock(hctx, srcu_idx);
+ }
+ 
+-blk_status_t blk_mq_request_direct_issue(struct request *rq)
++blk_status_t blk_mq_request_issue_directly(struct request *rq)
+ {
+ 	blk_status_t ret;
+ 	int srcu_idx;
+diff --git a/block/blk-mq.h b/block/blk-mq.h
+index e3ebc93..88c558f 100644
+--- a/block/blk-mq.h
++++ b/block/blk-mq.h
+@@ -75,7 +75,7 @@ void blk_mq_insert_requests(struct blk_mq_hw_ctx *hctx, struct blk_mq_ctx *ctx,
+ 				struct list_head *list);
+ 
+ /* Used by blk_insert_cloned_request() to issue request directly */
+-blk_status_t blk_mq_request_direct_issue(struct request *rq);
++blk_status_t blk_mq_request_issue_directly(struct request *rq);
+ 
+ /*
+  * CPU -> queue mappings
+-- 
+cgit v1.1
+
