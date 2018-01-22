@@ -1,0 +1,78 @@
+From c3916ad9320eed8eacd7c0b2cf7f881efceda892 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Sun, 10 Dec 2017 17:55:04 -0800
+Subject: tcp: smoother receiver autotuning
+
+Back in linux-3.13 (commit b0983d3c9b13 ("tcp: fix dynamic right sizing"))
+I addressed the pressing issues we had with receiver autotuning.
+
+But DRS suffers from extra latencies caused by rcv_rtt_est.rtt_us
+drifts. One common problem happens during slow start, since the
+apparent RTT measured by the receiver can be inflated by ~50%,
+at the end of one packet train.
+
+Also, a single drop can delay read() calls by one RTT, meaning
+tcp_rcv_space_adjust() can be called one RTT too late.
+
+By replacing the tri-modal heuristic with a continuous function,
+we can offset the effects of not growing 'at the optimal time'.
+
+The curve of the function matches prior behavior if the space
+increased by 25% and 50% exactly.
+
+Cost of added multiply/divide is small, considering a TCP flow
+typically would run this part of the code few times in its life.
+
+I tested this patch with 100 ms RTT / 1% loss link, 100 runs
+of (netperf -l 5), and got an average throughput of 4600 Mbit
+instead of 1700 Mbit.
+
+[HH: context-only backport to 4.14.x]
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Acked-by: Wei Wang <weiwan@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_input.c | 19 +++++--------------
+ 1 file changed, 5 insertions(+), 14 deletions(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 2900e58..fefb46c 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -601,26 +601,17 @@ void tcp_rcv_space_adjust(struct sock *sk)
+ 	if (sysctl_tcp_moderate_rcvbuf &&
+ 	    !(sk->sk_userlocks & SOCK_RCVBUF_LOCK)) {
+ 		int rcvmem, rcvbuf;
+-		u64 rcvwin;
++		u64 rcvwin, grow;
+ 
+ 		/* minimal window to cope with packet losses, assuming
+ 		 * steady state. Add some cushion because of small variations.
+ 		 */
+ 		rcvwin = ((u64)copied << 1) + 16 * tp->advmss;
+ 
+-		/* If rate increased by 25%,
+-		 *	assume slow start, rcvwin = 3 * copied
+-		 * If rate increased by 50%,
+-		 *	assume sender can use 2x growth, rcvwin = 4 * copied
+-		 */
+-		if (copied >=
+-		    tp->rcvq_space.space + (tp->rcvq_space.space >> 2)) {
+-			if (copied >=
+-			    tp->rcvq_space.space + (tp->rcvq_space.space >> 1))
+-				rcvwin <<= 1;
+-			else
+-				rcvwin += (rcvwin >> 1);
+-		}
++		/* Accommodate for sender rate increase (eg. slow start) */
++		grow = rcvwin * (copied - tp->rcvq_space.space);
++		do_div(grow, tp->rcvq_space.space);
++		rcvwin += (grow << 1);
+ 
+ 		rcvmem = SKB_TRUESIZE(tp->advmss + MAX_TCP_HEADER);
+ 		while (tcp_win_from_space(rcvmem) < tp->advmss)
+-- 
+cgit v1.1
+
