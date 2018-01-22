@@ -1,0 +1,77 @@
+From 607065bad9931e72207b0cac365d7d4abc06bd99 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Sun, 10 Dec 2017 17:55:03 -0800
+Subject: tcp: avoid integer overflows in tcp_rcv_space_adjust()
+
+When using large tcp_rmem[2] values (I did tests with 500 MB),
+I noticed overflows while computing rcvwin.
+
+Lets fix this before the following patch.
+
+[HH: backported to 4.14.x]
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Acked-by: Wei Wang <weiwan@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ include/linux/tcp.h  |  2 +-
+ net/ipv4/tcp_input.c | 12 +++++++-----
+ 2 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/include/linux/tcp.h b/include/linux/tcp.h
+index ca4a636..4f93f095 100644
+--- a/include/linux/tcp.h
++++ b/include/linux/tcp.h
+@@ -344,7 +344,7 @@ struct tcp_sock {
+ 
+ /* Receiver queue space */
+ 	struct {
+-		int	space;
++		u32	space;
+ 		u32	seq;
+ 		u64	time;
+ 	} rcvq_space;
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 746a677..2900e58 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -576,8 +576,8 @@ static inline void tcp_rcv_rtt_measure_ts(struct sock *sk,
+ void tcp_rcv_space_adjust(struct sock *sk)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
++	u32 copied;
+ 	int time;
+-	int copied;
+ 
+ 	tcp_mstamp_refresh(tp);
+ 	time = tcp_stamp_us_delta(tp->tcp_mstamp, tp->rcvq_space.time);
+@@ -600,12 +600,13 @@ void tcp_rcv_space_adjust(struct sock *sk)
+ 
+ 	if (sysctl_tcp_moderate_rcvbuf &&
+ 	    !(sk->sk_userlocks & SOCK_RCVBUF_LOCK)) {
+-		int rcvwin, rcvmem, rcvbuf;
++		int rcvmem, rcvbuf;
++		u64 rcvwin;
+ 
+ 		/* minimal window to cope with packet losses, assuming
+ 		 * steady state. Add some cushion because of small variations.
+ 		 */
+-		rcvwin = (copied << 1) + 16 * tp->advmss;
++		rcvwin = ((u64)copied << 1) + 16 * tp->advmss;
+ 
+ 		/* If rate increased by 25%,
+ 		 *	assume slow start, rcvwin = 3 * copied
+@@ -625,7 +626,8 @@ void tcp_rcv_space_adjust(struct sock *sk)
+ 		while (tcp_win_from_space(rcvmem) < tp->advmss)
+ 			rcvmem += 128;
+ 
+-		rcvbuf = min(rcvwin / tp->advmss * rcvmem, sysctl_tcp_rmem[2]);
++		do_div(rcvwin, tp->advmss);
++		rcvbuf = min_t(u64, rcvwin * rcvmem, sysctl_tcp_rmem[2]);
+ 		if (rcvbuf > sk->sk_rcvbuf) {
+ 			sk->sk_rcvbuf = rcvbuf;
+ 
+-- 
+cgit v1.1
+
