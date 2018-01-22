@@ -1,0 +1,41 @@
+From 02db55718d53f9d426cee504c27fb768e9ed4ffe Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Sun, 10 Dec 2017 17:55:02 -0800
+Subject: tcp: do not overshoot window_clamp in tcp_rcv_space_adjust()
+
+While rcvbuf is properly clamped by tcp_rmem[2], rcvwin
+is left to a potentially too big value.
+
+It has no serious effect, since :
+1) tcp_grow_window() has very strict checks.
+2) window_clamp can be mangled by user space to any value anyway.
+
+tcp_init_buffer_space() and companions use tcp_full_space(),
+we use tcp_win_from_space() to avoid reloading sk->sk_rcvbuf
+
+[HH: backported to 4.14.x]
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Acked-by: Wei Wang <weiwan@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_input.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 9550cc4..746a677 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -631,7 +631,7 @@ void tcp_rcv_space_adjust(struct sock *sk)
+ 			sk->sk_rcvbuf = rcvbuf;
+ 
+ 			/* Make the window clamp follow along.  */
+-			tp->window_clamp = rcvwin;
++			tp->window_clamp = tcp_win_from_space(rcvbuf);
+ 		}
+ 	}
+ 	tp->rcvq_space.space = copied;
+-- 
+cgit v1.1
+
