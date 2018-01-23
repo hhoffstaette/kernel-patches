@@ -1,0 +1,74 @@
+From: Peter Zijlstra <peterz@infradead.org>
+Subject: [PATCH] futex: Fix OWNER_DEAD fixup
+Date: Tue, 23 Jan 2018 17:19:11 +0100
+Cc: Ingo Molnar <mingo@kernel.org>,
+        Linus Torvalds <torvalds@linux-foundation.org>,
+        Linux Kernel Mailing List <linux-kernel@vger.kernel.org>,
+        Thomas Gleixner <tglx@linutronix.de>,
+        "Paul E. McKenney" <paulmck@us.ibm.com>,
+        Andrew Morton <akpm@linux-foundation.org>,
+        davej@codemonkey.org.uk
+To: Geert Uytterhoeven <geert@linux-m68k.org>
+
+On Mon, Jan 22, 2018 at 11:39:47AM +0100, Peter Zijlstra wrote:
+> No, I think you actually spotted a bug there. We now can't set
+> OWNER_DIED anymore, which is bad.
+> 
+> I think the below fixes things, but let me go trawl through the various
+> futex test things, because I think I've seen a unit test for this
+> _somewhere_.
+
+glibc has robustpi tests, but nothing there triggered this case.
+
+---
+Subject: futex: Fix OWNER_DEAD fixup
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Mon, 22 Jan 2018 11:39:47 +0100
+
+Both Geert and DaveJ reported that the recent futex commit:
+
+  c1e2f0eaf015 ("futex: Avoid violating the 10th rule of futex")
+
+introduced a problem with setting OWNER_DEAD. We set the bit on an
+uninitialized variable and then entirely optimize it away as a
+dead-store.
+
+Move the setting of the bit to where it is more useful.
+
+Reported-by: Geert Uytterhoeven <geert@linux-m68k.org>
+Reported-by: Dave Jones <davej@codemonkey.org.uk>
+Cc: Ingo Molnar <mingo@kernel.org>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: "Paul E. McKenney" <paulmck@us.ibm.com>
+Fixes: c1e2f0eaf015 ("futex: Avoid violating the 10th rule of futex")
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+---
+ kernel/futex.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/futex.c b/kernel/futex.c
+index 8c5424dd5924..7f719d110908 100644
+--- a/kernel/futex.c
++++ b/kernel/futex.c
+@@ -2311,9 +2311,6 @@ static int fixup_pi_state_owner(u32 __user *uaddr, struct futex_q *q,
+ 	raw_spin_lock_irq(&pi_state->pi_mutex.wait_lock);
+ 
+ 	oldowner = pi_state->owner;
+-	/* Owner died? */
+-	if (!pi_state->owner)
+-		newtid |= FUTEX_OWNER_DIED;
+ 
+ 	/*
+ 	 * We are here because either:
+@@ -2374,6 +2371,9 @@ static int fixup_pi_state_owner(u32 __user *uaddr, struct futex_q *q,
+ 	}
+ 
+ 	newtid = task_pid_vnr(newowner) | FUTEX_WAITERS;
++	/* Owner died? */
++	if (!pi_state->owner)
++		newtid |= FUTEX_OWNER_DIED;
+ 
+ 	if (get_futex_value_locked(&uval, uaddr))
+ 		goto handle_fault;
