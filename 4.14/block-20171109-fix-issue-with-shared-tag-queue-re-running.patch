@@ -1,4 +1,4 @@
-From 602ff1b682c1d45723f85da8c2883c6a19824329 Mon Sep 17 00:00:00 2001
+From eb619fdb2d4cb8b3d3419e9113921e87e7daf557 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@kernel.dk>
 Date: Thu, 9 Nov 2017 08:32:43 -0700
 Subject: blk-mq: fix issue with shared tag queue re-running
@@ -41,12 +41,13 @@ back on the dispatch list.
 Reviewed-by: Bart Van Assche <bart.vanassche@wdc.com>
 Tested-by: Bart Van Assche <bart.vanassche@wdc.com>
 Reviewed-by: Ming Lei <ming.lei@redhat.com>
+Reviewed-by: Omar Sandoval <osandov@fb.com>
 Signed-off-by: Jens Axboe <axboe@kernel.dk>
 ---
  block/blk-mq-debugfs.c |  1 -
- block/blk-mq.c         | 83 ++++++++++++++++++++++++++++----------------------
+ block/blk-mq.c         | 85 ++++++++++++++++++++++++++++----------------------
  include/linux/blk-mq.h |  5 ++-
- 3 files changed, 49 insertions(+), 40 deletions(-)
+ 3 files changed, 50 insertions(+), 41 deletions(-)
 
 diff --git a/block/blk-mq-debugfs.c b/block/blk-mq-debugfs.c
 index 7f4a1ba..bb7f084 100644
@@ -61,7 +62,7 @@ index 7f4a1ba..bb7f084 100644
  };
  #undef HCTX_STATE_NAME
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 3d759bb..2396f03 100644
+index 3d759bb..fed8165 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -998,49 +998,64 @@ done:
@@ -191,11 +192,13 @@ index 3d759bb..2396f03 100644
  		 *
  		 * If no I/O scheduler has been configured it is possible that
  		 * the hardware queue got stopped and restarted before requests
-@@ -1156,7 +1164,7 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
+@@ -1155,8 +1163,8 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
+ 		 *   returning BLK_STS_RESOURCE. Two exceptions are scsi-mq
  		 *   and dm-rq.
  		 */
- 		if (!blk_mq_sched_needs_restart(hctx) &&
+-		if (!blk_mq_sched_needs_restart(hctx) &&
 -		    !test_bit(BLK_MQ_S_TAG_WAITING, &hctx->state))
++		if (!blk_mq_sched_needs_restart(hctx) ||
 +		    (no_tag && list_empty_careful(&hctx->dispatch_wait.entry)))
  			blk_mq_run_hw_queue(hctx, true);
  	}
