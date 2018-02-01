@@ -1,0 +1,84 @@
+From: Heiner Kallweit <hkallweit1@gmail.com>
+To: Realtek linux nic maintainers <nic_swsd@realtek.com>,
+ Bjorn Helgaas <bhelgaas@google.com>, David Miller <davem@davemloft.net>
+Cc: "netdev@vger.kernel.org" <netdev@vger.kernel.org>,
+ "linux-pci@vger.kernel.org" <linux-pci@vger.kernel.org>
+Subject: [v2,1/3] PCI: Add pcim_set_mwi(), a device-managed pci_set_mwi()
+Date: Tue, 12 Dec 2017 07:40:56 +0100
+
+Add pcim_set_mwi(), a device-managed version of pci_set_mwi().
+First user is the Realtek r8169 driver.
+
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Acked-by: Bjorn Helgaas <bhelgaas@google.com>
+---
+v2:
+- Reorder calls
+- Adjust and commit message
+---
+ drivers/pci/pci.c   | 25 +++++++++++++++++++++++++
+ include/linux/pci.h |  1 +
+ 2 files changed, 26 insertions(+)
+
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index 4a7c6864f..764ca7b88 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -1458,6 +1458,7 @@ struct pci_devres {
+ 	unsigned int pinned:1;
+ 	unsigned int orig_intx:1;
+ 	unsigned int restore_intx:1;
++	unsigned int mwi:1;
+ 	u32 region_mask;
+ };
+ 
+@@ -1476,6 +1477,9 @@ static void pcim_release(struct device *gendev, void *res)
+ 		if (this->region_mask & (1 << i))
+ 			pci_release_region(dev, i);
+ 
++	if (this->mwi)
++		pci_clear_mwi(dev);
++
+ 	if (this->restore_intx)
+ 		pci_intx(dev, this->orig_intx);
+ 
+@@ -3760,6 +3764,27 @@ int pci_set_mwi(struct pci_dev *dev)
+ }
+ EXPORT_SYMBOL(pci_set_mwi);
+ 
++/**
++ * pcim_set_mwi - a device-managed pci_set_mwi()
++ * @dev: the PCI device for which MWI is enabled
++ *
++ * Managed pci_set_mwi().
++ *
++ * RETURNS: An appropriate -ERRNO error value on error, or zero for success.
++ */
++int pcim_set_mwi(struct pci_dev *dev)
++{
++	struct pci_devres *dr;
++
++	dr = find_pci_dr(dev);
++	if (!dr)
++		return -ENOMEM;
++
++	dr->mwi = 1;
++	return pci_set_mwi(dev);
++}
++EXPORT_SYMBOL(pcim_set_mwi);
++
+ /**
+  * pci_try_set_mwi - enables memory-write-invalidate PCI transaction
+  * @dev: the PCI device for which MWI is enabled
+diff --git a/include/linux/pci.h b/include/linux/pci.h
+index 978aad784..0a7ac863a 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -1064,6 +1064,7 @@ int pci_set_pcie_reset_state(struct pci_dev *dev, enum pcie_reset_state state);
+ int pci_set_cacheline_size(struct pci_dev *dev);
+ #define HAVE_PCI_SET_MWI
+ int __must_check pci_set_mwi(struct pci_dev *dev);
++int __must_check pcim_set_mwi(struct pci_dev *dev);
+ int pci_try_set_mwi(struct pci_dev *dev);
+ void pci_clear_mwi(struct pci_dev *dev);
+ void pci_intx(struct pci_dev *dev, int enable);
