@@ -1,0 +1,42 @@
+From b9aa1c75e694618e4e2ba32667b89134c7fe2e7c Mon Sep 17 00:00:00 2001
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Date: Mon, 8 Jan 2018 21:39:02 +0100
+Subject: r8169: remove unneeded rpm ops in rtl_shutdown
+
+This patch reverts commit 2a15cd2ff488 "r8169: runtime resume before
+shutdown" from 2012. Few months after this change the underlying issue
+was solved in the PCI core with commit 3ff2de9ba1a2 "PCI/PM: Resume
+device before shutdown".
+
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 857f67b..606fb76 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -8195,9 +8195,6 @@ static void rtl_shutdown(struct pci_dev *pdev)
+ {
+ 	struct net_device *dev = pci_get_drvdata(pdev);
+ 	struct rtl8169_private *tp = netdev_priv(dev);
+-	struct device *d = &pdev->dev;
+-
+-	pm_runtime_get_sync(d);
+ 
+ 	rtl8169_net_suspend(dev);
+ 
+@@ -8215,8 +8212,6 @@ static void rtl_shutdown(struct pci_dev *pdev)
+ 		pci_wake_from_d3(pdev, true);
+ 		pci_set_power_state(pdev, PCI_D3hot);
+ 	}
+-
+-	pm_runtime_put_noidle(d);
+ }
+ 
+ static void rtl_remove_one(struct pci_dev *pdev)
+-- 
+cgit v1.1
+
