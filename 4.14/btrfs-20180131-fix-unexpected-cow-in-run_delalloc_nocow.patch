@@ -1,7 +1,7 @@
 From:   Liu Bo <bo.li.liu@oracle.com>
 To:     linux-btrfs@vger.kernel.org
-Subject: [PATCH] Btrfs: fix unexpected cow in run_delalloc_nocow
-Date:   Thu, 25 Jan 2018 11:02:49 -0700
+Subject: [PATCH v2] Btrfs: fix unexpected cow in run_delalloc_nocow
+Date:   Wed, 31 Jan 2018 17:09:13 -0700
 
 Fstests generic/475 provides a way to fail metadata reads while
 checking if checksum exists for the inode inside run_delalloc_nocow(),
@@ -21,11 +21,13 @@ cc: <stable@vger.kernel.org> v2.6.28+
 Fixes: 17d217fe970d ("Btrfs: fix nodatasum handling in balancing code")
 Signed-off-by: Liu Bo <bo.li.liu@oracle.com>
 ---
+v2: fix error handling after btrfs_cross_ref_exist().
+
  fs/btrfs/inode.c | 37 ++++++++++++++++++++++++++++++++-----
  1 file changed, 32 insertions(+), 5 deletions(-)
 
 diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
-index e1a7f3c..ac1a1ac 100644
+index e1a7f3c..8f2bd04 100644
 --- a/fs/btrfs/inode.c
 +++ b/fs/btrfs/inode.c
 @@ -1257,6 +1257,8 @@ static noinline int csum_exist_in_range(struct btrfs_fs_info *fs_info,
@@ -52,7 +54,7 @@ index e1a7f3c..ac1a1ac 100644
 +				 * ret could be -EIO if the above fails to read
 +				 * metadata.
 +				 */
-+				if (ret != -ENOENT) {
++				if (ret < 0) {
 +					if (cow_start != (u64)-1)
 +						cur_offset = cow_start;
 +					goto error;
