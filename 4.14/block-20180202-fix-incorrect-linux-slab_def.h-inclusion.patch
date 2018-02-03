@@ -1,0 +1,76 @@
+From 1d51877578799bfe0fcfe189d8233c9fccf05931 Mon Sep 17 00:00:00 2001
+From: Arnd Bergmann <arnd@arndb.de>
+Date: Fri, 2 Feb 2018 16:03:04 +0100
+Subject: block: skd: fix incorrect linux/slab_def.h inclusion
+
+skd includes slab_def.h to get access to the slab cache object size.
+However, including this header breaks when we use SLUB or SLOB instead of
+the SLAB allocator, since the structure layout is completely different,
+as shown by this warning when we build this driver in one of the invalid
+configurations with link-time optimizations enabled:
+
+include/linux/slab.h:715:0: error: type of 'kmem_cache_size' does not match original declaration [-Werror=lto-type-mismatch]
+ unsigned int kmem_cache_size(struct kmem_cache *s);
+
+mm/slab_common.c:77:14: note: 'kmem_cache_size' was previously declared here
+ unsigned int kmem_cache_size(struct kmem_cache *s)
+              ^
+mm/slab_common.c:77:14: note: code may be misoptimized unless -fno-strict-aliasing is used
+include/linux/slab.h:147:0: error: type of 'kmem_cache_destroy' does not match original declaration [-Werror=lto-type-mismatch]
+ void kmem_cache_destroy(struct kmem_cache *);
+
+mm/slab_common.c:858:6: note: 'kmem_cache_destroy' was previously declared here
+ void kmem_cache_destroy(struct kmem_cache *s)
+      ^
+mm/slab_common.c:858:6: note: code may be misoptimized unless -fno-strict-aliasing is used
+include/linux/slab.h:140:0: error: type of 'kmem_cache_create' does not match original declaration [-Werror=lto-type-mismatch]
+ struct kmem_cache *kmem_cache_create(const char *name, size_t size,
+
+mm/slab_common.c:534:1: note: 'kmem_cache_create' was previously declared here
+ kmem_cache_create(const char *name, size_t size, size_t align,
+ ^
+
+This removes the header inclusion and instead uses the kmem_cache_size()
+interface to get the size in a reliable way.
+
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ drivers/block/skd_main.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/block/skd_main.c b/drivers/block/skd_main.c
+index de0d081..e41935a 100644
+--- a/drivers/block/skd_main.c
++++ b/drivers/block/skd_main.c
+@@ -32,7 +32,6 @@
+ #include <linux/aer.h>
+ #include <linux/wait.h>
+ #include <linux/stringify.h>
+-#include <linux/slab_def.h>
+ #include <scsi/scsi.h>
+ #include <scsi/sg.h>
+ #include <linux/io.h>
+@@ -2603,7 +2602,8 @@ static void *skd_alloc_dma(struct skd_device *skdev, struct kmem_cache *s,
+ 	buf = kmem_cache_alloc(s, gfp);
+ 	if (!buf)
+ 		return NULL;
+-	*dma_handle = dma_map_single(dev, buf, s->size, dir);
++	*dma_handle = dma_map_single(dev, buf,
++				     kmem_cache_size(s), dir);
+ 	if (dma_mapping_error(dev, *dma_handle)) {
+ 		kmem_cache_free(s, buf);
+ 		buf = NULL;
+@@ -2618,7 +2618,8 @@ static void skd_free_dma(struct skd_device *skdev, struct kmem_cache *s,
+ 	if (!vaddr)
+ 		return;
+ 
+-	dma_unmap_single(&skdev->pdev->dev, dma_handle, s->size, dir);
++	dma_unmap_single(&skdev->pdev->dev, dma_handle,
++			 kmem_cache_size(s), dir);
+ 	kmem_cache_free(s, vaddr);
+ }
+ 
+-- 
+cgit v1.1
+
