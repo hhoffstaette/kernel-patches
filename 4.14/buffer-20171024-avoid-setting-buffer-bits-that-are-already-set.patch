@@ -1,0 +1,55 @@
+From 60f91826ca62bcf85d6d5fc90941337282787671 Mon Sep 17 00:00:00 2001
+From: Kemi Wang <kemi.wang@intel.com>
+Date: Tue, 24 Oct 2017 09:16:42 +0800
+Subject: buffer: Avoid setting buffer bits that are already set
+
+It's expensive to set buffer flags that are already set, because that
+causes a costly cache line transition.
+
+A common case is setting the "verified" flag during ext4 writes.
+This patch checks for the flag being set first.
+
+With the AIM7/creat-clo benchmark testing on a 48G ramdisk based-on ext4
+file system, we see 3.3%(15431->15936) improvement of aim7.jobs-per-min on
+a 2-sockets broadwell platform.
+
+What the benchmark does is: it forks 3000 processes, and each  process do
+the following:
+a) open a new file
+b) close the file
+c) delete the file
+until loop=100*1000 times.
+
+The original patch is contributed by Andi Kleen.
+
+Signed-off-by: Andi Kleen <ak@linux.intel.com>
+Tested-by: Kemi Wang <kemi.wang@intel.com>
+Signed-off-by: Kemi Wang <kemi.wang@intel.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/linux/buffer_head.h | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/buffer_head.h b/include/linux/buffer_head.h
+index 8b1bf8d..06797ef 100644
+--- a/include/linux/buffer_head.h
++++ b/include/linux/buffer_head.h
+@@ -81,11 +81,14 @@ struct buffer_head {
+ /*
+  * macro tricks to expand the set_buffer_foo(), clear_buffer_foo()
+  * and buffer_foo() functions.
++ * To avoid reset buffer flags that are already set, because that causes
++ * a costly cache line transition, check the flag first.
+  */
+ #define BUFFER_FNS(bit, name)						\
+ static __always_inline void set_buffer_##name(struct buffer_head *bh)	\
+ {									\
+-	set_bit(BH_##bit, &(bh)->b_state);				\
++	if (!test_bit(BH_##bit, &(bh)->b_state))			\
++		set_bit(BH_##bit, &(bh)->b_state);			\
+ }									\
+ static __always_inline void clear_buffer_##name(struct buffer_head *bh)	\
+ {									\
+-- 
+cgit v1.1
+
