@@ -1,0 +1,27 @@
+From bea99a500773fdfdb16b7dbfbaa00af7a6f0dc3b Mon Sep 17 00:00:00 2001
+From: Keith Busch <keith.busch@intel.com>
+Date: Thu, 1 Feb 2018 14:41:15 -0700
+Subject: blk-mq-sched: Enable merging discard bio into request
+
+Signed-off-by: Keith Busch <keith.busch@intel.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq-sched.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/block/blk-mq-sched.c b/block/blk-mq-sched.c
+index 55c0a74..25c14c5 100644
+--- a/block/blk-mq-sched.c
++++ b/block/blk-mq-sched.c
+@@ -259,6 +259,8 @@ bool blk_mq_sched_try_merge(struct request_queue *q, struct bio *bio,
+ 		if (!*merged_request)
+ 			elv_merged_request(q, rq, ELEVATOR_FRONT_MERGE);
+ 		return true;
++	case ELEVATOR_DISCARD_MERGE:
++		return bio_attempt_discard_merge(q, rq, bio);
+ 	default:
+ 		return false;
+ 	}
+-- 
+cgit v1.1
+
