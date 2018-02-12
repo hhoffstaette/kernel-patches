@@ -1,0 +1,361 @@
+From a57d3929b838204efd026e0f6d5eaed5bb65cce7 Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Fri, 19 Jan 2018 17:03:25 +0300
+Subject: [PATCH 18/23] net: aquantia: Introduce support for new firmware on
+ AQC cards
+
+This defines fw2x operations table and corresponding methods.
+Some of the functions are being shared with 1.x firmware
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/Makefile    |   1 +
+ drivers/net/ethernet/aquantia/atlantic/aq_hw.h     |   1 -
+ .../aquantia/atlantic/hw_atl/hw_atl_utils.c        |  12 +-
+ .../aquantia/atlantic/hw_atl/hw_atl_utils.h        |  63 ++++++-
+ .../aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c   | 184 +++++++++++++++++++++
+ 5 files changed, 257 insertions(+), 4 deletions(-)
+ create mode 100644 drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/Makefile b/drivers/net/ethernet/aquantia/atlantic/Makefile
+index e4ae696920ef..686f6d8c9e79 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/Makefile
++++ b/drivers/net/ethernet/aquantia/atlantic/Makefile
+@@ -39,4 +39,5 @@ atlantic-objs := aq_main.o \
+ 	hw_atl/hw_atl_a0.o \
+ 	hw_atl/hw_atl_b0.o \
+ 	hw_atl/hw_atl_utils.o \
++	hw_atl/hw_atl_utils_fw2x.o \
+ 	hw_atl/hw_atl_llh.o
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+index 33a7c14c3bc6..51b55694a1f6 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+@@ -42,7 +42,6 @@ struct aq_hw_caps_s {
+ 	u8 rx_rings;
+ 	bool flow_control;
+ 	bool is_64_dma;
+-	u32 fw_ver_expected;
+ };
+ 
+ struct aq_hw_link_status_s {
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+index 616475ea5b2f..56fb048c4ddc 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+@@ -32,6 +32,8 @@
+ #define HW_ATL_MPI_SPEED_SHIFT  16U
+ 
+ #define HW_ATL_FW_VER_1X 0x01050006U
++#define HW_ATL_FW_VER_2X 0x02000000U
++#define HW_ATL_FW_VER_3X 0x03000000U
+ 
+ static int hw_atl_utils_ver_match(u32 ver_expected, u32 ver_actual);
+ 
+@@ -46,6 +48,12 @@ int hw_atl_utils_initfw(struct aq_hw_s *self, const struct aq_fw_ops **fw_ops)
+ 
+ 	if (hw_atl_utils_ver_match(HW_ATL_FW_VER_1X, self->fw_ver_actual) == 0)
+ 		*fw_ops = &aq_fw_1x_ops;
++	else if (hw_atl_utils_ver_match(HW_ATL_FW_VER_2X,
++					self->fw_ver_actual) == 0)
++		*fw_ops = &aq_fw_2x_ops;
++	else if (hw_atl_utils_ver_match(HW_ATL_FW_VER_3X,
++					self->fw_ver_actual) == 0)
++		*fw_ops = &aq_fw_2x_ops;
+ 	else {
+ 		aq_pr_err("Bad FW version detected: %x\n",
+ 		       self->fw_ver_actual);
+@@ -56,8 +64,8 @@ int hw_atl_utils_initfw(struct aq_hw_s *self, const struct aq_fw_ops **fw_ops)
+ 	return err;
+ }
+ 
+-static int hw_atl_utils_fw_downld_dwords(struct aq_hw_s *self, u32 a,
+-					 u32 *p, u32 cnt)
++int hw_atl_utils_fw_downld_dwords(struct aq_hw_s *self, u32 a,
++				  u32 *p, u32 cnt)
+ {
+ 	int err = 0;
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h
+index d6d05e5eb939..2c690947910a 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h
+@@ -163,7 +163,7 @@ struct __packed hw_aq_atl_utils_mbox {
+ #define HAL_ATLANTIC_UTILS_CHIP_REVISION_B0  0x02000000U
+ 
+ #define IS_CHIP_FEATURE(_F_) (HAL_ATLANTIC_UTILS_CHIP_##_F_ & \
+-				self->chip_features)
++	self->chip_features)
+ 
+ enum hal_atl_utils_fw_state_e {
+ 	MPI_DEINIT = 0,
+@@ -180,6 +180,64 @@ enum hal_atl_utils_fw_state_e {
+ #define HAL_ATLANTIC_RATE_100M       BIT(5)
+ #define HAL_ATLANTIC_RATE_INVALID    BIT(6)
+ 
++enum hw_atl_fw2x_rate {
++	FW2X_RATE_100M    = 0x20,
++	FW2X_RATE_1G      = 0x100,
++	FW2X_RATE_2G5     = 0x200,
++	FW2X_RATE_5G      = 0x400,
++	FW2X_RATE_10G     = 0x800,
++};
++
++enum hw_atl_fw2x_caps_lo {
++	CAPS_LO_10BASET_HD = 0x00,
++	CAPS_LO_10BASET_FD,
++	CAPS_LO_100BASETX_HD,
++	CAPS_LO_100BASET4_HD,
++	CAPS_LO_100BASET2_HD,
++	CAPS_LO_100BASETX_FD,
++	CAPS_LO_100BASET2_FD,
++	CAPS_LO_1000BASET_HD,
++	CAPS_LO_1000BASET_FD,
++	CAPS_LO_2P5GBASET_FD,
++	CAPS_LO_5GBASET_FD,
++	CAPS_LO_10GBASET_FD,
++};
++
++enum hw_atl_fw2x_caps_hi {
++	CAPS_HI_RESERVED1 = 0x00,
++	CAPS_HI_10BASET_EEE,
++	CAPS_HI_RESERVED2,
++	CAPS_HI_PAUSE,
++	CAPS_HI_ASYMMETRIC_PAUSE,
++	CAPS_HI_100BASETX_EEE,
++	CAPS_HI_RESERVED3,
++	CAPS_HI_RESERVED4,
++	CAPS_HI_1000BASET_FD_EEE,
++	CAPS_HI_2P5GBASET_FD_EEE,
++	CAPS_HI_5GBASET_FD_EEE,
++	CAPS_HI_10GBASET_FD_EEE,
++	CAPS_HI_RESERVED5,
++	CAPS_HI_RESERVED6,
++	CAPS_HI_RESERVED7,
++	CAPS_HI_RESERVED8,
++	CAPS_HI_RESERVED9,
++	CAPS_HI_CABLE_DIAG,
++	CAPS_HI_TEMPERATURE,
++	CAPS_HI_DOWNSHIFT,
++	CAPS_HI_PTP_AVB_EN,
++	CAPS_HI_MEDIA_DETECT,
++	CAPS_HI_LINK_DROP,
++	CAPS_HI_SLEEP_PROXY,
++	CAPS_HI_WOL,
++	CAPS_HI_MAC_STOP,
++	CAPS_HI_EXT_LOOPBACK,
++	CAPS_HI_INT_LOOPBACK,
++	CAPS_HI_EFUSE_AGENT,
++	CAPS_HI_WOL_TIMER,
++	CAPS_HI_STATISTICS,
++	CAPS_HI_TRANSACTION_ID,
++};
++
+ struct aq_hw_s;
+ struct aq_fw_ops;
+ struct aq_hw_caps_s;
+@@ -222,7 +280,10 @@ int hw_atl_utils_get_fw_version(struct aq_hw_s *self, u32 *fw_version);
+ int hw_atl_utils_update_stats(struct aq_hw_s *self);
+ 
+ struct aq_stats_s *hw_atl_utils_get_hw_stats(struct aq_hw_s *self);
++int hw_atl_utils_fw_downld_dwords(struct aq_hw_s *self, u32 a,
++				  u32 *p, u32 cnt);
+ 
+ extern const struct aq_fw_ops aq_fw_1x_ops;
++extern const struct aq_fw_ops aq_fw_2x_ops;
+ 
+ #endif /* HW_ATL_UTILS_H */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c
+new file mode 100644
+index 000000000000..8cfce95c82fc
+--- /dev/null
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c
+@@ -0,0 +1,184 @@
++/*
++ * aQuantia Corporation Network Driver
++ * Copyright (C) 2014-2017 aQuantia Corporation. All rights reserved
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ */
++
++/* File hw_atl_utils_fw2x.c: Definition of firmware 2.x functions for
++ * Atlantic hardware abstraction layer.
++ */
++
++#include "../aq_hw.h"
++#include "../aq_hw_utils.h"
++#include "../aq_pci_func.h"
++#include "../aq_ring.h"
++#include "../aq_vec.h"
++#include "hw_atl_utils.h"
++#include "hw_atl_llh.h"
++
++#define HW_ATL_FW2X_MPI_EFUSE_ADDR	0x364
++#define HW_ATL_FW2X_MPI_MBOX_ADDR	0x360
++
++#define HW_ATL_FW2X_MPI_CONTROL_ADDR	0x368
++#define HW_ATL_FW2X_MPI_CONTROL2_ADDR	0x36C
++
++#define HW_ATL_FW2X_MPI_STATE_ADDR	0x370
++#define HW_ATL_FW2X_MPI_STATE2_ADDR	0x374
++
++static int aq_fw2x_init(struct aq_hw_s *self)
++{
++	int err = 0;
++
++	/* check 10 times by 1ms */
++	AQ_HW_WAIT_FOR(0U != (self->mbox_addr =
++			aq_hw_read_reg(self, HW_ATL_FW2X_MPI_MBOX_ADDR)),
++		       1000U, 10U);
++	return err;
++}
++
++static enum hw_atl_fw2x_rate link_speed_mask_2fw2x_ratemask(u32 speed)
++{
++	enum hw_atl_fw2x_rate rate = 0;
++
++	if (speed & AQ_NIC_RATE_10G)
++		rate |= FW2X_RATE_10G;
++
++	if (speed & AQ_NIC_RATE_5G)
++		rate |= FW2X_RATE_5G;
++
++	if (speed & AQ_NIC_RATE_5GSR)
++		rate |= FW2X_RATE_5G;
++
++	if (speed & AQ_NIC_RATE_2GS)
++		rate |= FW2X_RATE_2G5;
++
++	if (speed & AQ_NIC_RATE_1G)
++		rate |= FW2X_RATE_1G;
++
++	if (speed & AQ_NIC_RATE_100M)
++		rate |= FW2X_RATE_100M;
++
++	return rate;
++}
++
++static int aq_fw2x_set_link_speed(struct aq_hw_s *self, u32 speed)
++{
++	u32 val = link_speed_mask_2fw2x_ratemask(speed);
++
++	aq_hw_write_reg(self, HW_ATL_FW2X_MPI_CONTROL_ADDR, val);
++
++	return 0;
++}
++
++static int aq_fw2x_set_state(struct aq_hw_s *self,
++			     enum hal_atl_utils_fw_state_e state)
++{
++	/* No explicit state in 2x fw */
++	return 0;
++}
++
++static int aq_fw2x_update_link_status(struct aq_hw_s *self)
++{
++	u32 mpi_state = aq_hw_read_reg(self, HW_ATL_FW2X_MPI_STATE_ADDR);
++	u32 speed = mpi_state & (FW2X_RATE_100M | FW2X_RATE_1G |
++				FW2X_RATE_2G5 | FW2X_RATE_5G | FW2X_RATE_10G);
++	struct aq_hw_link_status_s *link_status = &self->aq_link_status;
++
++	if (speed) {
++		if (speed & FW2X_RATE_10G)
++			link_status->mbps = 10000;
++		else if (speed & FW2X_RATE_5G)
++			link_status->mbps = 5000;
++		else if (speed & FW2X_RATE_2G5)
++			link_status->mbps = 2500;
++		else if (speed & FW2X_RATE_1G)
++			link_status->mbps = 1000;
++		else if (speed & FW2X_RATE_100M)
++			link_status->mbps = 100;
++		else
++			link_status->mbps = 10000;
++	} else {
++		link_status->mbps = 0;
++	}
++
++	return 0;
++}
++
++int aq_fw2x_get_mac_permanent(struct aq_hw_s *self, u8 *mac)
++{
++	int err = 0;
++	u32 h = 0U;
++	u32 l = 0U;
++	u32 mac_addr[2] = { 0 };
++	u32 efuse_addr = aq_hw_read_reg(self, HW_ATL_FW2X_MPI_EFUSE_ADDR);
++
++	if (efuse_addr != 0) {
++		err = hw_atl_utils_fw_downld_dwords(self,
++						    efuse_addr + (40U * 4U),
++						    mac_addr,
++						    ARRAY_SIZE(mac_addr));
++		if (err)
++			return err;
++		mac_addr[0] = __swab32(mac_addr[0]);
++		mac_addr[1] = __swab32(mac_addr[1]);
++	}
++
++	ether_addr_copy(mac, (u8 *)mac_addr);
++
++	if ((mac[0] & 0x01U) || ((mac[0] | mac[1] | mac[2]) == 0x00U)) {
++		unsigned int rnd = 0;
++
++		get_random_bytes(&rnd, sizeof(unsigned int));
++
++		l = 0xE3000000U
++			| (0xFFFFU & rnd)
++			| (0x00 << 16);
++		h = 0x8001300EU;
++
++		mac[5] = (u8)(0xFFU & l);
++		l >>= 8;
++		mac[4] = (u8)(0xFFU & l);
++		l >>= 8;
++		mac[3] = (u8)(0xFFU & l);
++		l >>= 8;
++		mac[2] = (u8)(0xFFU & l);
++		mac[1] = (u8)(0xFFU & h);
++		h >>= 8;
++		mac[0] = (u8)(0xFFU & h);
++	}
++	return err;
++}
++
++static int aq_fw2x_update_stats(struct aq_hw_s *self)
++{
++	int err = 0;
++	u32 mpi_opts = aq_hw_read_reg(self, HW_ATL_FW2X_MPI_CONTROL2_ADDR);
++	u32 orig_stats_val = mpi_opts & BIT(CAPS_HI_STATISTICS);
++
++	/* Toggle statistics bit for FW to update */
++	mpi_opts = mpi_opts ^ BIT(CAPS_HI_STATISTICS);
++	aq_hw_write_reg(self, HW_ATL_FW2X_MPI_CONTROL2_ADDR, mpi_opts);
++
++	/* Wait FW to report back */
++	AQ_HW_WAIT_FOR(orig_stats_val !=
++		       (aq_hw_read_reg(self, HW_ATL_FW2X_MPI_STATE2_ADDR) &
++				       BIT(CAPS_HI_STATISTICS)),
++		       1U, 10000U);
++	if (err)
++		return err;
++
++	return hw_atl_utils_update_stats(self);
++}
++
++const struct aq_fw_ops aq_fw_2x_ops = {
++	.init = aq_fw2x_init,
++	.reset = NULL,
++	.get_mac_permanent = aq_fw2x_get_mac_permanent,
++	.set_link_speed = aq_fw2x_set_link_speed,
++	.set_state = aq_fw2x_set_state,
++	.update_link_status = aq_fw2x_update_link_status,
++	.update_stats = aq_fw2x_update_stats,
++};
+-- 
+2.16.1
+

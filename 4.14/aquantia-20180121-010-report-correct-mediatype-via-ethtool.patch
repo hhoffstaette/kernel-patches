@@ -1,0 +1,58 @@
+From 854ab38c15061b2353f8cc04e2bb93d0980e9789 Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Fri, 19 Jan 2018 17:03:27 +0300
+Subject: [PATCH 20/23] net: aquantia: Report correct mediatype via ethtool
+
+For devices with known capabilities of Fibre media type we now report that
+to ethtool.
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+index 3087a3044bb3..ebbaf63eaf47 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+@@ -690,7 +690,10 @@ static void aq_nic_update_ndev_stats(struct aq_nic_s *self)
+ void aq_nic_get_link_ksettings(struct aq_nic_s *self,
+ 			       struct ethtool_link_ksettings *cmd)
+ {
+-	cmd->base.port = PORT_TP;
++	if (self->aq_nic_cfg.aq_hw_caps->media_type == AQ_HW_MEDIA_TYPE_FIBRE)
++		cmd->base.port = PORT_FIBRE;
++	else
++		cmd->base.port = PORT_TP;
+ 	/* This driver supports only 10G capable adapters, so DUPLEX_FULL */
+ 	cmd->base.duplex = DUPLEX_FULL;
+ 	cmd->base.autoneg = self->aq_nic_cfg.is_autoneg;
+@@ -722,7 +725,11 @@ void aq_nic_get_link_ksettings(struct aq_nic_s *self,
+ 						     Pause);
+ 
+ 	ethtool_link_ksettings_add_link_mode(cmd, supported, Autoneg);
+-	ethtool_link_ksettings_add_link_mode(cmd, supported, TP);
++
++	if (self->aq_nic_cfg.aq_hw_caps->media_type == AQ_HW_MEDIA_TYPE_FIBRE)
++		ethtool_link_ksettings_add_link_mode(cmd, supported, FIBRE);
++	else
++		ethtool_link_ksettings_add_link_mode(cmd, supported, TP);
+ 
+ 	ethtool_link_ksettings_zero_link_mode(cmd, advertising);
+ 
+@@ -753,7 +760,10 @@ void aq_nic_get_link_ksettings(struct aq_nic_s *self,
+ 		ethtool_link_ksettings_add_link_mode(cmd, advertising,
+ 						     Pause);
+ 
+-	ethtool_link_ksettings_add_link_mode(cmd, advertising, TP);
++	if (self->aq_nic_cfg.aq_hw_caps->media_type == AQ_HW_MEDIA_TYPE_FIBRE)
++		ethtool_link_ksettings_add_link_mode(cmd, advertising, FIBRE);
++	else
++		ethtool_link_ksettings_add_link_mode(cmd, advertising, TP);
+ }
+ 
+ int aq_nic_set_link_ksettings(struct aq_nic_s *self,
+-- 
+2.16.1
+

@@ -1,0 +1,127 @@
+From ef24175d9fd2457e20c4122a1904a4b1ccfb661a Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Fri, 19 Jan 2018 17:03:22 +0300
+Subject: [PATCH 15/23] net: aquantia: Remove create/destroy from hw ops
+
+These ops are not related to HW and are now implemented in pci module.
+Thus, remove these ops pointers and implementation.
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_hw.h     |  5 -----
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c  | 25 ----------------------
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c  | 24 ---------------------
+ 3 files changed, 54 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+index 8219157e2d7c..5566486358cc 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+@@ -101,7 +101,6 @@ struct aq_stats_s {
+ struct aq_hw_s {
+ 	atomic_t flags;
+ 	struct aq_nic_cfg_s *aq_nic_cfg;
+-	struct aq_pci_func_s *aq_pci_func;
+ 	void __iomem *mmio;
+ 	unsigned int not_ff_addr;
+ 	struct aq_hw_link_status_s aq_link_status;
+@@ -126,10 +125,6 @@ struct aq_nic_cfg_s;
+ struct sk_buff;
+ 
+ struct aq_hw_ops {
+-	struct aq_hw_s *(*create)(struct aq_pci_func_s *aq_pci_func,
+-				  unsigned int port);
+-
+-	void (*destroy)(struct aq_hw_s *self);
+ 
+ 	int (*hw_ring_tx_xmit)(struct aq_hw_s *self, struct aq_ring_s *aq_ring,
+ 			       unsigned int frags);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+index 491a901b6d22..9c9fb1e8b453 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+@@ -79,29 +79,6 @@ const struct aq_hw_caps_s hw_atl_a0_caps_aqc109 = {
+ 			  HW_ATL_A0_RATE_100M,
+ };
+ 
+-
+-static struct aq_hw_s *hw_atl_a0_create(struct aq_pci_func_s *aq_pci_func,
+-					unsigned int port)
+-{
+-	struct aq_hw_s *self = NULL;
+-
+-	self = kzalloc(sizeof(*self), GFP_KERNEL);
+-	if (!self)
+-		goto err_exit;
+-
+-	self->aq_pci_func = aq_pci_func;
+-
+-	self->not_ff_addr = 0x10U;
+-
+-err_exit:
+-	return self;
+-}
+-
+-static void hw_atl_a0_destroy(struct aq_hw_s *self)
+-{
+-	kfree(self);
+-}
+-
+ static int hw_atl_a0_hw_reset(struct aq_hw_s *self)
+ {
+ 	int err = 0;
+@@ -906,8 +883,6 @@ static int hw_atl_a0_hw_set_speed(struct aq_hw_s *self, u32 speed)
+ }
+ 
+ const struct aq_hw_ops hw_atl_ops_a0 = {
+-	.create               = hw_atl_a0_create,
+-	.destroy              = hw_atl_a0_destroy,
+ 	.hw_get_mac_permanent = hw_atl_utils_get_mac_permanent,
+ 	.hw_set_mac_address   = hw_atl_a0_hw_mac_addr_set,
+ 	.hw_get_link_status   = hw_atl_utils_mpi_get_link_status,
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index 87e7d0f04ee8..00edad1085f8 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -82,28 +82,6 @@ const struct aq_hw_caps_s hw_atl_b0_caps_aqc109 = {
+ 			  HW_ATL_B0_RATE_100M,
+ };
+ 
+-static struct aq_hw_s *hw_atl_b0_create(struct aq_pci_func_s *aq_pci_func,
+-					unsigned int port)
+-{
+-	struct aq_hw_s *self = NULL;
+-
+-	self = kzalloc(sizeof(*self), GFP_KERNEL);
+-	if (!self)
+-		goto err_exit;
+-
+-	self->aq_pci_func = aq_pci_func;
+-
+-	self->not_ff_addr = 0x10U;
+-
+-err_exit:
+-	return self;
+-}
+-
+-static void hw_atl_b0_destroy(struct aq_hw_s *self)
+-{
+-	kfree(self);
+-}
+-
+ static int hw_atl_b0_hw_reset(struct aq_hw_s *self)
+ {
+ 	int err = 0;
+@@ -981,8 +959,6 @@ static int hw_atl_b0_hw_set_speed(struct aq_hw_s *self, u32 speed)
+ }
+ 
+ const struct aq_hw_ops hw_atl_ops_b0 = {
+-	.create               = hw_atl_b0_create,
+-	.destroy              = hw_atl_b0_destroy,
+ 	.hw_get_mac_permanent = hw_atl_utils_get_mac_permanent,
+ 	.hw_set_mac_address   = hw_atl_b0_hw_mac_addr_set,
+ 	.hw_get_link_status   = hw_atl_utils_mpi_get_link_status,
+-- 
+2.16.1
+

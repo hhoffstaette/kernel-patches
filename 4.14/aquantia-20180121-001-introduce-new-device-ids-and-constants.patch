@@ -1,0 +1,349 @@
+From efe779b749cc9da0f36a01fba38c98864e6b8748 Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Fri, 19 Jan 2018 17:03:18 +0300
+Subject: [PATCH 11/23] net: aquantia: Introduce new device ids and constants
+
+New set of aquantia devices has an upgraded hardware (B1).
+The hardware interface is identical to B0. The difference will
+be in firmware which is incompatible with old one.
+
+Reorganized and removed duplicate speed and devid definitions
+Introduced explicit flow control configuration defines
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_cfg.h    |  8 ++++-
+ drivers/net/ethernet/aquantia/atlantic/aq_common.h | 34 ++++++++++++++++++++++
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.h    | 13 ---------
+ .../net/ethernet/aquantia/atlantic/aq_pci_func.c   | 28 ++++++++++++++----
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c  | 20 ++++++-------
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h  | 13 ---------
+ .../aquantia/atlantic/hw_atl/hw_atl_a0_internal.h  | 16 ++++------
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c  | 20 ++++++-------
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h  | 13 ---------
+ .../aquantia/atlantic/hw_atl/hw_atl_b0_internal.h  | 16 ++++------
+ 10 files changed, 94 insertions(+), 87 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h b/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h
+index 105fdb958cef..0b49f1aeebd3 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h
+@@ -65,7 +65,13 @@
+ 
+ /*#define AQ_CFG_MAC_ADDR_PERMANENT {0x30, 0x0E, 0xE3, 0x12, 0x34, 0x56}*/
+ 
+-#define AQ_CFG_FC_MODE 3U
++#define AQ_NIC_FC_OFF    0U
++#define AQ_NIC_FC_TX     1U
++#define AQ_NIC_FC_RX     2U
++#define AQ_NIC_FC_FULL   3U
++#define AQ_NIC_FC_AUTO   4U
++
++#define AQ_CFG_FC_MODE AQ_NIC_FC_FULL
+ 
+ #define AQ_CFG_SPEED_MSK  0xFFFFU	/* 0xFFFFU==auto_neg */
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_common.h b/drivers/net/ethernet/aquantia/atlantic/aq_common.h
+index f79da4b5900b..35054c3a3ada 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_common.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_common.h
+@@ -19,4 +19,38 @@
+ #include "aq_cfg.h"
+ #include "aq_utils.h"
+ 
++#define PCI_VENDOR_ID_AQUANTIA  0x1D6A
++
++#define AQ_DEVICE_ID_0001	0x0001
++#define AQ_DEVICE_ID_D100	0xD100
++#define AQ_DEVICE_ID_D107	0xD107
++#define AQ_DEVICE_ID_D108	0xD108
++#define AQ_DEVICE_ID_D109	0xD109
++
++#define AQ_DEVICE_ID_AQC100	0x00B1
++#define AQ_DEVICE_ID_AQC107	0x07B1
++#define AQ_DEVICE_ID_AQC108	0x08B1
++#define AQ_DEVICE_ID_AQC109	0x09B1
++#define AQ_DEVICE_ID_AQC111	0x11B1
++#define AQ_DEVICE_ID_AQC112	0x12B1
++
++#define AQ_DEVICE_ID_AQC100S	0x80B1
++#define AQ_DEVICE_ID_AQC107S	0x87B1
++#define AQ_DEVICE_ID_AQC108S	0x88B1
++#define AQ_DEVICE_ID_AQC109S	0x89B1
++#define AQ_DEVICE_ID_AQC111S	0x91B1
++#define AQ_DEVICE_ID_AQC112S	0x92B1
++
++#define AQ_DEVICE_ID_AQC111E	0x51B1
++#define AQ_DEVICE_ID_AQC112E	0x52B1
++
++#define HW_ATL_NIC_NAME "aQuantia AQtion 10Gbit Network Adapter"
++
++#define AQ_NIC_RATE_10G        BIT(0)
++#define AQ_NIC_RATE_5G         BIT(1)
++#define AQ_NIC_RATE_5GSR       BIT(2)
++#define AQ_NIC_RATE_2GS        BIT(3)
++#define AQ_NIC_RATE_1G         BIT(4)
++#define AQ_NIC_RATE_100M       BIT(5)
++
+ #endif /* AQ_COMMON_H */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
+index 1cd7d728e91b..17a228f6f26b 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
+@@ -22,19 +22,6 @@ struct aq_hw_ops;
+ struct aq_fw_s;
+ struct aq_vec_s;
+ 
+-#define AQ_NIC_FC_OFF    0U
+-#define AQ_NIC_FC_TX     1U
+-#define AQ_NIC_FC_RX     2U
+-#define AQ_NIC_FC_FULL   3U
+-#define AQ_NIC_FC_AUTO   4U
+-
+-#define AQ_NIC_RATE_10G        BIT(0)
+-#define AQ_NIC_RATE_5G         BIT(1)
+-#define AQ_NIC_RATE_5GSR       BIT(2)
+-#define AQ_NIC_RATE_2GS        BIT(3)
+-#define AQ_NIC_RATE_1G         BIT(4)
+-#define AQ_NIC_RATE_100M       BIT(5)
+-
+ struct aq_nic_cfg_s {
+ 	const struct aq_hw_caps_s *aq_hw_caps;
+ 	u64 hw_features;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
+index 78ef7d2deffe..95a6ae416b18 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
+@@ -34,11 +34,29 @@ struct aq_pci_func_s {
+ };
+ 
+ static const struct pci_device_id aq_pci_tbl[] = {
+-	{ PCI_VDEVICE(AQUANTIA, HW_ATL_DEVICE_ID_0001), },
+-	{ PCI_VDEVICE(AQUANTIA, HW_ATL_DEVICE_ID_D100), },
+-	{ PCI_VDEVICE(AQUANTIA, HW_ATL_DEVICE_ID_D107), },
+-	{ PCI_VDEVICE(AQUANTIA, HW_ATL_DEVICE_ID_D108), },
+-	{ PCI_VDEVICE(AQUANTIA, HW_ATL_DEVICE_ID_D109), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_0001), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_D100), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_D107), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_D108), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_D109), },
++
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC100), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC107), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC108), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC109), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC111), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC112), },
++
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC100S), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC107S), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC108S), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC109S), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC111S), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC112S), },
++
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC111E), },
++	{ PCI_VDEVICE(AQUANTIA, AQ_DEVICE_ID_AQC112E), },
++
+ 	{}
+ };
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+index 4a1c1b96b8b6..4a4779619012 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+@@ -25,12 +25,12 @@ static int hw_atl_a0_get_hw_caps(struct aq_hw_s *self,
+ {
+ 	memcpy(aq_hw_caps, &hw_atl_a0_hw_caps_, sizeof(*aq_hw_caps));
+ 
+-	if (device == HW_ATL_DEVICE_ID_D108 && subsystem_device == 0x0001)
+-		aq_hw_caps->link_speed_msk &= ~HW_ATL_A0_RATE_10G;
++	if (device == AQ_DEVICE_ID_D108 && subsystem_device == 0x0001)
++		aq_hw_caps->link_speed_msk &= ~AQ_NIC_RATE_10G;
+ 
+-	if (device == HW_ATL_DEVICE_ID_D109 && subsystem_device == 0x0001) {
+-		aq_hw_caps->link_speed_msk &= ~HW_ATL_A0_RATE_10G;
+-		aq_hw_caps->link_speed_msk &= ~HW_ATL_A0_RATE_5G;
++	if (device == AQ_DEVICE_ID_D109 && subsystem_device == 0x0001) {
++		aq_hw_caps->link_speed_msk &= ~AQ_NIC_RATE_10G;
++		aq_hw_caps->link_speed_msk &= ~AQ_NIC_RATE_5G;
+ 	}
+ 
+ 	return 0;
+@@ -907,11 +907,11 @@ static const struct aq_hw_ops hw_atl_ops_ = {
+ const struct aq_hw_ops *hw_atl_a0_get_ops_by_id(struct pci_dev *pdev)
+ {
+ 	bool is_vid_ok = (pdev->vendor == PCI_VENDOR_ID_AQUANTIA);
+-	bool is_did_ok = ((pdev->device == HW_ATL_DEVICE_ID_0001) ||
+-			(pdev->device == HW_ATL_DEVICE_ID_D100) ||
+-			(pdev->device == HW_ATL_DEVICE_ID_D107) ||
+-			(pdev->device == HW_ATL_DEVICE_ID_D108) ||
+-			(pdev->device == HW_ATL_DEVICE_ID_D109));
++	bool is_did_ok = ((pdev->device == AQ_DEVICE_ID_0001) ||
++			(pdev->device == AQ_DEVICE_ID_D100) ||
++			(pdev->device == AQ_DEVICE_ID_D107) ||
++			(pdev->device == AQ_DEVICE_ID_D108) ||
++			(pdev->device == AQ_DEVICE_ID_D109));
+ 
+ 	bool is_rev_ok = (pdev->revision == 1U);
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h
+index 4fdd51b67097..a4da1065fb5b 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h
+@@ -16,19 +16,6 @@
+ 
+ #include "../aq_common.h"
+ 
+-#ifndef PCI_VENDOR_ID_AQUANTIA
+-
+-#define PCI_VENDOR_ID_AQUANTIA  0x1D6A
+-#define HW_ATL_DEVICE_ID_0001   0x0001
+-#define HW_ATL_DEVICE_ID_D100   0xD100
+-#define HW_ATL_DEVICE_ID_D107   0xD107
+-#define HW_ATL_DEVICE_ID_D108   0xD108
+-#define HW_ATL_DEVICE_ID_D109   0xD109
+-
+-#define HW_ATL_NIC_NAME "aQuantia AQtion 5Gbit Network Adapter"
+-
+-#endif
+-
+ const struct aq_hw_ops *hw_atl_a0_get_ops_by_id(struct pci_dev *pdev);
+ 
+ #endif /* HW_ATL_A0_H */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0_internal.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0_internal.h
+index 7a71330252bd..cc1d237377a6 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0_internal.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0_internal.h
+@@ -62,12 +62,6 @@
+ #define HW_ATL_A0_MPI_SPEED_MSK       0xFFFFU
+ #define HW_ATL_A0_MPI_SPEED_SHIFT     16U
+ 
+-#define HW_ATL_A0_RATE_10G            BIT(0)
+-#define HW_ATL_A0_RATE_5G             BIT(1)
+-#define HW_ATL_A0_RATE_2G5            BIT(3)
+-#define HW_ATL_A0_RATE_1G             BIT(4)
+-#define HW_ATL_A0_RATE_100M           BIT(5)
+-
+ #define HW_ATL_A0_TXBUF_MAX 160U
+ #define HW_ATL_A0_RXBUF_MAX 320U
+ 
+@@ -111,11 +105,11 @@ static struct aq_hw_caps_s hw_atl_a0_hw_caps_ = {
+ 			NETIF_F_SG |
+ 			NETIF_F_TSO,
+ 	.hw_priv_flags = IFF_UNICAST_FLT,
+-	.link_speed_msk = (HW_ATL_A0_RATE_10G |
+-			HW_ATL_A0_RATE_5G |
+-			HW_ATL_A0_RATE_2G5 |
+-			HW_ATL_A0_RATE_1G |
+-			HW_ATL_A0_RATE_100M),
++	.link_speed_msk = (AQ_NIC_RATE_10G |
++			AQ_NIC_RATE_5G |
++			AQ_NIC_RATE_2GS |
++			AQ_NIC_RATE_1G |
++			AQ_NIC_RATE_100M),
+ 	.flow_control = true,
+ 	.mtu = HW_ATL_A0_MTU_JUMBO,
+ 	.mac_regs_count = 88,
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index 0b090161ed79..edb9823e36e5 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -26,12 +26,12 @@ static int hw_atl_b0_get_hw_caps(struct aq_hw_s *self,
+ {
+ 	memcpy(aq_hw_caps, &hw_atl_b0_hw_caps_, sizeof(*aq_hw_caps));
+ 
+-	if (device == HW_ATL_DEVICE_ID_D108 && subsystem_device == 0x0001)
+-		aq_hw_caps->link_speed_msk &= ~HW_ATL_B0_RATE_10G;
++	if (device == AQ_DEVICE_ID_D108 && subsystem_device == 0x0001)
++		aq_hw_caps->link_speed_msk &= ~AQ_NIC_RATE_10G;
+ 
+-	if (device == HW_ATL_DEVICE_ID_D109 && subsystem_device == 0x0001) {
+-		aq_hw_caps->link_speed_msk &= ~HW_ATL_B0_RATE_10G;
+-		aq_hw_caps->link_speed_msk &= ~HW_ATL_B0_RATE_5G;
++	if (device == AQ_DEVICE_ID_D109 && subsystem_device == 0x0001) {
++		aq_hw_caps->link_speed_msk &= ~AQ_NIC_RATE_10G;
++		aq_hw_caps->link_speed_msk &= ~AQ_NIC_RATE_5G;
+ 	}
+ 
+ 	return 0;
+@@ -981,11 +981,11 @@ static const struct aq_hw_ops hw_atl_ops_ = {
+ const struct aq_hw_ops *hw_atl_b0_get_ops_by_id(struct pci_dev *pdev)
+ {
+ 	bool is_vid_ok = (pdev->vendor == PCI_VENDOR_ID_AQUANTIA);
+-	bool is_did_ok = ((pdev->device == HW_ATL_DEVICE_ID_0001) ||
+-			(pdev->device == HW_ATL_DEVICE_ID_D100) ||
+-			(pdev->device == HW_ATL_DEVICE_ID_D107) ||
+-			(pdev->device == HW_ATL_DEVICE_ID_D108) ||
+-			(pdev->device == HW_ATL_DEVICE_ID_D109));
++	bool is_did_ok = ((pdev->device == AQ_DEVICE_ID_0001) ||
++			(pdev->device == AQ_DEVICE_ID_D100) ||
++			(pdev->device == AQ_DEVICE_ID_D107) ||
++			(pdev->device == AQ_DEVICE_ID_D108) ||
++			(pdev->device == AQ_DEVICE_ID_D109));
+ 
+ 	bool is_rev_ok = (pdev->revision == 2U);
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h
+index 3e10969c1df5..099799333eaa 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h
+@@ -16,19 +16,6 @@
+ 
+ #include "../aq_common.h"
+ 
+-#ifndef PCI_VENDOR_ID_AQUANTIA
+-
+-#define PCI_VENDOR_ID_AQUANTIA  0x1D6A
+-#define HW_ATL_DEVICE_ID_0001   0x0001
+-#define HW_ATL_DEVICE_ID_D100   0xD100
+-#define HW_ATL_DEVICE_ID_D107   0xD107
+-#define HW_ATL_DEVICE_ID_D108   0xD108
+-#define HW_ATL_DEVICE_ID_D109   0xD109
+-
+-#define HW_ATL_NIC_NAME "aQuantia AQtion 5Gbit Network Adapter"
+-
+-#endif
+-
+ const struct aq_hw_ops *hw_atl_b0_get_ops_by_id(struct pci_dev *pdev);
+ 
+ #endif /* HW_ATL_B0_H */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0_internal.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0_internal.h
+index 740ff73c6d67..dcba2167a237 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0_internal.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0_internal.h
+@@ -67,12 +67,6 @@
+ #define HW_ATL_B0_MPI_SPEED_MSK         0xFFFFU
+ #define HW_ATL_B0_MPI_SPEED_SHIFT       16U
+ 
+-#define HW_ATL_B0_RATE_10G              BIT(0)
+-#define HW_ATL_B0_RATE_5G               BIT(1)
+-#define HW_ATL_B0_RATE_2G5              BIT(3)
+-#define HW_ATL_B0_RATE_1G               BIT(4)
+-#define HW_ATL_B0_RATE_100M             BIT(5)
+-
+ #define HW_ATL_B0_TXBUF_MAX  160U
+ #define HW_ATL_B0_RXBUF_MAX  320U
+ 
+@@ -166,11 +160,11 @@ static struct aq_hw_caps_s hw_atl_b0_hw_caps_ = {
+ 			NETIF_F_TSO |
+ 			NETIF_F_LRO,
+ 	.hw_priv_flags = IFF_UNICAST_FLT,
+-	.link_speed_msk = (HW_ATL_B0_RATE_10G |
+-			HW_ATL_B0_RATE_5G |
+-			HW_ATL_B0_RATE_2G5 |
+-			HW_ATL_B0_RATE_1G |
+-			HW_ATL_B0_RATE_100M),
++	.link_speed_msk = (AQ_NIC_RATE_10G |
++			AQ_NIC_RATE_5G |
++			AQ_NIC_RATE_2GS |
++			AQ_NIC_RATE_1G |
++			AQ_NIC_RATE_100M),
+ 	.flow_control = true,
+ 	.mtu = HW_ATL_B0_MTU_JUMBO,
+ 	.mac_regs_count = 88,
+-- 
+2.16.1
+

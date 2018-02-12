@@ -1,0 +1,35 @@
+From f03e4f8aadc84deb8f3dddcbf0032bac75051e7a Mon Sep 17 00:00:00 2001
+From: Wei Yongjun <weiyongjun1@huawei.com>
+Date: Tue, 23 Jan 2018 02:10:46 +0000
+Subject: [PATCH 22/23] net: aquantia: Fix error return code in aq_pci_probe()
+
+Fix to return error code -ENOMEM from the aq_ndev_alloc() error
+handling case instead of 0, as done elsewhere in this function.
+
+Fixes: 23ee07ad3c2f ("net: aquantia: Cleanup pci functions module")
+Signed-off-by: Wei Yongjun <weiyongjun1@huawei.com>
+Acked-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
+index f5dd5f75a40f..5cf3542a7e86 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
+@@ -210,8 +210,10 @@ static int aq_pci_probe(struct pci_dev *pdev,
+ 		goto err_pci_func;
+ 
+ 	ndev = aq_ndev_alloc();
+-	if (!ndev)
++	if (!ndev) {
++		err = -ENOMEM;
+ 		goto err_ndev;
++	}
+ 
+ 	self = netdev_priv(ndev);
+ 	self->pdev = pdev;
+-- 
+2.16.1
+
