@@ -1,0 +1,260 @@
+From 4cbc9f92f9a134fb4c8ab190a1ed5f9014bb99a5 Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Mon, 15 Jan 2018 16:41:17 +0300
+Subject: [PATCH 05/23] net: aquantia: Add const qualifiers for hardware ops
+ tables
+
+Hardware operations and capabilities tables are constants and
+never changed. Declare these as constants.
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_hw.h               | 3 ++-
+ drivers/net/ethernet/aquantia/atlantic/aq_main.c             | 6 +++---
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.c              | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.h              | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c         | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/aq_pci_func.h         | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/aq_vec.c              | 4 ++--
+ drivers/net/ethernet/aquantia/atlantic/aq_vec.h              | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c    | 4 ++--
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h    | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c    | 4 ++--
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h    | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c | 4 ++--
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h | 2 +-
+ 14 files changed, 21 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+index 2f7ecd6607de..cdd1acd417c2 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+@@ -196,7 +196,8 @@ struct aq_hw_ops {
+ 			       struct aq_rss_parameters *rss_params);
+ 
+ 	int (*hw_get_regs)(struct aq_hw_s *self,
+-			   struct aq_hw_caps_s *aq_hw_caps, u32 *regs_buff);
++			   const struct aq_hw_caps_s *aq_hw_caps,
++			   u32 *regs_buff);
+ 
+ 	int (*hw_update_stats)(struct aq_hw_s *self);
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_main.c b/drivers/net/ethernet/aquantia/atlantic/aq_main.c
+index 5d6c40d86775..1b0399c37584 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_main.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_main.c
+@@ -35,9 +35,9 @@ MODULE_VERSION(AQ_CFG_DRV_VERSION);
+ MODULE_AUTHOR(AQ_CFG_DRV_AUTHOR);
+ MODULE_DESCRIPTION(AQ_CFG_DRV_DESC);
+ 
+-static struct aq_hw_ops *aq_pci_probe_get_hw_ops_by_id(struct pci_dev *pdev)
++static const struct aq_hw_ops *aq_pci_probe_get_hw_ops_by_id(struct pci_dev *pdev)
+ {
+-	struct aq_hw_ops *ops = NULL;
++	const struct aq_hw_ops *ops = NULL;
+ 
+ 	ops = hw_atl_a0_get_ops_by_id(pdev);
+ 	if (!ops)
+@@ -174,7 +174,7 @@ static const struct net_device_ops aq_ndev_ops = {
+ static int aq_pci_probe(struct pci_dev *pdev,
+ 			const struct pci_device_id *pci_id)
+ {
+-	struct aq_hw_ops *aq_hw_ops = NULL;
++	const struct aq_hw_ops *aq_hw_ops = NULL;
+ 	struct aq_pci_func_s *aq_pci_func = NULL;
+ 	int err = 0;
+ 
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+index f934b095bb19..f210e6237679 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+@@ -295,7 +295,7 @@ int aq_nic_ndev_register(struct aq_nic_s *self)
+ 
+ int aq_nic_ndev_init(struct aq_nic_s *self)
+ {
+-	struct aq_hw_caps_s *aq_hw_caps = self->aq_nic_cfg.aq_hw_caps;
++	const struct aq_hw_caps_s *aq_hw_caps = self->aq_nic_cfg.aq_hw_caps;
+ 	struct aq_nic_cfg_s *aq_nic_cfg = &self->aq_nic_cfg;
+ 
+ 	self->ndev->hw_features |= aq_hw_caps->hw_features;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
+index be3b4ce49749..715b53c689ef 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
+@@ -34,7 +34,7 @@ struct aq_hw_ops;
+ #define AQ_NIC_RATE_100M       BIT(5)
+ 
+ struct aq_nic_cfg_s {
+-	struct aq_hw_caps_s *aq_hw_caps;
++	const struct aq_hw_caps_s *aq_hw_caps;
+ 	u64 hw_features;
+ 	u32 rxds;		/* rx ring size, descriptors # */
+ 	u32 txds;		/* tx ring size, descriptors # */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
+index 58c29d04b186..bc85809288ee 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.c
+@@ -29,7 +29,7 @@ struct aq_pci_func_s {
+ 	struct aq_hw_caps_s aq_hw_caps;
+ };
+ 
+-struct aq_pci_func_s *aq_pci_func_alloc(struct aq_hw_ops *aq_hw_ops,
++struct aq_pci_func_s *aq_pci_func_alloc(const struct aq_hw_ops *aq_hw_ops,
+ 					struct pci_dev *pdev,
+ 					const struct net_device_ops *ndev_ops,
+ 					const struct ethtool_ops *eth_ops)
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.h b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.h
+index a174d900dd04..84465220b36b 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_pci_func.h
+@@ -15,7 +15,7 @@
+ #include "aq_common.h"
+ #include "aq_nic.h"
+ 
+-struct aq_pci_func_s *aq_pci_func_alloc(struct aq_hw_ops *hw_ops,
++struct aq_pci_func_s *aq_pci_func_alloc(const struct aq_hw_ops *hw_ops,
+ 					struct pci_dev *pdev,
+ 					const struct net_device_ops *ndev_ops,
+ 					const struct ethtool_ops *eth_ops);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_vec.c b/drivers/net/ethernet/aquantia/atlantic/aq_vec.c
+index 5477524dd429..f890b8a5a862 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_vec.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_vec.c
+@@ -19,7 +19,7 @@
+ #include <linux/netdevice.h>
+ 
+ struct aq_vec_s {
+-	struct aq_hw_ops *aq_hw_ops;
++	const struct aq_hw_ops *aq_hw_ops;
+ 	struct aq_hw_s *aq_hw;
+ 	struct aq_nic_s *aq_nic;
+ 	unsigned int tx_rings;
+@@ -165,7 +165,7 @@ struct aq_vec_s *aq_vec_alloc(struct aq_nic_s *aq_nic, unsigned int idx,
+ 	return self;
+ }
+ 
+-int aq_vec_init(struct aq_vec_s *self, struct aq_hw_ops *aq_hw_ops,
++int aq_vec_init(struct aq_vec_s *self, const struct aq_hw_ops *aq_hw_ops,
+ 		struct aq_hw_s *aq_hw)
+ {
+ 	struct aq_ring_s *ring = NULL;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_vec.h b/drivers/net/ethernet/aquantia/atlantic/aq_vec.h
+index 6c68b184236c..78cc6c36b550 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_vec.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_vec.h
+@@ -26,7 +26,7 @@ irqreturn_t aq_vec_isr(int irq, void *private);
+ irqreturn_t aq_vec_isr_legacy(int irq, void *private);
+ struct aq_vec_s *aq_vec_alloc(struct aq_nic_s *aq_nic, unsigned int idx,
+ 			      struct aq_nic_cfg_s *aq_nic_cfg);
+-int aq_vec_init(struct aq_vec_s *self, struct aq_hw_ops *aq_hw_ops,
++int aq_vec_init(struct aq_vec_s *self, const struct aq_hw_ops *aq_hw_ops,
+ 		struct aq_hw_s *aq_hw);
+ void aq_vec_deinit(struct aq_vec_s *self);
+ void aq_vec_free(struct aq_vec_s *self);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+index 5c616e4f782e..5b1f3c19d8ba 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+@@ -851,7 +851,7 @@ static int hw_atl_a0_hw_set_speed(struct aq_hw_s *self, u32 speed)
+ 	return err;
+ }
+ 
+-static struct aq_hw_ops hw_atl_ops_ = {
++static const struct aq_hw_ops hw_atl_ops_ = {
+ 	.create               = hw_atl_a0_create,
+ 	.destroy              = hw_atl_a0_destroy,
+ 	.get_hw_caps          = hw_atl_a0_get_hw_caps,
+@@ -894,7 +894,7 @@ static struct aq_hw_ops hw_atl_ops_ = {
+ 	.hw_get_fw_version           = hw_atl_utils_get_fw_version,
+ };
+ 
+-struct aq_hw_ops *hw_atl_a0_get_ops_by_id(struct pci_dev *pdev)
++const struct aq_hw_ops *hw_atl_a0_get_ops_by_id(struct pci_dev *pdev)
+ {
+ 	bool is_vid_ok = (pdev->vendor == PCI_VENDOR_ID_AQUANTIA);
+ 	bool is_did_ok = ((pdev->device == HW_ATL_DEVICE_ID_0001) ||
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h
+index 6e1d527954c9..4fdd51b67097 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.h
+@@ -29,6 +29,6 @@
+ 
+ #endif
+ 
+-struct aq_hw_ops *hw_atl_a0_get_ops_by_id(struct pci_dev *pdev);
++const struct aq_hw_ops *hw_atl_a0_get_ops_by_id(struct pci_dev *pdev);
+ 
+ #endif /* HW_ATL_A0_H */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index e2240ab64987..1c47811a03e7 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -928,7 +928,7 @@ static int hw_atl_b0_hw_set_speed(struct aq_hw_s *self, u32 speed)
+ 	return err;
+ }
+ 
+-static struct aq_hw_ops hw_atl_ops_ = {
++static const struct aq_hw_ops hw_atl_ops_ = {
+ 	.create               = hw_atl_b0_create,
+ 	.destroy              = hw_atl_b0_destroy,
+ 	.get_hw_caps          = hw_atl_b0_get_hw_caps,
+@@ -971,7 +971,7 @@ static struct aq_hw_ops hw_atl_ops_ = {
+ 	.hw_get_fw_version           = hw_atl_utils_get_fw_version,
+ };
+ 
+-struct aq_hw_ops *hw_atl_b0_get_ops_by_id(struct pci_dev *pdev)
++const struct aq_hw_ops *hw_atl_b0_get_ops_by_id(struct pci_dev *pdev)
+ {
+ 	bool is_vid_ok = (pdev->vendor == PCI_VENDOR_ID_AQUANTIA);
+ 	bool is_did_ok = ((pdev->device == HW_ATL_DEVICE_ID_0001) ||
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h
+index a1e1bce6c1f3..3e10969c1df5 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.h
+@@ -29,6 +29,6 @@
+ 
+ #endif
+ 
+-struct aq_hw_ops *hw_atl_b0_get_ops_by_id(struct pci_dev *pdev);
++const struct aq_hw_ops *hw_atl_b0_get_ops_by_id(struct pci_dev *pdev);
+ 
+ #endif /* HW_ATL_B0_H */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+index 407dc06ab253..0abb7d788db2 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+@@ -117,7 +117,7 @@ static int hw_atl_utils_ver_match(u32 ver_expected, u32 ver_actual)
+ }
+ 
+ static int hw_atl_utils_init_ucp(struct aq_hw_s *self,
+-				 struct aq_hw_caps_s *aq_hw_caps)
++				 const struct aq_hw_caps_s *aq_hw_caps)
+ {
+ 	int err = 0;
+ 
+@@ -564,7 +564,7 @@ static const u32 hw_atl_utils_hw_mac_regs[] = {
+ };
+ 
+ int hw_atl_utils_hw_get_regs(struct aq_hw_s *self,
+-			     struct aq_hw_caps_s *aq_hw_caps,
++			     const struct aq_hw_caps_s *aq_hw_caps,
+ 			     u32 *regs_buff)
+ {
+ 	unsigned int i = 0U;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h
+index 1530abd6ed84..40e2319c65d5 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.h
+@@ -207,7 +207,7 @@ int hw_atl_utils_get_mac_permanent(struct aq_hw_s *self,
+ unsigned int hw_atl_utils_mbps_2_speed_index(unsigned int mbps);
+ 
+ int hw_atl_utils_hw_get_regs(struct aq_hw_s *self,
+-			     struct aq_hw_caps_s *aq_hw_caps,
++			     const struct aq_hw_caps_s *aq_hw_caps,
+ 			     u32 *regs_buff);
+ 
+ int hw_atl_utils_hw_set_power(struct aq_hw_s *self,
+-- 
+2.16.1
+

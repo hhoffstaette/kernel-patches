@@ -1,0 +1,177 @@
+From 78f5193dbcd3ed799c9fe187ddbfa67503e97ab8 Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Mon, 15 Jan 2018 16:41:14 +0300
+Subject: [PATCH 02/23] net: aquantia: Cleanup status flags accesses
+
+Usage of aq_obj_s structure is noop, here we remove it
+replacing access to flags filed directly.
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_hw.h            | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/aq_hw_utils.c      | 6 +++---
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.c           | 8 ++++----
+ drivers/net/ethernet/aquantia/atlantic/aq_nic_internal.h  | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/aq_ring.h          | 1 -
+ drivers/net/ethernet/aquantia/atlantic/aq_utils.h         | 4 ----
+ drivers/net/ethernet/aquantia/atlantic/aq_vec.c           | 1 -
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c | 2 +-
+ 9 files changed, 11 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+index b3825de6cdfb..ef8544252a97 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+@@ -87,7 +87,7 @@ struct aq_stats_s {
+ #define AQ_HW_FLAG_ERRORS      (AQ_HW_FLAG_ERR_HW | AQ_HW_FLAG_ERR_UNPLUG)
+ 
+ struct aq_hw_s {
+-	struct aq_obj_s header;
++	atomic_t flags;
+ 	struct aq_nic_cfg_s *aq_nic_cfg;
+ 	struct aq_pci_func_s *aq_pci_func;
+ 	void __iomem *mmio;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_hw_utils.c b/drivers/net/ethernet/aquantia/atlantic/aq_hw_utils.c
+index 5f13465995f6..27e250d61da7 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_hw_utils.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_hw_utils.c
+@@ -40,7 +40,7 @@ u32 aq_hw_read_reg(struct aq_hw_s *hw, u32 reg)
+ 	u32 value = readl(hw->mmio + reg);
+ 
+ 	if ((~0U) == value && (~0U) == readl(hw->mmio + hw->not_ff_addr))
+-		aq_utils_obj_set(&hw->header.flags, AQ_HW_FLAG_ERR_UNPLUG);
++		aq_utils_obj_set(&hw->flags, AQ_HW_FLAG_ERR_UNPLUG);
+ 
+ 	return value;
+ }
+@@ -54,11 +54,11 @@ int aq_hw_err_from_flags(struct aq_hw_s *hw)
+ {
+ 	int err = 0;
+ 
+-	if (aq_utils_obj_test(&hw->header.flags, AQ_HW_FLAG_ERR_UNPLUG)) {
++	if (aq_utils_obj_test(&hw->flags, AQ_HW_FLAG_ERR_UNPLUG)) {
+ 		err = -ENXIO;
+ 		goto err_exit;
+ 	}
+-	if (aq_utils_obj_test(&hw->header.flags, AQ_HW_FLAG_ERR_HW)) {
++	if (aq_utils_obj_test(&hw->flags, AQ_HW_FLAG_ERR_HW)) {
+ 		err = -EIO;
+ 		goto err_exit;
+ 	}
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+index 546dd8cc12f5..35ca37f9cffb 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+@@ -150,9 +150,9 @@ static int aq_nic_update_link_status(struct aq_nic_s *self)
+ 
+ 	self->link_status = self->aq_hw->aq_link_status;
+ 	if (!netif_carrier_ok(self->ndev) && self->link_status.mbps) {
+-		aq_utils_obj_set(&self->header.flags,
++		aq_utils_obj_set(&self->flags,
+ 				 AQ_NIC_FLAG_STARTED);
+-		aq_utils_obj_clear(&self->header.flags,
++		aq_utils_obj_clear(&self->flags,
+ 				   AQ_NIC_LINK_DOWN);
+ 		netif_carrier_on(self->ndev);
+ 		netif_tx_wake_all_queues(self->ndev);
+@@ -160,7 +160,7 @@ static int aq_nic_update_link_status(struct aq_nic_s *self)
+ 	if (netif_carrier_ok(self->ndev) && !self->link_status.mbps) {
+ 		netif_carrier_off(self->ndev);
+ 		netif_tx_disable(self->ndev);
+-		aq_utils_obj_set(&self->header.flags, AQ_NIC_LINK_DOWN);
++		aq_utils_obj_set(&self->flags, AQ_NIC_LINK_DOWN);
+ 	}
+ 	return 0;
+ }
+@@ -171,7 +171,7 @@ static void aq_nic_service_timer_cb(struct timer_list *t)
+ 	int ctimer = AQ_CFG_SERVICE_TIMER_INTERVAL;
+ 	int err = 0;
+ 
+-	if (aq_utils_obj_test(&self->header.flags, AQ_NIC_FLAGS_IS_NOT_READY))
++	if (aq_utils_obj_test(&self->flags, AQ_NIC_FLAGS_IS_NOT_READY))
+ 		goto err_exit;
+ 
+ 	err = aq_nic_update_link_status(self);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic_internal.h b/drivers/net/ethernet/aquantia/atlantic/aq_nic_internal.h
+index e7d2711dc165..265211c763ca 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic_internal.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic_internal.h
+@@ -13,7 +13,7 @@
+ #define AQ_NIC_INTERNAL_H
+ 
+ struct aq_nic_s {
+-	struct aq_obj_s header;
++	atomic_t flags;
+ 	struct aq_vec_s *aq_vec[AQ_CFG_VECS_MAX];
+ 	struct aq_ring_s *aq_ring_tx[AQ_CFG_VECS_MAX * AQ_CFG_TCS_MAX];
+ 	struct aq_hw_s *aq_hw;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_ring.h b/drivers/net/ethernet/aquantia/atlantic/aq_ring.h
+index 5844078764bd..2b051fdb67b7 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_ring.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_ring.h
+@@ -105,7 +105,6 @@ union aq_ring_stats_s {
+ };
+ 
+ struct aq_ring_s {
+-	struct aq_obj_s header;
+ 	struct aq_ring_buff_s *buff_ring;
+ 	u8 *dx_ring;		/* descriptors ring, dma shared mem */
+ 	struct aq_nic_s *aq_nic;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_utils.h b/drivers/net/ethernet/aquantia/atlantic/aq_utils.h
+index 981633833f2f..786ea8187c69 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_utils.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_utils.h
+@@ -14,10 +14,6 @@
+ 
+ #include "aq_common.h"
+ 
+-struct aq_obj_s {
+-	atomic_t flags;
+-};
+-
+ static inline void aq_utils_obj_set(atomic_t *flags, u32 mask)
+ {
+ 	unsigned long flags_old, flags_new;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_vec.c b/drivers/net/ethernet/aquantia/atlantic/aq_vec.c
+index 5fecc9a099ef..5477524dd429 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_vec.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_vec.c
+@@ -19,7 +19,6 @@
+ #include <linux/netdevice.h>
+ 
+ struct aq_vec_s {
+-	struct aq_obj_s header;
+ 	struct aq_hw_ops *aq_hw_ops;
+ 	struct aq_hw_s *aq_hw;
+ 	struct aq_nic_s *aq_nic;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+index 97920ca37690..cee53cf3fc62 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+@@ -574,7 +574,7 @@ static int hw_atl_a0_hw_ring_tx_head_update(struct aq_hw_s *self,
+ 	int err = 0;
+ 	unsigned int hw_head_ = tdm_tx_desc_head_ptr_get(self, ring->idx);
+ 
+-	if (aq_utils_obj_test(&self->header.flags, AQ_HW_FLAG_ERR_UNPLUG)) {
++	if (aq_utils_obj_test(&self->flags, AQ_HW_FLAG_ERR_UNPLUG)) {
+ 		err = -ENXIO;
+ 		goto err_exit;
+ 	}
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index 83006731d040..d1b3303637c9 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -625,7 +625,7 @@ static int hw_atl_b0_hw_ring_tx_head_update(struct aq_hw_s *self,
+ 	int err = 0;
+ 	unsigned int hw_head_ = tdm_tx_desc_head_ptr_get(self, ring->idx);
+ 
+-	if (aq_utils_obj_test(&self->header.flags, AQ_HW_FLAG_ERR_UNPLUG)) {
++	if (aq_utils_obj_test(&self->flags, AQ_HW_FLAG_ERR_UNPLUG)) {
+ 		err = -ENXIO;
+ 		goto err_exit;
+ 	}
+-- 
+2.16.1
+

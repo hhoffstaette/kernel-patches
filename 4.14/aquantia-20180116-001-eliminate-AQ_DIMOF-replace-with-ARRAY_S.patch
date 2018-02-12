@@ -1,0 +1,84 @@
+From 08b5cf08bc4adefb84215c8c7b5ebd5052c3595d Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Mon, 15 Jan 2018 16:41:13 +0300
+Subject: [PATCH 01/23] net: aquantia: Eliminate AQ_DIMOF, replace with
+ ARRAY_SIZE
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.c              | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/aq_utils.h            | 2 --
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c    | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c    | 2 +-
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c | 2 +-
+ 5 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+index 75a894a9251c..546dd8cc12f5 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+@@ -992,7 +992,7 @@ void aq_nic_free_hot_resources(struct aq_nic_s *self)
+ 	if (!self)
+ 		goto err_exit;
+ 
+-	for (i = AQ_DIMOF(self->aq_vec); i--;) {
++	for (i = ARRAY_SIZE(self->aq_vec); i--;) {
+ 		if (self->aq_vec[i]) {
+ 			aq_vec_free(self->aq_vec[i]);
+ 			self->aq_vec[i] = NULL;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_utils.h b/drivers/net/ethernet/aquantia/atlantic/aq_utils.h
+index e12bcdfb874a..981633833f2f 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_utils.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_utils.h
+@@ -14,8 +14,6 @@
+ 
+ #include "aq_common.h"
+ 
+-#define AQ_DIMOF(_ARY_)  ARRAY_SIZE(_ARY_)
+-
+ struct aq_obj_s {
+ 	atomic_t flags;
+ };
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+index f18dce14c93c..97920ca37690 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+@@ -193,7 +193,7 @@ static int hw_atl_a0_hw_rss_set(struct aq_hw_s *self,
+ 			((i * 3U) & 0xFU));
+ 	}
+ 
+-	for (i = AQ_DIMOF(bitary); i--;) {
++	for (i = ARRAY_SIZE(bitary); i--;) {
+ 		rpf_rss_redir_tbl_wr_data_set(self, bitary[i]);
+ 		rpf_rss_redir_tbl_addr_set(self, i);
+ 		rpf_rss_redir_wr_en_set(self, 1U);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index e4a22ce7bf09..83006731d040 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -194,7 +194,7 @@ static int hw_atl_b0_hw_rss_set(struct aq_hw_s *self,
+ 			((i * 3U) & 0xFU));
+ 	}
+ 
+-	for (i = AQ_DIMOF(bitary); i--;) {
++	for (i = ARRAY_SIZE(bitary); i--;) {
+ 		rpf_rss_redir_tbl_wr_data_set(self, bitary[i]);
+ 		rpf_rss_redir_tbl_addr_set(self, i);
+ 		rpf_rss_redir_wr_en_set(self, 1U);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+index f2ce12ed4218..1a6cf9eb6b1c 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+@@ -396,7 +396,7 @@ int hw_atl_utils_get_mac_permanent(struct aq_hw_s *self,
+ 					    aq_hw_read_reg(self, 0x00000374U) +
+ 					    (40U * 4U),
+ 					    mac_addr,
+-					    AQ_DIMOF(mac_addr));
++					    ARRAY_SIZE(mac_addr));
+ 	if (err < 0) {
+ 		mac_addr[0] = 0U;
+ 		mac_addr[1] = 0U;
+-- 
+2.16.1
+
