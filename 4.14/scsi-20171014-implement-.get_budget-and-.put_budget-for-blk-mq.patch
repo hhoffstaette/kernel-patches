@@ -7,6 +7,7 @@ We need to tell blk-mq to reserve resources before queuing one request,
 so implement these two callbacks. Then blk-mq can avoid to dequeue
 request too early, and IO merging can be improved a lot.
 
+[HH: rebased onto 4.14.20]
 Signed-off-by: Ming Lei <ming.lei@redhat.com>
 Signed-off-by: Jens Axboe <axboe@kernel.dk>
 ---
@@ -31,7 +32,7 @@ index d159bb0..6f10afa 100644
 +	struct scsi_device *sdev = q->queuedata;
 +	struct Scsi_Host *shost = sdev->host;
 +
-+	atomic_dec(&shost->host_busy);
++	scsi_dec_host_busy(shost);
 +	if (scsi_target(sdev)->can_queue > 0)
 +		atomic_dec(&scsi_target(sdev)->target_busy);
 +	atomic_dec(&sdev->device_busy);
@@ -112,7 +113,7 @@ index d159bb0..6f10afa 100644
  	return BLK_STS_OK;
  
 -out_dec_host_busy:
--	atomic_dec(&shost->host_busy);
+-	scsi_dec_host_busy(shost);
 -out_dec_target_busy:
 -	if (scsi_target(sdev)->can_queue > 0)
 -		atomic_dec(&scsi_target(sdev)->target_busy);

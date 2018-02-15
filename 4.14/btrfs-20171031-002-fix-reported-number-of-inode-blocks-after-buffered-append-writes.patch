@@ -35,6 +35,7 @@ using a command line like the following:
 
   $ ./runltp -q -p -l /ltp.log -f commands -s du -d /mnt
 
+[HH: rebased onto 4.14.20]
 Fixes: 7e3b975a0f92 ("Btrfs: fix reported number of inode blocks")
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
@@ -266,15 +267,17 @@ index d94e3f68b9b1..185cdc904856 100644
  }
  
  /* see btrfs_writepage_start_hook for details on why this is required */
-@@ -2101,7 +2102,7 @@ static void btrfs_writepage_fixup_worker(struct btrfs_work *work)
+@@ -2101,8 +2102,8 @@ static void btrfs_writepage_fixup_worker(struct btrfs_work *work)
  		goto out;
  	 }
  
--	btrfs_set_extent_delalloc(inode, page_start, page_end, &cached_state,
-+	btrfs_set_extent_delalloc(inode, page_start, page_end, 0, &cached_state,
- 				  0);
- 	ClearPageChecked(page);
- 	set_page_dirty(page);
+-	ret = btrfs_set_extent_delalloc(inode, page_start, page_end,
+-					&cached_state, 0);
++	ret = btrfs_set_extent_delalloc(inode, page_start, page_end, 0,
++									&cached_state, 0);
+ 	if (ret) {
+ 		mapping_set_error(page->mapping, ret);
+ 		end_extent_writepage(page, ret, page_start, page_end);
 @@ -4853,7 +4854,7 @@ int btrfs_truncate_block(struct inode *inode, loff_t from, loff_t len,
  			  EXTENT_DO_ACCOUNTING | EXTENT_DEFRAG,
  			  0, 0, &cached_state, GFP_NOFS);

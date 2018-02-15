@@ -12,6 +12,7 @@ and don't run queue if the counter becomes zero, so IO hang may be caused
 if all requests are completed just before the current SCSI device
 is added to shost->starved_list.
 
+[HH: rebased onto 4.14.20]
 Fixes: 0df21c86bdbf(scsi: implement .get_budget and .put_budget for blk-mq)
 Reported-by: Bart Van Assche <bart.vanassche@wdc.com>
 Signed-off-by: Ming Lei <ming.lei@redhat.com>
@@ -30,7 +31,7 @@ index 6f10afa..22a7e4c 100644
  	struct scsi_device *sdev = q->queuedata;
 -	struct Scsi_Host *shost = sdev->host;
  
--	atomic_dec(&shost->host_busy);
+-	scsi_dec_host_busy(shost);
 -	if (scsi_target(sdev)->can_queue > 0)
 -		atomic_dec(&scsi_target(sdev)->target_busy);
  	atomic_dec(&sdev->device_busy);
@@ -99,7 +100,7 @@ index 6f10afa..22a7e4c 100644
  	return BLK_STS_OK;
  
 +out_dec_host_busy:
-+       atomic_dec(&shost->host_busy);
++       scsi_dec_host_busy(shost);
 +out_dec_target_busy:
 +	if (scsi_target(sdev)->can_queue > 0)
 +		atomic_dec(&scsi_target(sdev)->target_busy);
