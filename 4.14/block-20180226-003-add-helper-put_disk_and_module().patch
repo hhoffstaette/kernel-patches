@@ -1,0 +1,188 @@
+From 9df6c29912315186fef1c79cc15b758ace84175b Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.cz>
+Date: Mon, 26 Feb 2018 13:01:39 +0100
+Subject: genhd: Add helper put_disk_and_module()
+
+Add a proper counterpart to get_disk_and_module() -
+put_disk_and_module(). Currently it is opencoded in several places.
+
+[HH: small context fix for 4.14.x]
+Signed-off-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-cgroup.c    | 11 ++---------
+ block/genhd.c         | 20 ++++++++++++++++----
+ fs/block_dev.c        | 19 +++++--------------
+ include/linux/genhd.h |  1 +
+ 4 files changed, 24 insertions(+), 27 deletions(-)
+
+diff --git a/block/blk-cgroup.c b/block/blk-cgroup.c
+index 4117524..c2033a2 100644
+--- a/block/blk-cgroup.c
++++ b/block/blk-cgroup.c
+@@ -812,7 +812,6 @@ int blkg_conf_prep(struct blkcg *blkcg, const struct blkcg_policy *pol,
+ 	struct gendisk *disk;
+ 	struct request_queue *q;
+ 	struct blkcg_gq *blkg;
+-	struct module *owner;
+ 	unsigned int major, minor;
+ 	int key_len, part, ret;
+ 	char *body;
+@@ -904,9 +903,7 @@ fail_unlock:
+ 	spin_unlock_irq(q->queue_lock);
+ 	rcu_read_unlock();
+ fail:
+-	owner = disk->fops->owner;
+-	put_disk(disk);
+-	module_put(owner);
++	put_disk_and_module(disk);
+ 	/*
+ 	 * If queue was bypassing, we should retry.  Do so after a
+ 	 * short msleep().  It isn't strictly necessary but queue
+@@ -931,13 +928,9 @@ EXPORT_SYMBOL_GPL(blkg_conf_prep);
+ void blkg_conf_finish(struct blkg_conf_ctx *ctx)
+ 	__releases(ctx->disk->queue->queue_lock) __releases(rcu)
+ {
+-	struct module *owner;
+-
+ 	spin_unlock_irq(ctx->disk->queue->queue_lock);
+ 	rcu_read_unlock();
+-	owner = ctx->disk->fops->owner;
+-	put_disk(ctx->disk);
+-	module_put(owner);
++	put_disk_and_module(ctx->disk);
+ }
+ EXPORT_SYMBOL_GPL(blkg_conf_finish);
+ 
+diff --git a/block/genhd.c b/block/genhd.c
+index 21b2843..4c05904 100644
+--- a/block/genhd.c
++++ b/block/genhd.c
+@@ -817,10 +817,7 @@ struct gendisk *get_gendisk(dev_t devt, int *partno)
+ 	}
+ 
+ 	if (disk && unlikely(disk->flags & GENHD_FL_HIDDEN)) {
+-		struct module *owner = disk->fops->owner;
+-
+-		put_disk(disk);
+-		module_put(owner);
++		put_disk_and_module(disk);
+ 		disk = NULL;
+ 	}
+ 	return disk;
+@@ -1483,6 +1480,21 @@ void put_disk(struct gendisk *disk)
+ }
+ EXPORT_SYMBOL(put_disk);
+ 
++/*
++ * This is a counterpart of get_disk_and_module() and thus also of
++ * get_gendisk().
++ */
++void put_disk_and_module(struct gendisk *disk)
++{
++	if (disk) {
++		struct module *owner = disk->fops->owner;
++
++		put_disk(disk);
++		module_put(owner);
++	}
++}
++EXPORT_SYMBOL(put_disk_and_module);
++
+ static void set_disk_ro_uevent(struct gendisk *gd, int ro)
+ {
+ 	char event[] = "DISK_RO=1";
+diff --git a/fs/block_dev.c b/fs/block_dev.c
+index 4a181fc..1dbbf84 100644
+--- a/fs/block_dev.c
++++ b/fs/block_dev.c
+@@ -1111,8 +1111,7 @@ static struct block_device *bd_start_claiming(struct block_device *bdev,
+ 	else
+ 		whole = bdgrab(bdev);
+ 
+-	module_put(disk->fops->owner);
+-	put_disk(disk);
++	put_disk_and_module(disk);
+ 	if (!whole)
+ 		return ERR_PTR(-ENOMEM);
+ 
+@@ -1407,7 +1406,6 @@ static void __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part);
+ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
+ {
+ 	struct gendisk *disk;
+-	struct module *owner;
+ 	int ret;
+ 	int partno;
+ 	int perm = 0;
+@@ -1433,7 +1431,6 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
+ 	disk = get_gendisk(bdev->bd_dev, &partno);
+ 	if (!disk)
+ 		goto out;
+-	owner = disk->fops->owner;
+ 
+ 	disk_block_events(disk);
+ 	mutex_lock_nested(&bdev->bd_mutex, for_part);
+@@ -1463,8 +1460,7 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
+ 					bdev->bd_queue = NULL;
+ 					mutex_unlock(&bdev->bd_mutex);
+ 					disk_unblock_events(disk);
+-					put_disk(disk);
+-					module_put(owner);
++					put_disk_and_module(disk);
+ 					goto restart;
+ 				}
+ 			}
+@@ -1525,8 +1521,7 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
+ 				goto out_unlock_bdev;
+ 		}
+ 		/* only one opener holds refs to the module and disk */
+-		put_disk(disk);
+-		module_put(owner);
++		put_disk_and_module(disk);
+ 	}
+ 	bdev->bd_openers++;
+ 	if (for_part)
+@@ -1546,8 +1541,7 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
+  out_unlock_bdev:
+ 	mutex_unlock(&bdev->bd_mutex);
+ 	disk_unblock_events(disk);
+-	put_disk(disk);
+-	module_put(owner);
++	put_disk_and_module(disk);
+  out:
+ 	bdput(bdev);
+ 
+@@ -1770,8 +1764,6 @@ static void __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part)
+ 			disk->fops->release(disk, mode);
+ 	}
+ 	if (!bdev->bd_openers) {
+-		struct module *owner = disk->fops->owner;
+-
+ 		disk_put_part(bdev->bd_part);
+ 		bdev->bd_part = NULL;
+ 		bdev->bd_disk = NULL;
+@@ -1779,8 +1771,7 @@ static void __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part)
+ 			victim = bdev->bd_contains;
+ 		bdev->bd_contains = NULL;
+ 
+-		put_disk(disk);
+-		module_put(owner);
++		put_disk_and_module(disk);
+ 	}
+ 	mutex_unlock(&bdev->bd_mutex);
+ 	bdput(bdev);
+diff --git a/include/linux/genhd.h b/include/linux/genhd.h
+index 8e11b93..7f5906f 100644
+--- a/include/linux/genhd.h
++++ b/include/linux/genhd.h
+@@ -602,6 +602,7 @@ extern void printk_all_partitions(void);
+ extern struct gendisk *alloc_disk(int minors);
+ extern struct kobject *get_disk_and_module(struct gendisk *disk);
+ extern void put_disk(struct gendisk *disk);
++extern void put_disk_and_module(struct gendisk *disk);
+ extern void blk_register_region(dev_t devt, unsigned long range,
+ 			struct module *module,
+ 			struct kobject *(*probe)(dev_t, int *, void *),
+-- 
+cgit v1.1
+
