@@ -2,9 +2,6 @@ From 99fead8d38e5302b1be9403d4de815ce9174a3df Mon Sep 17 00:00:00 2001
 From: Paolo Valente <paolo.valente@linaro.org>
 Date: Mon, 9 Oct 2017 13:11:23 +0200
 Subject: block, bfq: fix unbalanced decrements of burst size
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
 
 The commit "block, bfq: decrease burst size when queues in burst
 exit" introduced the decrement of burst_size on the removal of a

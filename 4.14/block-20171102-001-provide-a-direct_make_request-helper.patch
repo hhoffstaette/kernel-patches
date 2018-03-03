@@ -2,9 +2,6 @@ From f421e1d9ade4e1b88183e54425cf50e390d16a7f Mon Sep 17 00:00:00 2001
 From: Christoph Hellwig <hch@lst.de>
 Date: Thu, 2 Nov 2017 21:29:50 +0300
 Subject: block: provide a direct_make_request helper
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
 
 This helper allows reinserting a bio into a new queue without much
 overhead, but requires all queue limits to be the same for the upper

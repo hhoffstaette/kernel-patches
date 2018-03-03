@@ -2,9 +2,6 @@ From 350c9f484bde93ef229682eedd98cd5f74350f7f Mon Sep 17 00:00:00 2001
 From: Eric Dumazet <edumazet@google.com>
 Date: Wed, 21 Feb 2018 06:43:03 -0800
 Subject: tcp_bbr: better deal with suboptimal GSO
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
 
 BBR uses tcp_tso_autosize() in an attempt to probe what would be the
 burst sizes and to adjust cwnd in bbr_target_cwnd() with following
