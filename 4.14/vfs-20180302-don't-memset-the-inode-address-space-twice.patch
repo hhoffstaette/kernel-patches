@@ -1,0 +1,60 @@
+From: Dave Chinner <david@fromorbit.com>
+To: linux-fsdevel@vger.kernel.org
+Cc: linux-xfs@vger.kernel.org
+Subject: inode: don't memset the inode address space twice
+Date: Fri,  2 Mar 2018 09:34:02 +1100
+
+From: Dave Chinner <dchinner@redhat.com>
+
+Noticed when looking at why cycling 600k inodes/s through the inode
+cache was taking a total of 8% cpu in memset() during inode
+initialisation.  There is no need to zero the inode.i_data structure
+twice.
+
+This increases single threaded bulkstat throughput from ~200,000
+inodes/s to ~220,000 inodes/s, so we save a substantial amount of
+CPU time per inode init by doing this.
+
+Signed-Off-By: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Carlos Maiolino <cmaiolino@redhat.com>
+---
+ fs/inode.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index 6295f1415761..b153aeaa61ea 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -346,9 +346,8 @@ void inc_nlink(struct inode *inode)
+ }
+ EXPORT_SYMBOL(inc_nlink);
+ 
+-void address_space_init_once(struct address_space *mapping)
++static void __address_space_init_once(struct address_space *mapping)
+ {
+-	memset(mapping, 0, sizeof(*mapping));
+ 	INIT_RADIX_TREE(&mapping->page_tree, GFP_ATOMIC | __GFP_ACCOUNT);
+ 	spin_lock_init(&mapping->tree_lock);
+ 	init_rwsem(&mapping->i_mmap_rwsem);
+@@ -356,6 +355,12 @@ void address_space_init_once(struct address_space *mapping)
+ 	spin_lock_init(&mapping->private_lock);
+ 	mapping->i_mmap = RB_ROOT_CACHED;
+ }
++
++void address_space_init_once(struct address_space *mapping)
++{
++	memset(mapping, 0, sizeof(*mapping));
++	__address_space_init_once(mapping);
++}
+ EXPORT_SYMBOL(address_space_init_once);
+ 
+ /*
+@@ -371,7 +376,7 @@ void inode_init_once(struct inode *inode)
+ 	INIT_LIST_HEAD(&inode->i_io_list);
+ 	INIT_LIST_HEAD(&inode->i_wb_list);
+ 	INIT_LIST_HEAD(&inode->i_lru);
+-	address_space_init_once(&inode->i_data);
++	__address_space_init_once(&inode->i_data);
+ 	i_size_ordered_init(inode);
+ }
+ EXPORT_SYMBOL(inode_init_once);
