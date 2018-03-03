@@ -1,0 +1,48 @@
+From: Eric Sandeen <sandeen@redhat.com>
+To: linux-xfs <linux-xfs@vger.kernel.org>
+Subject: xfs: do not log/recover swapext extent owner changes for deleted inodes
+Date: Fri, 23 Feb 2018 17:49:41 -0600
+
+Today if we run swapext and crash, log replay can fail because
+the recovery code tries to instantiate the donor inode from
+disk to replay the swapext, but it's been deleted and we throw
+corruption failures if we try to get an inode off disk with
+i_mode == 0.
+
+This fixes both sides: We don't log the swapext change if the
+inode has been deleted, and we don't try to recover it either.
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+---
+diff --git a/fs/xfs/xfs_inode_item.c b/fs/xfs/xfs_inode_item.c
+index 26f2413..de48eb8 100644
+--- a/fs/xfs/xfs_inode_item.c
++++ b/fs/xfs/xfs_inode_item.c
+@@ -436,6 +436,12 @@ xfs_inode_item_format(
+ 			~(XFS_ILOG_ADATA | XFS_ILOG_ABROOT | XFS_ILOG_AEXT);
+ 	}
+ 
++	/* If this inode has been deleted do not log swapext owner changes */
++	if (VFS_I(ip)->i_mode == 0) {
++		ilf->ilf_fields &= ~(XFS_ILOG_DOWNER | XFS_ILOG_AOWNER);
++		iip->ili_fields &= ~(XFS_ILOG_DOWNER | XFS_ILOG_AOWNER);
++	}
++
+ 	/* update the format with the exact fields we actually logged */
+ 	ilf->ilf_fields |= (iip->ili_fields & ~XFS_ILOG_TIMESTAMP);
+ }
+diff --git a/fs/xfs/xfs_log_recover.c b/fs/xfs/xfs_log_recover.c
+index 5e219d9..d0e33b9 100644
+--- a/fs/xfs/xfs_log_recover.c
++++ b/fs/xfs/xfs_log_recover.c
+@@ -3199,7 +3199,9 @@ xlog_recover_inode_pass2(
+ 	}
+ 
+ out_owner_change:
+-	if (in_f->ilf_fields & (XFS_ILOG_DOWNER|XFS_ILOG_AOWNER))
++	/* Recover the swapext owner change unless inode has been deleted */
++	if ((in_f->ilf_fields & (XFS_ILOG_DOWNER|XFS_ILOG_AOWNER)) &&
++	    (dip->di_mode != 0))
+ 		error = xfs_recover_inode_owner_change(mp, dip, in_f,
+ 						       buffer_list);
+ 	/* re-generate the checksum. */
