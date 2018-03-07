@@ -19,6 +19,7 @@ Next patch will remove bbr->tso_segs_goal since it does not have
 to be persistent.
 
 [HH: backported to 4.14.x]
+[HH: small context update for 4.14.25]
 Signed-off-by: Eric Dumazet <edumazet@google.com>
 Acked-by: Neal Cardwell <ncardwell@google.com>
 Signed-off-by: David S. Miller <davem@davemloft.net>
@@ -124,7 +125,7 @@ index 49d043d..383cac0 100644
  
  /* Return the number of segments we want in the skb we are transmitting.
   * See if congestion control module wants to decide; otherwise, autosize.
-@@ -1728,10 +1727,13 @@ EXPORT_SYMBOL(tcp_tso_autosize);
+@@ -1728,11 +1727,13 @@ EXPORT_SYMBOL(tcp_tso_autosize);
  static u32 tcp_tso_segs(struct sock *sk, unsigned int mss_now)
  {
  	const struct tcp_congestion_ops *ca_ops = inet_csk(sk)->icsk_ca_ops;
@@ -132,7 +133,8 @@ index 49d043d..383cac0 100644
 +	u32 min_tso, tso_segs;
  
 -	if (!tso_segs)
--		tso_segs = tcp_tso_autosize(sk, mss_now, sysctl_tcp_min_tso_segs);
+-		tso_segs = tcp_tso_autosize(sk, mss_now,
+-					    sysctl_tcp_min_tso_segs);
 +	min_tso = ca_ops->min_tso_segs ?
 +			ca_ops->min_tso_segs(sk) :
 +			sysctl_tcp_min_tso_segs;

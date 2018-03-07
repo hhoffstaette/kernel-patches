@@ -26,6 +26,7 @@ for avoiding I/O deadlock.
 
 Also we have to put the driver tag before requeueing.
 
+[HH: small context update for 4.14.25]
 Signed-off-by: Ming Lei <ming.lei@redhat.com>
 Signed-off-by: Jens Axboe <axboe@kernel.dk>
 ---
@@ -189,7 +190,7 @@ index 14f6886..c501cbd 100644
 +
  	trace_block_rq_requeue(q, rq);
  	wbt_requeue(q->rq_wb, &rq->issue_stat);
- 	blk_mq_sched_requeue_request(rq);
+ 
 @@ -996,30 +998,6 @@ done:
  	return rq->tag != -1;
  }
