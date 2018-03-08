@@ -1,0 +1,68 @@
+From 14967f94972c0388f455625e7109ab7651429014 Mon Sep 17 00:00:00 2001
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Date: Wed, 28 Feb 2018 07:55:20 +0100
+Subject: r8169: convert remaining feature flag and remove enum features
+
+Now that only one feature flag is left we can convert it and remove
+enum features.
+
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 12 ++++--------
+ 1 file changed, 4 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index cc51286..0a0638d 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -735,10 +735,6 @@ struct ring_info {
+ 	u8		__pad[sizeof(void *) - sizeof(u32)];
+ };
+ 
+-enum features {
+-	RTL_FEATURE_GMII	= (1 << 0),
+-};
+-
+ struct rtl8169_counters {
+ 	__le64	tx_packets;
+ 	__le64	rx_packets;
+@@ -8233,7 +8229,7 @@ static const struct rtl_cfg_info {
+ 	unsigned int region;
+ 	unsigned int align;
+ 	u16 event_slow;
+-	unsigned features;
++	unsigned int has_gmii:1;
+ 	const struct rtl_coalesce_info *coalesce_info;
+ 	u8 default_ver;
+ } rtl_cfg_infos [] = {
+@@ -8242,7 +8238,7 @@ static const struct rtl_cfg_info {
+ 		.region		= 1,
+ 		.align		= 0,
+ 		.event_slow	= SYSErr | LinkChg | RxOverflow | RxFIFOOver,
+-		.features	= RTL_FEATURE_GMII,
++		.has_gmii	= 1,
+ 		.coalesce_info	= rtl_coalesce_info_8169,
+ 		.default_ver	= RTL_GIGA_MAC_VER_01,
+ 	},
+@@ -8251,7 +8247,7 @@ static const struct rtl_cfg_info {
+ 		.region		= 2,
+ 		.align		= 8,
+ 		.event_slow	= SYSErr | LinkChg | RxOverflow,
+-		.features	= RTL_FEATURE_GMII,
++		.has_gmii	= 1,
+ 		.coalesce_info	= rtl_coalesce_info_8168_8136,
+ 		.default_ver	= RTL_GIGA_MAC_VER_11,
+ 	},
+@@ -8394,7 +8390,7 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 	mii->mdio_write = rtl_mdio_write;
+ 	mii->phy_id_mask = 0x1f;
+ 	mii->reg_num_mask = 0x1f;
+-	mii->supports_gmii = !!(cfg->features & RTL_FEATURE_GMII);
++	mii->supports_gmii = cfg->has_gmii;
+ 
+ 	/* disable ASPM completely as that cause random device stop working
+ 	 * problems as well as full system hangs for some PCIe devices users */
+-- 
+cgit v1.1
+
