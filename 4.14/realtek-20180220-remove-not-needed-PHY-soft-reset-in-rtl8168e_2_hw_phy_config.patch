@@ -1,0 +1,31 @@
+From 4be83e5aa21e667b0c25e2e87e5bb9bf260d870d Mon Sep 17 00:00:00 2001
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Date: Tue, 20 Feb 2018 07:30:16 +0100
+Subject: r8169: remove not needed PHY soft reset in rtl8168e_2_hw_phy_config
+
+rtl8169_init_phy() resets the PHY anyway after applying the chip-specific
+PHY configuration. So we don't need to soft-reset the PHY as part of the
+chip-specific configuration.
+
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 2f3e3ae..c16b97a 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -3800,8 +3800,6 @@ static void rtl8168e_2_hw_phy_config(struct rtl8169_private *tp)
+ 	rtl_writephy(tp, 0x1f, 0x0005);
+ 	rtl_w0w1_phy(tp, 0x01, 0x0100, 0x0000);
+ 	rtl_writephy(tp, 0x1f, 0x0000);
+-	/* soft-reset phy */
+-	rtl_writephy(tp, MII_BMCR, BMCR_RESET | BMCR_ANENABLE | BMCR_ANRESTART);
+ 
+ 	/* Broken BIOS workaround: feed GigaMAC registers with MAC address. */
+ 	rtl_rar_exgmac_set(tp, tp->dev->dev_addr);
+-- 
+cgit v1.1
+
