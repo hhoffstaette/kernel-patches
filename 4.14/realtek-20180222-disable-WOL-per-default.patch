@@ -1,0 +1,59 @@
+From 7edf6d314cd061e1d0a1b7bc0b511d64322c3f72 Mon Sep 17 00:00:00 2001
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Date: Thu, 22 Feb 2018 21:22:40 +0100
+Subject: r8169: disable WOL per default
+
+Currently, if BIOS enables WOL in the chip, settings are inconsistent
+because the device isn't marked as wakeup-enabled (if not done
+explicitly via userspace tools). This causes issues with suspend/
+resume because mdio_bus_phy_may_suspend() checks whether device is
+wakeup-enabled. In detail MDIO bus access in phy_suspend() can fail
+because the MDIO bus is disabled.
+
+In the history of the driver we find two competing approaches:
+8f9d5138035d "r8169: remember WOL preferences on driver load" prefers
+to preserve what the BIOS may have set, whilst bde135a672bf
+"r8169: only enable PCI wakeups when WOL is active" disabled PCI
+wakeup per default to work around a bug on one platform.
+
+Seems like nobody complained after the latter patch about non-working
+WOL, what makes me think that nobody uses WOL w/o configuring it
+explicitly.
+
+My opinion:
+Vast majority of users doesn't use WOL even if the BIOS enables it in
+the chip. And having WOL being active keeps the PHY(s) from powering
+down if being idle.
+If somebody needs WOL, he can enable it during boot, e.g. by
+configuring systemd.link/WakeOnLan.
+
+Therefore, to make WOL consistent again, disable it per default.
+
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index c16b97a..91a03d5 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -8512,11 +8512,12 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 	tp->txd_version = rtl_chip_infos[chipset].txd_version;
+ 
+ 	RTL_W8(Cfg9346, Cfg9346_Unlock);
+-	RTL_W8(Config1, RTL_R8(Config1) | PMEnable);
+-	RTL_W8(Config5, RTL_R8(Config5) & (BWF | MWF | UWF | LanWake | PMEStatus));
+ 	tp->features |= rtl_try_msi(tp, cfg);
+ 	RTL_W8(Cfg9346, Cfg9346_Lock);
+ 
++	/* override BIOS settings, use userspace tools to enable WOL */
++	__rtl8169_set_wol(tp, 0);
++
+ 	if (rtl_tbi_enabled(tp)) {
+ 		tp->set_speed = rtl8169_set_speed_tbi;
+ 		tp->get_link_ksettings = rtl8169_get_link_ksettings_tbi;
+-- 
+cgit v1.1
+
