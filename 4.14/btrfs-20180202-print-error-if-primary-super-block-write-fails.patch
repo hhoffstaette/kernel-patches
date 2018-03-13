@@ -1,0 +1,72 @@
+From a1ab5e282e9b0228b9949bddbe5811b86b114a15 Mon Sep 17 00:00:00 2001
+From: Howard McLauchlan <hmclauchlan@fb.com>
+Date: Fri, 2 Feb 2018 11:09:01 -0800
+Subject: btrfs: print error if primary super block write fails
+
+Presently, failing a primary super block write but succeeding in at
+least one super block write in general will appear to users as if
+nothing important went wrong. However, upon unmounting and re-mounting,
+the file system will be in a rolled back state. This was discovered
+with a BCC program that uses bpf_override_return() to fail super block
+writes.
+
+This patch outputs an error clarifying that the primary super block
+write has failed, so users can expect potentially erroneous behaviour.
+It also forces wait_dev_supers() to return an error to its caller if
+the primary super block write fails.
+
+Signed-off-by: Howard McLauchlan <hmclauchlan@fb.com>
+Reviewed-by: Qu Wenruo <wqu@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 21f34ad..9f7ed43 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -3290,6 +3290,7 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
+ 	struct buffer_head *bh;
+ 	int i;
+ 	int errors = 0;
++	bool primary_failed = false;
+ 	u64 bytenr;
+ 
+ 	if (max_mirrors == 0)
+@@ -3306,11 +3307,16 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
+ 				      BTRFS_SUPER_INFO_SIZE);
+ 		if (!bh) {
+ 			errors++;
++			if (i == 0)
++				primary_failed = true;
+ 			continue;
+ 		}
+ 		wait_on_buffer(bh);
+-		if (!buffer_uptodate(bh))
++		if (!buffer_uptodate(bh)) {
+ 			errors++;
++			if (i == 0)
++				primary_failed = true;
++		}
+ 
+ 		/* drop our reference */
+ 		brelse(bh);
+@@ -3319,6 +3325,13 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
+ 		brelse(bh);
+ 	}
+ 
++	/* log error, force error return */
++	if (primary_failed) {
++		btrfs_err(device->fs_info, "error writing primary super block to device %llu",
++			  device->devid);
++		return -1;
++	}
++
+ 	return errors < i ? 0 : -1;
+ }
+ 
+-- 
+cgit v1.1
+
