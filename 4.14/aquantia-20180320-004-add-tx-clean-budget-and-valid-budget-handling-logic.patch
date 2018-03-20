@@ -3,8 +3,8 @@ To: "David S . Miller" <davem@davemloft.net>
 Cc: netdev@vger.kernel.org, David Arcari <darcari@redhat.com>,
  Pavel Belous <pavel.belous@aquantia.com>,
  Igor Russkikh <igor.russkikh@aquantia.com>
-Subject: [net,4/7] net: aquantia: Add aq_tx_clean_budget and valid budget handling logic
-Date: Fri, 16 Mar 2018 13:53:47 +0300
+Subject: [v2, net, 4/7] net: aquantia: Add tx clean budget and valid budget handling logic
+Date: Tue, 20 Mar 2018 14:40:34 +0300
 
 We should report to napi full budget only when we have more job to do.
 Before this fix, on any tx queue cleanup we forced napi to do poll again.
@@ -16,43 +16,27 @@ to do. Or, as before, when rx budget was fully consumed.
 
 Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
 ---
- drivers/net/ethernet/aquantia/atlantic/aq_nic.c  | 4 ++++
- drivers/net/ethernet/aquantia/atlantic/aq_nic.h  | 2 ++
- drivers/net/ethernet/aquantia/atlantic/aq_ring.c | 7 +++++--
- drivers/net/ethernet/aquantia/atlantic/aq_ring.h | 2 +-
- drivers/net/ethernet/aquantia/atlantic/aq_vec.c  | 7 +++----
- 5 files changed, 15 insertions(+), 7 deletions(-)
+ drivers/net/ethernet/aquantia/atlantic/aq_cfg.h  |  2 ++
+ drivers/net/ethernet/aquantia/atlantic/aq_ring.c |  7 +++++--
+ drivers/net/ethernet/aquantia/atlantic/aq_ring.h |  2 +-
+ drivers/net/ethernet/aquantia/atlantic/aq_vec.c  | 11 +++++------
+ 4 files changed, 13 insertions(+), 9 deletions(-)
 
-diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
-index ebbaf63..5723f2c 100644
---- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
-+++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
-@@ -36,6 +36,10 @@ static unsigned int aq_itr_rx;
- module_param_named(aq_itr_rx, aq_itr_rx, uint, 0644);
- MODULE_PARM_DESC(aq_itr_rx, "RX interrupt throttle rate");
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h b/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h
+index 0b49f1a..fc73831 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_cfg.h
+@@ -36,6 +36,8 @@
+ #define AQ_CFG_TX_FRAME_MAX  (16U * 1024U)
+ #define AQ_CFG_RX_FRAME_MAX  (4U * 1024U)
  
-+unsigned aq_tx_clean_budget = 256;
-+module_param_named(aq_tx_clean_budget, aq_tx_clean_budget, uint, 0644);
-+MODULE_PARM_DESC(aq_tx_clean_budget, "Maximum descriptors to cleanup on TX at once");
++#define AQ_CFG_TX_CLEAN_BUDGET 256U
 +
- static void aq_nic_update_ndev_stats(struct aq_nic_s *self);
+ /* LRO */
+ #define AQ_CFG_IS_LRO_DEF           1U
  
- static void aq_nic_rss_init(struct aq_nic_s *self, unsigned int num_rss_queues)
-diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
-index d16b0f1..2b689b7 100644
---- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
-+++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
-@@ -87,6 +87,8 @@ static inline struct device *aq_nic_get_dev(struct aq_nic_s *self)
- 	return self->ndev->dev.parent;
- }
- 
-+extern unsigned aq_tx_clean_budget;
-+
- void aq_nic_ndev_init(struct aq_nic_s *self);
- struct aq_nic_s *aq_nic_alloc_hot(struct net_device *ndev);
- void aq_nic_set_tx_ring(struct aq_nic_s *self, unsigned int idx,
 diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_ring.c b/drivers/net/ethernet/aquantia/atlantic/aq_ring.c
-index 0be6a11..64a6de6 100644
+index 0be6a11..b5f1f62 100644
 --- a/drivers/net/ethernet/aquantia/atlantic/aq_ring.c
 +++ b/drivers/net/ethernet/aquantia/atlantic/aq_ring.c
 @@ -136,11 +136,12 @@ void aq_ring_queue_stop(struct aq_ring_s *ring)
@@ -63,7 +47,7 @@ index 0be6a11..64a6de6 100644
 +bool aq_ring_tx_clean(struct aq_ring_s *self)
  {
  	struct device *dev = aq_nic_get_dev(self->aq_nic);
-+	unsigned int budget = aq_tx_clean_budget;
++	unsigned int budget = AQ_CFG_TX_CLEAN_BUDGET;
  
 -	for (; self->sw_head != self->hw_head;
 +	for (; self->sw_head != self->hw_head && budget--;
@@ -93,15 +77,22 @@ index 965fae0..ac1329f 100644
  		     struct napi_struct *napi,
  		     int *work_done,
 diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_vec.c b/drivers/net/ethernet/aquantia/atlantic/aq_vec.c
-index f890b8a..9528507 100644
+index f890b8a..d335c33 100644
 --- a/drivers/net/ethernet/aquantia/atlantic/aq_vec.c
 +++ b/drivers/net/ethernet/aquantia/atlantic/aq_vec.c
-@@ -40,7 +40,7 @@ static int aq_vec_poll(struct napi_struct *napi, int budget)
- 	int err = 0;
- 	unsigned int i = 0U;
- 	unsigned int sw_tail_old = 0U;
--	bool was_tx_cleaned = false;
+@@ -35,12 +35,12 @@ struct aq_vec_s {
+ static int aq_vec_poll(struct napi_struct *napi, int budget)
+ {
+ 	struct aq_vec_s *self = container_of(napi, struct aq_vec_s, napi);
++	unsigned int sw_tail_old = 0U;
+ 	struct aq_ring_s *ring = NULL;
 +	bool was_tx_cleaned = true;
++	unsigned int i = 0U;
+ 	int work_done = 0;
+ 	int err = 0;
+-	unsigned int i = 0U;
+-	unsigned int sw_tail_old = 0U;
+-	bool was_tx_cleaned = false;
  
  	if (!self) {
  		err = -EINVAL;

@@ -3,8 +3,8 @@ To: "David S . Miller" <davem@davemloft.net>
 Cc: netdev@vger.kernel.org, David Arcari <darcari@redhat.com>,
  Pavel Belous <pavel.belous@aquantia.com>,
  Igor Russkikh <igor.russkikh@aquantia.com>
-Subject: [net,5/7] net: aquantia: Allow live mac address changes
-Date: Fri, 16 Mar 2018 13:53:48 +0300
+Subject: [v2,net,5/7] net: aquantia: Allow live mac address changes
+Date: Tue, 20 Mar 2018 14:40:35 +0300
 
 There is nothing prevents us from changing MAC on the running interface.
 Allow this with ndev priv flag.
@@ -15,10 +15,10 @@ Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
  1 file changed, 2 insertions(+)
 
 diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
-index 5723f2c..f32e4b3 100644
+index ebbaf63..34120d5 100644
 --- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
 +++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
-@@ -251,6 +251,8 @@ void aq_nic_ndev_init(struct aq_nic_s *self)
+@@ -247,6 +247,8 @@ void aq_nic_ndev_init(struct aq_nic_s *self)
  	self->ndev->hw_features |= aq_hw_caps->hw_features;
  	self->ndev->features = aq_hw_caps->hw_features;
  	self->ndev->priv_flags = aq_hw_caps->hw_priv_flags;

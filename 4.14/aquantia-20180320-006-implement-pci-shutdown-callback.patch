@@ -3,8 +3,8 @@ To: "David S . Miller" <davem@davemloft.net>
 Cc: netdev@vger.kernel.org, David Arcari <darcari@redhat.com>,
  Pavel Belous <pavel.belous@aquantia.com>,
  Igor Russkikh <igor.russkikh@aquantia.com>
-Subject: [net,6/7] net: aquantia: Implement pci shutdown callback
-Date: Fri, 16 Mar 2018 13:53:49 +0300
+Subject: [v2,net, 6/7] net: aquantia: Implement pci shutdown callback
+Date: Tue, 20 Mar 2018 14:40:36 +0300
 
 We should close link and all NIC operations during shutdown.
 On some systems graceful reboot never closes NIC interface on its own,
@@ -20,10 +20,10 @@ Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
  3 files changed, 36 insertions(+)
 
 diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
-index f32e4b3..79b0914 100644
+index 34120d5..c96a921 100644
 --- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
 +++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
-@@ -943,3 +943,23 @@ int aq_nic_change_pm_state(struct aq_nic_s *self, pm_message_t *pm_msg)
+@@ -939,3 +939,23 @@ int aq_nic_change_pm_state(struct aq_nic_s *self, pm_message_t *pm_msg)
  out:
  	return err;
  }
@@ -49,10 +49,10 @@ index f32e4b3..79b0914 100644
 +}
 \ No newline at end of file
 diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
-index 2b689b7..b770eeb 100644
+index d16b0f1..219b550 100644
 --- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
 +++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.h
-@@ -120,5 +120,6 @@ struct aq_nic_cfg_s *aq_nic_get_cfg(struct aq_nic_s *self);
+@@ -118,5 +118,6 @@ struct aq_nic_cfg_s *aq_nic_get_cfg(struct aq_nic_s *self);
  u32 aq_nic_get_fw_version(struct aq_nic_s *self);
  int aq_nic_change_pm_state(struct aq_nic_s *self, pm_message_t *pm_msg);
  int aq_nic_update_interrupt_moderation_settings(struct aq_nic_s *self);

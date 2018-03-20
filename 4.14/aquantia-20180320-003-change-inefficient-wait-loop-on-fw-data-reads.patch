@@ -3,8 +3,8 @@ To: "David S . Miller" <davem@davemloft.net>
 Cc: netdev@vger.kernel.org, David Arcari <darcari@redhat.com>,
  Pavel Belous <pavel.belous@aquantia.com>,
  Igor Russkikh <igor.russkikh@aquantia.com>
-Subject: [net,3/7] net: aquantia: Change inefficient wait loop on fw data reads
-Date: Fri, 16 Mar 2018 13:53:46 +0300
+Subject: [v2, net, 3/7] net: aquantia: Change inefficient wait loop on fw data reads
+Date: Tue, 20 Mar 2018 14:40:33 +0300
 
 B1 hardware changes behavior of mailbox interface, it has busy bit
 always raised. Data ready condition should be detected by increment
@@ -20,7 +20,7 @@ Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
  2 files changed, 28 insertions(+), 15 deletions(-)
 
 diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
-index 9a53a4c..2accffc 100644
+index dcb27bc..d3b847e 100644
 --- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
 +++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
 @@ -21,6 +21,10 @@

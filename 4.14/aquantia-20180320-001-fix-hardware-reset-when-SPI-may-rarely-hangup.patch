@@ -3,8 +3,8 @@ To: "David S . Miller" <davem@davemloft.net>
 Cc: netdev@vger.kernel.org, David Arcari <darcari@redhat.com>,
  Pavel Belous <pavel.belous@aquantia.com>,
  Igor Russkikh <igor.russkikh@aquantia.com>
-Subject: [net,1/7] net: aquantia: Fix hardware reset when SPI may rarely hangup
-Date: Fri, 16 Mar 2018 13:53:44 +0300
+Subject: [v2, net, 1/7] net: aquantia: Fix hardware reset when SPI may rarely hangup
+Date: Tue, 20 Mar 2018 14:40:31 +0300
 
 Under some circumstances (notably using thunderbolt interface) SPI
 on chip reset may be in active transaction.
@@ -16,15 +16,16 @@ Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
  1 file changed, 15 insertions(+), 5 deletions(-)
 
 diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
-index 967f0fd..0da480b 100644
+index 967f0fd..fcb3279 100644
 --- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
 +++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
-@@ -80,15 +80,14 @@ int hw_atl_utils_initfw(struct aq_hw_s *self, const struct aq_fw_ops **fw_ops)
+@@ -79,16 +79,15 @@ int hw_atl_utils_initfw(struct aq_hw_s *self, const struct aq_fw_ops **fw_ops)
+ 
  static int hw_atl_utils_soft_reset_flb(struct aq_hw_s *self)
  {
++	u32 gsr, val;
  	int k = 0;
 -	u32 gsr;
-+	u32 gsr, val;
  
  	aq_hw_write_reg(self, 0x404, 0x40e1);
  	AQ_HW_SLEEP(50);

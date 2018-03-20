@@ -3,8 +3,8 @@ To: "David S . Miller" <davem@davemloft.net>
 Cc: netdev@vger.kernel.org, David Arcari <darcari@redhat.com>,
  Pavel Belous <pavel.belous@aquantia.com>,
  Igor Russkikh <igor.russkikh@aquantia.com>
-Subject: [net,7/7] net: aquantia: driver version bump
-Date: Fri, 16 Mar 2018 13:53:50 +0300
+Subject: [v2,net, 7/7] net: aquantia: driver version bump
+Date: Tue, 20 Mar 2018 14:40:37 +0300
 
 Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
 ---
