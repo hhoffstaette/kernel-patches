@@ -1,0 +1,39 @@
+From 0f7cda2b824bb2afe0d75716a8664117fa03f5e0 Mon Sep 17 00:00:00 2001
+From: Kees Cook <keescook@chromium.org>
+Date: Fri, 1 Dec 2017 12:10:00 -0800
+Subject: Kconfig: Make STRICT_DEVMEM default-y on x86 and arm64
+
+Distros have been shipping with CONFIG_STRICT_DEVMEM=y for years now. It
+is probably time to flip this default for x86 and arm64.
+
+Signed-off-by: Kees Cook <keescook@chromium.org>
+Acked-by: Laura Abbott <labbott@redhat.com>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Mark Rutland <mark.rutland@arm.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Will Deacon <will.deacon@arm.com>
+Cc: kernel-hardening@lists.openwall.com
+Link: http://lkml.kernel.org/r/20171201201000.GA44539@beast
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ lib/Kconfig.debug | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/Kconfig.debug b/lib/Kconfig.debug
+index 947d3e2..39b123d 100644
+--- a/lib/Kconfig.debug
++++ b/lib/Kconfig.debug
+@@ -1985,7 +1985,7 @@ config STRICT_DEVMEM
+ 	bool "Filter access to /dev/mem"
+ 	depends on MMU && DEVMEM
+ 	depends on ARCH_HAS_DEVMEM_IS_ALLOWED
+-	default y if TILE || PPC
++	default y if TILE || PPC || X86 || ARM64
+ 	---help---
+ 	  If this option is disabled, you allow userspace (root) access to all
+ 	  of memory, including kernel and userspace memory. Accidental
+-- 
+cgit v1.1
+
