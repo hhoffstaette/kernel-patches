@@ -1,0 +1,55 @@
+From: Josh Poimboeuf <jpoimboe@redhat.com>
+Subject: [PATCH] objtool: add clang support
+Date: Thu, 22 Mar 2018 13:00:37 -0500
+Cc: linux-kernel@vger.kernel.org, Ingo Molnar <mingo@kernel.org>,
+        Peter Zijlstra <peterz@infradead.org>,
+        Linus Torvalds <torvalds@linux-foundation.org>,
+        Thomas Gleixner <tglx@linutronix.de>,
+        Matthias Kaehlcke <mka@chromium.org>
+To: x86@kernel.org
+
+Since the ORC unwinder was made the default on x86_64, clang-built
+defconfig kernels have triggered some new objtool warnings:
+
+  drivers/gpu/drm/i915/i915_gpu_error.o: warning: objtool: i915_error_printf()+0x6c: return with modified stack frame
+  drivers/gpu/drm/i915/intel_display.o: warning: objtool: pipe_config_err()+0xa6: return with modified stack frame
+
+The problem is that objtool has never seen clang-built binaries before.
+
+Shockingly enough, objtool is apparently able to follow the code flow
+mostly fine, except for one instruction sequence.  Instead of a LEAVE
+instruction, clang restores RSP and RBP the long way:
+
+   67c:   48 89 ec                mov    %rbp,%rsp
+   67f:   5d                      pop    %rbp
+
+Teach objtool about this new code sequence.
+
+Reported-and-test-by: Matthias Kaehlcke <mka@chromium.org>
+Signed-off-by: Josh Poimboeuf <jpoimboe@redhat.com>
+---
+ tools/objtool/check.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/tools/objtool/check.c b/tools/objtool/check.c
+index 92b6a2c21631..f02df714c18e 100644
+--- a/tools/objtool/check.c
++++ b/tools/objtool/check.c
+@@ -1386,6 +1386,17 @@ static int update_insn_state(struct instruction *insn, struct insn_state *state)
+ 				state->vals[op->dest.reg].offset = -state->stack_size;
+ 			}
+ 
++			else if (op->src.reg == CFI_BP && op->dest.reg == CFI_SP &&
++				 cfa->base == CFI_BP) {
++
++				/*
++				 * mov %rbp, %rsp
++				 *
++				 * Restore the original stack pointer (clang).
++				 */
++				state->stack_size = -state->regs[CFI_BP].offset;
++			}
++
+ 			else if (op->dest.reg == cfa->base) {
+ 
+ 				/* mov %reg, %rsp */
