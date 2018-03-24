@@ -1,0 +1,31 @@
+From: Dave Chinner <david@fromorbit.com>
+To: linux-xfs@vger.kernel.org
+Subject: [2/2] xfs: remove dead inode version setting code
+Date: Wed, 21 Mar 2018 18:52:48 +1100
+
+From: Dave Chinner <dchinner@redhat.com>
+
+We can only get into the branch if CRCs are enabled, so there's no
+need to check inside the branch for CRCs being enabled....
+
+Signed-Off-By: Dave Chinner <dchinner@redhat.com>
+---
+ fs/xfs/libxfs/xfs_inode_buf.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_inode_buf.c b/fs/xfs/libxfs/xfs_inode_buf.c
+index 4fe17b368316..b646bf633f66 100644
+--- a/fs/xfs/libxfs/xfs_inode_buf.c
++++ b/fs/xfs/libxfs/xfs_inode_buf.c
+@@ -564,10 +564,7 @@ xfs_iread(
+ 		/* initialise the on-disk inode core */
+ 		memset(&ip->i_d, 0, sizeof(ip->i_d));
+ 		VFS_I(ip)->i_generation = prandom_u32();
+-		if (xfs_sb_version_hascrc(&mp->m_sb))
+-			ip->i_d.di_version = 3;
+-		else
+-			ip->i_d.di_version = 2;
++		ip->i_d.di_version = 3;
+ 		return 0;
+ 	}
+ 
