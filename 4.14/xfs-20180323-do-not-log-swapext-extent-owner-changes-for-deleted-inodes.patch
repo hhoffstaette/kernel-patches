@@ -14,6 +14,7 @@ i_mode == 0.
 Strip the extent owner changes out of the logged fields when
 we're freeing the inode to avoid this.
 
+[HH: fixed up bitwise negation snafu]
 Signed-off-by: Eric Sandeen <sandeen@redhat.com>
 ---
 
@@ -29,7 +30,7 @@ index 604ee38..d17e2d5 100644
  	ip->i_d.di_aformat = XFS_DINODE_FMT_EXTENTS;
 +
 +	/* Don't attempt to replay owner changes for a deleted inode */
-+	ip->i_itemp->ili_fields &= !(XFS_ILOG_AOWNER|XFS_ILOG_DOWNER);
++	ip->i_itemp->ili_fields &= ~(XFS_ILOG_AOWNER|XFS_ILOG_DOWNER);
 +
  	/*
  	 * Bump the generation count so no one will be confused
