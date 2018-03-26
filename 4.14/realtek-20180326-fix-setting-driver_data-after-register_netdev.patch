@@ -1,0 +1,47 @@
+From: Heiner Kallweit <hkallweit1@gmail.com>
+To: Realtek linux nic maintainers <nic_swsd@realtek.com>,
+ David Miller <davem@davemloft.net>
+Cc: "netdev@vger.kernel.org" <netdev@vger.kernel.org>
+Subject: [net] r8169: fix setting driver_data after register_netdev
+Date: Mon, 26 Mar 2018 00:32:42 +0200
+
+pci_set_drvdata() is called only after registering the net_device,
+therefore we could run into a NPE if one of the functions using
+driver_data is called before it's set.
+
+Fix this by calling pci_set_drvdata() before registering the
+net_device.
+
+This fix is a candidate for stable. As far as I can see the
+bug has been there in kernel version 3.2 already, therefore
+I can't provide a reference which commit is fixed by it.
+
+The fix may need small adjustments per kernel version because
+due to other changes the label which is jumped to if
+register_netdev() fails has changed over time.
+
+Reported-by: David Miller <davem@davemloft.net>
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+---
+ drivers/net/ethernet/realtek/r8169.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 630409e0..604ae783 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -8378,12 +8378,12 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 	if (!tp->counters)
+ 		return -ENOMEM;
+ 
++	pci_set_drvdata(pdev, dev);
++
+ 	rc = register_netdev(dev);
+ 	if (rc < 0)
+ 		return rc;
+ 
+-	pci_set_drvdata(pdev, dev);
+-
+ 	netif_info(tp, probe, dev, "%s at 0x%p, %pM, XID %08x IRQ %d\n",
+ 		   rtl_chip_infos[chipset].name, tp->mmio_addr, dev->dev_addr,
+ 		   (u32)(RTL_R32(tp, TxConfig) & 0x9cf0f8ff),
