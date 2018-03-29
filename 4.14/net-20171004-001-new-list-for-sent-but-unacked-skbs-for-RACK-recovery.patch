@@ -32,6 +32,7 @@ we need to make sure _skb_refdst and destructor are properly zeroed
 before skb is cloned/copied at transmit, and before being freed.
 
 [HH: backported to 4.14.x]
+[HH: rebased to 4.14.32]
 Signed-off-by: Eric Dumazet <edumazet@google.com>
 Signed-off-by: Yuchung Cheng <ycheng@google.com>
 Signed-off-by: Neal Cardwell <ncardwell@google.com>
@@ -91,9 +92,9 @@ diff --git a/include/net/tcp.h b/include/net/tcp.h
 index 426c2e9..3b16f35 100644
 --- a/include/net/tcp.h
 +++ b/include/net/tcp.h
-@@ -1589,14 +1589,34 @@ enum tcp_chrono {
- void tcp_chrono_start(struct sock *sk, const enum tcp_chrono type);
- void tcp_chrono_stop(struct sock *sk, const enum tcp_chrono type);
+@@ -1589,14 +1589,34 @@ static inline void tcp_init_send_head(struct sock *sk)
+ 	sk->sk_send_head = NULL;
+ }
  
 +/* This helper is needed, because skb->tcp_tsorted_anchor uses
 + * the same memory storage than skb->destructor/_skb_refdst
@@ -126,7 +127,7 @@ index 426c2e9..3b16f35 100644
 +	INIT_LIST_HEAD(&tcp_sk(sk)->tsorted_sent_queue);
  	sk_mem_reclaim(sk);
  	tcp_clear_all_retrans_hints(tcp_sk(sk));
- }
+ 	tcp_init_send_head(sk);
 @@ -1711,6 +1731,8 @@ static inline void tcp_insert_write_queue_before(struct sk_buff *new,
  
  static inline void tcp_unlink_write_queue(struct sk_buff *skb, struct sock *sk)
