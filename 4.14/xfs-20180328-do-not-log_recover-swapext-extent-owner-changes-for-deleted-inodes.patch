@@ -1,0 +1,56 @@
+From:   Eric Sandeen <sandeen@sandeen.net>
+To:     Eric Sandeen <sandeen@redhat.com>,
+        linux-xfs <linux-xfs@vger.kernel.org>
+Subject: [PATCH V3] xfs: do not log/recover swapext extent owner changes for deleted inodes
+Date:   Wed, 28 Mar 2018 17:12:44 -0500
+
+Today if we run xfs_fsr and crash[1], log replay can fail because
+the recovery code tries to instantiate the donor inode from
+disk to replay the swapext, but it's been deleted and we get
+verifier failures when we try to read the inode off disk with
+i_mode == 0.
+
+This fixes both sides: We don't log the swapext change if the
+inode has been deleted, and we don't try to recover it either.
+
+[1] or if systemd doesn't uncleanly unmount root, as is its wont
+    to do ...
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+---
+
+V2: Move the fix to xfs_ifree per bfoster's suggestion
+V3: Fix my eeeediot logic thinko, and add back in replay fix
+    so that people already in this situation can recover.
+    Tidy up commit log a bit.
+
+diff --git a/fs/xfs/xfs_inode.c b/fs/xfs/xfs_inode.c
+index 604ee38..d17e2d5 100644
+--- a/fs/xfs/xfs_inode.c
++++ b/fs/xfs/xfs_inode.c
+@@ -2470,6 +2470,10 @@
+ 	ip->i_d.di_forkoff = 0;		/* mark the attr fork not in use */
+ 	ip->i_d.di_format = XFS_DINODE_FMT_EXTENTS;
+ 	ip->i_d.di_aformat = XFS_DINODE_FMT_EXTENTS;
++
++	/* Don't attempt to replay owner changes for a deleted inode */
++	ip->i_itemp->ili_fields &= ~(XFS_ILOG_AOWNER|XFS_ILOG_DOWNER);
++
+ 	/*
+ 	 * Bump the generation count so no one will be confused
+ 	 * by reincarnations of this inode.
+diff --git a/fs/xfs/xfs_log_recover.c b/fs/xfs/xfs_log_recover.c
+index 5e219d9..d0e33b9 100644
+--- a/fs/xfs/xfs_log_recover.c
++++ b/fs/xfs/xfs_log_recover.c
+@@ -3199,7 +3199,9 @@ xlog_recover_inode_pass2(
+ 	}
+ 
+ out_owner_change:
+-	if (in_f->ilf_fields & (XFS_ILOG_DOWNER|XFS_ILOG_AOWNER))
++	/* Recover the swapext owner change unless inode has been deleted */
++	if ((in_f->ilf_fields & (XFS_ILOG_DOWNER|XFS_ILOG_AOWNER)) &&
++	    (dip->di_mode != 0))
+ 		error = xfs_recover_inode_owner_change(mp, dip, in_f,
+ 						       buffer_list);
+ 	/* re-generate the checksum. */
