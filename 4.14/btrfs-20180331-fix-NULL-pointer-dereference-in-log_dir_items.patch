@@ -1,0 +1,33 @@
+From: Liu Bo <bo.liu@linux.alibaba.com>
+To: <linux-btrfs@vger.kernel.org>
+Subject: Btrfs: fix NULL pointer dereference in log_dir_items
+Date: Sat, 31 Mar 2018 06:11:57 +0800
+
+0, 1 and <0 can be returned by btrfs_next_leaf(), and when <0 is
+returned, path->nodes[0] could be NULL, log_dir_items lacks such a
+check for <0 and we may run into a null pointer dereference panic.
+
+Signed-off-by: Liu Bo <bo.liu@linux.alibaba.com>
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+---
+ fs/btrfs/tree-log.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index 4344577..4ee9431 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -3518,8 +3518,11 @@ static noinline int log_dir_items(struct btrfs_trans_handle *trans,
+ 		 * from this directory and from this transaction
+ 		 */
+ 		ret = btrfs_next_leaf(root, path);
+-		if (ret == 1) {
+-			last_offset = (u64)-1;
++		if (ret) {
++			if (ret == 1)
++				last_offset = (u64)-1;
++			else
++				err = ret;
+ 			goto done;
+ 		}
+ 		btrfs_item_key_to_cpu(path->nodes[0], &tmp, path->slots[0]);
