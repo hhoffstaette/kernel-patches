@@ -1,0 +1,66 @@
+From 93a00d4d613fb6363c618c941b0283c2df6bd64e Mon Sep 17 00:00:00 2001
+From: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
+Date: Thu, 1 Mar 2018 13:27:35 +0200
+Subject: r8169: switch to device-managed functions in probe (part 2)
+
+This is a follow up to the commit
+
+  4c45d24a759d ("r8169: switch to device-managed functions in probe")
+
+to move towards managed resources even more.
+
+Cc: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 16 ++++------------
+ 1 file changed, 4 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index b6098e0..7055db1 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -8169,7 +8169,6 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 	struct rtl8169_private *tp;
+ 	struct mii_if_info *mii;
+ 	struct net_device *dev;
+-	void __iomem *ioaddr;
+ 	int chipset, i;
+ 	int rc;
+ 
+@@ -8227,20 +8226,13 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 		return -ENODEV;
+ 	}
+ 
+-	rc = pci_request_regions(pdev, MODULENAME);
++	rc = pcim_iomap_regions(pdev, BIT(region), MODULENAME);
+ 	if (rc < 0) {
+-		netif_err(tp, probe, dev, "could not request regions\n");
++		netif_err(tp, probe, dev, "cannot remap MMIO, aborting\n");
+ 		return rc;
+ 	}
+ 
+-	/* ioremap MMIO region */
+-	ioaddr = devm_ioremap(&pdev->dev, pci_resource_start(pdev, region),
+-			      R8169_REGS_SIZE);
+-	if (!ioaddr) {
+-		netif_err(tp, probe, dev, "cannot remap MMIO, aborting\n");
+-		return -EIO;
+-	}
+-	tp->mmio_addr = ioaddr;
++	tp->mmio_addr = pcim_iomap_table(pdev)[region];
+ 
+ 	if (!pci_is_pcie(pdev))
+ 		netif_info(tp, probe, dev, "not PCI Express\n");
+@@ -8412,7 +8404,7 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 		return rc;
+ 
+ 	netif_info(tp, probe, dev, "%s at 0x%p, %pM, XID %08x IRQ %d\n",
+-		   rtl_chip_infos[chipset].name, ioaddr, dev->dev_addr,
++		   rtl_chip_infos[chipset].name, tp->mmio_addr, dev->dev_addr,
+ 		   (u32)(RTL_R32(tp, TxConfig) & 0x9cf0f8ff),
+ 		   pci_irq_vector(pdev, 0));
+ 	if (rtl_chip_infos[chipset].jumbo_max != JUMBO_1K) {
+-- 
+cgit v1.1
+
