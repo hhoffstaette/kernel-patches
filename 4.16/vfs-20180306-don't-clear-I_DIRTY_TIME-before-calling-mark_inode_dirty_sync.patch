@@ -1,0 +1,51 @@
+From 0d07e5573ffb3f3b941ca4c2df44f386319b1686 Mon Sep 17 00:00:00 2001
+From: Christoph Hellwig <hch@lst.de>
+Date: Tue, 6 Mar 2018 17:03:31 -0800
+Subject: fs: don't clear I_DIRTY_TIME before calling mark_inode_dirty_sync
+
+__mark_inode_dirty already takes care of that, and for the XFS lazytime
+implementation we need to know that ->dirty_inode was called because
+I_DIRTY_TIME was set.
+
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+Reviewed-by: Jan Kara <jack@suse.cz>
+Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+ fs/inode.c | 1 -
+ fs/sync.c  | 6 +-----
+ 2 files changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index ef36236..6295f14 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -1533,7 +1533,6 @@ retry:
+ 	if (atomic_dec_and_lock(&inode->i_count, &inode->i_lock)) {
+ 		if (inode->i_nlink && (inode->i_state & I_DIRTY_TIME)) {
+ 			atomic_inc(&inode->i_count);
+-			inode->i_state &= ~I_DIRTY_TIME;
+ 			spin_unlock(&inode->i_lock);
+ 			trace_writeback_lazytime_iput(inode);
+ 			mark_inode_dirty_sync(inode);
+diff --git a/fs/sync.c b/fs/sync.c
+index 6e0a2cb..09f0259 100644
+--- a/fs/sync.c
++++ b/fs/sync.c
+@@ -187,12 +187,8 @@ int vfs_fsync_range(struct file *file, loff_t start, loff_t end, int datasync)
+ 
+ 	if (!file->f_op->fsync)
+ 		return -EINVAL;
+-	if (!datasync && (inode->i_state & I_DIRTY_TIME)) {
+-		spin_lock(&inode->i_lock);
+-		inode->i_state &= ~I_DIRTY_TIME;
+-		spin_unlock(&inode->i_lock);
++	if (!datasync && (inode->i_state & I_DIRTY_TIME))
+ 		mark_inode_dirty_sync(inode);
+-	}
+ 	return file->f_op->fsync(file, start, end, datasync);
+ }
+ EXPORT_SYMBOL(vfs_fsync_range);
+-- 
+cgit v1.1
+
