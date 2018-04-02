@@ -1,0 +1,68 @@
+From 4df0f7f145f2ac143039e2c569d17a25354f411d Mon Sep 17 00:00:00 2001
+From: Dave Chinner <dchinner@redhat.com>
+Date: Tue, 6 Mar 2018 17:07:22 -0800
+Subject: xfs: fix transaction allocation deadlock in IO path
+
+xfs_trans_alloc() does GFP_KERNEL allocation, and we can call it
+while holding pages locked for writeback in the ->writepages path.
+The memory allocation is allowed to wait on pages under writeback,
+and so can wait on pages that are tagged as writeback by the
+caller.
+
+This affects both pre-IO submission and post-IO submission paths.
+Hence xfs_setsize_trans_alloc(), xfs_reflink_end_cow(),
+xfs_iomap_write_unwritten() and xfs_reflink_cancel_cow_range().
+xfs_iomap_write_unwritten() already does the right thing, but the
+others don't. Fix them.
+
+Signed-Off-By: Dave Chinner <dchinner@redhat.com>
+Fixes: 281627df3eb5 ("xfs: log file size updates at I/O completion time")
+Fixes: 43caeb187deb9 ("xfs: move mappings from cow fork to data fork after copy-write)"
+Reviewed-by: Eric Sandeen <sandeen@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+ fs/xfs/xfs_aops.c    | 3 ++-
+ fs/xfs/xfs_reflink.c | 4 ++--
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/fs/xfs/xfs_aops.c b/fs/xfs/xfs_aops.c
+index 9c6a830..a0afb64 100644
+--- a/fs/xfs/xfs_aops.c
++++ b/fs/xfs/xfs_aops.c
+@@ -209,7 +209,8 @@ xfs_setfilesize_trans_alloc(
+ 	struct xfs_trans	*tp;
+ 	int			error;
+ 
+-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_fsyncts, 0, 0, 0, &tp);
++	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_fsyncts, 0, 0,
++				XFS_TRANS_NOFS, &tp);
+ 	if (error)
+ 		return error;
+ 
+diff --git a/fs/xfs/xfs_reflink.c b/fs/xfs/xfs_reflink.c
+index 2702469..8c16177 100644
+--- a/fs/xfs/xfs_reflink.c
++++ b/fs/xfs/xfs_reflink.c
+@@ -668,7 +668,7 @@ xfs_reflink_cancel_cow_range(
+ 
+ 	/* Start a rolling transaction to remove the mappings */
+ 	error = xfs_trans_alloc(ip->i_mount, &M_RES(ip->i_mount)->tr_write,
+-			0, 0, 0, &tp);
++			0, 0, XFS_TRANS_NOFS, &tp);
+ 	if (error)
+ 		goto out;
+ 
+@@ -741,7 +741,7 @@ xfs_reflink_end_cow(
+ 			(unsigned int)(end_fsb - offset_fsb),
+ 			XFS_DATA_FORK);
+ 	error = xfs_trans_alloc(ip->i_mount, &M_RES(ip->i_mount)->tr_write,
+-			resblks, 0, XFS_TRANS_RESERVE, &tp);
++			resblks, 0, XFS_TRANS_RESERVE | XFS_TRANS_NOFS, &tp);
+ 	if (error)
+ 		goto out;
+ 
+-- 
+cgit v1.1
+
