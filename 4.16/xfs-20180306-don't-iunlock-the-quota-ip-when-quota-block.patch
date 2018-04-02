@@ -1,0 +1,37 @@
+From 8241f7f983b972823431d762f7c3c9fe0f2a7b00 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Tue, 6 Mar 2018 17:08:30 -0800
+Subject: xfs: don't iunlock the quota ip when quota block
+
+In xfs_qm_dqalloc, we join the locked quota inode to the transaction we
+use to allocate blocks.  If the allocation or mapping fails, we're not
+allowed to unlock the inode because the transaction code is in charge of
+unlocking it for us.  Therefore, remove the iunlock call to avoid
+blowing asserts about unbalanced locking + mount hang.
+
+Found by corrupting the AGF and allocating space in the filesystem
+(quotacheck) immediately after mount.  The upcoming agfl wrapping fixup
+test will trigger this scenario.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+---
+ fs/xfs/xfs_dquot.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/fs/xfs/xfs_dquot.c b/fs/xfs/xfs_dquot.c
+index 43572f8..2410acc 100644
+--- a/fs/xfs/xfs_dquot.c
++++ b/fs/xfs/xfs_dquot.c
+@@ -394,8 +394,6 @@ xfs_qm_dqalloc(
+ error1:
+ 	xfs_defer_cancel(&dfops);
+ error0:
+-	xfs_iunlock(quotip, XFS_ILOCK_EXCL);
+-
+ 	return error;
+ }
+ 
+-- 
+cgit v1.1
+
