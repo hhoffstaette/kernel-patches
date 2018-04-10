@@ -1,0 +1,38 @@
+From bc5511d0eda1c2534aa3cedb485eae1fc354f2dc Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <nborisov@suse.com>
+Date: Tue, 23 Jan 2018 14:46:53 +0200
+Subject: btrfs: Use schedule_timeout_interruptible
+
+Instead of manually fiddling with the state of the task
+(RUNNING->INTERRUPTIBLE->RUNNING) again just use schedule_timeout_interruptible
+which adjusts the task state as needed. No functional changes.
+
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+Reviewed-by: Josef Bacik <jbacik@fb.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index b23961a..fa80de5 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1800,12 +1800,10 @@ sleep:
+ 		if (unlikely(test_bit(BTRFS_FS_STATE_ERROR,
+ 				      &fs_info->fs_state)))
+ 			btrfs_cleanup_transaction(fs_info);
+-		set_current_state(TASK_INTERRUPTIBLE);
+ 		if (!kthread_should_stop() &&
+ 				(!btrfs_transaction_blocked(fs_info) ||
+ 				 cannot_commit))
+-			schedule_timeout(delay);
+-		__set_current_state(TASK_RUNNING);
++			schedule_timeout_interruptible(delay);
+ 	} while (!kthread_should_stop());
+ 	return 0;
+ }
+-- 
+cgit v1.1
+
