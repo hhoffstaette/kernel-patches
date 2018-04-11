@@ -13,6 +13,7 @@ When the probe error path is reached, the net_device isn't
 registered yet. Therefore reordering the call to netif_napi_del
 shouldn't cause any issues.
 
+[HH: rebased for 4.14.34]
 Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
 ---
 v2:
@@ -25,7 +26,7 @@ diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek
 index 3c7d90d3a..857f67beb 100644
 --- a/drivers/net/ethernet/realtek/r8169.c
 +++ b/drivers/net/ethernet/realtek/r8169.c
-@@ -8672,14 +8672,12 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+@@ -8672,16 +8672,14 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
  	tp->counters = dmam_alloc_coherent (&pdev->dev, sizeof(*tp->counters),
  					    &tp->counters_phys_addr,
  					    GFP_KERNEL);
@@ -36,13 +37,15 @@ index 3c7d90d3a..857f67beb 100644
 +	if (!tp->counters)
 +		return -ENOMEM;
  
+ 	pci_set_drvdata(pdev, dev);
+ 
  	rc = register_netdev(dev);
  	if (rc < 0)
 -		goto err_out_msi_5;
 +		return rc;
- 
- 	pci_set_drvdata(pdev, dev);
- 
+
+ 	netif_info(tp, probe, dev, "%s at 0x%p, %pM, XID %08x IRQ %d\n",
+ 		   rtl_chip_infos[chipset].name, ioaddr, dev->dev_addr,
 @@ -8709,11 +8707,6 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
  	netif_carrier_off(dev);
  

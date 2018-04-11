@@ -12,6 +12,7 @@ functions.
 rtl_disable_msi isn't needed any longer because the release callback
 of pcim_enable_device does this implicitely.
 
+[HH: rebased for 4.14.34]
 Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
 ---
 v2:
@@ -173,8 +174,8 @@ index fc0d5fa65..3c7d90d3a 100644
 -		goto err_out_cnt_6;
 +		goto err_out_msi_5;
  
- 	pci_set_drvdata(pdev, dev);
- 
+ 	netif_info(tp, probe, dev, "%s at 0x%p, %pM, XID %08x IRQ %d\n",
+ 		   rtl_chip_infos[chipset].name, ioaddr, dev->dev_addr,
 @@ -8735,25 +8708,12 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
  
  	netif_carrier_off(dev);

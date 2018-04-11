@@ -9,6 +9,7 @@ This is a follow up to the commit
 
 to move towards managed resources even more.
 
+[HH: rebased for 4.14.34]
 Cc: Heiner Kallweit <hkallweit1@gmail.com>
 Signed-off-by: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
 Signed-off-by: David S. Miller <davem@davemloft.net>
@@ -53,7 +54,7 @@ index b6098e0..7055db1 100644
  	if (!pci_is_pcie(pdev))
  		netif_info(tp, probe, dev, "not PCI Express\n");
 @@ -8412,7 +8404,7 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
- 	pci_set_drvdata(pdev, dev);
+ 		return rc;
  
  	netif_info(tp, probe, dev, "%s at 0x%p, %pM, XID %08x IRQ %d\n",
 -		   rtl_chip_infos[chipset].name, ioaddr, dev->dev_addr,
