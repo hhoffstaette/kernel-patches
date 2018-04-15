@@ -1,0 +1,51 @@
+From: Soheil Hassas Yeganeh <soheil.kdev@gmail.com>
+Subject: [PATCH net] tcp: clear tp->packets_out when purging write queue
+Date: Sat, 14 Apr 2018 20:44:46 -0400
+Cc: ycheng@google.com, ncardwell@google.com, subashab@codeaurora.org,
+        hvtaifwkbgefbaei@gmail.com,
+        Soheil Hassas Yeganeh <soheil@google.com>,
+        Eric Dumazet <edumazet@google.com>
+To: davem@davemloft.net, netdev@vger.kernel.org
+
+From: Soheil Hassas Yeganeh <soheil@google.com>
+
+Clear tp->packets_out when purging the write queue, otherwise
+tcp_rearm_rto() mistakenly assumes TCP write queue is not empty.
+This results in NULL pointer dereference.
+
+Also, remove the redundant `tp->packets_out = 0` from
+tcp_disconnect(), since tcp_disconnect() calls
+tcp_write_queue_purge().
+
+Fixes: a27fd7a8ed38 (tcp: purge write queue upon RST)
+Reported-by: Subash Abhinov Kasiviswanathan <subashab@codeaurora.org>
+Reported-by: Sami Farin <hvtaifwkbgefbaei@gmail.com>
+Tested-by: Sami Farin <hvtaifwkbgefbaei@gmail.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: Soheil Hassas Yeganeh <soheil@google.com>
+Acked-by: Yuchung Cheng <ycheng@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+---
+ net/ipv4/tcp.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 4fa3f812b9ff8..9ce1c726185eb 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -2368,6 +2368,7 @@ void tcp_write_queue_purge(struct sock *sk)
+ 	INIT_LIST_HEAD(&tcp_sk(sk)->tsorted_sent_queue);
+ 	sk_mem_reclaim(sk);
+ 	tcp_clear_all_retrans_hints(tcp_sk(sk));
++	tcp_sk(sk)->packets_out = 0;
+ }
+ 
+ int tcp_disconnect(struct sock *sk, int flags)
+@@ -2417,7 +2418,6 @@ int tcp_disconnect(struct sock *sk, int flags)
+ 	icsk->icsk_backoff = 0;
+ 	tp->snd_cwnd = 2;
+ 	icsk->icsk_probes_out = 0;
+-	tp->packets_out = 0;
+ 	tp->snd_ssthresh = TCP_INFINITE_SSTHRESH;
+ 	tp->snd_cwnd_cnt = 0;
+ 	tp->window_clamp = 0;
