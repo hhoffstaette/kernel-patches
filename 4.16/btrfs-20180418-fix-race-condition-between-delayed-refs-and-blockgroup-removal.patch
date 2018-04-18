@@ -1,9 +1,9 @@
 From:   Nikolay Borisov <nborisov@suse.com>
-To:     osandov@osandov.com
-Cc:     linux-btrfs@vger.kernel.org, jeffm@suse.com,
+To:     dsterba@suse.cz
+Cc:     osandov@osandov.com, jeffm@suse.com, linux-btrfs@vger.kernel.org,
         Nikolay Borisov <nborisov@suse.com>
-Subject: [PATCH v2] btrfs: Fix race condition between delayed refs and blockgroup removal
-Date:   Wed, 11 Apr 2018 10:59:09 +0300
+Subject: [PATCH v3] btrfs: Fix race condition between delayed refs and blockgroup removal
+Date:   Wed, 18 Apr 2018 09:41:54 +0300
 
 When the delayed refs for a head are all run, eventually
 cleanup_ref_head is called which (in case of deletion) obtains a
@@ -46,14 +46,16 @@ Fixes: d7eae3403f46 ("Btrfs: rework delayed ref total_bytes_pinned accounting")
 Suggested-by: Omar Sandoval <osandov@osandov.com>
 Signed-off-by: Nikolay Borisov <nborisov@suse.com>
 ---
+V3:
+ * Use the logic in the if to set a 'flags' variable and call __find_space_info
+ just once. 
 
 v2: 
  * Collapsed the if/else logic in cleanup_ref_head
-
  fs/btrfs/delayed-ref.c | 19 ++++++++++++++-----
  fs/btrfs/delayed-ref.h |  1 +
- fs/btrfs/extent-tree.c | 18 +++++++++++++-----
- 3 files changed, 28 insertions(+), 10 deletions(-)
+ fs/btrfs/extent-tree.c | 16 +++++++++++-----
+ 3 files changed, 26 insertions(+), 10 deletions(-)
 
 diff --git a/fs/btrfs/delayed-ref.c b/fs/btrfs/delayed-ref.c
 index 5ac2d7909782..20fa7b4c132d 100644
@@ -136,29 +138,27 @@ index cdf4a94ce5c1..7e7bf4e66d48 100644
  };
  
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 9a05e5b5089f..349b053680c8 100644
+index 133a131c12d0..eb98f943bbed 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -2616,13 +2616,21 @@ static int cleanup_ref_head(struct btrfs_trans_handle *trans,
+@@ -2616,13 +2616,19 @@ static int cleanup_ref_head(struct btrfs_trans_handle *trans,
  	trace_run_delayed_ref_head(fs_info, head, 0);
  
  	if (head->total_ref_mod < 0) {
 -		struct btrfs_block_group_cache *cache;
 +		struct btrfs_space_info *space_info;
++		u64 flags;
  
 -		cache = btrfs_lookup_block_group(fs_info, head->bytenr);
 -		ASSERT(cache);
 -		percpu_counter_add(&cache->space_info->total_bytes_pinned,
-+		if (head->is_data) {
-+			space_info = __find_space_info(fs_info,
-+						       BTRFS_BLOCK_GROUP_DATA);
-+		} else if (head->is_system) {
-+			space_info = __find_space_info(fs_info,
-+						BTRFS_BLOCK_GROUP_SYSTEM);
-+		} else {
-+			space_info = __find_space_info(fs_info,
-+						BTRFS_BLOCK_GROUP_METADATA);
-+		}
++		if (head->is_data)
++			flags = BTRFS_BLOCK_GROUP_DATA;
++		else if (head->is_system)
++			flags = BTRFS_BLOCK_GROUP_SYSTEM;
++		else
++			flags = BTRFS_BLOCK_GROUP_METADATA;
++		space_info = __find_space_info(fs_info, flags);
 +		ASSERT(space_info);
 +		percpu_counter_add(&space_info->total_bytes_pinned,
  				   -head->num_bytes);
