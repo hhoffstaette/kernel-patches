@@ -29,7 +29,6 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - net: fixes & improvements from 4.17+ ([improved BBR ACK handling](https://groups.google.com/forum/#!topic/bbr-dev/8pgyOyUavvY))
 - pds: [PDS-mq 0.98n](http://cchalpha.blogspot.de/2018/04/pds-098n-release.html) CPU scheduler (**disabled** by default)
 - realtek: fixes & improvements from 4.17+ (interrupt handling)
-- timekeeping: improve stability of system clock
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 4.17+ (cleanups, correctness, performance, reliability)
 
