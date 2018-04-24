@@ -1,0 +1,50 @@
+From: David Sterba <dsterba@suse.com>
+To: linux-btrfs@vger.kernel.org
+Cc: David Sterba <dsterba@suse.com>
+Subject: [v2,1/3] btrfs: introduce conditional wakeup helpers
+Date: Tue, 24 Apr 2018 15:10:59 +0200
+
+Add convenience wrappers for the waitqueue management that involves
+memory barriers to prevent deadlocks. The helpers will let us remove
+barriers and the necessary comments in several places.
+
+[HH: small context fixup for 4.16.x]
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 2771cc56a622..1389942f3be1 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -3765,4 +3765,27 @@ static inline int btrfs_is_testing(struct btrfs_fs_info *fs_info)
+ #endif
+ 	return 0;
+ }
+-#endif
++ 
++static inline void cond_wake_up(struct wait_queue_head *wq)
++{
++	/*
++	 * This implies a full smp_mb barrier, see comments for
++	 * waitqueue_active why.
++	 */
++	if (wq_has_sleeper(wq))
++		wake_up(wq);
++}
++
++static inline void cond_wake_up_nomb(struct wait_queue_head *wq)
++{
++	/*
++	 * Special case for conditional wakeup where the barrier required for
++	 * waitqueue_active is implied by some of the preceding code. Eg. one
++	 * of such atomic operations (atomic_dec_and_return, ...), or a
++	 * unlock/lock sequence, etc.
++	 */
++	if (waitqueue_active(wq))
++		wake_up(wq);
++}
++
++ #endif
