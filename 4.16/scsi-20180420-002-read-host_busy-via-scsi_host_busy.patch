@@ -1,0 +1,190 @@
+From: Ming Lei <ming.lei@redhat.com>
+To: Jens Axboe <axboe@fb.com>
+Cc: linux-scsi@vger.kernel.org, linux-block@vger.kernel.org,
+ Ming Lei <ming.lei@redhat.com>, Omar Sandoval <osandov@fb.com>,
+ "Martin K. Petersen" <martin.petersen@oracle.com>,
+ James Bottomley <james.bottomley@hansenpartnership.com>,
+ Christoph Hellwig <hch@lst.de>, Don Brace <don.brace@microsemi.com>,
+ Kashyap Desai <kashyap.desai@broadcom.com>,
+ Mike Snitzer <snitzer@redhat.com>, Hannes Reinecke <hare@suse.de>,
+ Laurence Oberman <loberman@redhat.com>
+Subject: [2/3] scsi: read host_busy via scsi_host_busy()
+Date: Fri, 20 Apr 2018 14:57:41 +0800
+
+No functional change, just replace the direct read of scsi_host->host_busy
+with scsi_host_busy().
+
+Cc: Omar Sandoval <osandov@fb.com>,
+Cc: "Martin K. Petersen" <martin.petersen@oracle.com>,
+Cc: James Bottomley <james.bottomley@hansenpartnership.com>,
+Cc: Christoph Hellwig <hch@lst.de>,
+Cc: Don Brace <don.brace@microsemi.com>
+Cc: Kashyap Desai <kashyap.desai@broadcom.com>
+Cc: Mike Snitzer <snitzer@redhat.com>
+Cc: Hannes Reinecke <hare@suse.de>
+Cc: Laurence Oberman <loberman@redhat.com>
+Signed-off-by: Ming Lei <ming.lei@redhat.com>
+---
+ drivers/scsi/advansys.c                   | 8 ++++----
+ drivers/scsi/libsas/sas_scsi_host.c       | 4 ++--
+ drivers/scsi/megaraid/megaraid_sas_base.c | 2 +-
+ drivers/scsi/mpt3sas/mpt3sas_base.c       | 4 ++--
+ drivers/scsi/qlogicpti.c                  | 2 +-
+ drivers/scsi/scsi.c                       | 2 +-
+ drivers/scsi/scsi_error.c                 | 6 +++---
+ drivers/scsi/scsi_sysfs.c                 | 2 +-
+ 8 files changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/scsi/advansys.c b/drivers/scsi/advansys.c
+index 24e57e770432..38ee024cbfc7 100644
+--- a/drivers/scsi/advansys.c
++++ b/drivers/scsi/advansys.c
+@@ -2416,8 +2416,8 @@ static void asc_prt_scsi_host(struct Scsi_Host *s)
+ 	struct asc_board *boardp = shost_priv(s);
+ 
+ 	printk("Scsi_Host at addr 0x%p, device %s\n", s, dev_name(boardp->dev));
+-	printk(" host_busy %u, host_no %d,\n",
+-	       atomic_read(&s->host_busy), s->host_no);
++	printk(" host_busy %d, host_no %d,\n",
++	       scsi_host_busy(s), s->host_no);
+ 
+ 	printk(" base 0x%lx, io_port 0x%lx, irq %d,\n",
+ 	       (ulong)s->base, (ulong)s->io_port, boardp->irq);
+@@ -3182,8 +3182,8 @@ static void asc_prt_driver_conf(struct seq_file *m, struct Scsi_Host *shost)
+ 		shost->host_no);
+ 
+ 	seq_printf(m,
+-		   " host_busy %u, max_id %u, max_lun %llu, max_channel %u\n",
+-		   atomic_read(&shost->host_busy), shost->max_id,
++		   " host_busy %d, max_id %u, max_lun %llu, max_channel %u\n",
++		   scsi_host_busy(shost), shost->max_id,
+ 		   shost->max_lun, shost->max_channel);
+ 
+ 	seq_printf(m,
+diff --git a/drivers/scsi/libsas/sas_scsi_host.c b/drivers/scsi/libsas/sas_scsi_host.c
+index ceab5e5c41c2..33229348dcb6 100644
+--- a/drivers/scsi/libsas/sas_scsi_host.c
++++ b/drivers/scsi/libsas/sas_scsi_host.c
+@@ -759,7 +759,7 @@ void sas_scsi_recover_host(struct Scsi_Host *shost)
+ 	spin_unlock_irq(shost->host_lock);
+ 
+ 	SAS_DPRINTK("Enter %s busy: %d failed: %d\n",
+-		    __func__, atomic_read(&shost->host_busy), shost->host_failed);
++		    __func__, scsi_host_busy(shost), shost->host_failed);
+ 	/*
+ 	 * Deal with commands that still have SAS tasks (i.e. they didn't
+ 	 * complete via the normal sas_task completion mechanism),
+@@ -801,7 +801,7 @@ void sas_scsi_recover_host(struct Scsi_Host *shost)
+ 		goto retry;
+ 
+ 	SAS_DPRINTK("--- Exit %s: busy: %d failed: %d tries: %d\n",
+-		    __func__, atomic_read(&shost->host_busy),
++		    __func__, scsi_host_busy(shost),
+ 		    shost->host_failed, tries);
+ }
+ 
+diff --git a/drivers/scsi/megaraid/megaraid_sas_base.c b/drivers/scsi/megaraid/megaraid_sas_base.c
+index b89c6e6c0589..008a3bdfa948 100644
+--- a/drivers/scsi/megaraid/megaraid_sas_base.c
++++ b/drivers/scsi/megaraid/megaraid_sas_base.c
+@@ -2822,7 +2822,7 @@ static int megasas_reset_bus_host(struct scsi_cmnd *scmd)
+ 		"SCSI command pointer: (%p)\t SCSI host state: %d\t"
+ 		" SCSI host busy: %d\t FW outstanding: %d\n",
+ 		scmd, scmd->device->host->shost_state,
+-		atomic_read((atomic_t *)&scmd->device->host->host_busy),
++		scsi_host_busy(scmd->device->host),
+ 		atomic_read(&instance->fw_outstanding));
+ 
+ 	/*
+diff --git a/drivers/scsi/mpt3sas/mpt3sas_base.c b/drivers/scsi/mpt3sas/mpt3sas_base.c
+index 61f93a134956..b7325355df8e 100644
+--- a/drivers/scsi/mpt3sas/mpt3sas_base.c
++++ b/drivers/scsi/mpt3sas/mpt3sas_base.c
+@@ -3260,7 +3260,7 @@ _base_recovery_check(struct MPT3SAS_ADAPTER *ioc)
+ 	 * See _wait_for_commands_to_complete() call with regards to this code.
+ 	 */
+ 	if (ioc->shost_recovery && ioc->pending_io_count) {
+-		ioc->pending_io_count = atomic_read(&ioc->shost->host_busy);
++		ioc->pending_io_count = scsi_host_busy(ioc->shost);
+ 		if (ioc->pending_io_count == 0)
+ 			wake_up(&ioc->reset_wq);
+ 	}
+@@ -6658,7 +6658,7 @@ mpt3sas_wait_for_commands_to_complete(struct MPT3SAS_ADAPTER *ioc)
+ 		return;
+ 
+ 	/* pending command count */
+-	ioc->pending_io_count = atomic_read(&ioc->shost->host_busy);
++	ioc->pending_io_count = scsi_host_busy(ioc->shost);
+ 
+ 	if (!ioc->pending_io_count)
+ 		return;
+diff --git a/drivers/scsi/qlogicpti.c b/drivers/scsi/qlogicpti.c
+index cec9a14982e6..aaaaca685d65 100644
+--- a/drivers/scsi/qlogicpti.c
++++ b/drivers/scsi/qlogicpti.c
+@@ -959,7 +959,7 @@ static inline void update_can_queue(struct Scsi_Host *host, u_int in_ptr, u_int
+ 	/* Temporary workaround until bug is found and fixed (one bug has been found
+ 	   already, but fixing it makes things even worse) -jj */
+ 	int num_free = QLOGICPTI_REQ_QUEUE_LEN - REQ_QUEUE_DEPTH(in_ptr, out_ptr) - 64;
+-	host->can_queue = atomic_read(&host->host_busy) + num_free;
++	host->can_queue = scsi_host_busy(host) + num_free;
+ 	host->sg_tablesize = QLOGICPTI_MAX_SG(num_free);
+ }
+ 
+diff --git a/drivers/scsi/scsi.c b/drivers/scsi/scsi.c
+index 4c60c260c5da..a15d078321a2 100644
+--- a/drivers/scsi/scsi.c
++++ b/drivers/scsi/scsi.c
+@@ -167,7 +167,7 @@ void scsi_log_completion(struct scsi_cmnd *cmd, int disposition)
+ 			if (level > 3)
+ 				scmd_printk(KERN_INFO, cmd,
+ 					    "scsi host busy %d failed %d\n",
+-					    atomic_read(&cmd->device->host->host_busy),
++					    scsi_host_busy(cmd->device->host),
+ 					    cmd->device->host->host_failed);
+ 		}
+ 	}
+diff --git a/drivers/scsi/scsi_error.c b/drivers/scsi/scsi_error.c
+index 946039117bf4..bc06e465dc56 100644
+--- a/drivers/scsi/scsi_error.c
++++ b/drivers/scsi/scsi_error.c
+@@ -65,7 +65,7 @@ void scsi_eh_wakeup(struct Scsi_Host *shost)
+ {
+ 	lockdep_assert_held(shost->host_lock);
+ 
+-	if (atomic_read(&shost->host_busy) == shost->host_failed) {
++	if (scsi_host_busy(shost) == shost->host_failed) {
+ 		trace_scsi_eh_wakeup(shost);
+ 		wake_up_process(shost->ehandler);
+ 		SCSI_LOG_ERROR_RECOVERY(5, shost_printk(KERN_INFO, shost,
+@@ -2152,7 +2152,7 @@ int scsi_error_handler(void *data)
+ 			break;
+ 
+ 		if ((shost->host_failed == 0 && shost->host_eh_scheduled == 0) ||
+-		    shost->host_failed != atomic_read(&shost->host_busy)) {
++		    shost->host_failed != scsi_host_busy(shost)) {
+ 			SCSI_LOG_ERROR_RECOVERY(1,
+ 				shost_printk(KERN_INFO, shost,
+ 					     "scsi_eh_%d: sleeping\n",
+@@ -2167,7 +2167,7 @@ int scsi_error_handler(void *data)
+ 				     "scsi_eh_%d: waking up %d/%d/%d\n",
+ 				     shost->host_no, shost->host_eh_scheduled,
+ 				     shost->host_failed,
+-				     atomic_read(&shost->host_busy)));
++				     scsi_host_busy(shost)));
+ 
+ 		/*
+ 		 * We have a host that is failing for some reason.  Figure out
+diff --git a/drivers/scsi/scsi_sysfs.c b/drivers/scsi/scsi_sysfs.c
+index 1e36c9a9ad17..016a1c7930a8 100644
+--- a/drivers/scsi/scsi_sysfs.c
++++ b/drivers/scsi/scsi_sysfs.c
+@@ -382,7 +382,7 @@ static ssize_t
+ show_host_busy(struct device *dev, struct device_attribute *attr, char *buf)
+ {
+ 	struct Scsi_Host *shost = class_to_shost(dev);
+-	return snprintf(buf, 20, "%d\n", atomic_read(&shost->host_busy));
++	return snprintf(buf, 20, "%d\n", scsi_host_busy(shost));
+ }
+ static DEVICE_ATTR(host_busy, S_IRUGO, show_host_busy, NULL);
+ 
