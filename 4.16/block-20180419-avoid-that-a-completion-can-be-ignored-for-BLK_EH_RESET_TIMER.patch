@@ -1,13 +1,7 @@
+From 4acd555fa13087347b276cbd3573acc812e2dcae Mon Sep 17 00:00:00 2001
 From: Bart Van Assche <bart.vanassche@wdc.com>
-Subject: [PATCH v6] blk-mq: Avoid that a completion can be ignored for BLK_EH_RESET_TIMER
 Date: Thu, 19 Apr 2018 09:43:53 -0700
-Cc: linux-block@vger.kernel.org, Christoph Hellwig <hch@lst.de>,
-        Bart Van Assche <bart.vanassche@wdc.com>,
-        Tejun Heo <tj@kernel.org>, Ming Lei <ming.lei@redhat.com>,
-        Sagi Grimberg <sagi@grimberg.me>,
-        Israel Rukshin <israelr@mellanox.com>,
-        Max Gurtovoy <maxg@mellanox.com>, stable@vger.kernel.org
-To: Jens Axboe <axboe@kernel.dk>
+Subject: [PATCH] blk-mq: Avoid that a completion can be ignored for BLK_EH_RESET_TIMER
 
 The blk-mq timeout handling code ignores completions that occur after
 blk_mq_check_expired() has been called and before blk_mq_rq_timed_out()
@@ -40,53 +34,22 @@ Cc: Sagi Grimberg <sagi@grimberg.me>
 Cc: Israel Rukshin <israelr@mellanox.com>,
 Cc: Max Gurtovoy <maxg@mellanox.com>
 Cc: <stable@vger.kernel.org> # v4.16
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
 ---
-
-Changes compared to v5:
-- Restored the synchronize_rcu() call between marking a request for timeout
-  handling and the actual timeout handling to avoid that timeout handling
-  starts while .queue_rq() is still in progress if the timeout is very short.
-- Only use cmpxchg() if another context could attempt to change the request
-  state concurrently. Use WRITE_ONCE() otherwise.
-
-Changes compared to v4:
-- Addressed multiple review comments from Christoph. The most important are
-  that atomic_long_cmpxchg() has been changed into cmpxchg() and also that
-  there is now a nice and clean split between the legacy and blk-mq versions
-  of blk_add_timer().
-- Changed the patch name and modified the patch description because there is
-  disagreement about whether or not the v4.16 blk-mq core can complete a
-  single request twice. Kept the "Cc: stable" tag because of
-  https://bugzilla.kernel.org/show_bug.cgi?id=199077.
-
-Changes compared to v3 (see also https://www.mail-archive.com/linux-block@vger.kernel.org/msg20073.html):
-- Removed the spinlock again that was introduced to protect the request state.
-  v4 uses atomic_long_cmpxchg() instead.
-- Split __deadline into two variables - one for the legacy block layer and one
-  for blk-mq.
-
-Changes compared to v2 (https://www.mail-archive.com/linux-block@vger.kernel.org/msg18338.html):
-- Rebased and retested on top of kernel v4.16.
-
-Changes compared to v1 (https://www.mail-archive.com/linux-block@vger.kernel.org/msg18089.html):
-- Removed the gstate and aborted_gstate members of struct request and used
-  the __deadline member to encode both the generation and state information.
-
-
  block/blk-core.c       |   6 --
  block/blk-mq-debugfs.c |   1 -
- block/blk-mq.c         | 158 ++++++++++---------------------------------------
- block/blk-mq.h         |  85 +++++++++++++++++---------
- block/blk-timeout.c    |  89 ++++++++++++++++------------
- block/blk.h            |  13 ++--
- include/linux/blkdev.h |  29 +++------
- 7 files changed, 154 insertions(+), 227 deletions(-)
+ block/blk-mq.c         | 175 ++++++++++++-------------------------------------
+ block/blk-mq.h         |  92 ++++++++++++++++++--------
+ block/blk-timeout.c    |  89 ++++++++++++++-----------
+ block/blk.h            |  21 +++---
+ include/linux/blkdev.h |  42 ++++++------
+ 7 files changed, 190 insertions(+), 236 deletions(-)
 
 diff --git a/block/blk-core.c b/block/blk-core.c
-index de90ecab61cd..730a8e3be7ce 100644
+index 85909b431eb0d..b19de74dfc6c9 100644
 --- a/block/blk-core.c
 +++ b/block/blk-core.c
-@@ -200,12 +200,6 @@ void blk_rq_init(struct request_queue *q, struct request *rq)
+@@ -199,12 +199,6 @@ void blk_rq_init(struct request_queue *q, struct request *rq)
  	rq->start_time = jiffies;
  	set_start_time_ns(rq);
  	rq->part = NULL;
@@ -100,10 +63,10 @@ index de90ecab61cd..730a8e3be7ce 100644
  EXPORT_SYMBOL(blk_rq_init);
  
 diff --git a/block/blk-mq-debugfs.c b/block/blk-mq-debugfs.c
-index adb8d6f00098..529383841b3b 100644
+index 3080e18cb8590..ffa622366922f 100644
 --- a/block/blk-mq-debugfs.c
 +++ b/block/blk-mq-debugfs.c
-@@ -346,7 +346,6 @@ static const char *const rqf_name[] = {
+@@ -344,7 +344,6 @@ static const char *const rqf_name[] = {
  	RQF_NAME(STATS),
  	RQF_NAME(SPECIAL_PAYLOAD),
  	RQF_NAME(ZONE_WRITE_LOCKED),
@@ -112,10 +75,19 @@ index adb8d6f00098..529383841b3b 100644
  };
  #undef RQF_NAME
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index bb7f59d319fa..6f20845827f4 100644
+index 9ce9cac16c3f5..2732dd5ee9180 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
-@@ -481,7 +481,8 @@ void blk_mq_free_request(struct request *rq)
+@@ -317,7 +317,7 @@ static struct request *blk_mq_rq_ctx_init(struct blk_mq_alloc_data *data,
+ 	rq->special = NULL;
+ 	/* tag was already set */
+ 	rq->extra_len = 0;
+-	rq->__deadline = 0;
++	rq->das.das = 0;
+ 
+ 	INIT_LIST_HEAD(&rq->timeout_list);
+ 	rq->timeout = 0;
+@@ -493,7 +493,8 @@ void blk_mq_free_request(struct request *rq)
  	if (blk_rq_rl(rq))
  		blk_put_rl(blk_rq_rl(rq));
  
@@ -125,7 +97,7 @@ index bb7f59d319fa..6f20845827f4 100644
  	if (rq->tag != -1)
  		blk_mq_put_tag(hctx, hctx->tags, ctx, rq->tag);
  	if (sched_tag != -1)
-@@ -527,8 +528,7 @@ static void __blk_mq_complete_request(struct request *rq)
+@@ -539,8 +540,7 @@ static void __blk_mq_complete_request(struct request *rq)
  	bool shared = false;
  	int cpu;
  
@@ -135,7 +107,7 @@ index bb7f59d319fa..6f20845827f4 100644
  
  	if (rq->internal_tag != -1)
  		blk_mq_sched_completed_request(rq);
-@@ -577,36 +577,6 @@ static void hctx_lock(struct blk_mq_hw_ctx *hctx, int *srcu_idx)
+@@ -589,36 +589,6 @@ static void hctx_lock(struct blk_mq_hw_ctx *hctx, int *srcu_idx)
  		*srcu_idx = srcu_read_lock(hctx->srcu);
  }
  
@@ -172,7 +144,7 @@ index bb7f59d319fa..6f20845827f4 100644
  /**
   * blk_mq_complete_request - end I/O on a request
   * @rq:		the request being processed
-@@ -618,27 +588,12 @@ static u64 blk_mq_rq_aborted_gstate(struct request *rq)
+@@ -630,27 +600,12 @@ static u64 blk_mq_rq_aborted_gstate(struct request *rq)
  void blk_mq_complete_request(struct request *rq)
  {
  	struct request_queue *q = rq->q;
@@ -201,7 +173,7 @@ index bb7f59d319fa..6f20845827f4 100644
  }
  EXPORT_SYMBOL(blk_mq_complete_request);
  
-@@ -662,27 +617,7 @@ void blk_mq_start_request(struct request *rq)
+@@ -674,27 +629,7 @@ void blk_mq_start_request(struct request *rq)
  		wbt_issue(q->rq_wb, &rq->issue_stat);
  	}
  
@@ -230,7 +202,7 @@ index bb7f59d319fa..6f20845827f4 100644
  
  	if (q->dma_drain_size && blk_rq_bytes(rq)) {
  		/*
-@@ -695,22 +630,19 @@ void blk_mq_start_request(struct request *rq)
+@@ -707,22 +642,19 @@ void blk_mq_start_request(struct request *rq)
  }
  EXPORT_SYMBOL(blk_mq_start_request);
  
@@ -257,7 +229,7 @@ index bb7f59d319fa..6f20845827f4 100644
  		if (q->dma_drain_size && blk_rq_bytes(rq))
  			rq->nr_phys_segments--;
  	}
-@@ -819,8 +751,6 @@ static void blk_mq_rq_timed_out(struct request *req, bool reserved)
+@@ -831,8 +763,6 @@ static void blk_mq_rq_timed_out(struct request *req, bool reserved)
  	const struct blk_mq_ops *ops = req->q->mq_ops;
  	enum blk_eh_timer_return ret = BLK_EH_RESET_TIMER;
  
@@ -266,7 +238,7 @@ index bb7f59d319fa..6f20845827f4 100644
  	if (ops->timeout)
  		ret = ops->timeout(req, reserved);
  
-@@ -829,13 +759,7 @@ static void blk_mq_rq_timed_out(struct request *req, bool reserved)
+@@ -841,13 +771,7 @@ static void blk_mq_rq_timed_out(struct request *req, bool reserved)
  		__blk_mq_complete_request(req);
  		break;
  	case BLK_EH_RESET_TIMER:
@@ -281,7 +253,7 @@ index bb7f59d319fa..6f20845827f4 100644
  		break;
  	case BLK_EH_NOT_HANDLED:
  		break;
-@@ -849,48 +773,35 @@ static void blk_mq_check_expired(struct blk_mq_hw_ctx *hctx,
+@@ -861,48 +785,44 @@ static void blk_mq_check_expired(struct blk_mq_hw_ctx *hctx,
  		struct request *rq, void *priv, bool reserved)
  {
  	struct blk_mq_timeout_data *data = priv;
@@ -289,10 +261,7 @@ index bb7f59d319fa..6f20845827f4 100644
 -	int start;
 -
 -	might_sleep();
-+	unsigned long __deadline = READ_ONCE(rq->__deadline);
-+	unsigned long deadline = __deadline & ~RQ_STATE_MASK;
-+	enum mq_rq_state rq_state = __deadline & RQ_STATE_MASK;
- 
+-
 -	if (rq->rq_flags & RQF_MQ_TIMEOUT_EXPIRED)
 -		return;
 -
@@ -310,14 +279,28 @@ index bb7f59d319fa..6f20845827f4 100644
 -	if ((gstate & MQ_RQ_STATE_MASK) == MQ_RQ_IN_FLIGHT &&
 -	    time_after_eq(jiffies, deadline)) {
 -		blk_mq_rq_update_aborted_gstate(rq, gstate);
-+	rq->aborted_gstate = __deadline ^ (1ULL << 63);
-+	if (time_after_eq(jiffies, deadline) && rq_state == MQ_RQ_IN_FLIGHT) {
-+		rq->aborted_gstate = __deadline;
++	union blk_deadline_and_state das = READ_ONCE(rq->das);
++	unsigned long now = jiffies;
++	int32_t diff_jiffies = das.deadline - now;
++	int32_t diff_next = das.deadline - data->next;
++	enum mq_rq_state rq_state = das.state;
++
++	rq->aborted_gstate = das;
++	rq->aborted_gstate.generation ^= (1ULL << 29);
++	if (diff_jiffies <= 0 && rq_state == MQ_RQ_IN_FLIGHT) {
++		/* request timed out */
++		rq->aborted_gstate = das;
  		data->nr_expired++;
  		hctx->nr_expired++;
- 	} else if (!data->next_set || time_after(data->next, deadline)) {
- 		data->next = deadline;
+-	} else if (!data->next_set || time_after(data->next, deadline)) {
+-		data->next = deadline;
++	} else if (!data->next_set) {
++		/* data->next is not yet set; set it to deadline. */
++		data->next = now + diff_jiffies;
  		data->next_set = 1;
++	} else if (diff_next < 0) {
++		/* data->next is later than deadline; reduce data->next. */
++		data->next += diff_next;
  	}
 +
  }
@@ -325,9 +308,10 @@ index bb7f59d319fa..6f20845827f4 100644
  static void blk_mq_terminate_expired(struct blk_mq_hw_ctx *hctx,
  		struct request *rq, void *priv, bool reserved)
  {
-+	unsigned long old_val = rq->aborted_gstate;
-+	unsigned long new_val = (rq->aborted_gstate & ~RQ_STATE_MASK) |
-+		MQ_RQ_COMPLETE;
++	union blk_deadline_and_state old_val = rq->aborted_gstate;
++	union blk_deadline_and_state new_val = old_val;
++
++	new_val.state = MQ_RQ_COMPLETE;
 +
  	/*
 -	 * We marked @rq->aborted_gstate and waited for RCU.  If there were
@@ -336,16 +320,16 @@ index bb7f59d319fa..6f20845827f4 100644
 -	 * now guaranteed to see @rq->aborted_gstate and yield.  If
 -	 * @rq->aborted_gstate still matches @rq->gstate, @rq is ours.
 +	 * We marked @rq->aborted_gstate and waited for ongoing .queue_rq()
-+	 * calls. If rq->__deadline has not changed that means that it is
-+	 * now safe to change the request state and to handle the timeout.
++	 * calls. If rq->das has not changed that means that it
++	 * is now safe to change the request state and to handle the timeout.
  	 */
 -	if (!(rq->rq_flags & RQF_MQ_TIMEOUT_EXPIRED) &&
 -	    READ_ONCE(rq->gstate) == rq->aborted_gstate)
-+	if (cmpxchg(&rq->__deadline, old_val, new_val) == old_val)
++	if (cmpxchg64(&rq->das.das, old_val.das, new_val.das) == old_val.das)
  		blk_mq_rq_timed_out(rq, reserved);
  }
  
-@@ -929,10 +840,10 @@ static void blk_mq_timeout_work(struct work_struct *work)
+@@ -941,10 +861,10 @@ static void blk_mq_timeout_work(struct work_struct *work)
  		bool has_rcu = false;
  
  		/*
@@ -360,7 +344,7 @@ index bb7f59d319fa..6f20845827f4 100644
  		 */
  		queue_for_each_hw_ctx(q, hctx, i) {
  			if (!hctx->nr_expired)
-@@ -948,7 +859,7 @@ static void blk_mq_timeout_work(struct work_struct *work)
+@@ -960,7 +880,7 @@ static void blk_mq_timeout_work(struct work_struct *work)
  		if (has_rcu)
  			synchronize_rcu();
  
@@ -369,7 +353,7 @@ index bb7f59d319fa..6f20845827f4 100644
  		blk_mq_queue_tag_busy_iter(q, blk_mq_terminate_expired, NULL);
  	}
  
-@@ -2060,15 +1971,6 @@ static int blk_mq_init_request(struct blk_mq_tag_set *set, struct request *rq,
+@@ -2056,15 +1976,6 @@ static int blk_mq_init_request(struct blk_mq_tag_set *set, struct request *rq,
  			return ret;
  	}
  
@@ -386,10 +370,10 @@ index bb7f59d319fa..6f20845827f4 100644
  }
  
 diff --git a/block/blk-mq.h b/block/blk-mq.h
-index 88c558f71819..66efc8a3988b 100644
+index e1bb420dc5d6c..1cb5ca923c0c8 100644
 --- a/block/blk-mq.h
 +++ b/block/blk-mq.h
-@@ -27,18 +27,11 @@ struct blk_mq_ctx {
+@@ -30,18 +30,11 @@ struct blk_mq_ctx {
  	struct kobject		kobj;
  } ____cacheline_aligned_in_smp;
  
@@ -397,7 +381,7 @@ index 88c558f71819..66efc8a3988b 100644
 - * Bits for request->gstate.  The lower two bits carry MQ_RQ_* state value
 - * and the upper bits the generation number.
 - */
-+/* Lowest two bits of request->__deadline. */
++/* See also blk_deadline_and_state.state. */
  enum mq_rq_state {
  	MQ_RQ_IDLE		= 0,
  	MQ_RQ_IN_FLIGHT		= 1,
@@ -409,13 +393,13 @@ index 88c558f71819..66efc8a3988b 100644
  };
  
  void blk_mq_freeze_queue(struct request_queue *q);
-@@ -100,37 +93,73 @@ extern void blk_mq_hctx_kobj_init(struct blk_mq_hw_ctx *hctx);
+@@ -103,37 +96,82 @@ extern void blk_mq_hctx_kobj_init(struct blk_mq_hw_ctx *hctx);
  
  void blk_mq_release(struct request_queue *q);
  
 +/*
 + * If the state of request @rq equals @old_state, update deadline and request
-+ * state atomically to @time and @new_state. blk-mq only. cmpxchg() is only
++ * state atomically to @time and @new_state. blk-mq only. cmpxchg64() is only
 + * used if there could be a concurrent update attempt from another context.
 + */
 +static inline bool blk_mq_rq_set_deadline(struct request *rq,
@@ -423,25 +407,28 @@ index 88c558f71819..66efc8a3988b 100644
 +					  enum mq_rq_state old_state,
 +					  enum mq_rq_state new_state)
 +{
-+	unsigned long old_val, new_val;
++	union blk_deadline_and_state old_val, new_val;
 +
 +	if (old_state != MQ_RQ_IN_FLIGHT) {
-+		old_val = READ_ONCE(rq->__deadline);
-+		if ((old_val & RQ_STATE_MASK) != old_state)
++		old_val = READ_ONCE(rq->das);
++		if (old_val.state != old_state)
 +			return false;
-+		new_val = (new_time & ~RQ_STATE_MASK) |
-+			  (new_state & RQ_STATE_MASK);
-+		WRITE_ONCE(rq->__deadline, new_val);
++		new_val = old_val;
++		new_val.deadline = new_time;
++		new_val.state = new_state;
++		WRITE_ONCE(rq->das, new_val);
 +		return true;
 +	}
 +
 +	do {
-+		old_val = READ_ONCE(rq->__deadline);
-+		if ((old_val & RQ_STATE_MASK) != old_state)
++		old_val = READ_ONCE(rq->das);
++		if (old_val.state != old_state)
 +			return false;
-+		new_val = (new_time & ~RQ_STATE_MASK) |
-+			  (new_state & RQ_STATE_MASK);
-+	} while (cmpxchg(&rq->__deadline, old_val, new_val) != old_val);
++		new_val = old_val;
++		new_val.deadline = new_time;
++		new_val.state = new_state;
++	} while (cmpxchg64(&rq->das.das, old_val.das, new_val.das) !=
++		 old_val.das);
 +
 +	return true;
 +}
@@ -454,7 +441,7 @@ index 88c558f71819..66efc8a3988b 100644
 +static inline enum mq_rq_state blk_mq_rq_state(struct request *rq)
  {
 -	return READ_ONCE(rq->gstate) & MQ_RQ_STATE_MASK;
-+	return READ_ONCE(rq->__deadline) & RQ_STATE_MASK;
++	return rq->das.state;
  }
  
  /**
@@ -484,30 +471,35 @@ index 88c558f71819..66efc8a3988b 100644
 -	if (state == MQ_RQ_IN_FLIGHT) {
 -		WARN_ON_ONCE((old_val & MQ_RQ_STATE_MASK) != MQ_RQ_IDLE);
 -		new_val += MQ_RQ_GEN_INC;
--	}
++	union blk_deadline_and_state das = READ_ONCE(rq->das);
++	union blk_deadline_and_state old_val = das;
++	union blk_deadline_and_state new_val = das;
++
++	old_val.state = old_state;
++	new_val.state = new_state;
++	if (new_state == MQ_RQ_IN_FLIGHT)
++		new_val.generation++;
++	/*
++	 * For transitions from state in-flight to another state cmpxchg64()
++	 * must be used. For other state transitions it is safe to use
++	 * WRITE_ONCE().
++	 */
++	if (old_state != MQ_RQ_IN_FLIGHT) {
++		WRITE_ONCE(rq->das, new_val);
++		return true;
+ 	}
 -
 -	/* avoid exposing interim values */
 -	WRITE_ONCE(rq->gstate, new_val);
-+	unsigned long old_val = (READ_ONCE(rq->__deadline) & ~RQ_STATE_MASK) |
-+				old_state;
-+	unsigned long new_val = (old_val & ~RQ_STATE_MASK) | new_state;
-+
-+	/*
-+	 * For transitions from state in-flight to another state cmpxchg() must
-+	 * be used. For other state transitions it is safe to use WRITE_ONCE().
-+	 */
-+	if (old_state == MQ_RQ_IN_FLIGHT)
-+		return cmpxchg(&rq->__deadline, old_val, new_val) == old_val;
-+	WRITE_ONCE(rq->__deadline, new_val);
-+	return true;
++	return cmpxchg64(&rq->das.das, old_val.das, new_val.das) == old_val.das;
  }
  
  static inline struct blk_mq_ctx *__blk_mq_get_ctx(struct request_queue *q,
 diff --git a/block/blk-timeout.c b/block/blk-timeout.c
-index 50a191720055..e98da6db7d4b 100644
+index 652d4d4d3e972..efe237a421b3d 100644
 --- a/block/blk-timeout.c
 +++ b/block/blk-timeout.c
-@@ -165,8 +165,9 @@ void blk_abort_request(struct request *req)
+@@ -162,8 +162,9 @@ void blk_abort_request(struct request *req)
  		 * immediately and that scan sees the new timeout value.
  		 * No need for fancy synchronizations.
  		 */
@@ -519,7 +511,7 @@ index 50a191720055..e98da6db7d4b 100644
  	} else {
  		if (blk_mark_rq_complete(req))
  			return;
-@@ -187,52 +188,17 @@ unsigned long blk_rq_timeout(unsigned long timeout)
+@@ -184,52 +185,17 @@ unsigned long blk_rq_timeout(unsigned long timeout)
  	return timeout;
  }
  
@@ -573,7 +565,7 @@ index 50a191720055..e98da6db7d4b 100644
  	if (!timer_pending(&q->timeout) ||
  	    time_before(expiry, q->timeout.expires)) {
  		unsigned long diff = q->timeout.expires - expiry;
-@@ -247,5 +213,52 @@ void blk_add_timer(struct request *req)
+@@ -244,5 +210,52 @@ void blk_add_timer(struct request *req)
  		if (!timer_pending(&q->timeout) || (diff >= HZ / 2))
  			mod_timer(&q->timeout, expiry);
  	}
@@ -627,7 +619,7 @@ index 50a191720055..e98da6db7d4b 100644
 +	return __blk_add_timer(req);
  }
 diff --git a/block/blk.h b/block/blk.h
-index b034fd2460c4..7cd64f533a46 100644
+index b034fd2460c41..72f301abcf6dc 100644
 --- a/block/blk.h
 +++ b/block/blk.h
 @@ -170,6 +170,8 @@ static inline bool bio_integrity_endio(struct bio *bio)
@@ -639,6 +631,32 @@ index b034fd2460c4..7cd64f533a46 100644
  void blk_delete_timer(struct request *);
  
  
+@@ -191,21 +193,21 @@ void blk_account_io_done(struct request *req);
+ /*
+  * EH timer and IO completion will both attempt to 'grab' the request, make
+  * sure that only one of them succeeds. Steal the bottom bit of the
+- * __deadline field for this.
++ * das field for this.
+  */
+ static inline int blk_mark_rq_complete(struct request *rq)
+ {
+-	return test_and_set_bit(0, &rq->__deadline);
++	return test_and_set_bit(0, &rq->das.legacy_deadline);
+ }
+ 
+ static inline void blk_clear_rq_complete(struct request *rq)
+ {
+-	clear_bit(0, &rq->__deadline);
++	clear_bit(0, &rq->das.legacy_deadline);
+ }
+ 
+ static inline bool blk_rq_is_complete(struct request *rq)
+ {
+-	return test_bit(0, &rq->__deadline);
++	return test_bit(0, &rq->das.legacy_deadline);
+ }
+ 
+ /*
 @@ -308,18 +310,19 @@ static inline void req_set_nomerge(struct request_queue *q, struct request *req)
  }
  
@@ -654,18 +672,18 @@ index b034fd2460c4..7cd64f533a46 100644
  static inline void blk_rq_set_deadline(struct request *rq, unsigned long time)
  {
 -	rq->__deadline = time & ~0x1UL;
-+	rq->__deadline = time & RQ_STATE_MASK;
++	rq->das.legacy_deadline = time & ~0x1UL;
  }
  
  static inline unsigned long blk_rq_deadline(struct request *rq)
  {
 -	return rq->__deadline & ~0x1UL;
-+	return rq->__deadline & ~RQ_STATE_MASK;
++	return rq->das.legacy_deadline & ~0x1UL;
  }
  
  /*
 diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index b7681f3ee793..51cd69f14537 100644
+index 5c4eee0431917..1b0a83ff0ea75 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
 @@ -27,8 +27,6 @@
@@ -677,7 +695,7 @@ index b7681f3ee793..51cd69f14537 100644
  
  struct module;
  struct scsi_ioctl_command;
-@@ -125,10 +123,8 @@ typedef __u32 __bitwise req_flags_t;
+@@ -125,15 +123,23 @@ typedef __u32 __bitwise req_flags_t;
  #define RQF_SPECIAL_PAYLOAD	((__force req_flags_t)(1 << 18))
  /* The per-zone write lock is held for this request */
  #define RQF_ZONE_WRITE_LOCKED	((__force req_flags_t)(1 << 19))
@@ -689,7 +707,22 @@ index b7681f3ee793..51cd69f14537 100644
  
  /* flags that prevent us from merging requests: */
  #define RQF_NOMERGE_FLAGS \
-@@ -225,28 +221,19 @@ struct request {
+ 	(RQF_STARTED | RQF_SOFTBARRIER | RQF_FLUSH_SEQ | RQF_SPECIAL_PAYLOAD)
+ 
++union blk_deadline_and_state {
++	struct {
++		uint32_t generation:30;
++		uint32_t state:2;
++		uint32_t deadline;
++	};
++	unsigned long legacy_deadline;
++	uint64_t das;
++};
++
+ /*
+  * Try to put the fields that are referenced together in the same cacheline.
+  *
+@@ -225,29 +231,19 @@ struct request {
  
  	unsigned int extra_len;	/* length of alignment and padding */
  
@@ -712,20 +745,18 @@ index b7681f3ee793..51cd69f14537 100644
  	 * recycle instance of this request.  See blk_mq_timeout_work().
  	 */
 -	struct u64_stats_sync aborted_gstate_sync;
- 	u64 aborted_gstate;
+-	u64 aborted_gstate;
++	union blk_deadline_and_state aborted_gstate;
  
 -	/* access through blk_rq_set_deadline, blk_rq_deadline */
+-	unsigned long __deadline;
 +	/*
 +	 * Access through blk_rq_deadline() and blk_rq_set_deadline(),
 +	 * blk_mark_rq_complete(), blk_clear_rq_complete() and
 +	 * blk_rq_is_complete() for legacy queues or blk_mq_rq_state() for
 +	 * blk-mq queues.
 +	 */
-+#define RQ_STATE_MASK 0x3UL
- 	unsigned long __deadline;
++	union blk_deadline_and_state das;
  
  	struct list_head timeout_list;
--- 
-2.16.3
-
-
+ 
