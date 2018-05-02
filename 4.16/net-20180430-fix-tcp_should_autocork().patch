@@ -1,0 +1,73 @@
+From: Eric Dumazet <eric.dumazet@gmail.com>
+Subject: Re: Performance regressions in TCP_STREAM tests in Linux 4.15 (and later)
+Date: Mon, 30 Apr 2018 10:47:50 -0700
+Cc: "netdev@vger.kernel.org" <netdev@vger.kernel.org>,
+        Shilpi Agarwal <sagarwal@vmware.com>,
+        Boon Ang <bang@vmware.com>, Darren Hart <dvhart@vmware.com>,
+        Steven Rostedt <srostedt@vmware.com>,
+        Abdul Anshad Azeez <aazees@vmware.com>
+To: Ben Greear <greearb@candelatech.com>,
+        Steven Rostedt <rostedt@goodmis.org>,
+        Michael Wenig <mwenig@vmware.com>
+
+On 04/30/2018 09:36 AM, Eric Dumazet wrote:
+> 
+> On 04/30/2018 09:14 AM, Ben Greear wrote:
+>> On 04/27/2018 08:11 PM, Steven Rostedt wrote:
+>>>
+>>> We'd like this email archived in netdev list, but since netdev is
+>>> notorious for blocking outlook email as spam, it didn't go through. So
+>>> I'm replying here to help get it into the archives.
+>>>
+>>> Thanks!
+>>>
+>>> -- Steve
+>>>
+>>>
+>>> On Fri, 27 Apr 2018 23:05:46 +0000
+>>> Michael Wenig <mwenig@vmware.com> wrote:
+>>>
+>>>> As part of VMware's performance testing with the Linux 4.15 kernel,
+>>>> we identified CPU cost and throughput regressions when comparing to
+>>>> the Linux 4.14 kernel. The impacted test cases are mostly TCP_STREAM
+>>>> send tests when using small message sizes. The regressions are
+>>>> significant (up 3x) and were tracked down to be a side effect of Eric
+>>>> Dumazat's RB tree changes that went into the Linux 4.15 kernel.
+>>>> Further investigation showed our use of the TCP_NODELAY flag in
+>>>> conjunction with Eric's change caused the regressions to show and
+>>>> simply disabling TCP_NODELAY brought performance back to normal.
+>>>> Eric's change also resulted into significant improvements in our
+>>>> TCP_RR test cases.
+>>>>
+>>>>
+>>>>
+>>>> Based on these results, our theory is that Eric's change made the
+>>>> system overall faster (reduced latency) but as a side effect less
+>>>> aggregation is happening (with TCP_NODELAY) and that results in lower
+>>>> throughput. Previously even though TCP_NODELAY was set, system was
+>>>> slower and we still got some benefit of aggregation. Aggregation
+>>>> helps in better efficiency and higher throughput although it can
+>>>> increase the latency. If you are seeing a regression in your
+>>>> application throughput after this change, using TCP_NODELAY might
+>>>> help bring performance back however that might increase latency.
+>>
+>> I guess you mean _disabling_ TCP_NODELAY instead of _using_ TCP_NODELAY?
+>>
+> 
+> Yeah, I guess auto-corking does not work as intended.
+
+I would try the following patch :
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 44be7f43455e4aefde8db61e2d941a69abcc642a..c9d00ef54deca15d5760bcbe154001a96fa1e2a7 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -697,7 +697,7 @@ static bool tcp_should_autocork(struct sock *sk, struct sk_buff *skb,
+ {
+	return skb->len < size_goal &&
+	       sock_net(sk)->ipv4.sysctl_tcp_autocorking &&
+-	       skb != tcp_write_queue_head(sk) &&
++	       !tcp_rtx_queue_empty(sk) &&
+	       refcount_read(&sk->sk_wmem_alloc) > skb->truesize;
+ }
+ 
