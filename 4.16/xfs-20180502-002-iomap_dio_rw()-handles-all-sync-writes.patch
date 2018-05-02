@@ -1,9 +1,9 @@
-From: Dave Chinner <david@fromorbit.com>
-To: linux-xfs@vger.kernel.org
-Cc: linux-fsdevel@vger.kernel.org, linux-block@vger.kernel.org,
- hch@lst.de, rdorr@microsoft.com
-Subject: [2/4] iomap: iomap_dio_rw() handles all sync writes
-Date: Wed, 18 Apr 2018 14:08:26 +1000
+From:   Dave Chinner <david@fromorbit.com>
+To:     linux-xfs@vger.kernel.org
+Cc:     linux-fsdevel@vger.kernel.org, linux-block@vger.kernel.org,
+        hch@lst.de, rdorr@microsoft.com
+Subject: [PATCH 2/3] iomap: iomap_dio_rw() handles all sync writes
+Date:   Wed,  2 May 2018 15:38:06 +1000
 
 From: Dave Chinner <dchinner@redhat.com>
 
@@ -24,12 +24,12 @@ such as truncate or hole punch.
 Signed-Off-By: Dave Chinner <dchinner@redhat.com>
 Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
- fs/iomap.c        | 22 +++++++++++++++-------
+ fs/iomap.c        | 21 +++++++++++++++------
  fs/xfs/xfs_file.c |  5 -----
- 2 files changed, 15 insertions(+), 12 deletions(-)
+ 2 files changed, 15 insertions(+), 11 deletions(-)
 
 diff --git a/fs/iomap.c b/fs/iomap.c
-index afd163586aa0..1f59c2d9ade6 100644
+index afd163586aa0..b044d8ee2efd 100644
 --- a/fs/iomap.c
 +++ b/fs/iomap.c
 @@ -685,6 +685,7 @@ EXPORT_SYMBOL_GPL(iomap_seek_data);
@@ -54,11 +54,10 @@ index afd163586aa0..1f59c2d9ade6 100644
  	inode_dio_end(file_inode(iocb->ki_filp));
  	kfree(dio);
  
-@@ -768,14 +776,8 @@ static ssize_t iomap_dio_complete(struct iomap_dio *dio)
- static void iomap_dio_complete_work(struct work_struct *work)
+@@ -769,13 +777,8 @@ static void iomap_dio_complete_work(struct work_struct *work)
  {
  	struct iomap_dio *dio = container_of(work, struct iomap_dio, aio.work);
--	struct kiocb *iocb = dio->iocb;
+ 	struct kiocb *iocb = dio->iocb;
 -	bool is_write = (dio->flags & IOMAP_DIO_WRITE);
 -	ssize_t ret;
  
@@ -66,11 +65,11 @@ index afd163586aa0..1f59c2d9ade6 100644
 -	if (is_write && ret > 0)
 -		ret = generic_write_sync(iocb, ret);
 -	iocb->ki_complete(iocb, ret, 0);
-+	dio->iocb->ki_complete(dio->iocb, iomap_dio_complete(dio), 0);
++	iocb->ki_complete(iocb, iomap_dio_complete(dio), 0);
  }
  
  /*
-@@ -961,6 +963,10 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
+@@ -961,6 +964,10 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
  	return copied;
  }
  
@@ -81,7 +80,7 @@ index afd163586aa0..1f59c2d9ade6 100644
  ssize_t
  iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
  		const struct iomap_ops *ops, iomap_dio_end_io_t end_io)
-@@ -1006,6 +1012,8 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
+@@ -1006,6 +1013,8 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
  			dio->flags |= IOMAP_DIO_DIRTY;
  	} else {
  		dio->flags |= IOMAP_DIO_WRITE;
@@ -91,7 +90,7 @@ index afd163586aa0..1f59c2d9ade6 100644
  	}
  
 diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
-index 6f15027661b6..0c4b8313d544 100644
+index 4cbd15d84bb8..64112a57b004 100644
 --- a/fs/xfs/xfs_file.c
 +++ b/fs/xfs/xfs_file.c
 @@ -570,11 +570,6 @@ xfs_file_dio_aio_write(

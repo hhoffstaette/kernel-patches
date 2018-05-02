@@ -1,9 +1,9 @@
-From: Dave Chinner <david@fromorbit.com>
-To: linux-xfs@vger.kernel.org
-Cc: linux-fsdevel@vger.kernel.org, linux-block@vger.kernel.org,
- hch@lst.de, rdorr@microsoft.com
-Subject: [4/4] iomap: Use FUA for pure data O_DSYNC DIO writes
-Date: Wed, 18 Apr 2018 14:08:28 +1000
+From:   Dave Chinner <david@fromorbit.com>
+To:     linux-xfs@vger.kernel.org
+Cc:     linux-fsdevel@vger.kernel.org, linux-block@vger.kernel.org,
+        hch@lst.de, rdorr@microsoft.com
+Subject: [PATCH 3/3] iomap: Use FUA for pure data O_DSYNC DIO writes
+Date:   Wed,  2 May 2018 15:38:07 +1000
 
 From: Dave Chinner <dchinner@redhat.com>
 
@@ -48,11 +48,11 @@ anymore.
 Signed-Off-By: Dave Chinner <dchinner@redhat.com>
 Reviewed-by: Christoph Hellwig <hch@lst.de>
 ---
- fs/iomap.c | 48 +++++++++++++++++++++++++++++++++++++++++++-----
- 1 file changed, 43 insertions(+), 5 deletions(-)
+ fs/iomap.c | 51 ++++++++++++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 46 insertions(+), 5 deletions(-)
 
 diff --git a/fs/iomap.c b/fs/iomap.c
-index 1f59c2d9ade6..62f1f8256da2 100644
+index b044d8ee2efd..bcfd7f3654d4 100644
 --- a/fs/iomap.c
 +++ b/fs/iomap.c
 @@ -685,6 +685,7 @@ EXPORT_SYMBOL_GPL(iomap_seek_data);
@@ -63,7 +63,7 @@ index 1f59c2d9ade6..62f1f8256da2 100644
  #define IOMAP_DIO_NEED_SYNC	(1 << 29)
  #define IOMAP_DIO_WRITE		(1 << 30)
  #define IOMAP_DIO_DIRTY		(1 << 31)
-@@ -860,6 +861,7 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
+@@ -861,6 +862,7 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
  	struct iov_iter iter;
  	struct bio *bio;
  	bool need_zeroout = false;
@@ -71,7 +71,7 @@ index 1f59c2d9ade6..62f1f8256da2 100644
  	int nr_pages, ret;
  	size_t copied = 0;
  
-@@ -883,8 +885,20 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
+@@ -884,8 +886,20 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
  	case IOMAP_MAPPED:
  		if (iomap->flags & IOMAP_F_SHARED)
  			dio->flags |= IOMAP_DIO_COW;
@@ -93,7 +93,7 @@ index 1f59c2d9ade6..62f1f8256da2 100644
  		break;
  	default:
  		WARN_ON_ONCE(1);
-@@ -932,10 +946,14 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
+@@ -933,10 +947,14 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
  
  		n = bio->bi_iter.bi_size;
  		if (dio->flags & IOMAP_DIO_WRITE) {
@@ -110,7 +110,7 @@ index 1f59c2d9ade6..62f1f8256da2 100644
  			if (dio->flags & IOMAP_DIO_DIRTY)
  				bio_set_pages_dirty(bio);
  		}
-@@ -965,7 +983,12 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
+@@ -966,7 +984,12 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
  
  /*
   * iomap_dio_rw() always completes O_[D]SYNC writes regardless of whether the IO
@@ -124,25 +124,30 @@ index 1f59c2d9ade6..62f1f8256da2 100644
   */
  ssize_t
  iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
-@@ -1012,8 +1035,16 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
+@@ -1012,10 +1035,21 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
+ 		if (iter->type == ITER_IOVEC)
  			dio->flags |= IOMAP_DIO_DIRTY;
  	} else {
++		flags |= IOMAP_WRITE;
  		dio->flags |= IOMAP_DIO_WRITE;
--		if (iocb->ki_flags & IOCB_DSYNC)
-+		if (iocb->ki_flags & IOCB_DSYNC) {
++
++		/* for data sync or sync, we need sync completion processing */
+ 		if (iocb->ki_flags & IOCB_DSYNC)
  			dio->flags |= IOMAP_DIO_NEED_SYNC;
-+			/*
-+			 * We optimistically try using FUA for this IO.  Any
-+			 * non-FUA write that occurs will clear this flag, hence
-+			 * we know before completion whether a cache flush is
-+			 * necessary.
-+			 */
+-		flags |= IOMAP_WRITE;
++
++		/*
++		 * For datasync only writes, we optimistically try using FUA for
++		 * this IO.  Any non-FUA write that occurs will clear this flag,
++		 * hence we know before completion whether a cache flush is
++		 * necessary.
++		 */
++		if ((iocb->ki_flags & (IOCB_DSYNC | IOCB_SYNC)) == IOCB_DSYNC)
 +			dio->flags |= IOMAP_DIO_WRITE_FUA;
-+		}
- 		flags |= IOMAP_WRITE;
  	}
  
-@@ -1070,6 +1101,13 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
+ 	if (iocb->ki_flags & IOCB_NOWAIT) {
+@@ -1071,6 +1105,13 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
  	if (ret < 0)
  		iomap_dio_set_error(dio, ret);
  
