@@ -1,0 +1,72 @@
+From f3fa7398a5832d306f188b19cc4211559b798dfa Mon Sep 17 00:00:00 2001
+From: Josh Poimboeuf <jpoimboe@redhat.com>
+Date: Wed, 9 May 2018 09:03:00 -0500
+Subject: objtool: Support GCC 8 switch tables
+
+Add some additional checks to the switch jump table logic.  This fixes
+the following warnings with GCC 8:
+
+drivers/block/virtio_blk.o: warning: objtool: virtio_queue_rq()+0x0: stack state mismatch: cfa1=7+8 cfa2=7+72
+net/ipv6/icmp.o: warning: objtool: icmpv6_rcv()+0x0: stack state mismatch: cfa1=7+8 cfa2=7+64
+drivers/usb/core/quirks.o: warning: objtool: quirks_param_set()+0x0: stack state mismatch: cfa1=7+8 cfa2=7+48
+drivers/mtd/nand/raw/nand_hynix.o: warning: objtool: hynix_nand_decode_id()+0x0: stack state mismatch: cfa1=7+8 cfa2=7+24
+drivers/mtd/nand/raw/nand_samsung.o: warning: objtool: samsung_nand_decode_id()+0x0: stack state mismatch: cfa1=7+8 cfa2=7+32
+drivers/gpu/drm/nouveau/nvkm/subdev/top/gk104.o: warning: objtool: gk104_top_oneinit()+0x0: stack state mismatch: cfa1=7+8 cfa2=7+64
+
+Reported-by: kbuild test robot <lkp@intel.com>
+Signed-off-by: Josh Poimboeuf <jpoimboe@redhat.com>
+---
+ tools/objtool/check.c | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/tools/objtool/check.c b/tools/objtool/check.c
+index 14daf6a..e432a6e 100644
+--- a/tools/objtool/check.c
++++ b/tools/objtool/check.c
+@@ -810,17 +810,28 @@ static int add_switch_table(struct objtool_file *file, struct instruction *insn,
+ 	struct rela *rela = table;
+ 	struct instruction *alt_insn;
+ 	struct alternative *alt;
++	struct symbol *pfunc = insn->func->pfunc;
++	unsigned int prev_offset = 0;
+ 
+ 	list_for_each_entry_from(rela, &file->rodata->rela->rela_list, list) {
+ 		if (rela == next_table)
+ 			break;
+ 
++		/* Make sure the switch table entries are consecutive: */
++		if (prev_offset && rela->offset != prev_offset + sizeof(long))
++			break;
++
++		/* Detect function pointers from contiguous objects: */
++		if (rela->sym->sec == pfunc->sec &&
++		    rela->addend == pfunc->offset)
++			break;
++
+ 		alt_insn = find_insn(file, rela->sym->sec, rela->addend);
+ 		if (!alt_insn)
+ 			break;
+ 
+ 		/* Make sure the jmp dest is in the function or subfunction: */
+-		if (alt_insn->func->pfunc != insn->func->pfunc)
++		if (alt_insn->func->pfunc != pfunc)
+ 			break;
+ 
+ 		alt = malloc(sizeof(*alt));
+@@ -831,6 +842,13 @@ static int add_switch_table(struct objtool_file *file, struct instruction *insn,
+ 
+ 		alt->insn = alt_insn;
+ 		list_add_tail(&alt->list, &insn->alts);
++		prev_offset = rela->offset;
++	}
++
++	if (!prev_offset) {
++		WARN_FUNC("can't find switch jump table",
++			  insn->sec, insn->offset);
++		return -1;
+ 	}
+ 
+ 	return 0;
+-- 
+cgit v1.1
+
