@@ -1,0 +1,386 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: fix duplicate extents after fsync of file with prealloc extents
+Date:   Wed,  9 May 2018 16:01:46 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+In commit 471d557afed1 ("Btrfs: fix loss of prealloc extents past i_size
+after fsync log replay"), on fsync,  we started to always log all prealloc
+extents beyond an inode's i_size in order to avoid losing them after a
+power failure. However under some cases this can lead to the log replay
+code to create duplicate extent items, with different lengths, in the
+extent tree. That happens because, as of that commit, we can now log
+extent items based on extent maps that are not on the "modified" list
+of extent maps of the inode's extent map tree. Logging extent items based
+on extent maps is used during the fast fsync path to save time and for
+this to work reliably it requires that the extent maps are not merged
+with other adjacent extent maps - having the extent maps in the list
+of modified extents gives such guarantee.
+
+Consider the following example, captured during a long run of fsstress,
+which illustrates this problem.
+
+We have inode 271, in the filesystem tree (root 5), for which all of the
+following operations and discussion apply to.
+
+A buffered write starts at offset 312391 with a length of 933471 bytes
+(end offset at 1245862). At this point we have, for this inode, the
+following extent maps with the their field values:
+
+em A, start 0, orig_start 0, len 40960, block_start 18446744073709551613,
+      block_len 0, orig_block_len 0
+em B, start 40960, orig_start 40960, len 376832, block_start 1106399232,
+      block_len 376832, orig_block_len 376832
+em C, start 417792, orig_start 417792, len 782336, block_start
+      18446744073709551613, block_len 0, orig_block_len 0
+em D, start 1200128, orig_start 1200128, len 835584, block_start
+      1106776064, block_len 835584, orig_block_len 835584
+em E, start 2035712, orig_start 2035712, len 245760, block_start
+      1107611648, block_len 245760, orig_block_len 245760
+
+Extent map A corresponds to a hole and extent maps D and E correspond to
+preallocated extents.
+
+Extent map D ends where extent map E begins (1106776064 + 835584 =
+1107611648), but these extent maps were not merged because they are in
+the inode's list of modified extent maps.
+
+An fsync against this inode is made, which triggers the fast path
+(BTRFS_INODE_NEEDS_FULL_SYNC is not set). This fsync triggers writeback
+of the data previously written using buffered IO, and when the respective
+ordered extent finishes, btrfs_drop_extents() is called against the
+(aligned) range 311296..1249279. This causes a split of extent map D at
+btrfs_drop_extent_cache(), replacing extent map D with a new extent map
+D', also added to the list of modified extents,  with the following
+values:
+
+em D', start 1249280, orig_start of 1200128,
+       block_start 1106825216 (= 1106776064 + 1249280 - 1200128),
+       orig_block_len 835584,
+       block_len 786432 (835584 - (1249280 - 1200128))
+
+Then, during the fast fsync, btrfs_log_changed_extents() is called and
+extent maps D' and E are removed from the list of modified extents. The
+flag EXTENT_FLAG_LOGGING is also set on them. After the extents are logged
+clear_em_logging() is called on each of them, and that makes extent map E
+to be merged with extent map D' (try_merge_map()), resulting in D' being
+deleted and E adjusted to:
+
+em E, start 1249280, orig_start 1200128, len 1032192,
+      block_start 1106825216, block_len 1032192,
+      orig_block_len 245760
+
+A direct IO write at offset 1847296 and length of 360448 bytes (end offset
+at 2207744) starts, and at that moment the following extent maps exist for
+our inode:
+
+em A, start 0, orig_start 0, len 40960, block_start 18446744073709551613,
+      block_len 0, orig_block_len 0
+em B, start 40960, orig_start 40960, len 270336, block_start 1106399232,
+      block_len 270336, orig_block_len 376832
+em C, start 311296, orig_start 311296, len 937984, block_start 1112842240,
+      block_len 937984, orig_block_len 937984
+em E (prealloc), start 1249280, orig_start 1200128, len 1032192,
+      block_start 1106825216, block_len 1032192, orig_block_len 245760
+
+The dio write results in drop_extent_cache() being called twice. The first
+time for a range that starts at offset 1847296 and ends at offset 2035711
+(length of 188416), which results in a double split of extent map E,
+replacing it with two new extent maps:
+
+em F, start 1249280, orig_start 1200128, block_start 1106825216,
+      block_len 598016, orig_block_len 598016
+em G, start 2035712, orig_start 1200128, block_start 1107611648,
+      block_len 245760, orig_block_len 1032192
+
+It also creates a new extent map that represents a part of the requested
+IO (through create_io_em()):
+
+em H, start 1847296, len 188416, block_start 1107423232, block_len 188416
+
+The second call to drop_extent_cache() has a range with a start offset of
+2035712 and end offset of 2207743 (length of 172032). This leads to
+replacing extent map G with a new extent map I with the following values:
+
+em I, start 2207744, orig_start 1200128, block_start 1107783680,
+      block_len 73728, orig_block_len 1032192
+
+It also creates a new extent map that represents the second part of the
+requested IO (through create_io_em()):
+
+em J, start 2035712, len 172032, block_start 1107611648, block_len 172032
+
+The dio write set the inode's i_size to 2207744 bytes.
+
+After the dio write the inode has the following extent maps:
+
+em A, start 0, orig_start 0, len 40960, block_start 18446744073709551613,
+      block_len 0, orig_block_len 0
+em B, start 40960, orig_start 40960, len 270336, block_start 1106399232,
+      block_len 270336, orig_block_len 376832
+em C, start 311296, orig_start 311296, len 937984, block_start 1112842240,
+      block_len 937984, orig_block_len 937984
+em F, start 1249280, orig_start 1200128, len 598016,
+      block_start 1106825216, block_len 598016, orig_block_len 598016
+em H, start 1847296, orig_start 1200128, len 188416,
+      block_start 1107423232, block_len 188416, orig_block_len 835584
+em J, start 2035712, orig_start 2035712, len 172032,
+      block_start 1107611648, block_len 172032, orig_block_len 245760
+em I, start 2207744, orig_start 1200128, len 73728,
+      block_start 1107783680, block_len 73728, orig_block_len 1032192
+
+Now do some change to the file, like adding a xattr for example and then
+fsync it again. This triggers a fast fsync path, and as of commit
+471d557afed1 ("Btrfs: fix loss of prealloc extents past i_size after fsync
+log replay"), we use the extent map I to log a file extent item because
+it's a prealloc extent and it starts at an offset matching the inode's
+i_size. However when we log it, we create a file extent item with a value
+for the disk byte location that is wrong, as can be seen from the
+following output of "btrfs inspect-internal dump-tree":
+
+ item 1 key (271 EXTENT_DATA 2207744) itemoff 3782 itemsize 53
+     generation 22 type 2 (prealloc)
+     prealloc data disk byte 1106776064 nr 1032192
+     prealloc data offset 1007616 nr 73728
+
+Here the disk byte value corresponds to calculation based on some fields
+from the extent map I:
+
+  1106776064 = block_start (1107783680) - 1007616 (extent_offset)
+  extent_offset = 2207744 (start) - 1200128 (orig_start) = 1007616
+
+The disk byte value of 1106776064 clashes with disk byte values of the
+file extent items at offsets 1249280 and 1847296 in the fs tree:
+
+        item 6 key (271 EXTENT_DATA 1249280) itemoff 3568 itemsize 53
+                generation 20 type 2 (prealloc)
+                prealloc data disk byte 1106776064 nr 835584
+                prealloc data offset 49152 nr 598016
+        item 7 key (271 EXTENT_DATA 1847296) itemoff 3515 itemsize 53
+                generation 20 type 1 (regular)
+                extent data disk byte 1106776064 nr 835584
+                extent data offset 647168 nr 188416 ram 835584
+                extent compression 0 (none)
+        item 8 key (271 EXTENT_DATA 2035712) itemoff 3462 itemsize 53
+                generation 20 type 1 (regular)
+                extent data disk byte 1107611648 nr 245760
+                extent data offset 0 nr 172032 ram 245760
+                extent compression 0 (none)
+        item 9 key (271 EXTENT_DATA 2207744) itemoff 3409 itemsize 53
+                generation 20 type 2 (prealloc)
+                prealloc data disk byte 1107611648 nr 245760
+                prealloc data offset 172032 nr 73728
+
+Instead of the disk byte value of 1106776064, the value of 1107611648
+should have been logged. Also the data offset value should have been
+172032 and not 1007616.
+After a log replay we end up getting two extent items in the extent tree
+with different lengths, one of 835584, which is correct and existed
+before the log replay, and another one of 1032192 which is wrong and is
+based on the logged file extent item:
+
+ item 12 key (1106776064 EXTENT_ITEM 835584) itemoff 3406 itemsize 53
+    refs 2 gen 15 flags DATA
+    extent data backref root 5 objectid 271 offset 1200128 count 2
+ item 13 key (1106776064 EXTENT_ITEM 1032192) itemoff 3353 itemsize 53
+    refs 1 gen 22 flags DATA
+    extent data backref root 5 objectid 271 offset 1200128 count 1
+
+Obviously this leads to many problems and a filesystem check reports many
+errors:
+
+ (...)
+ checking extents
+ Extent back ref already exists for 1106776064 parent 0 root 5 owner 271 offset 1200128 num_refs 1
+ extent item 1106776064 has multiple extent items
+ ref mismatch on [1106776064 835584] extent item 2, found 3
+ Incorrect local backref count on 1106776064 root 5 owner 271 offset 1200128 found 2 wanted 1 back 0x55b1d0ad7680
+ Backref 1106776064 root 5 owner 271 offset 1200128 num_refs 0 not found in extent tree
+ Incorrect local backref count on 1106776064 root 5 owner 271 offset 1200128 found 1 wanted 0 back 0x55b1d0ad4e70
+ Backref bytes do not match extent backref, bytenr=1106776064, ref bytes=835584, backref bytes=1032192
+ backpointer mismatch on [1106776064 835584]
+ checking free space cache
+ block group 1103101952 has wrong amount of free space
+ failed to load free space cache for block group 1103101952
+ checking fs roots
+ (...)
+
+So fix this by logging the prealloc extents beyond the inode's i_size
+based on searches in the subvolume tree instead of the extent maps.
+
+Fixes: 471d557afed1 ("Btrfs: fix loss of prealloc extents past i_size after fsync log replay")
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/tree-log.c | 137 ++++++++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 112 insertions(+), 25 deletions(-)
+
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index eb3a41269b0e..25b888df00c9 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -4322,6 +4322,110 @@ static int log_one_extent(struct btrfs_trans_handle *trans,
+ 	return ret;
+ }
+ 
++/*
++ * Log all prealloc extents beyond the inode's i_size to make sure we do not
++ * lose them after doing a fast fsync and replaying the log. We scan the
++ * subvolume's root instead of iterating the inode's extent map tree because
++ * otherwise we can log incorrect extent items based on extent map conversion.
++ * That can happen due to the fact that extent maps are merged when they
++ * are not in the extent map tree's list of modified extents.
++ */
++static int btrfs_log_prealloc_extents(struct btrfs_trans_handle *trans,
++				      struct btrfs_inode *inode,
++				      struct btrfs_path *path)
++{
++	struct btrfs_root *root = inode->root;
++	struct btrfs_key key;
++	const u64 i_size = i_size_read(&inode->vfs_inode);
++	const u64 ino = btrfs_ino(inode);
++	struct btrfs_path *dst_path = NULL;
++	u64 last_extent = (u64)-1;
++	int ins_nr = 0;
++	int start_slot;
++	int ret;
++
++	if (!(inode->flags & BTRFS_INODE_PREALLOC))
++		return 0;
++
++	key.objectid = ino;
++	key.type = BTRFS_EXTENT_DATA_KEY;
++	key.offset = i_size;
++	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
++	if (ret < 0)
++		goto out;
++
++	while (true) {
++		struct extent_buffer *leaf = path->nodes[0];
++		int slot = path->slots[0];
++
++		if (slot >= btrfs_header_nritems(leaf)) {
++			if (ins_nr > 0) {
++				ret = copy_items(trans, inode, dst_path, path,
++						 &last_extent, start_slot,
++						 ins_nr, 1, 0);
++				if (ret < 0)
++					goto out;
++				ins_nr = 0;
++			}
++			ret = btrfs_next_leaf(root, path);
++			if (ret < 0)
++				goto out;
++			if (ret > 0) {
++				ret = 0;
++				break;
++			}
++			continue;
++		}
++
++		btrfs_item_key_to_cpu(leaf, &key, slot);
++		if (key.objectid > ino)
++			break;
++		if (WARN_ON_ONCE(key.objectid < ino) ||
++		    key.type < BTRFS_EXTENT_DATA_KEY ||
++		    key.offset < i_size) {
++			path->slots[0]++;
++			continue;
++		}
++		if (last_extent == (u64)-1) {
++			last_extent = key.offset;
++			/*
++			 * Avoid logging extent items logged in past fsync calls
++			 * and leading to duplicate keys in the log tree.
++			 */
++			do {
++				ret = btrfs_truncate_inode_items(trans,
++							 root->log_root,
++							 &inode->vfs_inode,
++							 i_size,
++							 BTRFS_EXTENT_DATA_KEY);
++			} while (ret == -EAGAIN);
++			if (ret)
++				goto out;
++		}
++		if (ins_nr == 0)
++			start_slot = slot;
++		ins_nr++;
++		path->slots[0]++;
++		if (!dst_path) {
++			dst_path = btrfs_alloc_path();
++			if (!dst_path) {
++				ret = -ENOMEM;
++				goto out;
++			}
++		}
++	}
++	if (ins_nr > 0) {
++		ret = copy_items(trans, inode, dst_path, path, &last_extent,
++				 start_slot, ins_nr, 1, 0);
++		if (ret > 0)
++			ret = 0;
++	}
++out:
++	btrfs_release_path(path);
++	btrfs_free_path(dst_path);
++	return ret;
++}
++
+ static int btrfs_log_changed_extents(struct btrfs_trans_handle *trans,
+ 				     struct btrfs_root *root,
+ 				     struct btrfs_inode *inode,
+@@ -4364,6 +4468,11 @@ static int btrfs_log_changed_extents(struct btrfs_trans_handle *trans,
+ 		if (em->generation <= test_gen)
+ 			continue;
+ 
++		/* We log prealloc extents beyond eof later. */
++		if (test_bit(EXTENT_FLAG_PREALLOC, &em->flags) &&
++		    em->start >= i_size_read(&inode->vfs_inode))
++			continue;
++
+ 		if (em->start < logged_start)
+ 			logged_start = em->start;
+ 		if ((em->start + em->len - 1) > logged_end)
+@@ -4376,31 +4485,6 @@ static int btrfs_log_changed_extents(struct btrfs_trans_handle *trans,
+ 		num++;
+ 	}
+ 
+-	/*
+-	 * Add all prealloc extents beyond the inode's i_size to make sure we
+-	 * don't lose them after doing a fast fsync and replaying the log.
+-	 */
+-	if (inode->flags & BTRFS_INODE_PREALLOC) {
+-		struct rb_node *node;
+-
+-		for (node = rb_last(&tree->map); node; node = rb_prev(node)) {
+-			em = rb_entry(node, struct extent_map, rb_node);
+-			if (em->start < i_size_read(&inode->vfs_inode))
+-				break;
+-			if (!list_empty(&em->list))
+-				continue;
+-			/* Same as above loop. */
+-			if (++num > 32768) {
+-				list_del_init(&tree->modified_extents);
+-				ret = -EFBIG;
+-				goto process;
+-			}
+-			refcount_inc(&em->refs);
+-			set_bit(EXTENT_FLAG_LOGGING, &em->flags);
+-			list_add_tail(&em->list, &extents);
+-		}
+-	}
+-
+ 	list_sort(NULL, &extents, extent_cmp);
+ 	btrfs_get_logged_extents(inode, logged_list, logged_start, logged_end);
+ 	/*
+@@ -4445,6 +4529,9 @@ static int btrfs_log_changed_extents(struct btrfs_trans_handle *trans,
+ 	up_write(&inode->dio_sem);
+ 
+ 	btrfs_release_path(path);
++	if (!ret)
++		ret = btrfs_log_prealloc_extents(trans, inode, path);
++
+ 	return ret;
+ }
+ 
