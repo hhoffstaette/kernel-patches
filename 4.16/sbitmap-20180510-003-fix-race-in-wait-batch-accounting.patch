@@ -1,0 +1,77 @@
+From: Jens Axboe <axboe@kernel.dk>
+To: linux-block@vger.kernel.org
+Cc: osandov@fb.com, efault@gmx.de, paolo.valente@linaro.org,
+ Jens Axboe <axboe@kernel.dk>
+Subject: [9/9] sbitmap: fix race in wait batch accounting
+Date: Thu, 10 May 2018 10:24:27 -0600
+
+If we have multiple callers of sbq_wake_up(), we can end up in a
+situation where the wait_cnt will continually go more and more
+negative. Consider the case where our wake batch is 1, hence
+wait_cnt will start out as 1.
+
+wait_cnt == 1
+
+CPU0				CPU1
+atomic_dec_return(), cnt == 0
+				atomic_dec_return(), cnt == -1
+				cmpxchg(-1, 0) (succeeds)
+				[wait_cnt now 0]
+cmpxchg(0, 1) (fails)
+
+This ends up with wait_cnt being 0, we'll wakeup immediately
+next time. Going through the same loop as above again, and
+we'll have wait_cnt -1.
+
+For the case where we have a larger wake batch, the only
+difference is that the starting point will be higher. We'll
+still end up with continually smaller batch wakeups, which
+defeats the purpose of the rolling wakeups.
+
+Always reset the wait_cnt to the batch value. Then it doesn't
+matter who wins the race. But ensure that whomever does win
+the race is the one that increments the ws index as well.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ lib/sbitmap.c | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/lib/sbitmap.c b/lib/sbitmap.c
+index 8f0950fbaa5c..ffc36e695f50 100644
+--- a/lib/sbitmap.c
++++ b/lib/sbitmap.c
+@@ -478,22 +478,26 @@ static void sbq_wake_up(struct sbitmap_queue *sbq)
+ 
+ 	wait_cnt = atomic_dec_return(&ws->wait_cnt);
+ 	if (wait_cnt <= 0) {
++		int ret;
++
+ 		wake_batch = READ_ONCE(sbq->wake_batch);
++
+ 		/*
+ 		 * Pairs with the memory barrier in sbitmap_queue_resize() to
+ 		 * ensure that we see the batch size update before the wait
+ 		 * count is reset.
+ 		 */
+ 		smp_mb__before_atomic();
++
+ 		/*
+-		 * If there are concurrent callers to sbq_wake_up(), the last
+-		 * one to decrement the wait count below zero will bump it back
+-		 * up. If there is a concurrent resize, the count reset will
+-		 * either cause the cmpxchg to fail or overwrite after the
+-		 * cmpxchg.
++		 * For concurrent callers (either resize, or just multiple
++		 * concurrent wakeups of waiters), the one that wins the
++		 * cmpxchg() race increments the waiter index.
+ 		 */
+-		atomic_cmpxchg(&ws->wait_cnt, wait_cnt, wait_cnt + wake_batch);
+-		sbq_index_atomic_inc(&sbq->wake_index);
++		ret = atomic_cmpxchg(&ws->wait_cnt, wait_cnt, wake_batch);
++		if (ret == wait_cnt)
++			sbq_index_atomic_inc(&sbq->wake_index);
++
+ 		wake_up_nr(&ws->wait, wake_batch);
+ 	}
+ }
