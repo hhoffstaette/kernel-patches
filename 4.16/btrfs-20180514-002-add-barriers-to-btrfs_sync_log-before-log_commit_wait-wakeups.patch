@@ -1,8 +1,9 @@
-From: David Sterba <dsterba@suse.com>
-To: linux-btrfs@vger.kernel.org
-Cc: David Sterba <dsterba@suse.com>, Nikolay Borisov <nborisov@suse.com>
-Subject: [v2, 2/3] btrfs: add barriers to btrfs_sync_log before log_commit_wait wakeups
-Date: Tue, 24 Apr 2018 15:11:01 +0200
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>,
+        Nikolay Borisov <nborisov@suse.com>
+Subject: [PATCH v3 2/3] btrfs: add barriers to btrfs_sync_log before log_commit_wait wakeups
+Date:   Mon, 14 May 2018 14:23:48 +0200
 
 Currently the code assumes that there's an implied barrier by the
 sequence of code preceding the wakeup, namely the mutex unlock.
@@ -46,7 +47,7 @@ So if we assume that *C is modifying the flag which the waitqueue is checking,
 and *E is the actual wakeup, then those accesses can be re-ordered...
 
 IMHO this code should be considered broken...
-~~~
+---
 
 To be on the safe side, add the barriers. The synchronization logic
 around log using the mutexes and several other threads does not make it

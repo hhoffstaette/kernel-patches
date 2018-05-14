@@ -1,8 +1,8 @@
-From: David Sterba <dsterba@suse.com>
-To: linux-btrfs@vger.kernel.org
-Cc: David Sterba <dsterba@suse.com>
-Subject: [v2,3/3] btrfs: replace waitqueue_actvie with cond_wake_up
-Date: Tue, 24 Apr 2018 15:11:04 +0200
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH v3 3/3] btrfs: replace waitqueue_actvie with cond_wake_up
+Date:   Mon, 14 May 2018 14:23:51 +0200
 
 Use the wrappers and reduce the amount of low-level details about the
 waitqueue management.
@@ -17,8 +17,8 @@ Signed-off-by: David Sterba <dsterba@suse.com>
  fs/btrfs/locking.c       | 34 +++++++++++-----------------------
  fs/btrfs/ordered-data.c  | 14 ++++----------
  fs/btrfs/transaction.c   |  7 +------
- fs/btrfs/tree-log.c      | 23 +++++++----------------
- 9 files changed, 35 insertions(+), 85 deletions(-)
+ fs/btrfs/tree-log.c      | 34 ++++++++++++----------------------
+ 9 files changed, 40 insertions(+), 91 deletions(-)
 
 diff --git a/fs/btrfs/compression.c b/fs/btrfs/compression.c
 index 5268c9f85ca7..dcebb91e4e0c 100644
@@ -39,7 +39,7 @@ index 5268c9f85ca7..dcebb91e4e0c 100644
  
  static void free_workspace(int type, struct list_head *ws)
 diff --git a/fs/btrfs/delayed-inode.c b/fs/btrfs/delayed-inode.c
-index a8d492dbd3e7..3b987cb94c4f 100644
+index a8d492dbd3e7..fe6caa7e698b 100644
 --- a/fs/btrfs/delayed-inode.c
 +++ b/fs/btrfs/delayed-inode.c
 @@ -460,13 +460,10 @@ static void finish_one_item(struct btrfs_delayed_root *delayed_root)
@@ -49,7 +49,7 @@ index a8d492dbd3e7..3b987cb94c4f 100644
 -	/*
 -	 * atomic_dec_return implies a barrier for waitqueue_active
 -	 */
-+	/* atomic_dec_return implies a barrier for waitqueue_active */
++	/* atomic_dec_return implies a barrier */
  	if ((atomic_dec_return(&delayed_root->items) <
 -	    BTRFS_DELAYED_BACKGROUND || seq % BTRFS_DELAYED_BATCH == 0) &&
 -	    waitqueue_active(&delayed_root->wait))
@@ -88,10 +88,10 @@ index f82be266ba4b..d33ff5b23302 100644
  
  void btrfs_bio_counter_inc_blocked(struct btrfs_fs_info *fs_info)
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index f99102063366..c4755e8c13a5 100644
+index 3871658b6ab1..94fc825a126d 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -11087,12 +11087,7 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+@@ -11094,12 +11094,7 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
  void btrfs_end_write_no_snapshotting(struct btrfs_root *root)
  {
  	percpu_counter_dec(&root->subv_writers->counter);
@@ -241,7 +241,7 @@ index c944b4769e3c..ff841abb756e 100644
  
  	if (current->journal_info == trans)
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index fa5b3dc5f4d5..49c897daaedb 100644
+index fa5b3dc5f4d5..a3ebda24ae12 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
 @@ -222,11 +222,8 @@ int btrfs_pin_log_trans(struct btrfs_root *root)
@@ -272,9 +272,16 @@ index fa5b3dc5f4d5..49c897daaedb 100644
  	}
  
  	if (ret) {
-@@ -3120,9 +3114,7 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
- 	 * above are seen by the woken threads. It might not be necessary, but
- 	 * proving that seems to be hard.
+@@ -3116,13 +3110,11 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 	mutex_unlock(&log_root_tree->log_mutex);
+ 
+ 	/*
+-	 * The barrier before waitqueue_active is needed so all the updates
+-	 * above are seen by the woken threads. It might not be necessary, but
+-	 * proving that seems to be hard.
++	 * The barrier before waitqueue_active (in cond_wake_up) is needed so
++	 * all the updates above are seen by the woken threads. It might not be
++	 * necessary, but proving that seems to be hard.
  	 */
 -	smp_mb();
 -	if (waitqueue_active(&log_root_tree->log_commit_wait[index2]))
@@ -283,15 +290,21 @@ index fa5b3dc5f4d5..49c897daaedb 100644
  out:
  	mutex_lock(&root->log_mutex);
  	btrfs_remove_all_log_ctxs(root, index1, ret);
-@@ -3135,9 +3127,8 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
- 	 * above are seen by the woken threads. It might not be necessary, but
- 	 * proving that seems to be hard.
+@@ -3131,13 +3123,11 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 	mutex_unlock(&root->log_mutex);
+ 
+ 	/*
+-	 * The barrier before waitqueue_active is needed so all the updates
+-	 * above are seen by the woken threads. It might not be necessary, but
+-	 * proving that seems to be hard.
++	 * The barrier before waitqueue_active (in cond_wake_up) is needed so
++	 * all the updates above are seen by the woken threads. It might not be
++	 * necessary, but proving that seems to be hard.
  	 */
 -	smp_mb();
 -	if (waitqueue_active(&root->log_commit_wait[index1]))
 -		wake_up(&root->log_commit_wait[index1]);
-+	/* The barrier is implied by mutex_unlock */
-+	cond_wake_up_nomb(&root->log_commit_wait[index1]);
++	cond_wake_up(&root->log_commit_wait[index1]);
  	return ret;
  }
  
