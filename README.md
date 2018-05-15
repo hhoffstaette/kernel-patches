@@ -24,6 +24,8 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **Stable Series: 4.16**
 
 - btrfs: fixes from 4.17+ (correctness, discard, error handling)
+- block: fixes from 4.17+ (blk-mq correctness, throttled discard)
+- build: support for GCC 8
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - net: fixes & improvements from 4.17+ ([improved BBR ACK handling](https://groups.google.com/forum/#!topic/bbr-dev/8pgyOyUavvY))
