@@ -1,0 +1,110 @@
+From 03f45c883c6f391ed4fff8292415b35bd1107519 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Mon, 16 Apr 2018 10:33:37 -0700
+Subject: tcp: avoid extra wakeups for SO_RCVLOWAT users
+
+SO_RCVLOWAT is properly handled in tcp_poll(), so that POLLIN is only
+generated when enough bytes are available in receive queue, after
+David change (commit c7004482e8dc "tcp: Respect SO_RCVLOWAT in tcp_poll().")
+
+But TCP still calls sk->sk_data_ready() for each chunk added in receive
+queue, meaning thread is awaken, and goes back to sleep shortly after.
+
+Tested:
+
+tcp_mmap test program, receiving 32768 MB of data with SO_RCVLOWAT set to 512KB
+
+-> Should get ~2 wakeups (c-switches) per MB, regardless of how many
+(tiny or big) packets were received.
+
+High speed (mostly full size GRO packets)
+
+received 32768 MB (100 % mmap'ed) in 8.03112 s, 34.2266 Gbit,
+  cpu usage user:0.037 sys:1.404, 43.9758 usec per MB, 65497 c-switches
+
+received 32768 MB (99.9954 % mmap'ed) in 7.98453 s, 34.4263 Gbit,
+  cpu usage user:0.03 sys:1.422, 44.3115 usec per MB, 65485 c-switches
+
+Low speed (sender is ratelimited and sends 1-MSS at a time, so GRO is not helping)
+
+received 22474.5 MB (100 % mmap'ed) in 6015.35 s, 0.0313414 Gbit,
+  cpu usage user:0.05 sys:1.586, 72.7952 usec per MB, 44950 c-switches
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ include/net/tcp.h    |  1 +
+ net/ipv4/tcp.c       |  4 ++++
+ net/ipv4/tcp_input.c | 15 +++++++++++++--
+ 3 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index b231824..0ee85c4 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -403,6 +403,7 @@ void tcp_syn_ack_timeout(const struct request_sock *req);
+ int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int nonblock,
+ 		int flags, int *addr_len);
+ int tcp_set_rcvlowat(struct sock *sk, int val);
++void tcp_data_ready(struct sock *sk);
+ void tcp_parse_options(const struct net *net, const struct sk_buff *skb,
+ 		       struct tcp_options_received *opt_rx,
+ 		       int estab, struct tcp_fastopen_cookie *foc);
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 0abd8d1..c768d30 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -1705,6 +1705,10 @@ EXPORT_SYMBOL(tcp_peek_len);
+ int tcp_set_rcvlowat(struct sock *sk, int val)
+ {
+ 	sk->sk_rcvlowat = val ? : 1;
++
++	/* Check if we need to signal EPOLLIN right now */
++	tcp_data_ready(sk);
++
+ 	if (sk->sk_userlocks & SOCK_RCVBUF_LOCK)
+ 		return 0;
+ 
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index d854363..f93687f 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -4576,6 +4576,17 @@ err:
+ 
+ }
+ 
++void tcp_data_ready(struct sock *sk)
++{
++	const struct tcp_sock *tp = tcp_sk(sk);
++	int avail = tp->rcv_nxt - tp->copied_seq;
++
++	if (avail < sk->sk_rcvlowat && !sock_flag(sk, SOCK_DONE))
++		return;
++
++	sk->sk_data_ready(sk);
++}
++
+ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
+@@ -4633,7 +4644,7 @@ queue_and_out:
+ 		if (eaten > 0)
+ 			kfree_skb_partial(skb, fragstolen);
+ 		if (!sock_flag(sk, SOCK_DEAD))
+-			sk->sk_data_ready(sk);
++			tcp_data_ready(sk);
+ 		return;
+ 	}
+ 
+@@ -5434,7 +5445,7 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
+ no_ack:
+ 			if (eaten)
+ 				kfree_skb_partial(skb, fragstolen);
+-			sk->sk_data_ready(sk);
++			tcp_data_ready(sk);
+ 			return;
+ 		}
+ 	}
+-- 
+cgit v1.1
+
