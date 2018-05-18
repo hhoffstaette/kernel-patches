@@ -1,0 +1,89 @@
+Subject: [net-next,7/8] tcp: new helper tcp_rack_skb_timeout
+To: davem@davemloft.net
+Cc: netdev@vger.kernel.org, edumazet@google.com, ncardwell@google.com,
+ soheil@google.com, priyarjha@google.com, Yuchung Cheng <ycheng@google.com>
+Date: Wed, 16 May 2018 16:40:16 -0700
+From: Yuchung Cheng <ycheng@google.com>
+
+Create and export a new helper tcp_rack_skb_timeout and move tcp_is_rack
+to prepare the final RTO change.
+
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Reviewed-by: Eric Dumazet <edumazet@google.com>
+Reviewed-by: Soheil Hassas Yeganeh <soheil@google.com>
+Reviewed-by: Priyaranjan Jha <priyarjha@google.com>
+---
+ include/net/tcp.h       |  2 ++
+ net/ipv4/tcp_input.c    | 10 +++++-----
+ net/ipv4/tcp_recovery.c |  9 +++++++--
+ 3 files changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 402484ed9b57..b46d0f9adbdb 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -1880,6 +1880,8 @@ void tcp_init(void);
+ /* tcp_recovery.c */
+ void tcp_mark_skb_lost(struct sock *sk, struct sk_buff *skb);
+ void tcp_newreno_mark_lost(struct sock *sk, bool snd_una_advanced);
++extern s32 tcp_rack_skb_timeout(struct tcp_sock *tp, struct sk_buff *skb,
++				u32 reo_wnd);
+ extern void tcp_rack_mark_lost(struct sock *sk);
+ extern void tcp_rack_advance(struct tcp_sock *tp, u8 sacked, u32 end_seq,
+ 			     u64 xmit_time);
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 1ccc97b368c7..ba8a8e3464aa 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -1917,6 +1917,11 @@ static inline void tcp_init_undo(struct tcp_sock *tp)
+ 	tp->undo_retrans = tp->retrans_out ? : -1;
+ }
+ 
++static bool tcp_is_rack(const struct sock *sk)
++{
++	return sock_net(sk)->ipv4.sysctl_tcp_recovery & TCP_RACK_LOSS_DETECTION;
++}
++
+ /* If we detect SACK reneging, forget all SACK information
+  * and reset tags completely, otherwise preserve SACKs. If receiver
+  * dropped its ofo queue, we will know this due to reneging detection.
+@@ -2031,11 +2036,6 @@ static inline int tcp_dupack_heuristics(const struct tcp_sock *tp)
+ 	return tp->sacked_out + 1;
+ }
+ 
+-static bool tcp_is_rack(const struct sock *sk)
+-{
+-	return sock_net(sk)->ipv4.sysctl_tcp_recovery & TCP_RACK_LOSS_DETECTION;
+-}
+-
+ /* Linux NewReno/SACK/ECN state machine.
+  * --------------------------------------
+  *
+diff --git a/net/ipv4/tcp_recovery.c b/net/ipv4/tcp_recovery.c
+index b2f9be388bf3..30cbfb69b1de 100644
+--- a/net/ipv4/tcp_recovery.c
++++ b/net/ipv4/tcp_recovery.c
+@@ -47,6 +47,12 @@ u32 tcp_rack_reo_wnd(const struct sock *sk)
+ 		   tp->srtt_us >> 3);
+ }
+ 
++s32 tcp_rack_skb_timeout(struct tcp_sock *tp, struct sk_buff *skb, u32 reo_wnd)
++{
++	return tp->rack.rtt_us + reo_wnd -
++	       tcp_stamp_us_delta(tp->tcp_mstamp, skb->skb_mstamp);
++}
++
+ /* RACK loss detection (IETF draft draft-ietf-tcpm-rack-01):
+  *
+  * Marks a packet lost, if some packet sent later has been (s)acked.
+@@ -92,8 +98,7 @@ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
+ 		/* A packet is lost if it has not been s/acked beyond
+ 		 * the recent RTT plus the reordering window.
+ 		 */
+-		remaining = tp->rack.rtt_us + reo_wnd -
+-			    tcp_stamp_us_delta(tp->tcp_mstamp, skb->skb_mstamp);
++		remaining = tcp_rack_skb_timeout(tp, skb, reo_wnd);
+ 		if (remaining <= 0) {
+ 			tcp_mark_skb_lost(sk, skb);
+ 			list_del_init(&skb->tcp_tsorted_anchor);

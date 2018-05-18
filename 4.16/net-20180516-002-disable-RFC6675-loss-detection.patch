@@ -1,0 +1,79 @@
+Subject: [net-next,2/8] tcp: disable RFC6675 loss detection
+To: davem@davemloft.net
+Cc: netdev@vger.kernel.org, edumazet@google.com, ncardwell@google.com,
+ soheil@google.com, priyarjha@google.com, Yuchung Cheng <ycheng@google.com>
+Date: Wed, 16 May 2018 16:40:11 -0700
+From: Yuchung Cheng <ycheng@google.com>
+
+This patch disables RFC6675 loss detection and make sysctl
+net.ipv4.tcp_recovery = 1 controls a binary choice between RACK
+(1) or RFC6675 (0).
+
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Reviewed-by: Eric Dumazet <edumazet@google.com>
+Reviewed-by: Soheil Hassas Yeganeh <soheil@google.com>
+Reviewed-by: Priyaranjan Jha <priyarjha@google.com>
+---
+ Documentation/networking/ip-sysctl.txt |  3 ++-
+ net/ipv4/tcp_input.c                   | 12 ++++++++----
+ 2 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/Documentation/networking/ip-sysctl.txt b/Documentation/networking/ip-sysctl.txt
+index 13bbac50dc8b..ea304a23c8d7 100644
+--- a/Documentation/networking/ip-sysctl.txt
++++ b/Documentation/networking/ip-sysctl.txt
+@@ -449,7 +449,8 @@ tcp_recovery - INTEGER
+ 	features.
+ 
+ 	RACK: 0x1 enables the RACK loss detection for fast detection of lost
+-	      retransmissions and tail drops.
++	      retransmissions and tail drops. It also subsumes and disables
++	      RFC6675 recovery for SACK connections.
+ 	RACK: 0x2 makes RACK's reordering window static (min_rtt/4).
+ 	RACK: 0x4 disables RACK's DUPACK threshold heuristic
+ 
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index b188e0d75edd..ccbe04f80040 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -2035,6 +2035,11 @@ static inline int tcp_dupack_heuristics(const struct tcp_sock *tp)
+ 	return tp->sacked_out + 1;
+ }
+ 
++static bool tcp_is_rack(const struct sock *sk)
++{
++	return sock_net(sk)->ipv4.sysctl_tcp_recovery & TCP_RACK_LOSS_DETECTION;
++}
++
+ /* Linux NewReno/SACK/ECN state machine.
+  * --------------------------------------
+  *
+@@ -2141,7 +2146,7 @@ static bool tcp_time_to_recover(struct sock *sk, int flag)
+ 		return true;
+ 
+ 	/* Not-A-Trick#2 : Classic rule... */
+-	if (tcp_dupack_heuristics(tp) > tp->reordering)
++	if (!tcp_is_rack(sk) && tcp_dupack_heuristics(tp) > tp->reordering)
+ 		return true;
+ 
+ 	return false;
+@@ -2722,8 +2727,7 @@ static void tcp_rack_identify_loss(struct sock *sk, int *ack_flag)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
+ 
+-	/* Use RACK to detect loss */
+-	if (sock_net(sk)->ipv4.sysctl_tcp_recovery & TCP_RACK_LOSS_DETECTION) {
++	if (tcp_is_rack(sk)) {
+ 		u32 prior_retrans = tp->retrans_out;
+ 
+ 		tcp_rack_mark_lost(sk);
+@@ -2862,7 +2866,7 @@ static void tcp_fastretrans_alert(struct sock *sk, const u32 prior_snd_una,
+ 		fast_rexmit = 1;
+ 	}
+ 
+-	if (do_lost)
++	if (!tcp_is_rack(sk) && do_lost)
+ 		tcp_update_scoreboard(sk, fast_rexmit);
+ 	*rexmit = REXMIT_LOST;
+ }
