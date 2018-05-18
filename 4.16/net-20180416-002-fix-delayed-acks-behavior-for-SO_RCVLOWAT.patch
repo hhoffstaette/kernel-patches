@@ -1,0 +1,42 @@
+From 796f82eafcd96629c2f9a0332dbb4f474854aaf8 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Mon, 16 Apr 2018 10:33:36 -0700
+Subject: tcp: fix delayed acks behavior for SO_RCVLOWAT
+
+We should not delay acks if there are not enough bytes
+in receive queue to satisfy SO_RCVLOWAT.
+
+Since [E]POLLIN event is not going to be generated, there is little
+hope for a delayed ack to be useful.
+
+In fact, delaying ACK prevents sender from completing
+the transfer.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_input.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 367def6..d854363 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -5026,9 +5026,12 @@ static void __tcp_ack_snd_check(struct sock *sk, int ofo_possible)
+ 	    /* More than one full frame received... */
+ 	if (((tp->rcv_nxt - tp->rcv_wup) > inet_csk(sk)->icsk_ack.rcv_mss &&
+ 	     /* ... and right edge of window advances far enough.
+-	      * (tcp_recvmsg() will send ACK otherwise). Or...
++	      * (tcp_recvmsg() will send ACK otherwise).
++	      * If application uses SO_RCVLOWAT, we want send ack now if
++	      * we have not received enough bytes to satisfy the condition.
+ 	      */
+-	     __tcp_select_window(sk) >= tp->rcv_wnd) ||
++	    (tp->rcv_nxt - tp->copied_seq < sk->sk_rcvlowat ||
++	     __tcp_select_window(sk) >= tp->rcv_wnd)) ||
+ 	    /* We ACK each frame or... */
+ 	    tcp_in_quickack_mode(sk) ||
+ 	    /* We have out of order data. */
+-- 
+cgit v1.1
+
