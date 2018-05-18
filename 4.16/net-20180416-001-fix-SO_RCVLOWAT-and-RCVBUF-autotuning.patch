@@ -1,0 +1,125 @@
+From d1361840f8c519eaee9a78ffe09e4f0a1b586846 Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Mon, 16 Apr 2018 10:33:35 -0700
+Subject: tcp: fix SO_RCVLOWAT and RCVBUF autotuning
+
+Applications might use SO_RCVLOWAT on TCP socket hoping to receive
+one [E]POLLIN event only when a given amount of bytes are ready in socket
+receive queue.
+
+Problem is that receive autotuning is not aware of this constraint,
+meaning sk_rcvbuf might be too small to allow all bytes to be stored.
+
+Add a new (struct proto_ops)->set_rcvlowat method so that a protocol
+can override the default setsockopt(SO_RCVLOWAT) behavior.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ include/linux/net.h |  1 +
+ include/net/tcp.h   |  1 +
+ net/core/sock.c     |  5 ++++-
+ net/ipv4/af_inet.c  |  1 +
+ net/ipv4/tcp.c      | 21 +++++++++++++++++++++
+ net/ipv6/af_inet6.c |  1 +
+ 6 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/net.h b/include/linux/net.h
+index 2248a05..6554d3b 100644
+--- a/include/linux/net.h
++++ b/include/linux/net.h
+@@ -197,6 +197,7 @@ struct proto_ops {
+ 					   int offset, size_t size, int flags);
+ 	int		(*sendmsg_locked)(struct sock *sk, struct msghdr *msg,
+ 					  size_t size);
++	int		(*set_rcvlowat)(struct sock *sk, int val);
+ };
+ 
+ #define DECLARE_SOCKADDR(type, dst, src)	\
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 9c9b376..b231824 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -402,6 +402,7 @@ void tcp_set_keepalive(struct sock *sk, int val);
+ void tcp_syn_ack_timeout(const struct request_sock *req);
+ int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int nonblock,
+ 		int flags, int *addr_len);
++int tcp_set_rcvlowat(struct sock *sk, int val);
+ void tcp_parse_options(const struct net *net, const struct sk_buff *skb,
+ 		       struct tcp_options_received *opt_rx,
+ 		       int estab, struct tcp_fastopen_cookie *foc);
+diff --git a/net/core/sock.c b/net/core/sock.c
+index 6444525..b2c3db1 100644
+--- a/net/core/sock.c
++++ b/net/core/sock.c
+@@ -905,7 +905,10 @@ set_rcvbuf:
+ 	case SO_RCVLOWAT:
+ 		if (val < 0)
+ 			val = INT_MAX;
+-		sk->sk_rcvlowat = val ? : 1;
++		if (sock->ops->set_rcvlowat)
++			ret = sock->ops->set_rcvlowat(sk, val);
++		else
++			sk->sk_rcvlowat = val ? : 1;
+ 		break;
+ 
+ 	case SO_RCVTIMEO:
+diff --git a/net/ipv4/af_inet.c b/net/ipv4/af_inet.c
+index eaed036..f5c562a 100644
+--- a/net/ipv4/af_inet.c
++++ b/net/ipv4/af_inet.c
+@@ -1006,6 +1006,7 @@ const struct proto_ops inet_stream_ops = {
+ 	.compat_getsockopt = compat_sock_common_getsockopt,
+ 	.compat_ioctl	   = inet_compat_ioctl,
+ #endif
++	.set_rcvlowat	   = tcp_set_rcvlowat,
+ };
+ EXPORT_SYMBOL(inet_stream_ops);
+ 
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index bccc4c2..0abd8d1 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -1701,6 +1701,27 @@ int tcp_peek_len(struct socket *sock)
+ }
+ EXPORT_SYMBOL(tcp_peek_len);
+ 
++/* Make sure sk_rcvbuf is big enough to satisfy SO_RCVLOWAT hint */
++int tcp_set_rcvlowat(struct sock *sk, int val)
++{
++	sk->sk_rcvlowat = val ? : 1;
++	if (sk->sk_userlocks & SOCK_RCVBUF_LOCK)
++		return 0;
++
++	/* val comes from user space and might be close to INT_MAX */
++	val <<= 1;
++	if (val < 0)
++		val = INT_MAX;
++
++	val = min(val, sock_net(sk)->ipv4.sysctl_tcp_rmem[2]);
++	if (val > sk->sk_rcvbuf) {
++		sk->sk_rcvbuf = val;
++		tcp_sk(sk)->window_clamp = tcp_win_from_space(sk, val);
++	}
++	return 0;
++}
++EXPORT_SYMBOL(tcp_set_rcvlowat);
++
+ static void tcp_update_recv_tstamps(struct sk_buff *skb,
+ 				    struct scm_timestamping *tss)
+ {
+diff --git a/net/ipv6/af_inet6.c b/net/ipv6/af_inet6.c
+index 8da0b51..e70d59f 100644
+--- a/net/ipv6/af_inet6.c
++++ b/net/ipv6/af_inet6.c
+@@ -590,6 +590,7 @@ const struct proto_ops inet6_stream_ops = {
+ 	.compat_setsockopt = compat_sock_common_setsockopt,
+ 	.compat_getsockopt = compat_sock_common_getsockopt,
+ #endif
++	.set_rcvlowat	   = tcp_set_rcvlowat,
+ };
+ 
+ const struct proto_ops inet6_dgram_ops = {
+-- 
+cgit v1.1
+
