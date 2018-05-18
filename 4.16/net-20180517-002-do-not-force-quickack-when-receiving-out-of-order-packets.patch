@@ -1,0 +1,38 @@
+Subject: [v3, net-next, 2/6] tcp: do not force quickack when receiving out-of-order packets
+To: "David S . Miller" <davem@davemloft.net>
+Cc: netdev <netdev@vger.kernel.org>, =?utf-8?q?Toke_H=C3=B8iland-J=C3=B8rg?=
+ =?utf-8?q?ensen?= <toke@toke.dk>,
+ Neal Cardwell <ncardwell@google.com>, Yuchung Cheng <ycheng@google.com>, 
+ Soheil Hassas Yeganeh <soheil@google.com>, Eric Dumazet
+ <edumazet@google.com>,         Eric Dumazet <eric.dumazet@gmail.com>
+Date: Thu, 17 May 2018 14:47:25 -0700
+From: Eric Dumazet <edumazet@google.com>
+
+As explained in commit 9f9843a751d0 ("tcp: properly handle stretch
+acks in slow start"), TCP stacks have to consider how many packets
+are acknowledged in one single ACK, because of GRO, but also
+because of ACK compression or losses.
+
+We plan to add SACK compression in the following patch, we
+must therefore not call tcp_enter_quickack_mode()
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+---
+ net/ipv4/tcp_input.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 0bf032839548f8dccb7f24a6fb5a7d47ea29208b..f5622b250665178e44460fa2cd4a11af23dfb23d 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -4715,8 +4715,6 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
+ 	if (!before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt + tcp_receive_window(tp)))
+ 		goto out_of_window;
+ 
+-	tcp_enter_quickack_mode(sk);
+-
+ 	if (before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt)) {
+ 		/* Partial packet, seq < rcv_next < end_seq */
+ 		SOCK_DEBUG(sk, "partial packet: rcv_next %X seq %X - %X\n",

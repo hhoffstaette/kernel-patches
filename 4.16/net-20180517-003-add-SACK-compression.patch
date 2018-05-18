@@ -1,0 +1,223 @@
+Subject: [v3,net-next,3/6] tcp: add SACK compression
+To: "David S . Miller" <davem@davemloft.net>
+Cc: netdev <netdev@vger.kernel.org>, =?utf-8?q?Toke_H=C3=B8iland-J=C3=B8rg?=
+ =?utf-8?q?ensen?= <toke@toke.dk>,
+ Neal Cardwell <ncardwell@google.com>, Yuchung Cheng <ycheng@google.com>, 
+ Soheil Hassas Yeganeh <soheil@google.com>, Eric Dumazet
+ <edumazet@google.com>,         Eric Dumazet <eric.dumazet@gmail.com>
+Date: Thu, 17 May 2018 14:47:26 -0700
+From: Eric Dumazet <edumazet@google.com>
+
+When TCP receives an out-of-order packet, it immediately sends
+a SACK packet, generating network load but also forcing the
+receiver to send 1-MSS pathological packets, increasing its
+RTX queue length/depth, and thus processing time.
+
+Wifi networks suffer from this aggressive behavior, but generally
+speaking, all these SACK packets add fuel to the fire when networks
+are under congestion.
+
+This patch adds a high resolution timer and tp->compressed_ack counter.
+
+Instead of sending a SACK, we program this timer with a small delay,
+based on RTT and capped to 1 ms :
+
+	delay = min ( 5 % of RTT, 1 ms)
+
+If subsequent SACKs need to be sent while the timer has not yet
+expired, we simply increment tp->compressed_ack.
+
+When timer expires, a SACK is sent with the latest information.
+Whenever an ACK is sent (if data is sent, or if in-order
+data is received) timer is canceled.
+
+Note that tcp_sack_new_ofo_skb() is able to force a SACK to be sent
+if the sack blocks need to be shuffled, even if the timer has not
+expired.
+
+A new SNMP counter is added in the following patch.
+
+Two other patches add sysctls to allow changing the 1,000,000 and 44
+values that this commit hard-coded.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+Acked-by: Yuchung Cheng <ycheng@google.com>
+Acked-by: Toke Høiland-Jørgensen <toke@toke.dk>
+---
+ include/linux/tcp.h   |  2 ++
+ include/net/tcp.h     |  3 +++
+ net/ipv4/tcp.c        |  1 +
+ net/ipv4/tcp_input.c  | 35 +++++++++++++++++++++++++++++------
+ net/ipv4/tcp_output.c |  7 +++++++
+ net/ipv4/tcp_timer.c  | 25 +++++++++++++++++++++++++
+ 6 files changed, 67 insertions(+), 6 deletions(-)
+
+diff --git a/include/linux/tcp.h b/include/linux/tcp.h
+index 807776928cb8610fe97121fbc3c600b08d5d2991..72705eaf4b84060a45bf04d5170f389a18010eac 100644
+--- a/include/linux/tcp.h
++++ b/include/linux/tcp.h
+@@ -218,6 +218,7 @@ struct tcp_sock {
+ 		   reord:1;	 /* reordering detected */
+ 	} rack;
+ 	u16	advmss;		/* Advertised MSS			*/
++	u8	compressed_ack;
+ 	u32	chrono_start;	/* Start time in jiffies of a TCP chrono */
+ 	u32	chrono_stat[3];	/* Time in jiffies for chrono_stat stats */
+ 	u8	chrono_type:2,	/* current chronograph type */
+@@ -297,6 +298,7 @@ struct tcp_sock {
+ 	u32	sacked_out;	/* SACK'd packets			*/
+ 
+ 	struct hrtimer	pacing_timer;
++	struct hrtimer	compressed_ack_timer;
+ 
+ 	/* from STCP, retrans queue hinting */
+ 	struct sk_buff* lost_skb_hint;
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 511bd0fde1dc1dd842598d083905b0425bcb05f8..952d842a604a3ed79e1bf87a712db20a461c35a9 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -561,6 +561,9 @@ static inline void tcp_clear_xmit_timers(struct sock *sk)
+ 	if (hrtimer_try_to_cancel(&tcp_sk(sk)->pacing_timer) == 1)
+ 		__sock_put(sk);
+ 
++	if (hrtimer_try_to_cancel(&tcp_sk(sk)->compressed_ack_timer) == 1)
++		__sock_put(sk);
++
+ 	inet_csk_clear_xmit_timers(sk);
+ }
+ 
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 62b776f9003798eaf06992a4eb0914d17646aa61..0a2ea0bbf867271db05aedd7d48b193677664321 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -2595,6 +2595,7 @@ int tcp_disconnect(struct sock *sk, int flags)
+ 	dst_release(sk->sk_rx_dst);
+ 	sk->sk_rx_dst = NULL;
+ 	tcp_saved_syn_free(tp);
++	tp->compressed_ack = 0;
+ 
+ 	/* Clean up fastopen related fields */
+ 	tcp_free_fastopen_req(tp);
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index f5622b250665178e44460fa2cd4a11af23dfb23d..cc2ac5346b92b968593f919192d543384865bcb8 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -4249,6 +4249,8 @@ static void tcp_sack_new_ofo_skb(struct sock *sk, u32 seq, u32 end_seq)
+ 	 * If the sack array is full, forget about the last one.
+ 	 */
+ 	if (this_sack >= TCP_NUM_SACKS) {
++		if (tp->compressed_ack)
++			tcp_send_ack(sk);
+ 		this_sack--;
+ 		tp->rx_opt.num_sacks--;
+ 		sp--;
+@@ -5081,6 +5083,7 @@ static inline void tcp_data_snd_check(struct sock *sk)
+ static void __tcp_ack_snd_check(struct sock *sk, int ofo_possible)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
++	unsigned long rtt, delay;
+ 
+ 	    /* More than one full frame received... */
+ 	if (((tp->rcv_nxt - tp->rcv_wup) > inet_csk(sk)->icsk_ack.rcv_mss &&
+@@ -5092,15 +5095,35 @@ static void __tcp_ack_snd_check(struct sock *sk, int ofo_possible)
+ 	    (tp->rcv_nxt - tp->copied_seq < sk->sk_rcvlowat ||
+ 	     __tcp_select_window(sk) >= tp->rcv_wnd)) ||
+ 	    /* We ACK each frame or... */
+-	    tcp_in_quickack_mode(sk) ||
+-	    /* We have out of order data. */
+-	    (ofo_possible && !RB_EMPTY_ROOT(&tp->out_of_order_queue))) {
+-		/* Then ack it now */
++	    tcp_in_quickack_mode(sk)) {
++send_now:
+ 		tcp_send_ack(sk);
+-	} else {
+-		/* Else, send delayed ack. */
++		return;
++	}
++
++	if (!ofo_possible || RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+ 		tcp_send_delayed_ack(sk);
++		return;
+ 	}
++
++	if (!tcp_is_sack(tp) || tp->compressed_ack >= 44)
++		goto send_now;
++	tp->compressed_ack++;
++
++	if (hrtimer_is_queued(&tp->compressed_ack_timer))
++		return;
++
++	/* compress ack timer : 5 % of rtt, but no more than 1 ms */
++
++	rtt = tp->rcv_rtt_est.rtt_us;
++	if (tp->srtt_us && tp->srtt_us < rtt)
++		rtt = tp->srtt_us;
++
++	delay = min_t(unsigned long, NSEC_PER_MSEC,
++		      rtt * (NSEC_PER_USEC >> 3)/20);
++	sock_hold(sk);
++	hrtimer_start(&tp->compressed_ack_timer, ns_to_ktime(delay),
++		      HRTIMER_MODE_REL_PINNED_SOFT);
+ }
+ 
+ static inline void tcp_ack_snd_check(struct sock *sk)
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 0d8f950a9006598c70dbf51e281a3fe32dfaa234..7ee98aad82b758674ca7f3e90bd3fc165e8fcd45 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -162,6 +162,13 @@ static void tcp_event_data_sent(struct tcp_sock *tp,
+ /* Account for an ACK we sent. */
+ static inline void tcp_event_ack_sent(struct sock *sk, unsigned int pkts)
+ {
++	struct tcp_sock *tp = tcp_sk(sk);
++
++	if (unlikely(tp->compressed_ack)) {
++		tp->compressed_ack = 0;
++		if (hrtimer_try_to_cancel(&tp->compressed_ack_timer) == 1)
++			__sock_put(sk);
++	}
+ 	tcp_dec_quickack_mode(sk, pkts);
+ 	inet_csk_clear_xmit_timer(sk, ICSK_TIME_DACK);
+ }
+diff --git a/net/ipv4/tcp_timer.c b/net/ipv4/tcp_timer.c
+index 92bdf64fffae3a5be291ca419eb21276b4c8cbae..3b3611729928f77934e0298bb248e55c7a7c5def 100644
+--- a/net/ipv4/tcp_timer.c
++++ b/net/ipv4/tcp_timer.c
+@@ -708,6 +708,27 @@ static void tcp_keepalive_timer (struct timer_list *t)
+ 	sock_put(sk);
+ }
+ 
++static enum hrtimer_restart tcp_compressed_ack_kick(struct hrtimer *timer)
++{
++	struct tcp_sock *tp = container_of(timer, struct tcp_sock, compressed_ack_timer);
++	struct sock *sk = (struct sock *)tp;
++
++	bh_lock_sock(sk);
++	if (!sock_owned_by_user(sk)) {
++		if (tp->compressed_ack)
++			tcp_send_ack(sk);
++	} else {
++		if (!test_and_set_bit(TCP_DELACK_TIMER_DEFERRED,
++				      &sk->sk_tsq_flags))
++			sock_hold(sk);
++	}
++	bh_unlock_sock(sk);
++
++	sock_put(sk);
++
++	return HRTIMER_NORESTART;
++}
++
+ void tcp_init_xmit_timers(struct sock *sk)
+ {
+ 	inet_csk_init_xmit_timers(sk, &tcp_write_timer, &tcp_delack_timer,
+@@ -715,4 +736,8 @@ void tcp_init_xmit_timers(struct sock *sk)
+ 	hrtimer_init(&tcp_sk(sk)->pacing_timer, CLOCK_MONOTONIC,
+ 		     HRTIMER_MODE_ABS_PINNED_SOFT);
+ 	tcp_sk(sk)->pacing_timer.function = tcp_pace_kick;
++
++	hrtimer_init(&tcp_sk(sk)->compressed_ack_timer, CLOCK_MONOTONIC,
++		     HRTIMER_MODE_REL_PINNED_SOFT);
++	tcp_sk(sk)->compressed_ack_timer.function = tcp_compressed_ack_kick;
+ }

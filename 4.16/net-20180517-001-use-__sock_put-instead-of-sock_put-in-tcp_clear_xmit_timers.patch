@@ -1,0 +1,31 @@
+Subject: [v3, net-next, 1/6] tcp: use __sock_put() instead of sock_put() in tcp_clear_xmit_timers()
+To: "David S . Miller" <davem@davemloft.net>
+Cc: netdev <netdev@vger.kernel.org>, =?utf-8?q?Toke_H=C3=B8iland-J=C3=B8rg?=
+ =?utf-8?q?ensen?= <toke@toke.dk>,
+ Neal Cardwell <ncardwell@google.com>, Yuchung Cheng <ycheng@google.com>, 
+ Soheil Hassas Yeganeh <soheil@google.com>, Eric Dumazet
+ <edumazet@google.com>,         Eric Dumazet <eric.dumazet@gmail.com>
+Date: Thu, 17 May 2018 14:47:24 -0700
+From: Eric Dumazet <edumazet@google.com>
+
+Socket can not disappear under us.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Neal Cardwell <ncardwell@google.com>
+---
+ include/net/tcp.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 6deb540297ccaa1f05ce633efe313d1ca2c15dd9..511bd0fde1dc1dd842598d083905b0425bcb05f8 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -559,7 +559,7 @@ void tcp_init_xmit_timers(struct sock *);
+ static inline void tcp_clear_xmit_timers(struct sock *sk)
+ {
+ 	if (hrtimer_try_to_cancel(&tcp_sk(sk)->pacing_timer) == 1)
+-		sock_put(sk);
++		__sock_put(sk);
+ 
+ 	inet_csk_clear_xmit_timers(sk);
+ }
