@@ -1,0 +1,39 @@
+From eedffa28c9b00ca2dcb4d541b5a530f4c917052d Mon Sep 17 00:00:00 2001
+From: Jeff Layton <jlayton@redhat.com>
+Date: Mon, 21 May 2018 14:35:03 -0400
+Subject: loop: clear wb_err in bd_inode when detaching backing file
+
+When a loop block device encounters a writeback error, that error will
+get propagated to the bd_inode's wb_err field. If we then detach the
+backing file from it, attach another and fsync it, we'll get back the
+writeback error that we had from the previous backing file.
+
+This is a bit of a grey area as POSIX doesn't cover loop devices, but it
+is somewhat counterintuitive.
+
+If we detach a backing file from the loopdev while there are still
+unreported errors, take it as a sign that we're no longer interested in
+the previous file, and clear out the wb_err in the loop blockdev.
+
+Reported-and-Tested-by: Theodore Y. Ts'o <tytso@mit.edu>
+Signed-off-by: Jeff Layton <jlayton@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ drivers/block/loop.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/block/loop.c b/drivers/block/loop.c
+index 5d4e316..55cf554 100644
+--- a/drivers/block/loop.c
++++ b/drivers/block/loop.c
+@@ -1068,6 +1068,7 @@ static int loop_clr_fd(struct loop_device *lo)
+ 	if (bdev) {
+ 		bdput(bdev);
+ 		invalidate_bdev(bdev);
++		bdev->bd_inode->i_mapping->wb_err = 0;
+ 	}
+ 	set_capacity(lo->lo_disk, 0);
+ 	loop_sysfs_exit(lo);
+-- 
+cgit v1.1
+
