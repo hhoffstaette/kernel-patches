@@ -1,0 +1,56 @@
+From 6131837b1de66116459ef4413e26fdbc70d066dc Mon Sep 17 00:00:00 2001
+From: Omar Sandoval <osandov@fb.com>
+Date: Thu, 26 Apr 2018 00:21:58 -0700
+Subject: blk-mq: count allocated but not started requests in iostats inflight
+
+In the legacy block case, we increment the counter right after we
+allocate the request, not when the driver handles it. In both the legacy
+and blk-mq cases, part_inc_in_flight() is called from
+blk_account_io_start() right after we've allocated the request. blk-mq
+only considers requests started requests as inflight, but this is
+inconsistent with the legacy definition and the intention in the code.
+This removes the started condition and instead counts all allocated
+requests.
+
+Fixes: f299b7c7a9de ("blk-mq: provide internal in-flight variant")
+Signed-off-by: Omar Sandoval <osandov@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c | 21 +++++++++------------
+ 1 file changed, 9 insertions(+), 12 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index c362145..5450cbc 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -95,18 +95,15 @@ static void blk_mq_check_inflight(struct blk_mq_hw_ctx *hctx,
+ {
+ 	struct mq_inflight *mi = priv;
+ 
+-	if (blk_mq_rq_state(rq) == MQ_RQ_IN_FLIGHT) {
+-		/*
+-		 * index[0] counts the specific partition that was asked
+-		 * for. index[1] counts the ones that are active on the
+-		 * whole device, so increment that if mi->part is indeed
+-		 * a partition, and not a whole device.
+-		 */
+-		if (rq->part == mi->part)
+-			mi->inflight[0]++;
+-		if (mi->part->partno)
+-			mi->inflight[1]++;
+-	}
++	/*
++	 * index[0] counts the specific partition that was asked for. index[1]
++	 * counts the ones that are active on the whole device, so increment
++	 * that if mi->part is indeed a partition, and not a whole device.
++	 */
++	if (rq->part == mi->part)
++		mi->inflight[0]++;
++	if (mi->part->partno)
++		mi->inflight[1]++;
+ }
+ 
+ void blk_mq_in_flight(struct request_queue *q, struct hd_struct *part,
+-- 
+cgit v1.1
+
