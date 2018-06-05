@@ -1,0 +1,67 @@
+From 22ab8bc02a5f6e8ffc418759894f7a6b0b632331 Mon Sep 17 00:00:00 2001
+From: Frederic Weisbecker <frederic@kernel.org>
+Date: Wed, 21 Feb 2018 05:17:25 +0100
+Subject: nohz: Allow to check if remote CPU tick is stopped
+
+This check is racy but provides a good heuristic to determine whether
+a CPU may need a remote tick or not.
+
+Signed-off-by: Frederic Weisbecker <frederic@kernel.org>
+Reviewed-by: Thomas Gleixner <tglx@linutronix.de>
+Acked-by: Peter Zijlstra <peterz@infradead.org>
+Cc: Chris Metcalf <cmetcalf@mellanox.com>
+Cc: Christoph Lameter <cl@linux.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Luiz Capitulino <lcapitulino@redhat.com>
+Cc: Mike Galbraith <efault@gmx.de>
+Cc: Paul E. McKenney <paulmck@linux.vnet.ibm.com>
+Cc: Rik van Riel <riel@redhat.com>
+Cc: Wanpeng Li <kernellwp@gmail.com>
+Link: http://lkml.kernel.org/r/1519186649-3242-4-git-send-email-frederic@kernel.org
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ include/linux/tick.h     | 2 ++
+ kernel/time/tick-sched.c | 7 +++++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/include/linux/tick.h b/include/linux/tick.h
+index 86576d9..7f8c9a1 100644
+--- a/include/linux/tick.h
++++ b/include/linux/tick.h
+@@ -114,6 +114,7 @@ enum tick_dep_bits {
+ #ifdef CONFIG_NO_HZ_COMMON
+ extern bool tick_nohz_enabled;
+ extern bool tick_nohz_tick_stopped(void);
++extern bool tick_nohz_tick_stopped_cpu(int cpu);
+ extern void tick_nohz_idle_enter(void);
+ extern void tick_nohz_idle_exit(void);
+ extern void tick_nohz_irq_exit(void);
+@@ -125,6 +126,7 @@ extern u64 get_cpu_iowait_time_us(int cpu, u64 *last_update_time);
+ #else /* !CONFIG_NO_HZ_COMMON */
+ #define tick_nohz_enabled (0)
+ static inline int tick_nohz_tick_stopped(void) { return 0; }
++static inline int tick_nohz_tick_stopped_cpu(int cpu) { return 0; }
+ static inline void tick_nohz_idle_enter(void) { }
+ static inline void tick_nohz_idle_exit(void) { }
+ 
+diff --git a/kernel/time/tick-sched.c b/kernel/time/tick-sched.c
+index 0aba041..d479b21 100644
+--- a/kernel/time/tick-sched.c
++++ b/kernel/time/tick-sched.c
+@@ -486,6 +486,13 @@ bool tick_nohz_tick_stopped(void)
+ 	return __this_cpu_read(tick_cpu_sched.tick_stopped);
+ }
+ 
++bool tick_nohz_tick_stopped_cpu(int cpu)
++{
++	struct tick_sched *ts = per_cpu_ptr(&tick_cpu_sched, cpu);
++
++	return ts->tick_stopped;
++}
++
+ /**
+  * tick_nohz_update_jiffies - update jiffies when idle was interrupted
+  *
+-- 
+cgit v1.1
+
