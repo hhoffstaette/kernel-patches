@@ -1,0 +1,58 @@
+From: Soheil Hassas Yeganeh <soheil.kdev@gmail.com>
+To: davem@davemloft.net, netdev@vger.kernel.org
+Cc: ycheng@google.com, ncardwell@google.com, edumazet@google.com,
+ willemb@google.com, Soheil Hassas Yeganeh <soheil@google.com>
+Subject: [net] tcp: limit sk_rcvlowat by the maximum receive buffer
+Date: Fri,  8 Jun 2018 22:47:10 -0400
+
+From: Soheil Hassas Yeganeh <soheil@google.com>
+
+The user-provided value to setsockopt(SO_RCVLOWAT) can be
+larger than the maximum possible receive buffer. Such values
+mute POLLIN signals on the socket which can stall progress
+on the socket.
+
+Limit the user-provided value to half of the maximum receive
+buffer, i.e., half of sk_rcvbuf when the receive buffer size
+is set by the user, or otherwise half of sysctl_tcp_rmem[2].
+
+Fixes: d1361840f8c5 ("tcp: fix SO_RCVLOWAT and RCVBUF autotuning")
+Signed-off-by: Soheil Hassas Yeganeh <soheil@google.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Reviewed-by: Neal Cardwell <ncardwell@google.com>
+Acked-by: Willem de Bruijn <willemb@google.com>
+---
+ net/ipv4/tcp.c | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 2741953adaba2..141acd92e58ae 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -1694,6 +1694,13 @@ EXPORT_SYMBOL(tcp_peek_len);
+ /* Make sure sk_rcvbuf is big enough to satisfy SO_RCVLOWAT hint */
+ int tcp_set_rcvlowat(struct sock *sk, int val)
+ {
++	int cap;
++
++	if (sk->sk_userlocks & SOCK_RCVBUF_LOCK)
++		cap = sk->sk_rcvbuf >> 1;
++	else
++		cap = sock_net(sk)->ipv4.sysctl_tcp_rmem[2] >> 1;
++	val = min(val, cap);
+ 	sk->sk_rcvlowat = val ? : 1;
+ 
+ 	/* Check if we need to signal EPOLLIN right now */
+@@ -1702,12 +1709,7 @@ int tcp_set_rcvlowat(struct sock *sk, int val)
+ 	if (sk->sk_userlocks & SOCK_RCVBUF_LOCK)
+ 		return 0;
+ 
+-	/* val comes from user space and might be close to INT_MAX */
+ 	val <<= 1;
+-	if (val < 0)
+-		val = INT_MAX;
+-
+-	val = min(val, sock_net(sk)->ipv4.sysctl_tcp_rmem[2]);
+ 	if (val > sk->sk_rcvbuf) {
+ 		sk->sk_rcvbuf = val;
+ 		tcp_sk(sk)->window_clamp = tcp_win_from_space(sk, val);
