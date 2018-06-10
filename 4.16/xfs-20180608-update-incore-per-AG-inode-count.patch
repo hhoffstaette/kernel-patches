@@ -1,0 +1,36 @@
+Date:   Fri, 8 Jun 2018 19:26:53 -0700
+From:   "Darrick J. Wong" <darrick.wong@oracle.com>
+To:     xfs <linux-xfs@vger.kernel.org>
+Subject: [PATCH] xfs: update incore per-AG inode count
+
+From: Darrick J. Wong <darrick.wong@oracle.com>
+
+For whatever reason we never actually update pagi_count (the in-core
+perag inode count) when we allocate or free inode chunks.  Online scrub
+is going to use it, so we need to fix the accounting.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+ fs/xfs/libxfs/xfs_ialloc.c |    2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/xfs/libxfs/xfs_ialloc.c b/fs/xfs/libxfs/xfs_ialloc.c
+index 3f551eb29157..a64f71b614cc 100644
+--- a/fs/xfs/libxfs/xfs_ialloc.c
++++ b/fs/xfs/libxfs/xfs_ialloc.c
+@@ -897,6 +897,7 @@ xfs_ialloc_ag_alloc(
+ 	be32_add_cpu(&agi->agi_freecount, newlen);
+ 	pag = xfs_perag_get(args.mp, agno);
+ 	pag->pagi_freecount += newlen;
++	pag->pagi_count += newlen;
+ 	xfs_perag_put(pag);
+ 	agi->agi_newino = cpu_to_be32(newino);
+ 
+@@ -1991,6 +1992,7 @@ xfs_difree_inobt(
+ 		xfs_ialloc_log_agi(tp, agbp, XFS_AGI_COUNT | XFS_AGI_FREECOUNT);
+ 		pag = xfs_perag_get(mp, agno);
+ 		pag->pagi_freecount -= ilen - 1;
++		pag->pagi_count -= ilen;
+ 		xfs_perag_put(pag);
+ 		xfs_trans_mod_sb(tp, XFS_TRANS_SB_ICOUNT, -ilen);
+ 		xfs_trans_mod_sb(tp, XFS_TRANS_SB_IFREE, -(ilen - 1));
