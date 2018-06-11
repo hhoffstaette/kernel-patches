@@ -1,0 +1,311 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH 2/2] Btrfs: sync log after logging new name
+Date:   Mon, 11 Jun 2018 19:24:28 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+When we add a new name for an inode which was logged in the current
+transaction, we update the inode in the log so that its new name and
+ancestors are added to the log. However when we do this we do not persist
+the log, so the changes remain in memory only, and as a consequence, any
+ancestors that were created in the current transaction are updated such
+that future calls to btrfs_inode_in_log() return true. This leads to a
+subsequent fsync against such new ancestor directories returning
+immediately, without persisting the log, therefore after a power failure
+the new ancestor directories do not exist, despite fsync being called
+against them explicitly.
+
+Example:
+
+  $ mkfs.btrfs -f /dev/sdb
+  $ mount /dev/sdb /mnt
+
+  $ mkdir /mnt/A
+  $ mkdir /mnt/B
+  $ mkdir /mnt/A/C
+  $ touch /mnt/B/foo
+  $ xfs_io -c "fsync" /mnt/B/foo
+  $ ln /mnt/B/foo /mnt/A/C/foo
+  $ xfs_io -c "fsync" /mnt/A
+  <power failure>
+
+After the power failure, directory "A" does not exist, despite the explicit
+fsync on it.
+
+Instead of fixing this by changing the behaviour of the explicit fsync on
+directory "A" to persist the log instead of doing nothing, make the logging
+of the new file name (which happens when creating a hard link or renaming)
+persist the log. This approach not only is simpler, not requiring addition
+of new fields to the inode in memory structure, but also gives us the same
+behaviour as ext4, xfs and f2fs (possibly other filesystems too).
+
+A test case for fstests follows soon.
+
+[HH: backported to 4.16.x]
+Fixes: 12fcfd22fe5b ("Btrfs: tree logging unlink/rename fixes")
+Reported-by: Vijay Chidambaram <vvijay03@gmail.com>
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/inode.c    | 92 ++++++++++++++++++++++++++++++++++++++++++++++-------
+ fs/btrfs/tree-log.c | 48 ++++++++++++++++++++++++----
+ fs/btrfs/tree-log.h | 10 +++++-
+ 3 files changed, 131 insertions(+), 19 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 2bb893aa54da..e84bf9d93ed4 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -6692,6 +6692,8 @@ static int btrfs_link(struct dentry *old_dentry, struct inode *dir,
+ 		drop_inode = 1;
+ 	} else {
+ 		struct dentry *parent = dentry->d_parent;
++		int ret;
++
+ 		err = btrfs_update_inode(trans, root, inode);
+ 		if (err)
+ 			goto fail;
+@@ -6705,7 +6707,12 @@ static int btrfs_link(struct dentry *old_dentry, struct inode *dir,
+ 				goto fail;
+ 		}
+ 		d_instantiate(dentry, inode);
+-		btrfs_log_new_name(trans, BTRFS_I(inode), NULL, parent);
++		ret = btrfs_log_new_name(trans, BTRFS_I(inode), NULL, parent,
++					 true, NULL);
++		if (ret == BTRFS_NEED_TRANS_COMMIT) {
++			err = btrfs_commit_transaction(trans);
++			trans = NULL;
++		}
+ 	}
+ 
+ fail:
+@@ -9445,14 +9452,21 @@ static int btrfs_rename_exchange(struct inode *old_dir,
+ 	u64 new_idx = 0;
+ 	u64 root_objectid;
+ 	int ret;
+-	int ret2;
+ 	bool root_log_pinned = false;
+ 	bool dest_log_pinned = false;
++	struct btrfs_log_ctx ctx_root;
++	struct btrfs_log_ctx ctx_dest;
++	bool sync_log_root = false;
++	bool sync_log_dest = false;
++	bool commit_transaction = false;
+ 
+ 	/* we only allow rename subvolume link between subvolumes */
+ 	if (old_ino != BTRFS_FIRST_FREE_OBJECTID && root != dest)
+ 		return -EXDEV;
+ 
++	btrfs_init_log_ctx(&ctx_root, old_inode);
++	btrfs_init_log_ctx(&ctx_dest, new_inode);
++
+ 	/* close the race window with snapshot create/destroy ioctl */
+ 	if (old_ino == BTRFS_FIRST_FREE_OBJECTID)
+ 		down_read(&fs_info->subvol_sem);
+@@ -9601,15 +9615,29 @@ static int btrfs_rename_exchange(struct inode *old_dir,
+ 
+ 	if (root_log_pinned) {
+ 		parent = new_dentry->d_parent;
+-		btrfs_log_new_name(trans, BTRFS_I(old_inode), BTRFS_I(old_dir),
+-				parent);
++		ret = btrfs_log_new_name(trans, BTRFS_I(old_inode),
++					 BTRFS_I(old_dir), parent,
++					 false, &ctx_root);
++		if (ret == BTRFS_NEED_LOG_SYNC)
++			sync_log_root = true;
++		else if (ret == BTRFS_NEED_TRANS_COMMIT)
++			commit_transaction = true;
++		ret = 0;
+ 		btrfs_end_log_trans(root);
+ 		root_log_pinned = false;
+ 	}
+ 	if (dest_log_pinned) {
+-		parent = old_dentry->d_parent;
+-		btrfs_log_new_name(trans, BTRFS_I(new_inode), BTRFS_I(new_dir),
+-				parent);
++		if (!commit_transaction) {
++			parent = old_dentry->d_parent;
++			ret = btrfs_log_new_name(trans, BTRFS_I(new_inode),
++						 BTRFS_I(new_dir), parent,
++						 false, &ctx_dest);
++			if (ret == BTRFS_NEED_LOG_SYNC)
++				sync_log_dest = true;
++			else if (ret == BTRFS_NEED_TRANS_COMMIT)
++				commit_transaction = true;
++			ret = 0;
++		}
+ 		btrfs_end_log_trans(dest);
+ 		dest_log_pinned = false;
+ 	}
+@@ -9642,8 +9670,26 @@ static int btrfs_rename_exchange(struct inode *old_dir,
+ 			dest_log_pinned = false;
+ 		}
+ 	}
+-	ret2 = btrfs_end_transaction(trans);
+-	ret = ret ? ret : ret2;
++	if (!ret && sync_log_root && !commit_transaction) {
++		ret = btrfs_sync_log(trans, BTRFS_I(old_inode)->root,
++				     &ctx_root);
++		if (ret)
++			commit_transaction = true;
++	}
++	if (!ret && sync_log_dest && !commit_transaction) {
++		ret = btrfs_sync_log(trans, BTRFS_I(new_inode)->root,
++				     &ctx_dest);
++		if (ret)
++			commit_transaction = true;
++	}
++	if (commit_transaction) {
++		ret = btrfs_commit_transaction(trans);
++	} else {
++		int ret2;
++
++		ret2 = btrfs_end_transaction(trans);
++		ret = ret ? ret : ret2;
++	}
+ out_notrans:
+ 	if (new_ino == BTRFS_FIRST_FREE_OBJECTID)
+ 		up_read(&fs_info->subvol_sem);
+@@ -9720,6 +9766,9 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	int ret;
+ 	u64 old_ino = btrfs_ino(BTRFS_I(old_inode));
+ 	bool log_pinned = false;
++	struct btrfs_log_ctx ctx;
++	bool sync_log = false;
++	bool commit_transaction = false;
+ 
+ 	if (btrfs_ino(BTRFS_I(new_dir)) == BTRFS_EMPTY_SUBVOL_DIR_OBJECTID)
+ 		return -EPERM;
+@@ -9878,8 +9927,15 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	if (log_pinned) {
+ 		struct dentry *parent = new_dentry->d_parent;
+ 
+-		btrfs_log_new_name(trans, BTRFS_I(old_inode), BTRFS_I(old_dir),
+-				parent);
++		btrfs_init_log_ctx(&ctx, old_inode);
++		ret = btrfs_log_new_name(trans, BTRFS_I(old_inode),
++					 BTRFS_I(old_dir), parent,
++					 false, &ctx);
++		if (ret == BTRFS_NEED_LOG_SYNC)
++			sync_log = true;
++		else if (ret == BTRFS_NEED_TRANS_COMMIT)
++			commit_transaction = true;
++		ret = 0;
+ 		btrfs_end_log_trans(root);
+ 		log_pinned = false;
+ 	}
+@@ -9916,7 +9972,19 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 		btrfs_end_log_trans(root);
+ 		log_pinned = false;
+ 	}
+-	btrfs_end_transaction(trans);
++	if (!ret && sync_log) {
++		ret = btrfs_sync_log(trans, BTRFS_I(old_inode)->root, &ctx);
++		if (ret)
++			commit_transaction = true;
++	}
++	if (commit_transaction) {
++		ret = btrfs_commit_transaction(trans);
++	} else {
++		int ret2;
++
++		ret2 = btrfs_end_transaction(trans);
++		ret = ret ? ret : ret2;
++	}
+ out_notrans:
+ 	if (old_ino == BTRFS_FIRST_FREE_OBJECTID)
+ 		up_read(&fs_info->subvol_sem);
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index f8220ec02036..73327a59bf42 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -6113,15 +6113,26 @@ void btrfs_record_snapshot_destroy(struct btrfs_trans_handle *trans,
+  * Call this after adding a new name for a file and it will properly
+  * update the log to reflect the new name.
+  *
+- * It will return zero if all goes well, and it will return 1 if a
+- * full transaction commit is required.
++ * @ctx can not be NULL when @sync_log is false, and should be NULL when it's
++ * true (because it's not used).
++ *
++ * Return value depends on whether @sync_log is true or false.
++ * When true: returns BTRFS_NEED_TRANS_COMMIT if the transaction needs to be
++ *            committed by the caller, and BTRFS_DONT_NEED_TRANS_COMMIT
++ *            otherwise.
++ * When false: returns BTRFS_DONT_NEED_LOG_SYNC if the caller does not need to
++ *             to sync the log, BTRFS_NEED_LOG_SYNC if it needs to sync the log,
++ *             or BTRFS_NEED_TRANS_COMMIT if the transaction needs to be
++ *             committed (without attempting to sync the log).
+  */
+ int btrfs_log_new_name(struct btrfs_trans_handle *trans,
+ 			struct btrfs_inode *inode, struct btrfs_inode *old_dir,
+-			struct dentry *parent)
++			struct dentry *parent,
++			bool sync_log, struct btrfs_log_ctx *ctx)
+ {
+ 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->vfs_inode.i_sb);
+	struct btrfs_root *root = inode->root;
++	int ret;
+ 
+ 	/*
+ 	 * this will force the logging code to walk the dentry chain
+@@ -6135,9 +6146,34 @@ int btrfs_log_new_name(struct btrfs_trans_handle *trans,
+ 	 */
+ 	if (inode->logged_trans <= fs_info->last_trans_committed &&
+ 	    (!old_dir || old_dir->logged_trans <= fs_info->last_trans_committed))
+-		return 0;
++		return sync_log ? BTRFS_DONT_NEED_TRANS_COMMIT :
++			BTRFS_DONT_NEED_LOG_SYNC;
++
++	if (sync_log) {
++		struct btrfs_log_ctx ctx2;
++
++		btrfs_init_log_ctx(&ctx2, &inode->vfs_inode);
++		ret = btrfs_log_inode_parent(trans, root, inode, parent, 0, LLONG_MAX,
++					     LOG_INODE_EXISTS, &ctx2);
++		if (ret == BTRFS_NO_LOG_SYNC)
++			return BTRFS_DONT_NEED_TRANS_COMMIT;
++		else if (ret)
++			return BTRFS_NEED_TRANS_COMMIT;
++
++		ret = btrfs_sync_log(trans, inode->root, &ctx2);
++		if (ret)
++			return BTRFS_NEED_TRANS_COMMIT;
++		return BTRFS_DONT_NEED_TRANS_COMMIT;
++	}
++
++	ASSERT(ctx);
++	ret = btrfs_log_inode_parent(trans, root, inode, parent, 0, LLONG_MAX,
++				     LOG_INODE_EXISTS, ctx);
++	if (ret == BTRFS_NO_LOG_SYNC)
++		return BTRFS_DONT_NEED_LOG_SYNC;
++	else if (ret)
++		return BTRFS_NEED_TRANS_COMMIT;
+ 
+-	return btrfs_log_inode_parent(trans, root, inode, parent, 0,
+-				      LLONG_MAX, LOG_INODE_EXISTS, NULL);
++	return BTRFS_NEED_LOG_SYNC;
+ }
+ 
+diff --git a/fs/btrfs/tree-log.h b/fs/btrfs/tree-log.h
+index 122e68b89a5a..7ab9bb88a639 100644
+--- a/fs/btrfs/tree-log.h
++++ b/fs/btrfs/tree-log.h
+@@ -71,7 +71,16 @@ void btrfs_record_unlink_dir(struct btrfs_trans_handle *trans,
+ 			     int for_rename);
+ void btrfs_record_snapshot_destroy(struct btrfs_trans_handle *trans,
+ 				   struct btrfs_inode *dir);
++/* Return values for btrfs_log_new_name() */
++enum {
++	BTRFS_DONT_NEED_TRANS_COMMIT,
++	BTRFS_NEED_TRANS_COMMIT,
++	BTRFS_DONT_NEED_LOG_SYNC,
++	BTRFS_NEED_LOG_SYNC,
++};
+ int btrfs_log_new_name(struct btrfs_trans_handle *trans,
+ 			struct btrfs_inode *inode, struct btrfs_inode *old_dir,
+-			struct dentry *parent);
++			struct dentry *parent,
++			bool sync_log, struct btrfs_log_ctx *ctx);
++
+ #endif
