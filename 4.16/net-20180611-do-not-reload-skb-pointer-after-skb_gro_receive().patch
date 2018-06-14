@@ -1,0 +1,37 @@
+From: David Miller <davem@davemloft.net>
+To: netdev@vger.kernel.org
+Cc: edumazet@google.com
+Subject: [RFC] tcp: Do not reload skb pointer after skb_gro_receive().
+Date: Mon, 11 Jun 2018 18:00:13 -0700 (PDT)
+
+This is not necessary.  skb_gro_receive() will never change what
+'head' points to.
+
+In it's original implementation (see commit 71d93b39e52e ("net: Add
+skb_gro_receive")), it did:
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+
+====================
++	*head = nskb;
++	nskb->next = p->next;
++	p->next = NULL;
+====================
+
+This sequence was removed in commit 58025e46ea2d ("net: gro: remove
+obsolete code from skb_gro_receive()")
+
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+diff --git a/net/ipv4/tcp_offload.c b/net/ipv4/tcp_offload.c
+index 4d58e2ce0b5b..8cc7c3487330 100644
+--- a/net/ipv4/tcp_offload.c
++++ b/net/ipv4/tcp_offload.c
+@@ -268,8 +268,6 @@ struct sk_buff **tcp_gro_receive(struct sk_buff **head, struct sk_buff *skb)
+ 		goto out_check_final;
+ 	}
+ 
+-	p = *head;
+-	th2 = tcp_hdr(p);
+ 	tcp_flag_word(th2) |= flags & (TCP_FLAG_FIN | TCP_FLAG_PSH);
+ 
+ out_check_final:
