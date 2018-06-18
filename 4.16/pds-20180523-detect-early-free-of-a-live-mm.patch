@@ -1,0 +1,21 @@
+From fb93f763635c53511c6c1085a0df50ce437eaf95 Mon Sep 17 00:00:00 2001
+From: Alfred Chen <cchalpha@gmail.com>
+Date: Wed, 23 May 2018 16:39:45 +0800
+Subject: [PATCH] pds: [Sync] 3eda69c92d47 kernel/fork.c: detect early free of a live mm
+
+---
+ kernel/sched/pds.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/sched/pds.c b/kernel/sched/pds.c
+index 98e32114890d..bde90945d806 100644
+--- a/kernel/sched/pds.c
++++ b/kernel/sched/pds.c
+@@ -5683,6 +5683,7 @@ void idle_task_exit(void)
+ 
+ 	if (mm != &init_mm) {
+ 		switch_mm(mm, &init_mm, current);
++		current->active_mm = &init_mm;
+ 		finish_arch_post_lock_switch();
+ 	}
+ 	mmdrop(mm);
