@@ -1,0 +1,48 @@
+From 4019343da28444f5f52b8a560dcd77dba74154b1 Mon Sep 17 00:00:00 2001
+From: Alfred Chen <cchalpha@gmail.com>
+Date: Wed, 23 May 2018 16:50:11 +0800
+Subject: [PATCH] pds: [Sync] 85f1abe0019f kthread, sched/wait: Fix kthread_parkme() completion issue
+
+---
+ kernel/sched/pds.c | 26 +++++++++++++++++---------
+ 1 file changed, 17 insertions(+), 9 deletions(-)
+
+diff --git a/kernel/sched/pds.c b/kernel/sched/pds.c
+index bde90945d806..4c16f25f8d6d 100644
+--- a/kernel/sched/pds.c
++++ b/kernel/sched/pds.c
+@@ -2455,17 +2455,25 @@ static struct rq *finish_task_switch(struct task_struct *prev)
+ 		membarrier_mm_sync_core_before_usermode(mm);
+ 		mmdrop(mm);
+ 	}
+-	if (unlikely(prev_state == TASK_DEAD)) {
+-		/*
+-		 * Remove function-return probe instances associated with this
+-		 * task and put them back on the free list.
+-		 */
+-		kprobe_flush_task(prev);
++	if (unlikely(prev_state & (TASK_DEAD|TASK_PARKED))) {
++		switch (prev_state) {
++		case TASK_DEAD:
++			/*
++			 * Remove function-return probe instances associated with this
++			 * task and put them back on the free list.
++			 */
++			kprobe_flush_task(prev);
+ 
+-		/* Task is done with its stack. */
+-		put_task_stack(prev);
++			/* Task is done with its stack. */
++			put_task_stack(prev);
+ 
+-		put_task_struct(prev);
++			put_task_struct(prev);
++			break;
++
++		case TASK_PARKED:
++			kthread_park_complete(prev);
++			break;
++		}
+ 	}
+ 
+ 	return rq;
