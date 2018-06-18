@@ -43,6 +43,7 @@ blkcg_css_offline(), and move the rest destruction (especially
 blkg_put()) into blkcg_css_free(), which should be the right way as
 discussed.
 
+[HH: rebased for 4.16.7 with "blkcg: don't hold blkcg lock when deactivating policy"]
 Fixes: ae1188963611 ("blkcg: consolidate blkg creation in blkcg_bio_issue_check()")
 Reported-by: Jiufei Xue <jiufei.xue@linux.alibaba.com>
 Signed-off-by: Joseph Qi <joseph.qi@linux.alibaba.com>
@@ -187,8 +188,8 @@ index c2033a2..1c16694 100644
  
  	list_del(&blkcg->all_blkcgs_node);
 @@ -1371,8 +1414,11 @@ void blkcg_deactivate_policy(struct request_queue *q,
- 		spin_lock(&blkg->blkcg->lock);
  
+ 	list_for_each_entry(blkg, &q->blkg_list, q_node) {
  		if (blkg->pd[pol->plid]) {
 -			if (pol->pd_offline_fn)
 +			if (!blkg->pd[pol->plid]->offline &&
