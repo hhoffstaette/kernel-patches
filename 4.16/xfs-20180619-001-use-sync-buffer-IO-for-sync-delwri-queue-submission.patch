@@ -1,7 +1,7 @@
 From:   Brian Foster <bfoster@redhat.com>
 To:     linux-xfs@vger.kernel.org
-Subject: [PATCH v3 2/2] xfs: use sync buffer I/O for sync delwri queue submission
-Date:   Fri, 15 Jun 2018 14:05:36 -0400
+Subject: [PATCH v4] xfs: use sync buffer I/O for sync delwri queue submission
+Date:   Tue, 19 Jun 2018 07:42:54 -0400
 
 If a delwri queue occurs of a buffer that sits on a delwri queue
 wait list, the queue sets _XBF_DELWRI_Q without changing the state
@@ -35,11 +35,16 @@ serialization are batched operations.
 Designed-by: Dave Chinner <dchinner@redhat.com>
 Signed-off-by: Brian Foster <bfoster@redhat.com>
 ---
- fs/xfs/xfs_buf.c | 78 +++++++++++++++++++++++++-----------------------
- 1 file changed, 41 insertions(+), 37 deletions(-)
+
+v4:
+- Condense a couple buffer error checks to use the xfs_buf_iowait()
+  return value.
+
+ fs/xfs/xfs_buf.c | 80 +++++++++++++++++++++++++-----------------------
+ 1 file changed, 41 insertions(+), 39 deletions(-)
 
 diff --git a/fs/xfs/xfs_buf.c b/fs/xfs/xfs_buf.c
-index 7b0f7c79cd62..b5c0f6949b30 100644
+index 7b0f7c79cd62..ef234847b4e6 100644
 --- a/fs/xfs/xfs_buf.c
 +++ b/fs/xfs/xfs_buf.c
 @@ -1531,6 +1531,20 @@ xfs_buf_submit(
@@ -132,21 +137,22 @@ index 7b0f7c79cd62..b5c0f6949b30 100644
  	}
  	blk_finish_plug(&plug);
  
-@@ -2073,8 +2078,11 @@ xfs_buf_delwri_submit(
+@@ -2073,9 +2078,11 @@ xfs_buf_delwri_submit(
  
  		list_del_init(&bp->b_list);
  
 -		/* locking the buffer will wait for async IO completion. */
 -		xfs_buf_lock(bp);
+-		error2 = bp->b_error;
 +		/*
 +		 * Wait on the locked buffer, check for errors and unlock and
 +		 * release the delwri queue reference.
 +		 */
-+		xfs_buf_iowait(bp);
- 		error2 = bp->b_error;
++		error2 = xfs_buf_iowait(bp);
  		xfs_buf_relse(bp);
  		if (!error)
-@@ -2121,22 +2129,18 @@ xfs_buf_delwri_pushbuf(
+ 			error = error2;
+@@ -2121,23 +2128,18 @@ xfs_buf_delwri_pushbuf(
  
  	/*
  	 * Delwri submission clears the DELWRI_Q buffer flag and returns with
@@ -170,7 +176,8 @@ index 7b0f7c79cd62..b5c0f6949b30 100644
 +	 * return with the buffer unlocked and on the original queue.
  	 */
 -	xfs_buf_lock(bp);
-+	xfs_buf_iowait(bp);
- 	error = bp->b_error;
+-	error = bp->b_error;
++	error = xfs_buf_iowait(bp);
  	bp->b_flags |= _XBF_DELWRI_Q;
  	xfs_buf_unlock(bp);
+ 
