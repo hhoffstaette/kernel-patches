@@ -1,0 +1,67 @@
+From:   Chengguang Xu <cgxu519@gmx.com>
+To:     clm@fb.com, jbacik@fb.com, dsterba@suse.com
+Cc:     linux-btrfs@vger.kernel.org, Chengguang Xu <cgxu519@gmx.com>
+Subject: [PATCH v3] btrfs: code cleanups for btrfs_get_acl()
+Date:   Tue, 26 Jun 2018 14:08:27 +0800
+
+There is no chance to get into -ERANGE error condition because
+we first call btrfs_getxattr to get the length of the attribute,
+then we do a subsequent call with the size from the first call.
+Between the 2 calls the size shouldn't change. So remove the
+unnecessary -ERANGE error check and meanwhile fix some other
+bad practices as well.
+
+Detail fixes in this patch.
+- return ERR_PTR(-EINVAL) instead of crashing kernel in default
+case of switch.
+- return original error code when failing from btrfs_getxattr().
+- remove unnecessary bracket.
+- remove unnecessary -ERANGE check.
+
+Signed-off-by: Chengguang Xu <cgxu519@gmx.com>
+---
+v3:
+- Fix some other bad practices.
+- Add more information to commit log.
+
+v2:
+- Avoid errno overriding instead of print error message in error case.
+- Change commit log for better understanding.
+
+ fs/btrfs/acl.c | 13 ++++++-------
+ 1 file changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/fs/btrfs/acl.c b/fs/btrfs/acl.c
+index 15e1dfef56a5..3b66c957ea6f 100644
+--- a/fs/btrfs/acl.c
++++ b/fs/btrfs/acl.c
+@@ -30,23 +30,22 @@ struct posix_acl *btrfs_get_acl(struct inode *inode, int type)
+ 		name = XATTR_NAME_POSIX_ACL_DEFAULT;
+ 		break;
+ 	default:
+-		BUG();
++		return ERR_PTR(-EINVAL);
+ 	}
+ 
+-	size = btrfs_getxattr(inode, name, "", 0);
++	size = btrfs_getxattr(inode, name, NULL, 0);
+ 	if (size > 0) {
+ 		value = kzalloc(size, GFP_KERNEL);
+ 		if (!value)
+ 			return ERR_PTR(-ENOMEM);
+ 		size = btrfs_getxattr(inode, name, value, size);
+ 	}
+-	if (size > 0) {
++	if (size > 0)
+ 		acl = posix_acl_from_xattr(&init_user_ns, value, size);
+-	} else if (size == -ERANGE || size == -ENODATA || size == 0) {
++	else if (size == -ENODATA || size == 0)
+ 		acl = NULL;
+-	} else {
+-		acl = ERR_PTR(-EIO);
+-	}
++	else
++		acl = ERR_PTR(size);
+ 	kfree(value);
+ 
+ 	return acl;
