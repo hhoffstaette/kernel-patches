@@ -1,0 +1,42 @@
+From ccaf63b4d6eaf3447037cefbb0b1038fa80c6639 Mon Sep 17 00:00:00 2001
+From: Guenter Roeck <linux@roeck-us.net>
+Date: Sun, 29 Apr 2018 09:16:45 -0700
+Subject: hwmon: (k10temp) Add support for Stoney Ridge and Bristol Ridge CPUs
+
+From: Guenter Roeck <linux@roeck-us.net>
+
+commit ccaf63b4d6eaf3447037cefbb0b1038fa80c6639 upstream.
+
+Add support for Stoney Ridge and Bristol Ridge (Family 15h Model 0x70)
+CPUs. Registers match those of Family 15h Model 0x60.
+
+Cc: stable@vger.kernel.org # v4.16+
+Tested-by: Gabriel Craciunescu <nix.or.die@gmail.com>
+Signed-off-by: Guenter Roeck <linux@roeck-us.net>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+
+---
+ drivers/hwmon/k10temp.c |    5 +++++
+ 1 file changed, 5 insertions(+)
+
+--- a/drivers/hwmon/k10temp.c
++++ b/drivers/hwmon/k10temp.c
+@@ -37,6 +37,10 @@ MODULE_PARM_DESC(force, "force loading o
+ /* Provide lock for writing to NB_SMU_IND_ADDR */
+ static DEFINE_MUTEX(nb_smu_ind_mutex);
+ 
++#ifndef PCI_DEVICE_ID_AMD_15H_M70H_NB_F3
++#define PCI_DEVICE_ID_AMD_15H_M70H_NB_F3	0x15b3
++#endif
++
+ #ifndef PCI_DEVICE_ID_AMD_17H_DF_F3
+ #define PCI_DEVICE_ID_AMD_17H_DF_F3	0x1463
+ #endif
+@@ -320,6 +324,7 @@ static const struct pci_device_id k10tem
+ 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_15H_M10H_F3) },
+ 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_15H_M30H_NB_F3) },
+ 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_15H_M60H_NB_F3) },
++	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_15H_M70H_NB_F3) },
+ 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_16H_NB_F3) },
+ 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_16H_M30H_NB_F3) },
+ 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_17H_DF_F3) },
