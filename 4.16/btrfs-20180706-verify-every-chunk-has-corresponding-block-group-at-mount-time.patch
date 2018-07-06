@@ -1,7 +1,7 @@
 From:   Qu Wenruo <wqu@suse.com>
 To:     linux-btrfs@vger.kernel.org
-Subject: [PATCH 5/5] btrfs: Verify every chunk has corresponding block group at mount time
-Date:   Tue,  3 Jul 2018 17:10:09 +0800
+Subject: [PATCH v2 2/2] btrfs: Verify every chunk has corresponding block group at mount time
+Date:   Fri,  6 Jul 2018 13:35:54 +0800
 
 If a crafted btrfs has missing block group items, it could cause
 unexpected behavior and breaks our expectation on 1:1
@@ -18,17 +18,24 @@ Link: https://bugzilla.kernel.org/show_bug.cgi?id=199847
 Reported-by: Xu Wen <wen.xu@gatech.edu>
 Signed-off-by: Qu Wenruo <wqu@suse.com>
 ---
- fs/btrfs/extent-tree.c | 52 +++++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 51 insertions(+), 1 deletion(-)
+changelog:
+v2:
+  Update return value, explain the @len parameter for
+  lookup_extent_mapping(), and remove the ratelimit, all suggested by
+  David.
+---
+ fs/btrfs/extent-tree.c | 57 +++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 56 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index 82b446f014b9..746095034ca2 100644
+index 63a6b5d36ac1..3578fa5b30ef 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -10038,6 +10038,56 @@ static int check_exist_chunk(struct btrfs_fs_info *fs_info, u64 start, u64 len,
- 	return ret;
+@@ -10030,6 +10030,61 @@ btrfs_create_block_group_cache(struct btrfs_fs_info *fs_info,
+ 	return cache;
  }
  
++
 +/*
 + * Iterate all chunks and verify each of them has corresponding block group
 + */
@@ -42,18 +49,22 @@ index 82b446f014b9..746095034ca2 100644
 +
 +	while (1) {
 +		read_lock(&map_tree->map_tree.lock);
-+		em = lookup_extent_mapping(&map_tree->map_tree, start,
-+					   (u64)-1 - start);
++		/*
++		 * lookup_extent_mapping will return the first extent map
++		 * intersects the range, so set @len to 1 is enough to get
++		 * the first chunk.
++		 */
++		em = lookup_extent_mapping(&map_tree->map_tree, start, 1);
 +		read_unlock(&map_tree->map_tree.lock);
 +		if (!em)
 +			break;
 +
 +		bg = btrfs_lookup_block_group(fs_info, em->start);
 +		if (!bg) {
-+			btrfs_err_rl(fs_info,
++			btrfs_err(fs_info,
 +	"chunk start=%llu len=%llu doesn't have corresponding block group",
 +				     em->start, em->len);
-+			ret = -ENOENT;
++			ret = -EUCLEAN;
 +			free_extent_map(em);
 +			break;
 +		}
@@ -61,7 +72,7 @@ index 82b446f014b9..746095034ca2 100644
 +		    bg->key.offset != em->len ||
 +		    (bg->flags & BTRFS_BLOCK_GROUP_TYPE_MASK) !=
 +		    (em->map_lookup->type & BTRFS_BLOCK_GROUP_TYPE_MASK)) {
-+			btrfs_err_rl(fs_info,
++			btrfs_err(fs_info,
 +"chunk start=%llu len=%llu flags=0x%llx doesn't match with block group start=%llu len=%llu flags=0x%llx",
 +				em->start, em->len,
 +				em->map_lookup->type & BTRFS_BLOCK_GROUP_TYPE_MASK,
@@ -82,7 +93,7 @@ index 82b446f014b9..746095034ca2 100644
  int btrfs_read_block_groups(struct btrfs_fs_info *info)
  {
  	struct btrfs_path *path;
-@@ -10227,7 +10277,7 @@ int btrfs_read_block_groups(struct btrfs_fs_info *info)
+@@ -10203,7 +10258,7 @@ int btrfs_read_block_groups(struct btrfs_fs_info *info)
  	}
  
  	init_global_block_rsv(info);
