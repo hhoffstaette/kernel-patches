@@ -1,0 +1,32 @@
+From a1e79188628580465ac6d7a93a313336ee3364f1 Mon Sep 17 00:00:00 2001
+From: Dan Carpenter <dan.carpenter@oracle.com>
+Date: Wed, 20 Jun 2018 13:45:05 +0300
+Subject: blk-mq-debugfs: Off by one in blk_mq_rq_state_name()
+
+If rq_state == ARRAY_SIZE() then we read one element beyond the end of
+the blk_mq_rq_state_name_array[] array.
+
+Fixes: ec6dcf63c55c ("blk-mq-debugfs: Show more request state information")
+Reviewed-by: Bart Van Assche <bart.vanassche@wdc.com>
+Signed-off-by: Dan Carpenter <dan.carpenter@oracle.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq-debugfs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/block/blk-mq-debugfs.c b/block/blk-mq-debugfs.c
+index ffa6223..1c4532e 100644
+--- a/block/blk-mq-debugfs.c
++++ b/block/blk-mq-debugfs.c
+@@ -356,7 +356,7 @@ static const char *const blk_mq_rq_state_name_array[] = {
+ 
+ static const char *blk_mq_rq_state_name(enum mq_rq_state rq_state)
+ {
+-	if (WARN_ON_ONCE((unsigned int)rq_state >
++	if (WARN_ON_ONCE((unsigned int)rq_state >=
+ 			 ARRAY_SIZE(blk_mq_rq_state_name_array)))
+ 		return "(?)";
+ 	return blk_mq_rq_state_name_array[rq_state];
+-- 
+cgit v1.1
+
