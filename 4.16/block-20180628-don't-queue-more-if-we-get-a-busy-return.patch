@@ -1,0 +1,63 @@
+From 1f57f8d442f8017587eeebd8617913bfc3661d3d Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 28 Jun 2018 11:54:01 -0600
+Subject: blk-mq: don't queue more if we get a busy return
+
+Some devices have different queue limits depending on the type of IO. A
+classic case is SATA NCQ, where some commands can queue, but others
+cannot. If we have NCQ commands inflight and encounter a non-queueable
+command, the driver returns busy. Currently we attempt to dispatch more
+from the scheduler, if we were able to queue some commands. But for the
+case where we ended up stopping due to BUSY, we should not attempt to
+retrieve more from the scheduler. If we do, we can get into a situation
+where we attempt to queue a non-queueable command, get BUSY, then
+successfully retrieve more commands from that scheduler and queue those.
+This can repeat forever, starving the non-queuable command indefinitely.
+
+Fix this by NOT attempting to pull more commands from the scheduler, if
+we get a BUSY return. This should also be more optimal in terms of
+letting requests stay in the scheduler for as long as possible, if we
+get a BUSY due to the regular out-of-tags condition.
+
+Reviewed-by: Omar Sandoval <osandov@fb.com>
+Reviewed-by: Ming Lei <ming.lei@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index b6888ff..d394cdd 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1075,6 +1075,9 @@ static bool blk_mq_mark_tag_wait(struct blk_mq_hw_ctx **hctx,
+ 
+ #define BLK_MQ_RESOURCE_DELAY	3		/* ms units */
+ 
++/*
++ * Returns true if we did some work AND can potentially do more.
++ */
+ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
+ 			     bool got_budget)
+ {
+@@ -1205,8 +1208,17 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
+ 			blk_mq_run_hw_queue(hctx, true);
+ 		else if (needs_restart && (ret == BLK_STS_RESOURCE))
+ 			blk_mq_delay_run_hw_queue(hctx, BLK_MQ_RESOURCE_DELAY);
++
++		return false;
+ 	}
+ 
++	/*
++	 * If the host/device is unable to accept more work, inform the
++	 * caller of that.
++	 */
++	if (ret == BLK_STS_RESOURCE || ret == BLK_STS_DEV_RESOURCE)
++		return false;
++
+ 	return (queued + errors) != 0;
+ }
+ 
+-- 
+cgit v1.1
+
