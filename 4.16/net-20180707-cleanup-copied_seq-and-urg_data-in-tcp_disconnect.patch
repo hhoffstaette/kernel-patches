@@ -1,0 +1,50 @@
+From: Eric Dumazet <edumazet@google.com>
+Subject: [PATCH net] tcp: cleanup copied_seq and urg_data in tcp_disconnect
+Date: Sat,  7 Jul 2018 23:00:01 -0700
+Cc: netdev <netdev@vger.kernel.org>,
+        Eric Dumazet <edumazet@google.com>,
+        Eric Dumazet <eric.dumazet@gmail.com>
+To: "David S . Miller" <davem@davemloft.net>
+
+tcp_zerocopy_receive() relies on tcp_inq() to limit number of bytes
+requested by user.
+
+syzbot found that after tcp_disconnect(), tcp_inq() was returning
+a stale value (number of bytes in queue before the disconnect).
+
+Note that after this patch, ioctl(fd, SIOCINQ, &val) is also fixed
+and returns 0, so this might be a candidate for all known linux kernels.
+
+While we are at this, we probably also should clear urg_data to
+avoid other syzkaller reports after it discovers how to deal with
+urgent data.
+
+syzkaller repro :
+
+socket(PF_INET, SOCK_STREAM, IPPROTO_IP) = 3
+bind(3, {sa_family=AF_INET, sin_port=htons(20000), sin_addr=inet_addr("224.0.0.1")}, 16) = 0
+connect(3, {sa_family=AF_INET, sin_port=htons(20000), sin_addr=inet_addr("127.0.0.1")}, 16) = 0
+send(3, ..., 4096, 0) = 4096
+connect(3, {sa_family=AF_UNSPEC, sa_data="\0\0\0\0\0\0\0\0\0\0\0\0\0\0"}, 128) = 0
+getsockopt(3, SOL_TCP, TCP_ZEROCOPY_RECEIVE, ..., [16]) = 0 // CRASH
+
+Fixes: 05255b823a61 ("tcp: add TCP_ZEROCOPY_RECEIVE support for zerocopy receive")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Reported-by: syzbot <syzkaller@googlegroups.com>
+---
+ net/ipv4/tcp.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index c959bb6ea4ed7c7e236a701209ec3aa493961a0a..0d43705dd001c4bf6d41afd5515327c7585da184 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -2562,6 +2562,8 @@ int tcp_disconnect(struct sock *sk, int flags)
+ 
+ 	tcp_clear_xmit_timers(sk);
+ 	__skb_queue_purge(&sk->sk_receive_queue);
++	tp->copied_seq = tp->rcv_nxt;
++	tp->urg_data = 0;
+ 	tcp_write_queue_purge(sk);
+ 	tcp_fastopen_active_disable_ofo_check(sk);
+ 	skb_rbtree_purge(&tp->out_of_order_queue);
