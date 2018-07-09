@@ -1,0 +1,82 @@
+From 3b825d1399c83ce5e9b3c9e8bc10786aa9debb61 Mon Sep 17 00:00:00 2001
+From: Alfred Chen <cchalpha@gmail.com>
+Date: Fri, 29 Jun 2018 18:16:32 +0800
+Subject: [PATCH] pds: Rework pds_sg_balance()
+
+Remove sched_cpu_sb_suppress_mask, the first cpu in the smt group will
+not do smt group balance.
+---
+ kernel/sched/pds.c | 25 +++++--------------------
+ 1 file changed, 5 insertions(+), 20 deletions(-)
+
+diff --git a/kernel/sched/pds.c b/kernel/sched/pds.c
+index 7ef33bc6a2c3..bbbd726c8454 100644
+--- a/kernel/sched/pds.c
++++ b/kernel/sched/pds.c
+@@ -205,7 +205,6 @@ DEFINE_PER_CPU(cpumask_t *, sched_cpu_affinity_chk_end_masks);
+ DEFINE_PER_CPU(unsigned int, cpu_has_smt_sibling);
+ 
+ static cpumask_t sched_cpu_sg_idle_mask ____cacheline_aligned_in_smp;
+-static cpumask_t sched_cpu_sb_suppress_mask ____cacheline_aligned_in_smp;
+ #endif
+ 
+ static int sched_rq_prio[NR_CPUS] ____cacheline_aligned;
+@@ -2882,32 +2881,25 @@ static inline bool pds_sg_balance(struct rq *rq)
+ 		return false;
+ 
+ 	/*
+-	 * Exit if any idle cpu in this smt group
++	 * First cpu in smt group does not do smt balance
+ 	 */
+ 	cpu = cpu_of(rq);
+-	if (cpumask_intersects(cpu_smt_mask(cpu),
+-			       &sched_rq_queued_masks[SCHED_RQ_EMPTY]))
++	if (cpu == per_cpu(sd_llc_id, cpu))
+ 		return false;
+ 
+ 	/*
+-	 * First cpu in smt group does not do smt balance, unless
+-	 * other cpu is smt balance suppressed.
++	 * Exit if any idle cpu in this smt group
+ 	 */
+-	if (cpu == per_cpu(sd_llc_id, cpu) &&
+-	    !cpumask_intersects(cpu_smt_mask(cpu), &sched_cpu_sb_suppress_mask))
++	if (cpumask_intersects(cpu_smt_mask(cpu),
++			       &sched_rq_queued_masks[SCHED_RQ_EMPTY]))
+ 		return false;
+ 
+ 	p = rq->curr;
+ 	if (cpumask_intersects(&p->cpus_allowed, &sched_cpu_sg_idle_mask)) {
+-		cpumask_andnot(&sched_cpu_sb_suppress_mask,
+-			       &sched_cpu_sb_suppress_mask,
+-			       cpu_smt_mask(cpu));
+ 		raise_softirq(SCHED_SOFTIRQ);
+-
+ 		return true;
+ 	}
+ 
+-	cpumask_set_cpu(cpu, &sched_cpu_sb_suppress_mask);
+ 	return false;
+ }
+ #endif /* CONFIG_SCHED_SMT */
+@@ -3524,9 +3516,6 @@ static void __sched notrace __schedule(bool preempt)
+ 	set_rq_task(rq, next);
+ 
+ 	if (prev != next) {
+-#ifdef CONFIG_SCHED_SMT
+-		cpumask_clear_cpu(cpu, &sched_cpu_sb_suppress_mask);
+-#endif
+ 		if (next->prio == PRIO_LIMIT)
+ 			schedstat_inc(rq->sched_goidle);
+ 
+@@ -6101,10 +6090,6 @@ void __init sched_init_smp(void)
+ 	if (set_cpus_allowed_ptr(current, housekeeping_cpumask(HK_FLAG_DOMAIN)) < 0)
+ 		BUG();
+ 
+-#ifdef CONFIG_SCHED_SMT
+-	cpumask_clear(&sched_cpu_sb_suppress_mask);
+-#endif
+-
+ 	cpumask_copy(&sched_rq_queued_masks[SCHED_RQ_EMPTY], cpu_online_mask);
+ 
+ 	sched_init_topology_cpumask();
