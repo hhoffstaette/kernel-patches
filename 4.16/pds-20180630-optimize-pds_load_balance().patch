@@ -1,0 +1,24 @@
+From 12eddea02aeb005ac8015f1a37bec426454e2503 Mon Sep 17 00:00:00 2001
+From: Alfred Chen <cchalpha@gmail.com>
+Date: Sat, 30 Jun 2018 00:48:57 +0800
+Subject: [PATCH] pds: Optimize pds_load_balance().
+
+---
+ kernel/sched/pds.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/kernel/sched/pds.c b/kernel/sched/pds.c
+index bbbd726c8454..a5764f7a0084 100644
+--- a/kernel/sched/pds.c
++++ b/kernel/sched/pds.c
+@@ -2924,9 +2924,7 @@ static inline bool pds_load_balance(struct rq *rq)
+ 	/*
+ 	 * this function is called when rq is locked and nr_running >= 2
+ 	 */
+-	if (unlikely((node = rq->sl_header.next[0]->next[0]) == &rq->sl_header))
+-		return false;
+-
++	node = rq->sl_header.next[0]->next[0];
+ 	p = skiplist_entry(node, struct task_struct, sl_node);
+ 
+ 	/*
