@@ -1,0 +1,22 @@
+From e77ae6ed337dc99d3205711d2bc3ddecbd0971e8 Mon Sep 17 00:00:00 2001
+From: Alfred Chen <cchalpha@gmail.com>
+Date: Mon, 9 Jul 2018 09:58:53 +0800
+Subject: [PATCH] Tag PDS 0.98s
+
+---
+ kernel/sched/pds.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/pds.c b/kernel/sched/pds.c
+index db16fc786065..ce1f2b300514 100644
+--- a/kernel/sched/pds.c
++++ b/kernel/sched/pds.c
+@@ -94,7 +94,7 @@ enum {
+ 
+ static inline void print_scheduler_version(void)
+ {
+-	printk(KERN_INFO "pds: PDS-mq CPU Scheduler 0.98p by Alfred Chen.\n");
++	printk(KERN_INFO "pds: PDS-mq CPU Scheduler 0.98s by Alfred Chen.\n");
+ }
+ 
+ /* task_struct::on_rq states: */
