@@ -1,0 +1,39 @@
+From aafe12cee0b132824f5187987f8a3fb704b9f685 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Thu, 21 Jun 2018 23:26:56 -0700
+Subject: xfs: don't trip over negative free space in xfs_reserve_blocks
+
+If we somehow end up with a filesystem that has fewer free blocks than
+the blocks set aside to avoid ENOSPC deadlocks, it's possible that the
+free space calculation in xfs_reserve_blocks will spit out a negative
+number (because percpu_counter_sum returns s64).  We fail to notice
+this negative number and set fdblks_delta to it.  Now we increment
+fdblocks(!) and the unsigned type of m_resblks means that we end up
+setting a ridiculously huge m_resblks reservation.
+
+Avoid this comedy of errors by detecting the negative free space and
+returning -ENOSPC.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Allison Henderson <allison.henderson@oracle.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+---
+ fs/xfs/xfs_fsops.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_fsops.c b/fs/xfs/xfs_fsops.c
+index a7afcad..3f2bd60 100644
+--- a/fs/xfs/xfs_fsops.c
++++ b/fs/xfs/xfs_fsops.c
+@@ -387,7 +387,7 @@ xfs_reserve_blocks(
+ 	do {
+ 		free = percpu_counter_sum(&mp->m_fdblocks) -
+ 						mp->m_alloc_set_aside;
+-		if (!free)
++		if (free <= 0)
+ 			break;
+ 
+ 		delta = request - mp->m_resblks;
+-- 
+cgit v1.1
+
