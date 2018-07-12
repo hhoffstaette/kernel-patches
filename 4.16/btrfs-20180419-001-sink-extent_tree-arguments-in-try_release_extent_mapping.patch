@@ -1,0 +1,75 @@
+From 477a30ba5f8dfb3fe951ed0352277bb26a616cb8 Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <nborisov@suse.com>
+Date: Thu, 19 Apr 2018 10:46:34 +0300
+Subject: btrfs: Sink extent_tree arguments in try_release_extent_mapping
+
+This function already gets the page from which the two extent trees
+are referenced. Simplify its signature by moving the code getting the
+trees inside the function. No functional changes.
+
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent_io.c | 6 +++---
+ fs/btrfs/extent_io.h | 4 +---
+ fs/btrfs/inode.c     | 8 +-------
+ 3 files changed, 5 insertions(+), 13 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 9a521e5..c7ae18f 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4238,13 +4238,13 @@ static int try_release_extent_state(struct extent_map_tree *map,
+  * in the range corresponding to the page, both state records and extent
+  * map records are removed
+  */
+-int try_release_extent_mapping(struct extent_map_tree *map,
+-			       struct extent_io_tree *tree, struct page *page,
+-			       gfp_t mask)
++int try_release_extent_mapping(struct page *page, gfp_t mask)
+ {
+ 	struct extent_map *em;
+ 	u64 start = page_offset(page);
+ 	u64 end = start + PAGE_SIZE - 1;
++	struct extent_io_tree *tree = &BTRFS_I(page->mapping->host)->io_tree;
++	struct extent_map_tree *map = &BTRFS_I(page->mapping->host)->extent_tree;
+ 
+ 	if (gfpflags_allow_blocking(mask) &&
+ 	    page->mapping->host->i_size > SZ_16M) {
+diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
+index c5e80d6..29d47383b 100644
+--- a/fs/btrfs/extent_io.h
++++ b/fs/btrfs/extent_io.h
+@@ -270,9 +270,7 @@ typedef struct extent_map *(get_extent_t)(struct btrfs_inode *inode,
+ 					  int create);
+ 
+ void extent_io_tree_init(struct extent_io_tree *tree, void *private_data);
+-int try_release_extent_mapping(struct extent_map_tree *map,
+-			       struct extent_io_tree *tree, struct page *page,
+-			       gfp_t mask);
++int try_release_extent_mapping(struct page *page, gfp_t mask);
+ int try_release_extent_buffer(struct page *page);
+ int lock_extent_bits(struct extent_io_tree *tree, u64 start, u64 end,
+ 		     struct extent_state **cached);
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index d722a30..6853cd8 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -8913,13 +8913,7 @@ btrfs_readpages(struct file *file, struct address_space *mapping,
+ }
+ static int __btrfs_releasepage(struct page *page, gfp_t gfp_flags)
+ {
+-	struct extent_io_tree *tree;
+-	struct extent_map_tree *map;
+-	int ret;
+-
+-	tree = &BTRFS_I(page->mapping->host)->io_tree;
+-	map = &BTRFS_I(page->mapping->host)->extent_tree;
+-	ret = try_release_extent_mapping(map, tree, page, gfp_flags);
++	int ret = try_release_extent_mapping(page, gfp_flags);
+ 	if (ret == 1) {
+ 		ClearPagePrivate(page);
+ 		set_page_private(page, 0);
+-- 
+cgit v1.1
+
