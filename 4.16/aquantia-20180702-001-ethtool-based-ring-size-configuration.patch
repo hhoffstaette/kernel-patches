@@ -1,0 +1,307 @@
+From c1af5427954b6a7f8c34b9778b1e1c9f1d9af302 Mon Sep 17 00:00:00 2001
+From: Anton Mikaev <amikaev@aquantia.com>
+Date: Mon, 2 Jul 2018 17:03:35 +0300
+Subject: net: aquantia: Ethtool based ring size configuration
+
+Implemented ring size setup, min/max validation and reconfiguration in
+runtime.
+
+Signed-off-by: Anton Mikaev <amikaev@aquantia.com>
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ .../net/ethernet/aquantia/atlantic/aq_ethtool.c    | 61 ++++++++++++++++++++++
+ drivers/net/ethernet/aquantia/atlantic/aq_hw.h     |  9 +++-
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.c    |  4 +-
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c  | 46 ++++++++--------
+ .../aquantia/atlantic/hw_atl/hw_atl_a0_internal.h  |  8 +++
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c  | 50 +++++++++---------
+ .../aquantia/atlantic/hw_atl/hw_atl_b0_internal.h  |  8 +++
+ 7 files changed, 136 insertions(+), 50 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_ethtool.c b/drivers/net/ethernet/aquantia/atlantic/aq_ethtool.c
+index f2d8063..0624215 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_ethtool.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_ethtool.c
+@@ -11,6 +11,7 @@
+ 
+ #include "aq_ethtool.h"
+ #include "aq_nic.h"
++#include "aq_vec.h"
+ 
+ static void aq_ethtool_get_regs(struct net_device *ndev,
+ 				struct ethtool_regs *regs, void *p)
+@@ -284,6 +285,64 @@ static int aq_ethtool_set_coalesce(struct net_device *ndev,
+ 	return aq_nic_update_interrupt_moderation_settings(aq_nic);
+ }
+ 
++static void aq_get_ringparam(struct net_device *ndev,
++			     struct ethtool_ringparam *ring)
++{
++	struct aq_nic_s *aq_nic = netdev_priv(ndev);
++	struct aq_nic_cfg_s *aq_nic_cfg = aq_nic_get_cfg(aq_nic);
++
++	ring->rx_pending = aq_nic_cfg->rxds;
++	ring->tx_pending = aq_nic_cfg->txds;
++
++	ring->rx_max_pending = aq_nic_cfg->aq_hw_caps->rxds_max;
++	ring->tx_max_pending = aq_nic_cfg->aq_hw_caps->txds_max;
++}
++
++static int aq_set_ringparam(struct net_device *ndev,
++			    struct ethtool_ringparam *ring)
++{
++	int err = 0;
++	bool ndev_running = false;
++	struct aq_nic_s *aq_nic = netdev_priv(ndev);
++	struct aq_nic_cfg_s *aq_nic_cfg = aq_nic_get_cfg(aq_nic);
++	const struct aq_hw_caps_s *hw_caps = aq_nic_cfg->aq_hw_caps;
++
++	if (ring->rx_mini_pending || ring->rx_jumbo_pending) {
++		err = -EOPNOTSUPP;
++		goto err_exit;
++	}
++
++	if (netif_running(ndev)) {
++		ndev_running = true;
++		dev_close(ndev);
++	}
++
++	aq_nic_free_vectors(aq_nic);
++
++	aq_nic_cfg->rxds = max(ring->rx_pending, hw_caps->rxds_min);
++	aq_nic_cfg->rxds = min(aq_nic_cfg->rxds, hw_caps->rxds_max);
++	aq_nic_cfg->rxds = ALIGN(aq_nic_cfg->rxds, AQ_HW_RXD_MULTIPLE);
++
++	aq_nic_cfg->txds = max(ring->tx_pending, hw_caps->txds_min);
++	aq_nic_cfg->txds = min(aq_nic_cfg->txds, hw_caps->txds_max);
++	aq_nic_cfg->txds = ALIGN(aq_nic_cfg->txds, AQ_HW_TXD_MULTIPLE);
++
++	for (aq_nic->aq_vecs = 0; aq_nic->aq_vecs < aq_nic_cfg->vecs;
++	     aq_nic->aq_vecs++) {
++		aq_nic->aq_vec[aq_nic->aq_vecs] =
++		    aq_vec_alloc(aq_nic, aq_nic->aq_vecs, aq_nic_cfg);
++		if (unlikely(!aq_nic->aq_vec[aq_nic->aq_vecs])) {
++			err = -ENOMEM;
++			goto err_exit;
++		}
++	}
++	if (ndev_running)
++		err = dev_open(ndev);
++
++err_exit:
++	return err;
++}
++
+ const struct ethtool_ops aq_ethtool_ops = {
+ 	.get_link            = aq_ethtool_get_link,
+ 	.get_regs_len        = aq_ethtool_get_regs_len,
+@@ -291,6 +350,8 @@ const struct ethtool_ops aq_ethtool_ops = {
+ 	.get_drvinfo         = aq_ethtool_get_drvinfo,
+ 	.get_strings         = aq_ethtool_get_strings,
+ 	.get_rxfh_indir_size = aq_ethtool_get_rss_indir_size,
++	.get_ringparam       = aq_get_ringparam,
++	.set_ringparam       = aq_set_ringparam,
+ 	.get_rxfh_key_size   = aq_ethtool_get_rss_key_size,
+ 	.get_rxfh            = aq_ethtool_get_rss,
+ 	.get_rxnfc           = aq_ethtool_get_rxnfc,
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+index a2d416b..904cdfd 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+@@ -24,8 +24,10 @@ struct aq_hw_caps_s {
+ 	u64 link_speed_msk;
+ 	unsigned int hw_priv_flags;
+ 	u32 media_type;
+-	u32 rxds;
+-	u32 txds;
++	u32 rxds_max;
++	u32 txds_max;
++	u32 rxds_min;
++	u32 txds_min;
+ 	u32 txhwb_alignment;
+ 	u32 irq_mask;
+ 	u32 vecs;
+@@ -98,6 +100,9 @@ struct aq_stats_s {
+ #define AQ_HW_MEDIA_TYPE_TP    1U
+ #define AQ_HW_MEDIA_TYPE_FIBRE 2U
+ 
++#define AQ_HW_TXD_MULTIPLE 8U
++#define AQ_HW_RXD_MULTIPLE 8U
++
+ struct aq_hw_s {
+ 	atomic_t flags;
+ 	u8 rbl_enabled:1;
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+index 1a1a638..ba6bbcf 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+@@ -89,8 +89,8 @@ void aq_nic_cfg_start(struct aq_nic_s *self)
+ 	aq_nic_rss_init(self, cfg->num_rss_queues);
+ 
+ 	/*descriptors */
+-	cfg->rxds = min(cfg->aq_hw_caps->rxds, AQ_CFG_RXDS_DEF);
+-	cfg->txds = min(cfg->aq_hw_caps->txds, AQ_CFG_TXDS_DEF);
++	cfg->rxds = min(cfg->aq_hw_caps->rxds_max, AQ_CFG_RXDS_DEF);
++	cfg->txds = min(cfg->aq_hw_caps->txds_max, AQ_CFG_TXDS_DEF);
+ 
+ 	/*rss rings */
+ 	cfg->vecs = min(cfg->aq_hw_caps->vecs, AQ_CFG_VECS_DEF);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+index 67e2f9f..7fd6a7e 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+@@ -19,29 +19,31 @@
+ #include "hw_atl_a0_internal.h"
+ 
+ #define DEFAULT_A0_BOARD_BASIC_CAPABILITIES \
+-	.is_64_dma = true, \
+-	.msix_irqs = 4U, \
+-	.irq_mask = ~0U, \
+-	.vecs = HW_ATL_A0_RSS_MAX, \
+-	.tcs = HW_ATL_A0_TC_MAX, \
+-	.rxd_alignment = 1U, \
+-	.rxd_size = HW_ATL_A0_RXD_SIZE, \
+-	.rxds = 248U, \
+-	.txd_alignment = 1U, \
+-	.txd_size = HW_ATL_A0_TXD_SIZE, \
+-	.txds = 8U * 1024U, \
+-	.txhwb_alignment = 4096U, \
+-	.tx_rings = HW_ATL_A0_TX_RINGS, \
+-	.rx_rings = HW_ATL_A0_RX_RINGS, \
+-	.hw_features = NETIF_F_HW_CSUM | \
+-			NETIF_F_RXHASH | \
+-			NETIF_F_RXCSUM | \
+-			NETIF_F_SG | \
+-			NETIF_F_TSO, \
++	.is_64_dma = true,		  \
++	.msix_irqs = 4U,		  \
++	.irq_mask = ~0U,		  \
++	.vecs = HW_ATL_A0_RSS_MAX,	  \
++	.tcs = HW_ATL_A0_TC_MAX,	  \
++	.rxd_alignment = 1U,		  \
++	.rxd_size = HW_ATL_A0_RXD_SIZE,   \
++	.rxds_max = HW_ATL_A0_MAX_RXD,    \
++	.rxds_min = HW_ATL_A0_MIN_RXD,    \
++	.txd_alignment = 1U,		  \
++	.txd_size = HW_ATL_A0_TXD_SIZE,   \
++	.txds_max = HW_ATL_A0_MAX_TXD,    \
++	.txds_min = HW_ATL_A0_MIN_RXD,    \
++	.txhwb_alignment = 4096U,	  \
++	.tx_rings = HW_ATL_A0_TX_RINGS,   \
++	.rx_rings = HW_ATL_A0_RX_RINGS,   \
++	.hw_features = NETIF_F_HW_CSUM |  \
++			NETIF_F_RXHASH |  \
++			NETIF_F_RXCSUM |  \
++			NETIF_F_SG |	  \
++			NETIF_F_TSO,	  \
+ 	.hw_priv_flags = IFF_UNICAST_FLT, \
+-	.flow_control = true, \
+-	.mtu = HW_ATL_A0_MTU_JUMBO, \
+-	.mac_regs_count = 88, \
++	.flow_control = true,		  \
++	.mtu = HW_ATL_A0_MTU_JUMBO,       \
++	.mac_regs_count = 88,		  \
+ 	.hw_alive_check_addr = 0x10U
+ 
+ const struct aq_hw_caps_s hw_atl_a0_caps_aqc100 = {
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0_internal.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0_internal.h
+index 1d88555..3c94cff 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0_internal.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0_internal.h
+@@ -88,4 +88,12 @@
+ 
+ #define HW_ATL_A0_FW_VER_EXPECTED 0x01050006U
+ 
++#define HW_ATL_A0_MIN_RXD \
++	(ALIGN(AQ_CFG_SKB_FRAGS_MAX + 1U, AQ_HW_RXD_MULTIPLE))
++#define HW_ATL_A0_MIN_TXD \
++	(ALIGN(AQ_CFG_SKB_FRAGS_MAX + 1U, AQ_HW_TXD_MULTIPLE))
++
++#define HW_ATL_A0_MAX_RXD 8184U
++#define HW_ATL_A0_MAX_TXD 8184U
++
+ #endif /* HW_ATL_A0_INTERNAL_H */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index 819f6bc..4ea15b9 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -20,30 +20,32 @@
+ #include "hw_atl_llh_internal.h"
+ 
+ #define DEFAULT_B0_BOARD_BASIC_CAPABILITIES \
+-	.is_64_dma = true,	\
+-	.msix_irqs = 4U,	\
+-	.irq_mask = ~0U,	\
+-	.vecs = HW_ATL_B0_RSS_MAX,	\
+-	.tcs = HW_ATL_B0_TC_MAX,	\
+-	.rxd_alignment = 1U,		\
+-	.rxd_size = HW_ATL_B0_RXD_SIZE, \
+-	.rxds = 4U * 1024U,		\
+-	.txd_alignment = 1U,		\
+-	.txd_size = HW_ATL_B0_TXD_SIZE, \
+-	.txds = 8U * 1024U,		\
+-	.txhwb_alignment = 4096U,	\
+-	.tx_rings = HW_ATL_B0_TX_RINGS, \
+-	.rx_rings = HW_ATL_B0_RX_RINGS, \
+-	.hw_features = NETIF_F_HW_CSUM | \
+-			NETIF_F_RXCSUM | \
+-			NETIF_F_RXHASH | \
+-			NETIF_F_SG |  \
+-			NETIF_F_TSO | \
+-			NETIF_F_LRO,  \
+-	.hw_priv_flags = IFF_UNICAST_FLT,   \
+-	.flow_control = true,		\
+-	.mtu = HW_ATL_B0_MTU_JUMBO,	\
+-	.mac_regs_count = 88,		\
++	.is_64_dma = true,		  \
++	.msix_irqs = 4U,		  \
++	.irq_mask = ~0U,		  \
++	.vecs = HW_ATL_B0_RSS_MAX,	  \
++	.tcs = HW_ATL_B0_TC_MAX,	  \
++	.rxd_alignment = 1U,		  \
++	.rxd_size = HW_ATL_B0_RXD_SIZE,   \
++	.rxds_max = HW_ATL_B0_MAX_RXD,    \
++	.rxds_min = HW_ATL_B0_MIN_RXD,    \
++	.txd_alignment = 1U,		  \
++	.txd_size = HW_ATL_B0_TXD_SIZE,   \
++	.txds_max = HW_ATL_B0_MAX_TXD,    \
++	.txds_min = HW_ATL_B0_MIN_TXD,    \
++	.txhwb_alignment = 4096U,	  \
++	.tx_rings = HW_ATL_B0_TX_RINGS,   \
++	.rx_rings = HW_ATL_B0_RX_RINGS,   \
++	.hw_features = NETIF_F_HW_CSUM |  \
++			NETIF_F_RXCSUM |  \
++			NETIF_F_RXHASH |  \
++			NETIF_F_SG |      \
++			NETIF_F_TSO |     \
++			NETIF_F_LRO,      \
++	.hw_priv_flags = IFF_UNICAST_FLT, \
++	.flow_control = true,		  \
++	.mtu = HW_ATL_B0_MTU_JUMBO,	  \
++	.mac_regs_count = 88,		  \
+ 	.hw_alive_check_addr = 0x10U
+ 
+ const struct aq_hw_caps_s hw_atl_b0_caps_aqc100 = {
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0_internal.h b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0_internal.h
+index 405d145..28568f5 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0_internal.h
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0_internal.h
+@@ -142,6 +142,14 @@
+ #define HW_ATL_INTR_MODER_MAX  0x1FF
+ #define HW_ATL_INTR_MODER_MIN  0xFF
+ 
++#define HW_ATL_B0_MIN_RXD \
++	(ALIGN(AQ_CFG_SKB_FRAGS_MAX + 1U, AQ_HW_RXD_MULTIPLE))
++#define HW_ATL_B0_MIN_TXD \
++	(ALIGN(AQ_CFG_SKB_FRAGS_MAX + 1U, AQ_HW_TXD_MULTIPLE))
++
++#define HW_ATL_B0_MAX_RXD 8184U
++#define HW_ATL_B0_MAX_TXD 8184U
++
+ /* HW layer capabilities */
+ 
+ #endif /* HW_ATL_B0_INTERNAL_H */
+-- 
+cgit v1.1
+
