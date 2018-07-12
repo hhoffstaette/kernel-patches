@@ -1,0 +1,43 @@
+From: Hugh Dickins <hughd@google.com>
+Subject: [PATCH] thp: fix data loss when splitting a file pmd
+Date: Wed, 11 Jul 2018 17:48:54 -0700 (PDT)
+Cc: Ashwin Chaugule <ashwinch@google.com>,
+        "Kirill A. Shutemov" <kirill.shutemov@linux.intel.com>,
+        "Huang, Ying" <ying.huang@intel.com>,
+        Yang Shi <yang.shi@linux.alibaba.com>,
+        linux-kernel@vger.kernel.org, linux-mm@kvack.org
+To: Andrew Morton <akpm@linux-foundation.org>
+
+__split_huge_pmd_locked() must check if the cleared huge pmd was dirty,
+and propagate that to PageDirty: otherwise, data may be lost when a huge
+tmpfs page is modified then split then reclaimed.
+
+How has this taken so long to be noticed?  Because there was no problem
+when the huge page is written by a write system call (shmem_write_end()
+calls set_page_dirty()), nor when the page is allocated for a write fault
+(fault_dirty_shared_page() calls set_page_dirty()); but when allocated
+for a read fault (which MAP_POPULATE simulates), no set_page_dirty().
+
+Fixes: d21b9e57c74c ("thp: handle file pages in split_huge_pmd()")
+Reported-by: Ashwin Chaugule <ashwinch@google.com>
+Signed-off-by: Hugh Dickins <hughd@google.com>
+Cc: "Kirill A. Shutemov" <kirill.shutemov@linux.intel.com>
+Cc: "Huang, Ying" <ying.huang@intel.com>
+Cc: Yang Shi <yang.shi@linux.alibaba.com>
+Cc: <stable@vger.kernel.org> # v4.8+
+---
+
+ mm/huge_memory.c |    2 ++
+ 1 file changed, 2 insertions(+)
+
+--- 4.18-rc4/mm/huge_memory.c	2018-06-16 18:48:22.029173363 -0700
++++ linux/mm/huge_memory.c	2018-07-10 20:11:29.991011603 -0700
+@@ -2084,6 +2084,8 @@ static void __split_huge_pmd_locked(stru
+ 		if (vma_is_dax(vma))
+ 			return;
+ 		page = pmd_page(_pmd);
++		if (!PageDirty(page) && pmd_dirty(_pmd))
++			set_page_dirty(page);
+ 		if (!PageReferenced(page) && pmd_young(_pmd))
+ 			SetPageReferenced(page);
+ 		page_remove_rmap(page, true);
