@@ -1,0 +1,70 @@
+From 8ae225a8a4f9054ffc6566e14aaf05dfc559743e Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <nborisov@suse.com>
+Date: Thu, 19 Apr 2018 10:46:38 +0300
+Subject: btrfs: Remove tree argument from extent_writepages
+
+It can be directly referenced from the passed address_space so do that.
+No functional changes.
+
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent_io.c | 5 ++---
+ fs/btrfs/extent_io.h | 3 +--
+ fs/btrfs/inode.c     | 5 +----
+ 3 files changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 20bb056..af2f040 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4109,14 +4109,13 @@ int extent_write_locked_range(struct inode *inode, u64 start, u64 end,
+ 	return ret;
+ }
+ 
+-int extent_writepages(struct extent_io_tree *tree,
+-		      struct address_space *mapping,
++int extent_writepages(struct address_space *mapping,
+ 		      struct writeback_control *wbc)
+ {
+ 	int ret = 0;
+ 	struct extent_page_data epd = {
+ 		.bio = NULL,
+-		.tree = tree,
++		.tree = &BTRFS_I(mapping->host)->io_tree,
+ 		.extent_locked = 0,
+ 		.sync_io = wbc->sync_mode == WB_SYNC_ALL,
+ 	};
+diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
+index 752ad87..0bfd4ae 100644
+--- a/fs/btrfs/extent_io.h
++++ b/fs/btrfs/extent_io.h
+@@ -411,8 +411,7 @@ int extent_invalidatepage(struct extent_io_tree *tree,
+ int extent_write_full_page(struct page *page, struct writeback_control *wbc);
+ int extent_write_locked_range(struct inode *inode, u64 start, u64 end,
+ 			      int mode);
+-int extent_writepages(struct extent_io_tree *tree,
+-		      struct address_space *mapping,
++int extent_writepages(struct address_space *mapping,
+ 		      struct writeback_control *wbc);
+ int btree_write_cache_pages(struct address_space *mapping,
+ 			    struct writeback_control *wbc);
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 0aadf17..775249f 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -8897,10 +8897,7 @@ static int btrfs_writepage(struct page *page, struct writeback_control *wbc)
+ static int btrfs_writepages(struct address_space *mapping,
+ 			    struct writeback_control *wbc)
+ {
+-	struct extent_io_tree *tree;
+-
+-	tree = &BTRFS_I(mapping->host)->io_tree;
+-	return extent_writepages(tree, mapping, wbc);
++	return extent_writepages(mapping, wbc);
+ }
+ 
+ static int
+-- 
+cgit v1.1
+
