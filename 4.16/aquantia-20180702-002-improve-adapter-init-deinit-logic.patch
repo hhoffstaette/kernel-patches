@@ -1,0 +1,277 @@
+From 44e00dd8eb94b894b7f60009c251acf24b8bbaf1 Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Mon, 2 Jul 2018 17:03:36 +0300
+Subject: net: aquantia: Improve adapter init/deinit logic
+
+We now pass link drop status to FW on init/deinit. This is required
+to inform FW that driver took/released a control on link.
+FW then will manage its own state and device power profile based
+on this information. To improve management we remove mpi_set
+function which ambiguously took both state and speed parameters.
+
+Deinit callback is now a part of FW ops, as it actually manages the FW.
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_hw.h     |  9 ++--
+ drivers/net/ethernet/aquantia/atlantic/aq_nic.c    |  2 +-
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c  |  1 -
+ .../ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c  |  1 -
+ .../aquantia/atlantic/hw_atl/hw_atl_utils.c        | 53 ++++++++++++----------
+ .../aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c   | 31 ++++++++++++-
+ 6 files changed, 66 insertions(+), 31 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+index 904cdfd..3aa36d5 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_hw.h
+@@ -202,25 +202,28 @@ struct aq_hw_ops {
+ 
+ 	int (*hw_get_fw_version)(struct aq_hw_s *self, u32 *fw_version);
+ 
+-	int (*hw_deinit)(struct aq_hw_s *self);
+-
+ 	int (*hw_set_power)(struct aq_hw_s *self, unsigned int power_state);
+ };
+ 
+ struct aq_fw_ops {
+ 	int (*init)(struct aq_hw_s *self);
+ 
++	int (*deinit)(struct aq_hw_s *self);
++
+ 	int (*reset)(struct aq_hw_s *self);
+ 
+ 	int (*get_mac_permanent)(struct aq_hw_s *self, u8 *mac);
+ 
+ 	int (*set_link_speed)(struct aq_hw_s *self, u32 speed);
+ 
+-	int (*set_state)(struct aq_hw_s *self, enum hal_atl_utils_fw_state_e state);
++	int (*set_state)(struct aq_hw_s *self,
++			 enum hal_atl_utils_fw_state_e state);
+ 
+ 	int (*update_link_status)(struct aq_hw_s *self);
+ 
+ 	int (*update_stats)(struct aq_hw_s *self);
++
++	int (*set_flow_control)(struct aq_hw_s *self);
+ };
+ 
+ #endif /* AQ_HW_H */
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+index ba6bbcf..e8cf93a 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_nic.c
+@@ -879,7 +879,7 @@ void aq_nic_deinit(struct aq_nic_s *self)
+ 		aq_vec_deinit(aq_vec);
+ 
+ 	if (self->power_state == AQ_HW_POWER_STATE_D0) {
+-		(void)self->aq_hw_ops->hw_deinit(self->aq_hw);
++		(void)self->aq_fw_ops->deinit(self->aq_hw);
+ 	} else {
+ 		(void)self->aq_hw_ops->hw_set_power(self->aq_hw,
+ 						   self->power_state);
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+index 7fd6a7e..ed7fe6f 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_a0.c
+@@ -877,7 +877,6 @@ static int hw_atl_a0_hw_ring_rx_stop(struct aq_hw_s *self,
+ const struct aq_hw_ops hw_atl_ops_a0 = {
+ 	.hw_set_mac_address   = hw_atl_a0_hw_mac_addr_set,
+ 	.hw_init              = hw_atl_a0_hw_init,
+-	.hw_deinit            = hw_atl_utils_hw_deinit,
+ 	.hw_set_power         = hw_atl_utils_hw_set_power,
+ 	.hw_reset             = hw_atl_a0_hw_reset,
+ 	.hw_start             = hw_atl_a0_hw_start,
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index 4ea15b9..9dd4f49 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -935,7 +935,6 @@ static int hw_atl_b0_hw_ring_rx_stop(struct aq_hw_s *self,
+ const struct aq_hw_ops hw_atl_ops_b0 = {
+ 	.hw_set_mac_address   = hw_atl_b0_hw_mac_addr_set,
+ 	.hw_init              = hw_atl_b0_hw_init,
+-	.hw_deinit            = hw_atl_utils_hw_deinit,
+ 	.hw_set_power         = hw_atl_utils_hw_set_power,
+ 	.hw_reset             = hw_atl_b0_hw_reset,
+ 	.hw_start             = hw_atl_b0_hw_start,
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+index e652d86..9d0a96d 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+@@ -30,10 +30,11 @@
+ #define HW_ATL_MPI_CONTROL_ADR  0x0368U
+ #define HW_ATL_MPI_STATE_ADR    0x036CU
+ 
+-#define HW_ATL_MPI_STATE_MSK    0x00FFU
+-#define HW_ATL_MPI_STATE_SHIFT  0U
+-#define HW_ATL_MPI_SPEED_MSK    0xFFFF0000U
+-#define HW_ATL_MPI_SPEED_SHIFT  16U
++#define HW_ATL_MPI_STATE_MSK      0x00FFU
++#define HW_ATL_MPI_STATE_SHIFT    0U
++#define HW_ATL_MPI_SPEED_MSK      0x00FF0000U
++#define HW_ATL_MPI_SPEED_SHIFT    16U
++#define HW_ATL_MPI_DIRTY_WAKE_MSK 0x02000000U
+ 
+ #define HW_ATL_MPI_DAISY_CHAIN_STATUS	0x704
+ #define HW_ATL_MPI_BOOT_EXIT_CODE	0x388
+@@ -521,23 +522,24 @@ void hw_atl_utils_mpi_read_stats(struct aq_hw_s *self,
+ err_exit:;
+ }
+ 
+-static int hw_atl_utils_mpi_set_speed(struct aq_hw_s *self, u32 speed)
++int hw_atl_utils_mpi_set_speed(struct aq_hw_s *self, u32 speed)
+ {
+ 	u32 val = aq_hw_read_reg(self, HW_ATL_MPI_CONTROL_ADR);
+ 
+-	val = (val & HW_ATL_MPI_STATE_MSK) | (speed << HW_ATL_MPI_SPEED_SHIFT);
++	val = val & ~HW_ATL_MPI_SPEED_MSK;
++	val |= speed << HW_ATL_MPI_SPEED_SHIFT;
+ 	aq_hw_write_reg(self, HW_ATL_MPI_CONTROL_ADR, val);
+ 
+ 	return 0;
+ }
+ 
+-void hw_atl_utils_mpi_set(struct aq_hw_s *self,
+-			  enum hal_atl_utils_fw_state_e state,
+-			  u32 speed)
++int hw_atl_utils_mpi_set_state(struct aq_hw_s *self,
++			       enum hal_atl_utils_fw_state_e state)
+ {
+ 	int err = 0;
+ 	u32 transaction_id = 0;
+ 	struct hw_aq_atl_utils_mbox_header mbox;
++	u32 val = aq_hw_read_reg(self, HW_ATL_MPI_CONTROL_ADR);
+ 
+ 	if (state == MPI_RESET) {
+ 		hw_atl_utils_mpi_read_mbox(self, &mbox);
+@@ -551,21 +553,21 @@ void hw_atl_utils_mpi_set(struct aq_hw_s *self,
+ 		if (err < 0)
+ 			goto err_exit;
+ 	}
++	/* On interface DEINIT we disable DW (raise bit)
++	 * Otherwise enable DW (clear bit)
++	 */
++	if (state == MPI_DEINIT || state == MPI_POWER)
++		val |= HW_ATL_MPI_DIRTY_WAKE_MSK;
++	else
++		val &= ~HW_ATL_MPI_DIRTY_WAKE_MSK;
+ 
+-	aq_hw_write_reg(self, HW_ATL_MPI_CONTROL_ADR,
+-			(speed << HW_ATL_MPI_SPEED_SHIFT) | state);
++	/* Set new state bits */
++	val = val & ~HW_ATL_MPI_STATE_MSK;
++	val |= state & HW_ATL_MPI_STATE_MSK;
+ 
+-err_exit:;
+-}
+-
+-static int hw_atl_utils_mpi_set_state(struct aq_hw_s *self,
+-				      enum hal_atl_utils_fw_state_e state)
+-{
+-	u32 val = aq_hw_read_reg(self, HW_ATL_MPI_CONTROL_ADR);
+-
+-	val = state | (val & HW_ATL_MPI_SPEED_MSK);
+ 	aq_hw_write_reg(self, HW_ATL_MPI_CONTROL_ADR, val);
+-	return 0;
++err_exit:
++	return err;
+ }
+ 
+ int hw_atl_utils_mpi_get_link_status(struct aq_hw_s *self)
+@@ -721,16 +723,18 @@ void hw_atl_utils_hw_chip_features_init(struct aq_hw_s *self, u32 *p)
+ 	*p = chip_features;
+ }
+ 
+-int hw_atl_utils_hw_deinit(struct aq_hw_s *self)
++static int hw_atl_fw1x_deinit(struct aq_hw_s *self)
+ {
+-	hw_atl_utils_mpi_set(self, MPI_DEINIT, 0x0U);
++	hw_atl_utils_mpi_set_speed(self, 0);
++	hw_atl_utils_mpi_set_state(self, MPI_DEINIT);
+ 	return 0;
+ }
+ 
+ int hw_atl_utils_hw_set_power(struct aq_hw_s *self,
+ 			      unsigned int power_state)
+ {
+-	hw_atl_utils_mpi_set(self, MPI_POWER, 0x0U);
++	hw_atl_utils_mpi_set_speed(self, 0);
++	hw_atl_utils_mpi_set_state(self, MPI_POWER);
+ 	return 0;
+ }
+ 
+@@ -823,6 +827,7 @@ int hw_atl_utils_get_fw_version(struct aq_hw_s *self, u32 *fw_version)
+ 
+ const struct aq_fw_ops aq_fw_1x_ops = {
+ 	.init = hw_atl_utils_mpi_create,
++	.deinit = hw_atl_fw1x_deinit,
+ 	.reset = NULL,
+ 	.get_mac_permanent = hw_atl_utils_get_mac_permanent,
+ 	.set_link_speed = hw_atl_utils_mpi_set_speed,
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c
+index 39cd3a2..a3e95f0 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils_fw2x.c
+@@ -28,6 +28,10 @@
+ #define HW_ATL_FW2X_MPI_STATE_ADDR	0x370
+ #define HW_ATL_FW2X_MPI_STATE2_ADDR	0x374
+ 
++static int aq_fw2x_set_link_speed(struct aq_hw_s *self, u32 speed);
++static int aq_fw2x_set_state(struct aq_hw_s *self,
++			     enum hal_atl_utils_fw_state_e state);
++
+ static int aq_fw2x_init(struct aq_hw_s *self)
+ {
+ 	int err = 0;
+@@ -39,6 +43,16 @@ static int aq_fw2x_init(struct aq_hw_s *self)
+ 	return err;
+ }
+ 
++static int aq_fw2x_deinit(struct aq_hw_s *self)
++{
++	int err = aq_fw2x_set_link_speed(self, 0);
++
++	if (!err)
++		err = aq_fw2x_set_state(self, MPI_DEINIT);
++
++	return err;
++}
++
+ static enum hw_atl_fw2x_rate link_speed_mask_2fw2x_ratemask(u32 speed)
+ {
+ 	enum hw_atl_fw2x_rate rate = 0;
+@@ -76,7 +90,21 @@ static int aq_fw2x_set_link_speed(struct aq_hw_s *self, u32 speed)
+ static int aq_fw2x_set_state(struct aq_hw_s *self,
+ 			     enum hal_atl_utils_fw_state_e state)
+ {
+-	/* No explicit state in 2x fw */
++	u32 mpi_state = aq_hw_read_reg(self, HW_ATL_FW2X_MPI_CONTROL2_ADDR);
++
++	switch (state) {
++	case MPI_INIT:
++		mpi_state &= ~BIT(CAPS_HI_LINK_DROP);
++		break;
++	case MPI_DEINIT:
++		mpi_state |= BIT(CAPS_HI_LINK_DROP);
++		break;
++	case MPI_RESET:
++	case MPI_POWER:
++		/* No actions */
++		break;
++	}
++	aq_hw_write_reg(self, HW_ATL_FW2X_MPI_CONTROL2_ADDR, mpi_state);
+ 	return 0;
+ }
+ 
+@@ -175,6 +203,7 @@ static int aq_fw2x_update_stats(struct aq_hw_s *self)
+ 
+ const struct aq_fw_ops aq_fw_2x_ops = {
+ 	.init = aq_fw2x_init,
++	.deinit = aq_fw2x_deinit,
+ 	.reset = NULL,
+ 	.get_mac_permanent = aq_fw2x_get_mac_permanent,
+ 	.set_link_speed = aq_fw2x_set_link_speed,
+-- 
+cgit v1.1
+
