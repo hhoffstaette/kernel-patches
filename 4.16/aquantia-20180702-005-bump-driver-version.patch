@@ -1,0 +1,29 @@
+From 1d1c21228344f2519f14aea25d0ebb1274b43c9a Mon Sep 17 00:00:00 2001
+From: Igor Russkikh <igor.russkikh@aquantia.com>
+Date: Mon, 2 Jul 2018 17:03:39 +0300
+Subject: net: aquantia: bump driver version
+
+Signed-off-by: Igor Russkikh <igor.russkikh@aquantia.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/aquantia/atlantic/ver.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/ver.h b/drivers/net/ethernet/aquantia/atlantic/ver.h
+index a445de6..94efc64 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/ver.h
++++ b/drivers/net/ethernet/aquantia/atlantic/ver.h
+@@ -12,8 +12,8 @@
+ 
+ #define NIC_MAJOR_DRIVER_VERSION           2
+ #define NIC_MINOR_DRIVER_VERSION           0
+-#define NIC_BUILD_DRIVER_VERSION           2
+-#define NIC_REVISION_DRIVER_VERSION        1
++#define NIC_BUILD_DRIVER_VERSION           3
++#define NIC_REVISION_DRIVER_VERSION        0
+ 
+ #define AQ_CFG_DRV_VERSION_SUFFIX "-kern"
+ 
+-- 
+cgit v1.1
+
