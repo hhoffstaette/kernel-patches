@@ -1,0 +1,89 @@
+From d8cb5e42378918e00eda58792f3ab86dd1e7d214 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Thu, 21 Jun 2018 23:26:56 -0700
+Subject: xfs: fix fdblocks accounting w/ RMAPBT per-AG reservation
+
+In __xfs_ag_resv_init we incorrectly calculate the amount by which to
+decrease fdblocks when reserving blocks for the rmapbt.  Because rmapbt
+allocations do not decrease fdblocks, we must decrease fdblocks by the
+entire size of the requested reservation in order to achieve our goal of
+always having enough free blocks to satisfy an rmapbt expansion.
+
+This is in contrast to the refcountbt/finobt, which /do/ subtract from
+fdblocks whenever they allocate a block.  For this allocation type we
+preserve the existing behavior where we decrease fdblocks only by the
+requested reservation minus the size of the existing tree.
+
+This fixes the problem where the available block counts reported by
+statfs change across a remount if there had been an rmapbt size change
+since mount time.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Allison Henderson <allison.henderson@oracle.com>
+---
+ fs/xfs/libxfs/xfs_ag_resv.c | 31 +++++++++++++++++++++++++++----
+ 1 file changed, 27 insertions(+), 4 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_ag_resv.c b/fs/xfs/libxfs/xfs_ag_resv.c
+index 84db76e..fecd187 100644
+--- a/fs/xfs/libxfs/xfs_ag_resv.c
++++ b/fs/xfs/libxfs/xfs_ag_resv.c
+@@ -157,6 +157,7 @@ __xfs_ag_resv_free(
+ 	error = xfs_mod_fdblocks(pag->pag_mount, oldresv, true);
+ 	resv->ar_reserved = 0;
+ 	resv->ar_asked = 0;
++	resv->ar_orig_reserved = 0;
+ 
+ 	if (error)
+ 		trace_xfs_ag_resv_free_error(pag->pag_mount, pag->pag_agno,
+@@ -189,13 +190,34 @@ __xfs_ag_resv_init(
+ 	struct xfs_mount		*mp = pag->pag_mount;
+ 	struct xfs_ag_resv		*resv;
+ 	int				error;
+-	xfs_extlen_t			reserved;
++	xfs_extlen_t			hidden_space;
+ 
+ 	if (used > ask)
+ 		ask = used;
+-	reserved = ask - used;
+ 
+-	error = xfs_mod_fdblocks(mp, -(int64_t)reserved, true);
++	switch (type) {
++	case XFS_AG_RESV_RMAPBT:
++		/*
++		 * Space taken by the rmapbt is not subtracted from fdblocks
++		 * because the rmapbt lives in the free space.  Here we must
++		 * subtract the entire reservation from fdblocks so that we
++		 * always have blocks available for rmapbt expansion.
++		 */
++		hidden_space = ask;
++		break;
++	case XFS_AG_RESV_METADATA:
++		/*
++		 * Space taken by all other metadata btrees are accounted
++		 * on-disk as used space.  We therefore only hide the space
++		 * that is reserved but not used by the trees.
++		 */
++		hidden_space = ask - used;
++		break;
++	default:
++		ASSERT(0);
++		return -EINVAL;
++	}
++	error = xfs_mod_fdblocks(mp, -(int64_t)hidden_space, true);
+ 	if (error) {
+ 		trace_xfs_ag_resv_init_error(pag->pag_mount, pag->pag_agno,
+ 				error, _RET_IP_);
+@@ -216,7 +238,8 @@ __xfs_ag_resv_init(
+ 
+ 	resv = xfs_perag_resv(pag, type);
+ 	resv->ar_asked = ask;
+-	resv->ar_reserved = resv->ar_orig_reserved = reserved;
++	resv->ar_orig_reserved = hidden_space;
++	resv->ar_reserved = ask - used;
+ 
+ 	trace_xfs_ag_resv_init(pag, type, ask);
+ 	return 0;
+-- 
+cgit v1.1
+
