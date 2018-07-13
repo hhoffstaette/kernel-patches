@@ -1,0 +1,348 @@
+From 9bb54cb56ae8498d35392745f8f050112cec5dcb Mon Sep 17 00:00:00 2001
+From: Dave Chinner <dchinner@redhat.com>
+Date: Thu, 7 Jun 2018 07:54:02 -0700
+Subject: xfs: clean up MIN/MAX
+
+Get rid of the MIN/MAX macros and just use the native min/max macros
+directly in the XFS code.
+
+Signed-Off-By: Dave Chinner <dchinner@redhat.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+ fs/xfs/libxfs/xfs_attr_leaf.c  |  2 +-
+ fs/xfs/libxfs/xfs_bmap.c       |  2 +-
+ fs/xfs/libxfs/xfs_da_btree.c   |  2 +-
+ fs/xfs/libxfs/xfs_dir2_block.c |  8 ++++----
+ fs/xfs/libxfs/xfs_dir2_leaf.c  |  8 ++++----
+ fs/xfs/libxfs/xfs_sb.c         |  2 +-
+ fs/xfs/libxfs/xfs_trans_resv.c | 16 ++++++++--------
+ fs/xfs/xfs_buf_item.c          |  2 +-
+ fs/xfs/xfs_iomap.c             |  6 +++---
+ fs/xfs/xfs_itable.c            |  2 +-
+ fs/xfs/xfs_linux.h             |  2 --
+ fs/xfs/xfs_log.c               |  4 ++--
+ fs/xfs/xfs_log_recover.c       |  6 +++---
+ fs/xfs/xfs_mount.h             |  2 +-
+ fs/xfs/xfs_super.c             |  2 +-
+ 15 files changed, 32 insertions(+), 34 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_attr_leaf.c b/fs/xfs/libxfs/xfs_attr_leaf.c
+index cf15042..99e0f57 100644
+--- a/fs/xfs/libxfs/xfs_attr_leaf.c
++++ b/fs/xfs/libxfs/xfs_attr_leaf.c
+@@ -465,7 +465,7 @@ xfs_attr_shortform_bytesfit(xfs_inode_t *dp, int bytes)
+ 	 * A data fork btree root must have space for at least
+ 	 * MINDBTPTRS key/ptr pairs if the data fork is small or empty.
+ 	 */
+-	minforkoff = MAX(dsize, XFS_BMDR_SPACE_CALC(MINDBTPTRS));
++	minforkoff = max(dsize, XFS_BMDR_SPACE_CALC(MINDBTPTRS));
+ 	minforkoff = roundup(minforkoff, 8) >> 3;
+ 
+ 	/* attr fork btree root can have at least this many key/ptr pairs */
+diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
+index 3de047e..6a79a07 100644
+--- a/fs/xfs/libxfs/xfs_bmap.c
++++ b/fs/xfs/libxfs/xfs_bmap.c
+@@ -3467,7 +3467,7 @@ xfs_bmap_btalloc(
+ 	xfs_rmap_skip_owner_update(&args.oinfo);
+ 
+ 	/* Trim the allocation back to the maximum an AG can fit. */
+-	args.maxlen = MIN(ap->length, mp->m_ag_max_usable);
++	args.maxlen = min(ap->length, mp->m_ag_max_usable);
+ 	args.firstblock = *ap->firstblock;
+ 	blen = 0;
+ 	if (nullfb) {
+diff --git a/fs/xfs/libxfs/xfs_da_btree.c b/fs/xfs/libxfs/xfs_da_btree.c
+index 5d5955d..8a30140 100644
+--- a/fs/xfs/libxfs/xfs_da_btree.c
++++ b/fs/xfs/libxfs/xfs_da_btree.c
+@@ -2081,7 +2081,7 @@ xfs_da_grow_inode_int(
+ 		 */
+ 		mapp = kmem_alloc(sizeof(*mapp) * count, KM_SLEEP);
+ 		for (b = *bno, mapi = 0; b < *bno + count; ) {
+-			nmap = MIN(XFS_BMAP_MAX_NMAP, count);
++			nmap = min(XFS_BMAP_MAX_NMAP, count);
+ 			c = (int)(*bno + count - b);
+ 			error = xfs_bmapi_write(tp, dp, b, c,
+ 					xfs_bmapi_aflag(w)|XFS_BMAPI_METADATA,
+diff --git a/fs/xfs/libxfs/xfs_dir2_block.c b/fs/xfs/libxfs/xfs_dir2_block.c
+index bac4c93..30ed591 100644
+--- a/fs/xfs/libxfs/xfs_dir2_block.c
++++ b/fs/xfs/libxfs/xfs_dir2_block.c
+@@ -502,8 +502,8 @@ xfs_dir2_block_addname(
+ 			if (mid - lowstale)
+ 				memmove(&blp[lowstale], &blp[lowstale + 1],
+ 					(mid - lowstale) * sizeof(*blp));
+-			lfloglow = MIN(lowstale, lfloglow);
+-			lfloghigh = MAX(mid, lfloghigh);
++			lfloglow = min(lowstale, lfloglow);
++			lfloghigh = max(mid, lfloghigh);
+ 		}
+ 		/*
+ 		 * Move entries toward the high-numbered stale entry.
+@@ -514,8 +514,8 @@ xfs_dir2_block_addname(
+ 			if (highstale - mid)
+ 				memmove(&blp[mid + 1], &blp[mid],
+ 					(highstale - mid) * sizeof(*blp));
+-			lfloglow = MIN(mid, lfloglow);
+-			lfloghigh = MAX(highstale, lfloghigh);
++			lfloglow = min(mid, lfloglow);
++			lfloghigh = max(highstale, lfloghigh);
+ 		}
+ 		be32_add_cpu(&btp->stale, -1);
+ 	}
+diff --git a/fs/xfs/libxfs/xfs_dir2_leaf.c b/fs/xfs/libxfs/xfs_dir2_leaf.c
+index 728c342..1728a3e 100644
+--- a/fs/xfs/libxfs/xfs_dir2_leaf.c
++++ b/fs/xfs/libxfs/xfs_dir2_leaf.c
+@@ -590,8 +590,8 @@ xfs_dir3_leaf_find_entry(
+ 				(index - lowstale - 1) *
+ 					sizeof(xfs_dir2_leaf_entry_t));
+ 		}
+-		*lfloglow = MIN(lowstale, *lfloglow);
+-		*lfloghigh = MAX(index - 1, *lfloghigh);
++		*lfloglow = min(lowstale, *lfloglow);
++		*lfloghigh = max(index - 1, *lfloghigh);
+ 		leafhdr->stale--;
+ 		return &ents[index - 1];
+ 	}
+@@ -610,8 +610,8 @@ xfs_dir3_leaf_find_entry(
+ 		memmove(&ents[index + 1], &ents[index],
+ 			(highstale - index) * sizeof(xfs_dir2_leaf_entry_t));
+ 	}
+-	*lfloglow = MIN(index, *lfloglow);
+-	*lfloghigh = MAX(highstale, *lfloghigh);
++	*lfloglow = min(index, *lfloglow);
++	*lfloghigh = max(highstale, *lfloghigh);
+ 	leafhdr->stale--;
+ 	return &ents[index];
+ }
+diff --git a/fs/xfs/libxfs/xfs_sb.c b/fs/xfs/libxfs/xfs_sb.c
+index a637886..350119e 100644
+--- a/fs/xfs/libxfs/xfs_sb.c
++++ b/fs/xfs/libxfs/xfs_sb.c
+@@ -771,7 +771,7 @@ xfs_sb_mount_common(
+ 	mp->m_refc_mnr[1] = mp->m_refc_mxr[1] / 2;
+ 
+ 	mp->m_bsize = XFS_FSB_TO_BB(mp, 1);
+-	mp->m_ialloc_inos = (int)MAX((uint16_t)XFS_INODES_PER_CHUNK,
++	mp->m_ialloc_inos = max_t(uint16_t, XFS_INODES_PER_CHUNK,
+ 					sbp->sb_inopblock);
+ 	mp->m_ialloc_blks = mp->m_ialloc_inos >> sbp->sb_inopblog;
+ 
+diff --git a/fs/xfs/libxfs/xfs_trans_resv.c b/fs/xfs/libxfs/xfs_trans_resv.c
+index 50c44e3..f99a7ae 100644
+--- a/fs/xfs/libxfs/xfs_trans_resv.c
++++ b/fs/xfs/libxfs/xfs_trans_resv.c
+@@ -236,7 +236,7 @@ xfs_calc_write_reservation(
+ 	struct xfs_mount	*mp)
+ {
+ 	return XFS_DQUOT_LOGRES(mp) +
+-		MAX((xfs_calc_inode_res(mp, 1) +
++		max((xfs_calc_inode_res(mp, 1) +
+ 		     xfs_calc_buf_res(XFS_BM_MAXLEVELS(mp, XFS_DATA_FORK),
+ 				      XFS_FSB_TO_B(mp, 1)) +
+ 		     xfs_calc_buf_res(3, mp->m_sb.sb_sectsize) +
+@@ -263,7 +263,7 @@ xfs_calc_itruncate_reservation(
+ 	struct xfs_mount	*mp)
+ {
+ 	return XFS_DQUOT_LOGRES(mp) +
+-		MAX((xfs_calc_inode_res(mp, 1) +
++		max((xfs_calc_inode_res(mp, 1) +
+ 		     xfs_calc_buf_res(XFS_BM_MAXLEVELS(mp, XFS_DATA_FORK) + 1,
+ 				      XFS_FSB_TO_B(mp, 1))),
+ 		    (xfs_calc_buf_res(9, mp->m_sb.sb_sectsize) +
+@@ -288,7 +288,7 @@ xfs_calc_rename_reservation(
+ 	struct xfs_mount	*mp)
+ {
+ 	return XFS_DQUOT_LOGRES(mp) +
+-		MAX((xfs_calc_inode_res(mp, 4) +
++		max((xfs_calc_inode_res(mp, 4) +
+ 		     xfs_calc_buf_res(2 * XFS_DIROP_LOG_COUNT(mp),
+ 				      XFS_FSB_TO_B(mp, 1))),
+ 		    (xfs_calc_buf_res(7, mp->m_sb.sb_sectsize) +
+@@ -328,7 +328,7 @@ xfs_calc_link_reservation(
+ {
+ 	return XFS_DQUOT_LOGRES(mp) +
+ 		xfs_calc_iunlink_remove_reservation(mp) +
+-		MAX((xfs_calc_inode_res(mp, 2) +
++		max((xfs_calc_inode_res(mp, 2) +
+ 		     xfs_calc_buf_res(XFS_DIROP_LOG_COUNT(mp),
+ 				      XFS_FSB_TO_B(mp, 1))),
+ 		    (xfs_calc_buf_res(3, mp->m_sb.sb_sectsize) +
+@@ -366,7 +366,7 @@ xfs_calc_remove_reservation(
+ {
+ 	return XFS_DQUOT_LOGRES(mp) +
+ 		xfs_calc_iunlink_add_reservation(mp) +
+-		MAX((xfs_calc_inode_res(mp, 1) +
++		max((xfs_calc_inode_res(mp, 1) +
+ 		     xfs_calc_buf_res(XFS_DIROP_LOG_COUNT(mp),
+ 				      XFS_FSB_TO_B(mp, 1))),
+ 		    (xfs_calc_buf_res(4, mp->m_sb.sb_sectsize) +
+@@ -424,7 +424,7 @@ STATIC uint
+ xfs_calc_icreate_reservation(xfs_mount_t *mp)
+ {
+ 	return XFS_DQUOT_LOGRES(mp) +
+-		MAX(xfs_calc_icreate_resv_alloc(mp),
++		max(xfs_calc_icreate_resv_alloc(mp),
+ 		    xfs_calc_create_resv_modify(mp));
+ }
+ 
+@@ -632,7 +632,7 @@ STATIC uint
+ xfs_calc_attrinval_reservation(
+ 	struct xfs_mount	*mp)
+ {
+-	return MAX((xfs_calc_inode_res(mp, 1) +
++	return max((xfs_calc_inode_res(mp, 1) +
+ 		    xfs_calc_buf_res(XFS_BM_MAXLEVELS(mp, XFS_ATTR_FORK),
+ 				     XFS_FSB_TO_B(mp, 1))),
+ 		   (xfs_calc_buf_res(9, mp->m_sb.sb_sectsize) +
+@@ -696,7 +696,7 @@ xfs_calc_attrrm_reservation(
+ 	struct xfs_mount	*mp)
+ {
+ 	return XFS_DQUOT_LOGRES(mp) +
+-		MAX((xfs_calc_inode_res(mp, 1) +
++		max((xfs_calc_inode_res(mp, 1) +
+ 		     xfs_calc_buf_res(XFS_DA_NODE_MAXDEPTH,
+ 				      XFS_FSB_TO_B(mp, 1)) +
+ 		     (uint)XFS_FSB_TO_B(mp,
+diff --git a/fs/xfs/xfs_buf_item.c b/fs/xfs/xfs_buf_item.c
+index 5d18c80..1c9d139 100644
+--- a/fs/xfs/xfs_buf_item.c
++++ b/fs/xfs/xfs_buf_item.c
+@@ -830,7 +830,7 @@ xfs_buf_item_log_segment(
+ 	 * of the last bit to be set in this word plus one.
+ 	 */
+ 	if (bit) {
+-		end_bit = MIN(bit + bits_to_set, (uint)NBWORD);
++		end_bit = min(bit + bits_to_set, (uint)NBWORD);
+ 		mask = ((1U << (end_bit - bit)) - 1) << bit;
+ 		*wordp |= mask;
+ 		wordp++;
+diff --git a/fs/xfs/xfs_iomap.c b/fs/xfs/xfs_iomap.c
+index 99a1a10..49f5492 100644
+--- a/fs/xfs/xfs_iomap.c
++++ b/fs/xfs/xfs_iomap.c
+@@ -188,7 +188,7 @@ xfs_iomap_write_direct(
+ 			goto out_unlock;
+ 	} else {
+ 		if (nmaps && (imap->br_startblock == HOLESTARTBLOCK))
+-			last_fsb = MIN(last_fsb, (xfs_fileoff_t)
++			last_fsb = min(last_fsb, (xfs_fileoff_t)
+ 					imap->br_blockcount +
+ 					imap->br_startoff);
+ 	}
+@@ -476,8 +476,8 @@ xfs_iomap_prealloc_size(
+ 	 * The shift throttle value is set to the maximum value as determined by
+ 	 * the global low free space values and per-quota low free space values.
+ 	 */
+-	alloc_blocks = MIN(alloc_blocks, qblocks);
+-	shift = MAX(shift, qshift);
++	alloc_blocks = min(alloc_blocks, qblocks);
++	shift = max(shift, qshift);
+ 
+ 	if (shift)
+ 		alloc_blocks >>= shift;
+diff --git a/fs/xfs/xfs_itable.c b/fs/xfs/xfs_itable.c
+index fa405f3..24f4f1c 100644
+--- a/fs/xfs/xfs_itable.c
++++ b/fs/xfs/xfs_itable.c
+@@ -559,7 +559,7 @@ xfs_inumbers(
+ 	    *lastino != XFS_AGINO_TO_INO(mp, agno, agino))
+ 		return error;
+ 
+-	bcount = MIN(left, (int)(PAGE_SIZE / sizeof(*buffer)));
++	bcount = min(left, (int)(PAGE_SIZE / sizeof(*buffer)));
+ 	buffer = kmem_zalloc(bcount * sizeof(*buffer), KM_SLEEP);
+ 	do {
+ 		struct xfs_inobt_rec_incore	r;
+diff --git a/fs/xfs/xfs_linux.h b/fs/xfs/xfs_linux.h
+index 1631cf4..0fcb629 100644
+--- a/fs/xfs/xfs_linux.h
++++ b/fs/xfs/xfs_linux.h
+@@ -140,8 +140,6 @@ typedef __u32			xfs_nlink_t;
+ 
+ #define XFS_PROJID_DEFAULT	0
+ 
+-#define MIN(a,b)	(min(a,b))
+-#define MAX(a,b)	(max(a,b))
+ #define howmany(x, y)	(((x)+((y)-1))/(y))
+ 
+ static inline void delay(long ticks)
+diff --git a/fs/xfs/xfs_log.c b/fs/xfs/xfs_log.c
+index e630778..5e56f3b 100644
+--- a/fs/xfs/xfs_log.c
++++ b/fs/xfs/xfs_log.c
+@@ -1629,8 +1629,8 @@ xlog_grant_push_ail(
+ 	 * log, and 256 blocks.
+ 	 */
+ 	free_threshold = BTOBB(need_bytes);
+-	free_threshold = MAX(free_threshold, (log->l_logBBsize >> 2));
+-	free_threshold = MAX(free_threshold, 256);
++	free_threshold = max(free_threshold, (log->l_logBBsize >> 2));
++	free_threshold = max(free_threshold, 256);
+ 	if (free_blocks >= free_threshold)
+ 		return;
+ 
+diff --git a/fs/xfs/xfs_log_recover.c b/fs/xfs/xfs_log_recover.c
+index 7d897c58..b1aedf73d 100644
+--- a/fs/xfs/xfs_log_recover.c
++++ b/fs/xfs/xfs_log_recover.c
+@@ -1804,7 +1804,7 @@ xlog_clear_stale_blocks(
+ 	 * we don't waste all day writing from the head to the tail
+ 	 * for no reason.
+ 	 */
+-	max_distance = MIN(max_distance, tail_distance);
++	max_distance = min(max_distance, tail_distance);
+ 
+ 	if ((head_block + max_distance) <= log->l_logBBsize) {
+ 		/*
+@@ -2872,14 +2872,14 @@ xlog_recover_buffer_pass2(
+ 	 * buffers in the log can be a different size if the log was generated
+ 	 * by an older kernel using unclustered inode buffers or a newer kernel
+ 	 * running with a different inode cluster size.  Regardless, if the
+-	 * the inode buffer size isn't MAX(blocksize, mp->m_inode_cluster_size)
++	 * the inode buffer size isn't max(blocksize, mp->m_inode_cluster_size)
+ 	 * for *our* value of mp->m_inode_cluster_size, then we need to keep
+ 	 * the buffer out of the buffer cache so that the buffer won't
+ 	 * overlap with future reads of those inodes.
+ 	 */
+ 	if (XFS_DINODE_MAGIC ==
+ 	    be16_to_cpu(*((__be16 *)xfs_buf_offset(bp, 0))) &&
+-	    (BBTOB(bp->b_io_length) != MAX(log->l_mp->m_sb.sb_blocksize,
++	    (BBTOB(bp->b_io_length) != max(log->l_mp->m_sb.sb_blocksize,
+ 			(uint32_t)log->l_mp->m_inode_cluster_size))) {
+ 		xfs_buf_stale(bp);
+ 		error = xfs_bwrite(bp);
+diff --git a/fs/xfs/xfs_mount.h b/fs/xfs/xfs_mount.h
+index 7f3d5e0..245349d 100644
+--- a/fs/xfs/xfs_mount.h
++++ b/fs/xfs/xfs_mount.h
+@@ -271,7 +271,7 @@ xfs_preferred_iosize(xfs_mount_t *mp)
+ 	return (mp->m_swidth ?
+ 		(mp->m_swidth << mp->m_sb.sb_blocklog) :
+ 		((mp->m_flags & XFS_MOUNT_DFLT_IOSIZE) ?
+-			(1 << (int)MAX(mp->m_readio_log, mp->m_writeio_log)) :
++			(1 << (int)max(mp->m_readio_log, mp->m_writeio_log)) :
+ 			PAGE_SIZE));
+ }
+ 
+diff --git a/fs/xfs/xfs_super.c b/fs/xfs/xfs_super.c
+index d55435e..7c4813a 100644
+--- a/fs/xfs/xfs_super.c
++++ b/fs/xfs/xfs_super.c
+@@ -1136,7 +1136,7 @@ xfs_fs_statfs(
+ 	statp->f_bavail = statp->f_bfree;
+ 
+ 	fakeinos = statp->f_bfree << sbp->sb_inopblog;
+-	statp->f_files = MIN(icount + fakeinos, (uint64_t)XFS_MAXINUMBER);
++	statp->f_files = min(icount + fakeinos, (uint64_t)XFS_MAXINUMBER);
+ 	if (mp->m_maxicount)
+ 		statp->f_files = min_t(typeof(statp->f_files),
+ 					statp->f_files,
+-- 
+cgit v1.1
+
