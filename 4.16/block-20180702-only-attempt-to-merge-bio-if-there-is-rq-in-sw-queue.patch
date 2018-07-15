@@ -1,0 +1,44 @@
+From b04f50ab8a74129b3041a2836c33c916be3c6667 Mon Sep 17 00:00:00 2001
+From: Ming Lei <ming.lei@redhat.com>
+Date: Mon, 2 Jul 2018 17:35:59 +0800
+Subject: blk-mq: only attempt to merge bio if there is rq in sw queue
+
+Only attempt to merge bio iff the ctx->rq_list isn't empty, because:
+
+1) for high-performance SSD, most of times dispatch may succeed, then
+there may be nothing left in ctx->rq_list, so don't try to merge over
+sw queue if it is empty, then we can save one acquiring of ctx->lock
+
+2) we can't expect good merge performance on per-cpu sw queue, and missing
+one merge on sw queue won't be a big deal since tasks can be scheduled from
+one CPU to another.
+
+Cc: Laurence Oberman <loberman@redhat.com>
+Cc: Omar Sandoval <osandov@fb.com>
+Cc: Bart Van Assche <bart.vanassche@wdc.com>
+Tested-by: Kashyap Desai <kashyap.desai@broadcom.com>
+Reported-by: Kashyap Desai <kashyap.desai@broadcom.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Ming Lei <ming.lei@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq-sched.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/block/blk-mq-sched.c b/block/blk-mq-sched.c
+index 4e027f6108ae..f3b4b5ceb4d1 100644
+--- a/block/blk-mq-sched.c
++++ b/block/blk-mq-sched.c
+@@ -326,7 +326,8 @@ bool __blk_mq_sched_bio_merge(struct request_queue *q, struct bio *bio)
+ 		return e->type->ops.mq.bio_merge(hctx, bio);
+ 	}
+ 
+-	if (hctx->flags & BLK_MQ_F_SHOULD_MERGE) {
++	if ((hctx->flags & BLK_MQ_F_SHOULD_MERGE) &&
++			!list_empty_careful(&ctx->rq_list)) {
+ 		/* default per sw-queue merge */
+ 		spin_lock(&ctx->lock);
+ 		ret = blk_mq_attempt_merge(q, ctx, bio);
+-- 
+cgit 1.2-0.2.lf.el7
+
