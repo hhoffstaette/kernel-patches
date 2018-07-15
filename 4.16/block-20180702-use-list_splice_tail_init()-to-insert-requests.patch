@@ -1,0 +1,54 @@
+From 3f0cedc7e9a0b32e79c79d2aac0c96d2b870ae55 Mon Sep 17 00:00:00 2001
+From: Ming Lei <ming.lei@redhat.com>
+Date: Mon, 2 Jul 2018 17:35:58 +0800
+Subject: blk-mq: use list_splice_tail_init() to insert requests
+
+list_splice_tail_init() is much more faster than inserting each
+request one by one, given all requets in 'list' belong to
+same sw queue and ctx->lock is required to insert requests.
+
+Cc: Laurence Oberman <loberman@redhat.com>
+Cc: Omar Sandoval <osandov@fb.com>
+Cc: Bart Van Assche <bart.vanassche@wdc.com>
+Tested-by: Kashyap Desai <kashyap.desai@broadcom.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Ming Lei <ming.lei@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index acf31ad733bf..795ba859b16b 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1545,19 +1545,19 @@ void blk_mq_insert_requests(struct blk_mq_hw_ctx *hctx, struct blk_mq_ctx *ctx,
+ 			    struct list_head *list)
+ 
+ {
++	struct request *rq;
++
+ 	/*
+ 	 * preemption doesn't flush plug list, so it's possible ctx->cpu is
+ 	 * offline now
+ 	 */
+-	spin_lock(&ctx->lock);
+-	while (!list_empty(list)) {
+-		struct request *rq;
+-
+-		rq = list_first_entry(list, struct request, queuelist);
++	list_for_each_entry(rq, list, queuelist) {
+ 		BUG_ON(rq->mq_ctx != ctx);
+-		list_del_init(&rq->queuelist);
+-		__blk_mq_insert_req_list(hctx, rq, false);
++		trace_block_rq_insert(hctx->queue, rq);
+ 	}
++
++	spin_lock(&ctx->lock);
++	list_splice_tail_init(list, &ctx->rq_list);
+ 	blk_mq_hctx_mark_pending(hctx, ctx);
+ 	spin_unlock(&ctx->lock);
+ }
+-- 
+cgit 1.2-0.2.lf.el7
+
