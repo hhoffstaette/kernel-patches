@@ -1,0 +1,105 @@
+From: Kirill A. Shutemov <kirill.shutemov@linux.intel.com>
+To: Marcel Ziswiler <marcel.ziswiler@toradex.com>
+Cc: "akpm@linux-foundation.org" <akpm@linux-foundation.org>,
+    "linux-mm@kvack.org" <linux-mm@kvack.org>,
+    "linux-kernel@vger.kernel.org" <linux-kernel@vger.kernel.org>,
+    "aarcange@redhat.com" <aarcange@redhat.com>,
+    "dvyukov@google.com" <dvyukov@google.com>,
+    "oleg@redhat.com" <oleg@redhat.com>,
+    "linux-tegra@vger.kernel.org" <linux-tegra@vger.kernel.org>
+Subject: Re: REGRESSION: [PATCHv2 2/2] mm: Drop unneeded ->vm_ops checks
+Date: Mon, 16 Jul 2018 17:20:49 +0300
+
+On Mon, Jul 16, 2018 at 01:30:34PM +0000, Marcel Ziswiler wrote:
+> 
+> Today's -next on Apalis T30 [1] gives the following error upon boot:
+> 
+> [   16.147496] Unable to handle kernel NULL pointer dereference at
+> virtual address 0000002c
+> [   16.156152] pgd = 843045af
+> [   16.158986] [0000002c] *pgd=facd9831
+> [   16.162578] Internal error: Oops: 17 [#1] PREEMPT SMP ARM
+> [   16.167970] Modules linked in:
+> [   16.171034] CPU: 2 PID: 442 Comm: polkitd Not tainted 4.18.0-rc5-
+> next-20180716-dirty #75
+> [   16.179111] Hardware name: NVIDIA Tegra SoC (Flattened Device Tree)
+> [   16.185382] PC is at show_map_vma.constprop.3+0xac/0x158
+> [   16.190686] LR is at show_map_vma.constprop.3+0xa8/0x158
+> [   16.195989] pc : [<c02c4900>]    lr : [<c02c48fc>]    psr: 800e0013
+> [   16.202243] sp : ec02de60  ip : 000003ce  fp : c0f09a3c
+> [   16.207457] r10: ec02df78  r9 : 00000000  r8 : 00000000
+> [   16.212672] r7 : 00000000  r6 : eda8ec48  r5 : 00000000  r4 :
+> c0f09a3c
+> [   16.219188] r3 : 00000000  r2 : ed1df000  r1 : 00000020  r0 :
+> eda8ec48
+> [   16.225705] Flags: Nzcv  IRQs on  FIQs on  Mode SVC_32  ISA
+> ARM  Segment none
+> [   16.232829] Control: 10c5387d  Table: ac01804a  DAC: 00000051
+> [   16.238573] Process polkitd (pid: 442, stack limit = 0xc0e83ce5)
+> [   16.244572] Stack: (0xec02de60 to 0xec02e000)
+> [   16.248928] de60: 00000000 00000000 00000000 00000000 eda8ec48
+> eda8ec48 c0f09a3c 000003a6
+> [   16.257097] de80: ecf46300 00000096 00000000 c02c4efc eda8ec48
+> 00000000 000003a6 c0289908
+> [   16.265287] dea0: 0000000c eda8ec78 ecf46300 000003f4 00081114
+> eda8ec60 00000000 c0f04c48
+> [   16.273482] dec0: c028956c 00000400 ec02df78 00000000 00081108
+> 00000400 00000000 c0263b20
+> [   16.281671] dee0: 5b4c9a7c 0ee6b280 000039ea 00000000 c0f04c48
+> 8bb3ec56 c0f04c48 be8c7a00
+> [   16.289853] df00: ecf46308 00000000 000007ff c0f04c48 00000001
+> 00000000 00000000 00000000
+> [   16.298037] df20: 00000000 8bb3ec56 000039ea 8bb3ec56 ecf46300
+> 00081108 00000400 ec02df78
+> [   16.306210] df40: 00000000 00081108 00000400 c0263cdc c0f04c48
+> b686ac78 000005e8 c0f04c48
+> [   16.314381] df60: ecf46303 00002400 00000000 ecf46300 00081108
+> c02641c0 00002400 00000000
+> [   16.322549] df80: 00000000 8bb3ec56 00022698 b686ac78 000005e8
+> 00000003 c0101204 ec02c000
+> [   16.330718] dfa0: 00000003 c0101000 00022698 b686ac78 00000009
+> 00081108 00000400 000000c2
+> [   16.338886] dfc0: 00022698 b686ac78 000005e8 00000003 0000004b
+> be8c7af4 00000000 00000000
+> [   16.347053] dfe0: 0004d1b2 be8c7a84 b686b94c b686ac98 000e0010
+> 00000009 00000000 00000000
+> [   16.355237] [<c02c4900>] (show_map_vma.constprop.3) from
+> [<c02c4efc>] (show_pid_map+0x10/0x34)  
+> [   16.363846] [<c02c4efc>] (show_pid_map) from [<c0289908>]
+> (seq_read+0x39c/0x4f4)
+> [   16.371264] [<c0289908>] (seq_read) from [<c0263b20>]
+> (__vfs_read+0x2c/0x15c)
+> [   16.378401] [<c0263b20>] (__vfs_read) from [<c0263cdc>]
+> (vfs_read+0x8c/0x110)
+> [   16.385546] [<c0263cdc>] (vfs_read) from [<c02641c0>]
+> (ksys_read+0x4c/0xac)
+> [   16.392519] [<c02641c0>] (ksys_read) from [<c0101000>]
+> (ret_fast_syscall+0x0/0x54)
+> [   16.400083] Exception stack(0xec02dfa8 to 0xec02dff0)
+> [   16.405135] dfa0:                   00022698 b686ac78 00000009
+> 00081108 00000400 000000c2
+> [   16.413311] dfc0: 00022698 b686ac78 000005e8 00000003 0000004b
+> be8c7af4 00000000 00000000
+> [   16.421485] dfe0: 0004d1b2 be8c7a84 b686b94c b686ac98
+> [   16.426542] Code: e1cd80f0 e5947020 ebfffb4f e5943048 (e593302c)
+> [   16.432734] ---[ end trace 5dbf91c64da6bd91 ]---
+> 
+> Reverting this makes it behave as expected again. Anybody knows what is
+> going on?
+
+Could you check if this fixup helps?
+
+diff --git a/arch/arm/kernel/process.c b/arch/arm/kernel/process.c
+index 225d1c58d2de..553262999564 100644
+--- a/arch/arm/kernel/process.c
++++ b/arch/arm/kernel/process.c
+@@ -334,6 +334,7 @@ static struct vm_area_struct gate_vma = {
+ 	.vm_start	= 0xffff0000,
+ 	.vm_end		= 0xffff0000 + PAGE_SIZE,
+ 	.vm_flags	= VM_READ | VM_EXEC | VM_MAYREAD | VM_MAYEXEC,
++	.vm_ops		= &dummy_vm_ops,
+ };
+ 
+ static int __init gate_vma_init(void)
+-- 
+ Kirill A. Shutemov
