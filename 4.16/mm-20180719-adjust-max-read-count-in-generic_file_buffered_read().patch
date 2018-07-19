@@ -1,0 +1,32 @@
+From: Chengguang Xu <cgxu519@gmx.com>
+Subject: [PATCH] mm: adjust max read count in generic_file_buffered_read()
+Date: Thu, 19 Jul 2018 16:17:26 +0800
+Cc: linux-mm@kvack.org, linux-kernel@vger.kernel.org,
+        Chengguang Xu <cgxu519@gmx.com>
+To: akpm@linux-foundation.org, jack@suse.cz,
+        mgorman@techsingularity.net, jlayton@redhat.com,
+        ak@linux.intel.com, mawilcox@microsoft.com,
+        tim.c.chen@linux.intel.com
+
+When we try to truncate read count in generic_file_buffered_read(),
+should deliver (sb->s_maxbytes - offset) as maximum count not
+sb->s_maxbytes itself.
+
+Signed-off-by: Chengguang Xu <cgxu519@gmx.com>
+---
+ mm/filemap.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/filemap.c b/mm/filemap.c
+index 52517f28e6f4..5c2d481d21cf 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -2064,7 +2064,7 @@ static ssize_t generic_file_buffered_read(struct kiocb *iocb,
+ 
+ 	if (unlikely(*ppos >= inode->i_sb->s_maxbytes))
+ 		return 0;
+-	iov_iter_truncate(iter, inode->i_sb->s_maxbytes);
++	iov_iter_truncate(iter, inode->i_sb->s_maxbytes - *ppos);
+ 
+ 	index = *ppos >> PAGE_SHIFT;
+ 	prev_index = ra->prev_pos >> PAGE_SHIFT;
