@@ -9,6 +9,7 @@ image that has an invalid chunk and does not return an error.
 Add chunk type check in btrfs_check_chunk_valid, to make error be
 returned in advance.
 
+[HH: switched 'mixed' from int -> bool]
 Reported-by: Xu Wen <wen.xu@gatech.edu>
 Signed-off-by: Gu Jinxiang <gujx@cn.fujitsu.com>
 Reviewed-by: Qu Wenruo <wqu@suse.com>
@@ -26,7 +27,7 @@ index 111bfeab18407..c34efb1f11fab 100644
  	u16 sub_stripes;
  	u64 type;
 +	u64 features;
-+	int mixed = 0;
++	bool mixed = false;
  
  	length = btrfs_chunk_length(leaf, chunk);
  	stripe_len = btrfs_chunk_stripe_len(leaf, chunk);
@@ -50,7 +51,7 @@ index 111bfeab18407..c34efb1f11fab 100644
 +
 +	features = btrfs_super_incompat_flags(fs_info->super_copy);
 +	if (features & BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS)
-+		mixed = 1;
++		mixed = true;
 +
 +	if (!mixed) {
 +		if (type &
