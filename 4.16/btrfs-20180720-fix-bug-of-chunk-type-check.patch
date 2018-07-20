@@ -1,0 +1,78 @@
+From:   Gu Jinxiang <gujx@cn.fujitsu.com>
+To:     <linux-btrfs@vger.kernel.org>
+CC:     <quwenruo.btrfs@gmx.com>
+Subject: [PATCH v2] btrfs: fix bug of chunk type check
+Date:   Fri, 20 Jul 2018 18:17:21 +0800
+
+chunk type BTRFS_BLOCK_GROUP_METADATA and BTRFS_BLOCK_GROUP_DATA
+should not be set in a non-mixed chunk at the same time.
+
+Since BTRFS_BLOCK_GROUP_METADATA is 0x4 and BTRFS_BLOCK_GROUP_DATA is 0x1,
+BTRFS_BLOCK_GROUP_METADATA & BTRFS_BLOCK_GROUP_DATA will be 0x0,
+so we should judge type is one of them separately.
+
+]HH: small context massage in hunk #2 for 4.16.x]
+Reported-by: Dan Carpenter <dan.carpenter@oracle.com>
+Signed-off-by: Gu Jinxiang <gujx@cn.fujitsu.com>
+---
+Changelog:
+ v2: As comment by Qu, change the print format of bit from %llu to 0x%llx.
+
+ fs/btrfs/volumes.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 3f2f01ad9356..d61c604b280c 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6360,7 +6360,7 @@ static int btrfs_check_chunk_valid(struct btrfs_fs_info *fs_info,
+ 	}
+ 	if (~(BTRFS_BLOCK_GROUP_TYPE_MASK | BTRFS_BLOCK_GROUP_PROFILE_MASK) &
+ 	    type) {
+-		btrfs_err(fs_info, "unrecognized chunk type: %llu",
++		btrfs_err(fs_info, "unrecognized chunk type: 0x%llx",
+ 			  ~(BTRFS_BLOCK_GROUP_TYPE_MASK |
+ 			    BTRFS_BLOCK_GROUP_PROFILE_MASK) &
+ 			  btrfs_chunk_type(leaf, chunk));
+@@ -6368,16 +6368,15 @@ static int btrfs_check_chunk_valid(struct btrfs_fs_info *fs_info,
+ 	}
+ 
+ 	if ((type & BTRFS_BLOCK_GROUP_TYPE_MASK) == 0) {
+-		btrfs_err(fs_info, "missing chunk type flag: %llu", type);
++		btrfs_err(fs_info, "missing chunk type flag: 0x%llx", type);
+ 		return -EIO;
+ 	}
+ 
+ 	if ((type & BTRFS_BLOCK_GROUP_SYSTEM) &&
+ 	    (type & (BTRFS_BLOCK_GROUP_METADATA | BTRFS_BLOCK_GROUP_DATA))) {
+ 		btrfs_err(fs_info,
+-			"system chunk with data and metadata type flag: %llu",
+-			type);
++		"system chunk with data or metadata type: 0x%llx", type);
+ 		return -EIO;
+ 	}
+
+ 	features = btrfs_super_incompat_flags(fs_info->super_copy);
+@@ -6384,10 +6384,10 @@ static int btrfs_check_chunk_valid(struct btrfs_fs_info *fs_info,
+ 		mixed = true;
+ 
+ 	if (!mixed) {
+-		if (type &
+-		    (BTRFS_BLOCK_GROUP_METADATA & BTRFS_BLOCK_GROUP_DATA)) {
++		if ((type & BTRFS_BLOCK_GROUP_METADATA) &&
++			(type & BTRFS_BLOCK_GROUP_DATA)) {
+ 			btrfs_err(fs_info,
+-			"mixed chunk type in non-mixed mode: %llu", type);
++			"mixed chunk type in non-mixed mode: 0x%llx", type);
+ 			return -EIO;
+ 		}
+ 	}
+@@ -6400,7 +6400,7 @@ static int btrfs_check_chunk_valid(struct btrfs_fs_info *fs_info,
+ 	    ((type & BTRFS_BLOCK_GROUP_PROFILE_MASK) == 0 &&
+ 	     num_stripes != 1)) {
+ 		btrfs_err(fs_info,
+-			"invalid num_stripes:sub_stripes %u:%u for profile %llu",
++			"invalid num_stripes:sub_stripes %u:%u for profile 0x%llx",
+ 			num_stripes, sub_stripes,
+ 			type & BTRFS_BLOCK_GROUP_PROFILE_MASK);
+ 		return -EIO;
