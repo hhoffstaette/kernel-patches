@@ -1,0 +1,496 @@
+From 9678c54388b6a6b309ff7ee5c8d23fa9eba7c06f Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <nborisov@suse.com>
+Date: Mon, 8 Jan 2018 11:45:05 +0200
+Subject: btrfs: Remove custom crc32c init code
+
+The custom crc32 init code was introduced in
+14a958e678cd ("Btrfs: fix btrfs boot when compiled as built-in") to
+enable using btrfs as a built-in. However, later as pointed out by
+60efa5eb2e88 ("Btrfs: use late_initcall instead of module_init") this
+wasn't enough and finally btrfs was switched to late_initcall which
+comes after the generic crc32c implementation is initiliased. The
+latter commit superseeded the former. Now that we don't have to
+maintain our own code let's just remove it and switch to using the
+generic implementation.
+
+Despite touching a lot of files the patch is really simple. Here is the gist of
+the changes:
+
+1. Select LIBCRC32C rather than the low-level modules.
+2. s/btrfs_crc32c/crc32c/g
+3. replace hash.h with linux/crc32c.h
+4. Move the btrfs namehash funcs to ctree.h and change the tree accordingly.
+
+I've tested this with btrfs being both a module and a built-in and xfstest
+doesn't complain.
+
+Does seem to fix the longstanding problem of not automatically selectiong
+the crc32c module when btrfs is used. Possibly there is a workaround in
+dracut.
+
+The modinfo confirms that now all the module dependencies are there:
+
+before:
+depends:        zstd_compress,zstd_decompress,raid6_pq,xor,zlib_deflate
+
+after:
+depends:        libcrc32c,zstd_compress,zstd_decompress,raid6_pq,xor,zlib_deflate
+
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+[ add more info to changelog from mails ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/Kconfig           |  3 +--
+ fs/btrfs/Makefile          |  2 +-
+ fs/btrfs/check-integrity.c |  4 ++--
+ fs/btrfs/ctree.h           | 16 ++++++++++++++
+ fs/btrfs/dir-item.c        |  1 -
+ fs/btrfs/disk-io.c         |  4 ++--
+ fs/btrfs/extent-tree.c     | 10 ++++-----
+ fs/btrfs/hash.c            | 54 ----------------------------------------------
+ fs/btrfs/hash.h            | 43 ------------------------------------
+ fs/btrfs/inode-item.c      |  1 -
+ fs/btrfs/inode.c           |  1 -
+ fs/btrfs/props.c           |  2 +-
+ fs/btrfs/send.c            |  4 ++--
+ fs/btrfs/super.c           | 14 ++++--------
+ fs/btrfs/tree-checker.c    |  1 -
+ fs/btrfs/tree-log.c        |  2 +-
+ 16 files changed, 35 insertions(+), 127 deletions(-)
+ delete mode 100644 fs/btrfs/hash.c
+ delete mode 100644 fs/btrfs/hash.h
+
+diff --git a/fs/btrfs/Kconfig b/fs/btrfs/Kconfig
+index 273351ee4c46..167e5dc7eadd 100644
+--- a/fs/btrfs/Kconfig
++++ b/fs/btrfs/Kconfig
+@@ -1,7 +1,6 @@
+ config BTRFS_FS
+ 	tristate "Btrfs filesystem support"
+-	select CRYPTO
+-	select CRYPTO_CRC32C
++	select LIBCRC32C
+ 	select ZLIB_INFLATE
+ 	select ZLIB_DEFLATE
+ 	select LZO_COMPRESS
+diff --git a/fs/btrfs/Makefile b/fs/btrfs/Makefile
+index 0c4373628eb4..ca693dd554e9 100644
+--- a/fs/btrfs/Makefile
++++ b/fs/btrfs/Makefile
+@@ -10,7 +10,7 @@ btrfs-y += super.o ctree.o extent-tree.o print-tree.o root-tree.o dir-item.o \
+ 	   export.o tree-log.o free-space-cache.o zlib.o lzo.o zstd.o \
+ 	   compression.o delayed-ref.o relocation.o delayed-inode.o scrub.o \
+ 	   reada.o backref.o ulist.o qgroup.o send.o dev-replace.o raid56.o \
+-	   uuid-tree.o props.o hash.o free-space-tree.o tree-checker.o
++	   uuid-tree.o props.o free-space-tree.o tree-checker.o
+ 
+ btrfs-$(CONFIG_BTRFS_FS_POSIX_ACL) += acl.o
+ btrfs-$(CONFIG_BTRFS_FS_CHECK_INTEGRITY) += check-integrity.o
+diff --git a/fs/btrfs/check-integrity.c b/fs/btrfs/check-integrity.c
+index 7d51b5a5b505..3baebbc021c5 100644
+--- a/fs/btrfs/check-integrity.c
++++ b/fs/btrfs/check-integrity.c
+@@ -96,9 +96,9 @@
+ #include <linux/blkdev.h>
+ #include <linux/mm.h>
+ #include <linux/string.h>
++#include <linux/crc32c.h>
+ #include "ctree.h"
+ #include "disk-io.h"
+-#include "hash.h"
+ #include "transaction.h"
+ #include "extent_io.h"
+ #include "volumes.h"
+@@ -1736,7 +1736,7 @@ static int btrfsic_test_for_metadata(struct btrfsic_state *state,
+ 		size_t sublen = i ? PAGE_SIZE :
+ 				    (PAGE_SIZE - BTRFS_CSUM_SIZE);
+ 
+-		crc = btrfs_crc32c(crc, data, sublen);
++		crc = crc32c(crc, data, sublen);
+ 	}
+ 	btrfs_csum_final(crc, csum);
+ 	if (memcmp(csum, h->csum, state->csum_size))
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index a4877b6959e3..92b9db7186bb 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -40,6 +40,7 @@
+ #include <linux/sizes.h>
+ #include <linux/dynamic_debug.h>
+ #include <linux/refcount.h>
++#include <linux/crc32c.h>
+ #include "extent_io.h"
+ #include "extent_map.h"
+ #include "async-thread.h"
+@@ -98,6 +99,7 @@ static const int btrfs_csum_sizes[] = { 4 };
+ 
+ #define BTRFS_MAX_EXTENT_SIZE SZ_128M
+ 
++
+ /*
+  * Count how many BTRFS_MAX_EXTENT_SIZE cover the @size
+  */
+@@ -2553,6 +2555,20 @@ BTRFS_SETGET_STACK_FUNCS(stack_dev_replace_cursor_right,
+ 	((unsigned long)(BTRFS_LEAF_DATA_OFFSET + \
+ 	btrfs_item_offset_nr(leaf, slot)))
+ 
++static inline u64 btrfs_name_hash(const char *name, int len)
++{
++       return crc32c((u32)~1, name, len);
++}
++
++/*
++ * Figure the key offset of an extended inode ref
++ */
++static inline u64 btrfs_extref_hash(u64 parent_objectid, const char *name,
++                                   int len)
++{
++       return (u64) crc32c(parent_objectid, name, len);
++}
++
+ static inline bool btrfs_mixed_space_info(struct btrfs_space_info *space_info)
+ {
+ 	return ((space_info->flags & BTRFS_BLOCK_GROUP_METADATA) &&
+diff --git a/fs/btrfs/dir-item.c b/fs/btrfs/dir-item.c
+index cbe421605cd5..29e967b2c667 100644
+--- a/fs/btrfs/dir-item.c
++++ b/fs/btrfs/dir-item.c
+@@ -18,7 +18,6 @@
+ 
+ #include "ctree.h"
+ #include "disk-io.h"
+-#include "hash.h"
+ #include "transaction.h"
+ 
+ /*
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 9d2c932b012e..c10c84640eee 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -31,10 +31,10 @@
+ #include <linux/uuid.h>
+ #include <linux/semaphore.h>
+ #include <linux/error-injection.h>
++#include <linux/crc32c.h>
+ #include <asm/unaligned.h>
+ #include "ctree.h"
+ #include "disk-io.h"
+-#include "hash.h"
+ #include "transaction.h"
+ #include "btrfs_inode.h"
+ #include "volumes.h"
+@@ -270,7 +270,7 @@ out:
+ 
+ u32 btrfs_csum_data(const char *data, u32 seed, size_t len)
+ {
+-	return btrfs_crc32c(seed, data, len);
++	return crc32c(seed, data, len);
+ }
+ 
+ void btrfs_csum_final(u32 crc, u8 *result)
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 22ac82198a54..2760292e1175 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -27,7 +27,7 @@
+ #include <linux/ratelimit.h>
+ #include <linux/percpu_counter.h>
+ #include <linux/lockdep.h>
+-#include "hash.h"
++#include <linux/crc32c.h>
+ #include "tree-log.h"
+ #include "disk-io.h"
+ #include "print-tree.h"
+@@ -1203,11 +1203,11 @@ static u64 hash_extent_data_ref(u64 root_objectid, u64 owner, u64 offset)
+ 	__le64 lenum;
+ 
+ 	lenum = cpu_to_le64(root_objectid);
+-	high_crc = btrfs_crc32c(high_crc, &lenum, sizeof(lenum));
++	high_crc = crc32c(high_crc, &lenum, sizeof(lenum));
+ 	lenum = cpu_to_le64(owner);
+-	low_crc = btrfs_crc32c(low_crc, &lenum, sizeof(lenum));
++	low_crc = crc32c(low_crc, &lenum, sizeof(lenum));
+ 	lenum = cpu_to_le64(offset);
+-	low_crc = btrfs_crc32c(low_crc, &lenum, sizeof(lenum));
++	low_crc = crc32c(low_crc, &lenum, sizeof(lenum));
+ 
+ 	return ((u64)high_crc << 31) ^ (u64)low_crc;
+ }
+@@ -5944,7 +5944,7 @@ int btrfs_orphan_reserve_metadata(struct btrfs_trans_handle *trans,
+ 	 */
+ 	u64 num_bytes = btrfs_calc_trans_metadata_size(fs_info, 1);
+ 
+-	trace_btrfs_space_reservation(fs_info, "orphan", btrfs_ino(inode), 
++	trace_btrfs_space_reservation(fs_info, "orphan", btrfs_ino(inode),
+ 			num_bytes, 1);
+ 	return btrfs_block_rsv_migrate(src_rsv, dst_rsv, num_bytes, 1);
+ }
+diff --git a/fs/btrfs/hash.c b/fs/btrfs/hash.c
+deleted file mode 100644
+index baacc1866861..000000000000
+--- a/fs/btrfs/hash.c
++++ /dev/null
+@@ -1,54 +0,0 @@
+-/*
+- * Copyright (C) 2014 Filipe David Borba Manana <fdmanana@gmail.com>
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public
+- * License v2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * General Public License for more details.
+- */
+-
+-#include <crypto/hash.h>
+-#include <linux/err.h>
+-#include "hash.h"
+-
+-static struct crypto_shash *tfm;
+-
+-int __init btrfs_hash_init(void)
+-{
+-	tfm = crypto_alloc_shash("crc32c", 0, 0);
+-
+-	return PTR_ERR_OR_ZERO(tfm);
+-}
+-
+-const char* btrfs_crc32c_impl(void)
+-{
+-	return crypto_tfm_alg_driver_name(crypto_shash_tfm(tfm));
+-}
+-
+-void btrfs_hash_exit(void)
+-{
+-	crypto_free_shash(tfm);
+-}
+-
+-u32 btrfs_crc32c(u32 crc, const void *address, unsigned int length)
+-{
+-	SHASH_DESC_ON_STACK(shash, tfm);
+-	u32 *ctx = (u32 *)shash_desc_ctx(shash);
+-	u32 retval;
+-	int err;
+-
+-	shash->tfm = tfm;
+-	shash->flags = 0;
+-	*ctx = crc;
+-
+-	err = crypto_shash_update(shash, address, length);
+-	BUG_ON(err);
+-
+-	retval = *ctx;
+-	barrier_data(ctx);
+-	return retval;
+-}
+diff --git a/fs/btrfs/hash.h b/fs/btrfs/hash.h
+deleted file mode 100644
+index c3a2ec554361..000000000000
+--- a/fs/btrfs/hash.h
++++ /dev/null
+@@ -1,43 +0,0 @@
+-/*
+- * Copyright (C) 2007 Oracle.  All rights reserved.
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public
+- * License v2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public
+- * License along with this program; if not, write to the
+- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+- * Boston, MA 021110-1307, USA.
+- */
+-
+-#ifndef __HASH__
+-#define __HASH__
+-
+-int __init btrfs_hash_init(void);
+-
+-void btrfs_hash_exit(void);
+-const char* btrfs_crc32c_impl(void);
+-
+-u32 btrfs_crc32c(u32 crc, const void *address, unsigned int length);
+-
+-static inline u64 btrfs_name_hash(const char *name, int len)
+-{
+-	return btrfs_crc32c((u32)~1, name, len);
+-}
+-
+-/*
+- * Figure the key offset of an extended inode ref
+- */
+-static inline u64 btrfs_extref_hash(u64 parent_objectid, const char *name,
+-				    int len)
+-{
+-	return (u64) btrfs_crc32c(parent_objectid, name, len);
+-}
+-
+-#endif
+diff --git a/fs/btrfs/inode-item.c b/fs/btrfs/inode-item.c
+index 65e1a76bf755..1d5631ef2738 100644
+--- a/fs/btrfs/inode-item.c
++++ b/fs/btrfs/inode-item.c
+@@ -18,7 +18,6 @@
+ 
+ #include "ctree.h"
+ #include "disk-io.h"
+-#include "hash.h"
+ #include "transaction.h"
+ #include "print-tree.h"
+ 
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index b55b47f493e9..6504e63b2317 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -58,7 +58,6 @@
+ #include "free-space-cache.h"
+ #include "inode-map.h"
+ #include "backref.h"
+-#include "hash.h"
+ #include "props.h"
+ #include "qgroup.h"
+ #include "dedupe.h"
+diff --git a/fs/btrfs/props.c b/fs/btrfs/props.c
+index b30a056963ab..e4ac24175524 100644
+--- a/fs/btrfs/props.c
++++ b/fs/btrfs/props.c
+@@ -19,8 +19,8 @@
+ #include <linux/hashtable.h>
+ #include "props.h"
+ #include "btrfs_inode.h"
+-#include "hash.h"
+ #include "transaction.h"
++#include "ctree.h"
+ #include "xattr.h"
+ #include "compression.h"
+ 
+diff --git a/fs/btrfs/send.c b/fs/btrfs/send.c
+index 484e2af793de..b0c5d710183e 100644
+--- a/fs/btrfs/send.c
++++ b/fs/btrfs/send.c
+@@ -27,10 +27,10 @@
+ #include <linux/vmalloc.h>
+ #include <linux/string.h>
+ #include <linux/compat.h>
++#include <linux/crc32c.h>
+ 
+ #include "send.h"
+ #include "backref.h"
+-#include "hash.h"
+ #include "locking.h"
+ #include "disk-io.h"
+ #include "btrfs_inode.h"
+@@ -695,7 +695,7 @@ static int send_cmd(struct send_ctx *sctx)
+ 	hdr->len = cpu_to_le32(sctx->send_size - sizeof(*hdr));
+ 	hdr->crc = 0;
+ 
+-	crc = btrfs_crc32c(0, (unsigned char *)sctx->send_buf, sctx->send_size);
++	crc = crc32c(0, (unsigned char *)sctx->send_buf, sctx->send_size);
+ 	hdr->crc = cpu_to_le32(crc);
+ 
+ 	ret = write_buf(sctx->send_filp, sctx->send_buf, sctx->send_size,
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 540c18511e7a..5d752f791950 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -41,6 +41,7 @@
+ #include <linux/slab.h>
+ #include <linux/cleancache.h>
+ #include <linux/ratelimit.h>
++#include <linux/crc32c.h>
+ #include <linux/btrfs.h>
+ #include "delayed-inode.h"
+ #include "ctree.h"
+@@ -48,7 +49,6 @@
+ #include "transaction.h"
+ #include "btrfs_inode.h"
+ #include "print-tree.h"
+-#include "hash.h"
+ #include "props.h"
+ #include "xattr.h"
+ #include "volumes.h"
+@@ -2357,22 +2357,18 @@ static void __init btrfs_print_mod_info(void)
+ 			", ref-verify=on"
+ #endif
+ 			"\n",
+-			btrfs_crc32c_impl());
++			crc32c_impl());
+ }
+ 
+ static int __init init_btrfs_fs(void)
+ {
+ 	int err;
+ 
+-	err = btrfs_hash_init();
+-	if (err)
+-		return err;
+-
+ 	btrfs_props_init();
+ 
+ 	err = btrfs_init_sysfs();
+ 	if (err)
+-		goto free_hash;
++		return err;
+ 
+ 	btrfs_init_compress();
+ 
+@@ -2453,8 +2449,7 @@ free_cachep:
+ free_compress:
+ 	btrfs_exit_compress();
+ 	btrfs_exit_sysfs();
+-free_hash:
+-	btrfs_hash_exit();
++
+ 	return err;
+ }
+ 
+@@ -2474,7 +2469,6 @@ static void __exit exit_btrfs_fs(void)
+ 	btrfs_exit_sysfs();
+ 	btrfs_cleanup_fs_uuids();
+ 	btrfs_exit_compress();
+-	btrfs_hash_exit();
+ }
+ 
+ late_initcall(init_btrfs_fs);
+diff --git a/fs/btrfs/tree-checker.c b/fs/btrfs/tree-checker.c
+index a5244f98f3b4..e96cfd93ae3f 100644
+--- a/fs/btrfs/tree-checker.c
++++ b/fs/btrfs/tree-checker.c
+@@ -30,7 +30,6 @@
+ #include "tree-checker.h"
+ #include "disk-io.h"
+ #include "compression.h"
+-#include "hash.h"
+ 
+ /*
+  * Error message should follow the following format:
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index fac5fd1cc786..bbd8a40b2006 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -21,12 +21,12 @@
+ #include <linux/blkdev.h>
+ #include <linux/list_sort.h>
+ #include <linux/iversion.h>
++#include "ctree.h"
+ #include "tree-log.h"
+ #include "disk-io.h"
+ #include "locking.h"
+ #include "print-tree.h"
+ #include "backref.h"
+-#include "hash.h"
+ #include "compression.h"
+ #include "qgroup.h"
+ #include "inode-map.h"
+-- 
+cgit 1.2-0.3.lf.el7
+

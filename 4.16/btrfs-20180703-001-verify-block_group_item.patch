@@ -36,9 +36,9 @@ index 8d40e7dd8c30..1cd735b099df 100644
 --- a/fs/btrfs/tree-checker.c
 +++ b/fs/btrfs/tree-checker.c
 @@ -19,6 +19,7 @@
+ #include "tree-checker.h"
  #include "disk-io.h"
  #include "compression.h"
- #include "hash.h"
 +#include "volumes.h"
  
  /*
