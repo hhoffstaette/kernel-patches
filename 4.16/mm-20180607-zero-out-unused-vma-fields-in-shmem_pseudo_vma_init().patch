@@ -1,0 +1,41 @@
+From daa280753cefa692607190852a98a9c06ae9ec9a Mon Sep 17 00:00:00 2001
+From: "Kirill A. Shutemov" <kirill.shutemov@linux.intel.com>
+Date: Thu, 7 Jun 2018 17:09:32 -0700
+Subject: mm/shmem.c: zero out unused vma fields in shmem_pseudo_vma_init()
+
+shmem/tmpfs uses pseudo vma to allocate page with correct NUMA policy.
+
+The pseudo vma doesn't have vm_page_prot set.  We are going to encode
+encryption KeyID in vm_page_prot.  Having garbage there causes problems.
+
+Zero out all unused fields in the pseudo vma.
+
+Link: http://lkml.kernel.org/r/20180531135602.20321-1-kirill.shutemov@linux.intel.com
+Signed-off-by: Kirill A. Shutemov <kirill.shutemov@linux.intel.com>
+Reviewed-by: Andrew Morton <akpm@linux-foundation.org>
+Cc: Hugh Dickins <hughd@google.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/shmem.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/mm/shmem.c b/mm/shmem.c
+index 2b686e3f53ad..e9a7ac74823d 100644
+--- a/mm/shmem.c
++++ b/mm/shmem.c
+@@ -1420,10 +1420,9 @@ static void shmem_pseudo_vma_init(struct vm_area_struct *vma,
+ 		struct shmem_inode_info *info, pgoff_t index)
+ {
+ 	/* Create a pseudo vma that just contains the policy */
+-	vma->vm_start = 0;
++	memset(vma, 0, sizeof(*vma));
+ 	/* Bias interleave by inode number to distribute better across nodes */
+ 	vma->vm_pgoff = index + info->vfs_inode.i_ino;
+-	vma->vm_ops = NULL;
+ 	vma->vm_policy = mpol_shared_policy_lookup(&info->policy, index);
+ }
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
