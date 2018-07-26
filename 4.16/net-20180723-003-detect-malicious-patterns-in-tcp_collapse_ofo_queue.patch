@@ -1,0 +1,73 @@
+From: Eric Dumazet <edumazet@google.com>
+To: "David S . Miller" <davem@davemloft.net>,
+ Juha-Matti Tilli <juha-matti.tilli@iki.fi>,
+ Yuchung Cheng <ycheng@google.com>,
+ Soheil Hassas Yeganeh <soheil@google.com>
+Cc: netdev <netdev@vger.kernel.org>, Eric Dumazet <edumazet@google.com>,
+ Eric Dumazet <eric.dumazet@gmail.com>
+Subject: [net,3/5] tcp: detect malicious patterns in tcp_collapse_ofo_queue()
+Date: Mon, 23 Jul 2018 09:28:19 -0700
+
+In case an attacker feeds tiny packets completely out of order,
+tcp_collapse_ofo_queue() might scan the whole rb-tree, performing
+expensive copies, but not changing socket memory usage at all.
+
+1) Do not attempt to collapse tiny skbs.
+2) Add logic to exit early when too many tiny skbs are detected.
+
+We prefer not doing aggressive collapsing (which copies packets)
+for pathological flows, and revert to tcp_prune_ofo_queue() which
+will be less expensive.
+
+In the future, we might add the possibility of terminating flows
+that are proven to be malicious.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+---
+ net/ipv4/tcp_input.c | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 53289911362a2dea6b1e9d9ce630b29eed87ebb9..78068b902e7bca6e60cbe562f1554fc33b43c872 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -4902,6 +4902,7 @@ tcp_collapse(struct sock *sk, struct sk_buff_head *list, struct rb_root *root,
+ static void tcp_collapse_ofo_queue(struct sock *sk)
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
++	u32 range_truesize, sum_tiny = 0;
+ 	struct sk_buff *skb, *head;
+ 	u32 start, end;
+ 
+@@ -4913,6 +4914,7 @@ static void tcp_collapse_ofo_queue(struct sock *sk)
+ 	}
+ 	start = TCP_SKB_CB(skb)->seq;
+ 	end = TCP_SKB_CB(skb)->end_seq;
++	range_truesize = skb->truesize;
+ 
+ 	for (head = skb;;) {
+ 		skb = skb_rb_next(skb);
+@@ -4923,11 +4925,20 @@ static void tcp_collapse_ofo_queue(struct sock *sk)
+ 		if (!skb ||
+ 		    after(TCP_SKB_CB(skb)->seq, end) ||
+ 		    before(TCP_SKB_CB(skb)->end_seq, start)) {
+-			tcp_collapse(sk, NULL, &tp->out_of_order_queue,
+-				     head, skb, start, end);
++			/* Do not attempt collapsing tiny skbs */
++			if (range_truesize != head->truesize ||
++			    end - start >= SKB_WITH_OVERHEAD(SK_MEM_QUANTUM)) {
++				tcp_collapse(sk, NULL, &tp->out_of_order_queue,
++					     head, skb, start, end);
++			} else {
++				sum_tiny += range_truesize;
++				if (sum_tiny > sk->sk_rcvbuf >> 3)
++					return;
++			}
+ 			goto new_range;
+ 		}
+ 
++		range_truesize += skb->truesize;
+ 		if (unlikely(before(TCP_SKB_CB(skb)->seq, start)))
+ 			start = TCP_SKB_CB(skb)->seq;
+ 		if (after(TCP_SKB_CB(skb)->end_seq, end))

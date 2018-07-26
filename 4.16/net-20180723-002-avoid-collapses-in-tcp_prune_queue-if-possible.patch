@@ -1,0 +1,47 @@
+From: Eric Dumazet <edumazet@google.com>
+To: "David S . Miller" <davem@davemloft.net>,
+ Juha-Matti Tilli <juha-matti.tilli@iki.fi>,
+ Yuchung Cheng <ycheng@google.com>,
+ Soheil Hassas Yeganeh <soheil@google.com>
+Cc: netdev <netdev@vger.kernel.org>, Eric Dumazet <edumazet@google.com>,
+ Eric Dumazet <eric.dumazet@gmail.com>
+Subject: [net,2/5] tcp: avoid collapses in tcp_prune_queue() if possible
+Date: Mon, 23 Jul 2018 09:28:18 -0700
+
+Right after a TCP flow is created, receiving tiny out of order
+packets allways hit the condition :
+
+if (atomic_read(&sk->sk_rmem_alloc) >= sk->sk_rcvbuf)
+	tcp_clamp_window(sk);
+
+tcp_clamp_window() increases sk_rcvbuf to match sk_rmem_alloc
+(guarded by tcp_rmem[2])
+
+Calling tcp_collapse_ofo_queue() in this case is not useful,
+and offers a O(N^2) surface attack to malicious peers.
+
+Better not attempt anything before full queue capacity is reached,
+forcing attacker to spend lots of resource and allow us to more
+easily detect the abuse.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Acked-by: Yuchung Cheng <ycheng@google.com>
+---
+ net/ipv4/tcp_input.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 64e45b279431886a50c8097593b9dbc9e5d75cc1..53289911362a2dea6b1e9d9ce630b29eed87ebb9 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -5004,6 +5004,9 @@ static int tcp_prune_queue(struct sock *sk)
+ 	else if (tcp_under_memory_pressure(sk))
+ 		tp->rcv_ssthresh = min(tp->rcv_ssthresh, 4U * tp->advmss);
+ 
++	if (atomic_read(&sk->sk_rmem_alloc) <= sk->sk_rcvbuf)
++		return 0;
++
+ 	tcp_collapse_ofo_queue(sk);
+ 	if (!skb_queue_empty(&sk->sk_receive_queue))
+ 		tcp_collapse(sk, &sk->sk_receive_queue, NULL,

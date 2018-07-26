@@ -1,0 +1,43 @@
+From: Eric Dumazet <edumazet@google.com>
+To: "David S . Miller" <davem@davemloft.net>,
+ Juha-Matti Tilli <juha-matti.tilli@iki.fi>,
+ Yuchung Cheng <ycheng@google.com>,
+ Soheil Hassas Yeganeh <soheil@google.com>
+Cc: netdev <netdev@vger.kernel.org>, Eric Dumazet <edumazet@google.com>,
+ Eric Dumazet <eric.dumazet@gmail.com>
+Subject: [net,4/5] tcp: call tcp_drop() from tcp_data_queue_ofo()
+Date: Mon, 23 Jul 2018 09:28:20 -0700
+
+In order to be able to give better diagnostics and detect
+malicious traffic, we need to have better sk->sk_drops tracking.
+
+Fixes: 9f5afeae5152 ("tcp: use an RB tree for ooo receive queue")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Acked-by: Yuchung Cheng <ycheng@google.com>
+---
+ net/ipv4/tcp_input.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 78068b902e7bca6e60cbe562f1554fc33b43c872..b062a76922384f6199563af7cf30a30c5baa7601 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -4510,7 +4510,7 @@ static void tcp_data_queue_ofo(struct sock *sk, struct sk_buff *skb)
+ 				/* All the bits are present. Drop. */
+ 				NET_INC_STATS(sock_net(sk),
+ 					      LINUX_MIB_TCPOFOMERGE);
+-				__kfree_skb(skb);
++				tcp_drop(sk, skb);
+ 				skb = NULL;
+ 				tcp_dsack_set(sk, seq, end_seq);
+ 				goto add_sack;
+@@ -4529,7 +4529,7 @@ static void tcp_data_queue_ofo(struct sock *sk, struct sk_buff *skb)
+ 						 TCP_SKB_CB(skb1)->end_seq);
+ 				NET_INC_STATS(sock_net(sk),
+ 					      LINUX_MIB_TCPOFOMERGE);
+-				__kfree_skb(skb1);
++				tcp_drop(sk, skb1);
+ 				goto merge_right;
+ 			}
+ 		} else if (tcp_try_coalesce(sk, skb1,
