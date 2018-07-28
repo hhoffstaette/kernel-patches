@@ -1,0 +1,130 @@
+From:   Misono Tomohiro <misono.tomohiro@jp.fujitsu.com>
+Subject: [PATCH] btrfs: backref: Do not return duplicate refs from find_parent_nodes()
+To:     linux-btrfs <linux-btrfs@vger.kernel.org>
+Date:   Wed, 25 Jul 2018 17:18:21 +0900
+
+In some case, "btrfs inspect-internal logical-resolve" returns
+duplicate entries for given logical address:
+
+[Example]
+=====
+// create a file sharing the exactly same extent
+$ dd if=/dev/urandom of=/mnt/file bs=4k count=1
+$ sync
+$ cloner -s 0 -d 4096 -l 4096 /mnt/file /mnt/file // cloner from xfstest
+$ sync
+
+$ filefrag -v
+Filesystem type is: 9123683e
+File size of /mnt/file is 8192 (2 blocks of 4096 bytes)
+ ext:     logical_offset:        physical_offset: length:   expected: flags:
+   0:        0..       0:       3410..      3410:      1:             shared
+   1:        1..       1:       3410..      3410:      1:       3411: last,shared,eof
+/mnt/file 2 extents found
+
+// there are two backrefs
+$ btrfs inspect-internal dump-tree $DEV | grep -A 3 "$((3410*4096)) EXTENT_ITEM"
+  item 12 key (13967360 EXTENT_ITEM 4096) itemoff 15449 itemsize 82
+         refs 2 gen 250 flags DATA
+         extent data backref root FS_TREE objectid 268 offset 4096 count 1
+         extent data backref root FS_TREE objectid 268 offset 0 count 1
+
+$ btrfs inspect-internal logical-resolve -P $((3410*4096)) /mnt
+inode 268 offset 4096 root 5
+inode 268 offset 0 root 5
+inode 268 offset 4096 root 5 // Duplicate
+
+(Or, see 004.full of xfstest for more complex case.)
+=====
+
+This problem is related to resolving indirect ref.
+Related call stack is as below:
+
+btrfs_ioctl_logical_to_ino()
+  - iterate_extent_inodes_from_logical()
+    - extent_from_logical()
+    - iterate_extent_inodes()
+      - btrfs_find_all_leafs()
+        - find_parent_nodes() // collect ref and root info
+          - add_delayed_refs()
+          - add_inline_refs()
+          - resolve_indirect_refs()
+            - resolve_indirect_ref()
+              - add_all_parents()
+
+In above example, two indirect backrefs of EXTENT_DATA
+((268 EXTENT_DATA 0), (268 EXTENT_DATA 4096)) will be added in rb_tree
+(descending order) in add_inline_refs(). They will be resolved in
+add_all_parents() in the end. However, add_all_parents() will search all
+EXTENT_DATA item of the root larger than the given offset which point to
+the target extent position each time.
+This is needed since backref may be referenced several time within a
+file (e.g. when extent is split), but could make duplicate entries.
+
+So, in above case, (268 EXTENT_DATA 4096) returns
+"inode 268 offset 4096 root 5" and (268 EXTENT_DATA 0) returns
+"inode 268 offset 4096 root 0" and "inode 268 offset 4096 root 5".
+
+Fix this problem by only searching the key with the lowest offset when
+ref's rootid and key objectid is the same. In order to this, sort entry
+in rb_tree ascending order (by swapping argument order in
+prelim_ref_compare() in prelim_ref_insert()) and skip call of
+resolve_indirect_ref() when rootid/key objectid matches the previous search.
+
+With this patch, logical-resolve will return correct entries:
+$ btrfs inspect-internal logical-resolve -P $((3410*4096)) /mnt
+inode 268 offset 0 root 5
+inode 268 offset 4096 root 5
+
+Note that find_parent_nodes() is also used in some other places,
+but they should not be affected by this patch as stated below:
+ - send/scrub (through iterate_extent_inodes())
+    - can work correctly with or without duplicate refs
+ - qgroup (through btrfs_find_all_roots())
+    - use only root info and not ref
+ - snapshot aware defrag (through iterate_extent_inodes_from_logical())
+    - currently dead code and not used
+
+Signed-off-by: Misono Tomohiro <misono.tomohiro@jp.fujitsu.com>
+---
+ fs/btrfs/backref.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/backref.c b/fs/btrfs/backref.c
+index 60f4afa8ecbc..7ce0b5f9e99e 100644
+--- a/fs/btrfs/backref.c
++++ b/fs/btrfs/backref.c
+@@ -237,7 +237,7 @@ static void prelim_ref_insert(const struct btrfs_fs_info *fs_info,
+ 	while (*p) {
+ 		parent = *p;
+ 		ref = rb_entry(parent, struct prelim_ref, rbnode);
+-		result = prelim_ref_compare(ref, newref);
++		result = prelim_ref_compare(newref, ref);
+ 		if (result < 0) {
+ 			p = &(*p)->rb_left;
+ 		} else if (result > 0) {
+@@ -612,6 +612,8 @@ static int resolve_indirect_refs(struct btrfs_fs_info *fs_info,
+ {
+ 	int err;
+ 	int ret = 0;
++	u64 prev_rootid = 0;
++	u64 prev_objectid = 0;
+ 	struct ulist *parents;
+ 	struct ulist_node *node;
+ 	struct ulist_iterator uiter;
+@@ -640,10 +642,14 @@ static int resolve_indirect_refs(struct btrfs_fs_info *fs_info,
+ 		rb_erase(&ref->rbnode, &preftrees->indirect.root);
+ 		preftrees->indirect.count--;
+ 
+-		if (ref->count == 0) {
++		if (ref->count == 0 ||
++		    (prev_rootid == ref->root_id &&
++		     prev_objectid == ref->key_for_search.objectid)) {
+ 			free_pref(ref);
+ 			continue;
+ 		}
++		prev_rootid = ref->root_id;
++		prev_objectid = ref->key_for_search.objectid;
+ 
+ 		if (sc && sc->root_objectid &&
+ 		    ref->root_id != sc->root_objectid) {
