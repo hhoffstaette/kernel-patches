@@ -1,0 +1,80 @@
+From 753d433b586d1d43c487e3d660f5778c7c8d58ea Mon Sep 17 00:00:00 2001
+From: "Tobin C. Harding" <me@tobin.cc>
+Date: Fri, 22 Jun 2018 09:15:32 +1000
+Subject: random: Return nbytes filled from hw RNG
+
+Currently the function get_random_bytes_arch() has return value 'void'.
+If the hw RNG fails we currently fall back to using get_random_bytes().
+This defeats the purpose of requesting random material from the hw RNG
+in the first place.
+
+There are currently no intree users of get_random_bytes_arch().
+
+Only get random bytes from the hw RNG, make function return the number
+of bytes retrieved from the hw RNG.
+
+Acked-by: Theodore Ts'o <tytso@mit.edu>
+Reviewed-by: Steven Rostedt (VMware) <rostedt@goodmis.org>
+Signed-off-by: Tobin C. Harding <me@tobin.cc>
+Signed-off-by: Theodore Ts'o <tytso@mit.edu>
+---
+ drivers/char/random.c  | 16 +++++++++-------
+ include/linux/random.h |  2 +-
+ 2 files changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 8e53e9515a1d..34ddfd57419b 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -1725,26 +1725,28 @@ EXPORT_SYMBOL(del_random_ready_callback);
+  * key known by the NSA).  So it's useful if we need the speed, but
+  * only if we're willing to trust the hardware manufacturer not to
+  * have put in a back door.
++ *
++ * Return number of bytes filled in.
+  */
+-void get_random_bytes_arch(void *buf, int nbytes)
++int __must_check get_random_bytes_arch(void *buf, int nbytes)
+ {
++	int left = nbytes;
+ 	char *p = buf;
+ 
+-	trace_get_random_bytes_arch(nbytes, _RET_IP_);
+-	while (nbytes) {
++	trace_get_random_bytes_arch(left, _RET_IP_);
++	while (left) {
+ 		unsigned long v;
+-		int chunk = min(nbytes, (int)sizeof(unsigned long));
++		int chunk = min_t(int, left, sizeof(unsigned long));
+ 
+ 		if (!arch_get_random_long(&v))
+ 			break;
+ 
+ 		memcpy(p, &v, chunk);
+ 		p += chunk;
+-		nbytes -= chunk;
++		left -= chunk;
+ 	}
+ 
+-	if (nbytes)
+-		get_random_bytes(p, nbytes);
++	return nbytes - left;
+ }
+ EXPORT_SYMBOL(get_random_bytes_arch);
+ 
+diff --git a/include/linux/random.h b/include/linux/random.h
+index 2ddf13b4281e..f1c9bc5cd231 100644
+--- a/include/linux/random.h
++++ b/include/linux/random.h
+@@ -38,7 +38,7 @@ extern void get_random_bytes(void *buf, int nbytes);
+ extern int wait_for_random_bytes(void);
+ extern int add_random_ready_callback(struct random_ready_callback *rdy);
+ extern void del_random_ready_callback(struct random_ready_callback *rdy);
+-extern void get_random_bytes_arch(void *buf, int nbytes);
++extern int __must_check get_random_bytes_arch(void *buf, int nbytes);
+ 
+ #ifndef MODULE
+ extern const struct file_operations random_fops, urandom_fops;
+-- 
+cgit 1.2-0.3.lf.el7
+
