@@ -1,0 +1,89 @@
+From 64482aafe55fc7e84d0741c356f8176ee7bde357 Mon Sep 17 00:00:00 2001
+From: Rik van Riel <riel@surriel.com>
+Date: Mon, 16 Jul 2018 15:03:35 -0400
+Subject: x86/mm/tlb: Only send page table free TLB flush to lazy TLB CPUs
+
+CPUs in !is_lazy have either received TLB flush IPIs earlier on during
+the munmap (when the user memory was unmapped), or have context switched
+and reloaded during that stage of the munmap.
+
+Page table free TLB flushes only need to be sent to CPUs in lazy TLB
+mode, which TLB contents might not yet be up to date yet.
+
+Tested-by: Song Liu <songliubraving@fb.com>
+Signed-off-by: Rik van Riel <riel@surriel.com>
+Acked-by: Dave Hansen <dave.hansen@intel.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: efault@gmx.de
+Cc: kernel-team@fb.com
+Cc: luto@kernel.org
+Link: http://lkml.kernel.org/r/20180716190337.26133-6-riel@surriel.com
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ arch/x86/mm/tlb.c | 43 +++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 39 insertions(+), 4 deletions(-)
+
+diff --git a/arch/x86/mm/tlb.c b/arch/x86/mm/tlb.c
+index 26542cc17043..e4156e37aa71 100644
+--- a/arch/x86/mm/tlb.c
++++ b/arch/x86/mm/tlb.c
+@@ -712,15 +712,50 @@ void tlb_flush_remove_tables_local(void *arg)
+ 	}
+ }
+ 
++static void mm_fill_lazy_tlb_cpu_mask(struct mm_struct *mm,
++				      struct cpumask *lazy_cpus)
++{
++	int cpu;
++
++	for_each_cpu(cpu, mm_cpumask(mm)) {
++		if (!per_cpu(cpu_tlbstate.is_lazy, cpu))
++			cpumask_set_cpu(cpu, lazy_cpus);
++	}
++}
++
+ void tlb_flush_remove_tables(struct mm_struct *mm)
+ {
+ 	int cpu = get_cpu();
++	cpumask_var_t lazy_cpus;
++
++	if (cpumask_any_but(mm_cpumask(mm), cpu) >= nr_cpu_ids) {
++		put_cpu();
++		return;
++	}
++
++	if (!zalloc_cpumask_var(&lazy_cpus, GFP_ATOMIC)) {
++		/*
++		 * If the cpumask allocation fails, do a brute force flush
++		 * on all the CPUs that have this mm loaded.
++		 */
++		smp_call_function_many(mm_cpumask(mm),
++				tlb_flush_remove_tables_local, (void *)mm, 1);
++		put_cpu();
++		return;
++	}
++
+ 	/*
+-	 * XXX: this really only needs to be called for CPUs in lazy TLB mode.
++	 * CPUs with !is_lazy either received a TLB flush IPI while the user
++	 * pages in this address range were unmapped, or have context switched
++	 * and reloaded %CR3 since then.
++	 *
++	 * Shootdown IPIs at page table freeing time only need to be sent to
++	 * CPUs that may have out of date TLB contents.
+ 	 */
+-	if (cpumask_any_but(mm_cpumask(mm), cpu) < nr_cpu_ids)
+-		smp_call_function_many(mm_cpumask(mm), tlb_flush_remove_tables_local, (void *)mm, 1);
+-
++	mm_fill_lazy_tlb_cpu_mask(mm, lazy_cpus);
++	smp_call_function_many(lazy_cpus,
++				tlb_flush_remove_tables_local, (void *)mm, 1);
++	free_cpumask_var(lazy_cpus);
+ 	put_cpu();
+ }
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
