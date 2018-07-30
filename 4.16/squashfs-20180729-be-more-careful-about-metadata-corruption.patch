@@ -1,0 +1,96 @@
+From 01cfb7937a9af2abb1136c7e89fbf3fd92952956 Mon Sep 17 00:00:00 2001
+From: Linus Torvalds <torvalds@linux-foundation.org>
+Date: Sun, 29 Jul 2018 12:44:46 -0700
+Subject: squashfs: be more careful about metadata corruption
+
+From: Linus Torvalds <torvalds@linux-foundation.org>
+
+commit 01cfb7937a9af2abb1136c7e89fbf3fd92952956 upstream.
+
+Anatoly Trosinenko reports that a corrupted squashfs image can cause a
+kernel oops.  It turns out that squashfs can end up being confused about
+negative fragment lengths.
+
+The regular squashfs_read_data() does check for negative lengths, but
+squashfs_read_metadata() did not, and the fragment size code just
+blindly trusted the on-disk value.  Fix both the fragment parsing and
+the metadata reading code.
+
+Reported-by: Anatoly Trosinenko <anatoly.trosinenko@gmail.com>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Phillip Lougher <phillip@squashfs.org.uk>
+Cc: stable@kernel.org
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+
+---
+ fs/squashfs/cache.c       |    3 +++
+ fs/squashfs/file.c        |    8 ++++++--
+ fs/squashfs/fragment.c    |    4 +---
+ fs/squashfs/squashfs_fs.h |    6 ++++++
+ 4 files changed, 16 insertions(+), 5 deletions(-)
+
+--- a/fs/squashfs/cache.c
++++ b/fs/squashfs/cache.c
+@@ -350,6 +350,9 @@ int squashfs_read_metadata(struct super_
+ 
+ 	TRACE("Entered squashfs_read_metadata [%llx:%x]\n", *block, *offset);
+ 
++	if (unlikely(length < 0))
++		return -EIO;
++
+ 	while (length) {
+ 		entry = squashfs_cache_get(sb, msblk->block_cache, *block, 0);
+ 		if (entry->error) {
+--- a/fs/squashfs/file.c
++++ b/fs/squashfs/file.c
+@@ -194,7 +194,11 @@ static long long read_indexes(struct sup
+ 		}
+ 
+ 		for (i = 0; i < blocks; i++) {
+-			int size = le32_to_cpu(blist[i]);
++			int size = squashfs_block_size(blist[i]);
++			if (size < 0) {
++				err = size;
++				goto failure;
++			}
+ 			block += SQUASHFS_COMPRESSED_SIZE_BLOCK(size);
+ 		}
+ 		n -= blocks;
+@@ -367,7 +371,7 @@ static int read_blocklist(struct inode *
+ 			sizeof(size));
+ 	if (res < 0)
+ 		return res;
+-	return le32_to_cpu(size);
++	return squashfs_block_size(size);
+ }
+ 
+ /* Copy data into page cache  */
+--- a/fs/squashfs/fragment.c
++++ b/fs/squashfs/fragment.c
+@@ -61,9 +61,7 @@ int squashfs_frag_lookup(struct super_bl
+ 		return size;
+ 
+ 	*fragment_block = le64_to_cpu(fragment_entry.start_block);
+-	size = le32_to_cpu(fragment_entry.size);
+-
+-	return size;
++	return squashfs_block_size(fragment_entry.size);
+ }
+ 
+ 
+--- a/fs/squashfs/squashfs_fs.h
++++ b/fs/squashfs/squashfs_fs.h
+@@ -129,6 +129,12 @@
+ 
+ #define SQUASHFS_COMPRESSED_BLOCK(B)	(!((B) & SQUASHFS_COMPRESSED_BIT_BLOCK))
+ 
++static inline int squashfs_block_size(__le32 raw)
++{
++	u32 size = le32_to_cpu(raw);
++	return (size >> 25) ? -EIO : size;
++}
++
+ /*
+  * Inode number ops.  Inodes consist of a compressed block number, and an
+  * uncompressed offset within that block
