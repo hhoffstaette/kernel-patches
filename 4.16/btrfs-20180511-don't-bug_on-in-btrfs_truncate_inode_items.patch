@@ -1,0 +1,37 @@
+From foo@baz Sat Jul 28 10:14:30 CEST 2018
+From: Omar Sandoval <osandov@fb.com>
+Date: Fri, 11 May 2018 13:13:31 -0700
+Subject: Btrfs: don't BUG_ON() in btrfs_truncate_inode_items()
+
+From: Omar Sandoval <osandov@fb.com>
+
+[ Upstream commit 0552210997badb6a60740a26ff9d976a416510f0 ]
+
+btrfs_free_extent() can fail because of ENOMEM. There's no reason to
+panic here, we can just abort the transaction.
+
+Fixes: f4b9aa8d3b87 ("btrfs_truncate")
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: Omar Sandoval <osandov@fb.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+Signed-off-by: Sasha Levin <alexander.levin@microsoft.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ fs/btrfs/inode.c |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -4671,7 +4671,10 @@ delete:
+ 						extent_num_bytes, 0,
+ 						btrfs_header_owner(leaf),
+ 						ino, extent_offset);
+-			BUG_ON(ret);
++			if (ret) {
++				btrfs_abort_transaction(trans, ret);
++				break;
++			}
+ 			if (btrfs_should_throttle_delayed_refs(trans, fs_info))
+ 				btrfs_async_run_delayed_refs(fs_info,
+ 					trans->delayed_ref_updates * 2,
