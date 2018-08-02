@@ -1,0 +1,54 @@
+From 53406ed1bcfdabe4b5bc35e6d17946c6f9f563e2 Mon Sep 17 00:00:00 2001
+From: Hugh Dickins <hughd@google.com>
+Date: Wed, 1 Aug 2018 11:31:52 -0700
+Subject: mm: delete historical BUG from zap_pmd_range()
+
+Delete the old VM_BUG_ON_VMA() from zap_pmd_range(), which asserted
+that mmap_sem must be held when splitting an "anonymous" vma there.
+Whether that's still strictly true nowadays is not entirely clear,
+but the danger of sometimes crashing on the BUG is now fairly clear.
+
+Even with the new stricter rules for anonymous vma marking, the
+condition it checks for can possible trigger. Commit 44960f2a7b63
+("staging: ashmem: Fix SIGBUS crash when traversing mmaped ashmem
+pages") is good, and originally I thought it was safe from that
+VM_BUG_ON_VMA(), because the /dev/ashmem fd exposed to the user is
+disconnected from the vm_file in the vma, and madvise(,,MADV_REMOVE)
+insists on VM_SHARED.
+
+But after I read John's earlier mail, drawing attention to the
+vfs_fallocate() in there: I may be wrong, and I don't know if Android
+has THP in the config anyway, but it looks to me like an
+unmap_mapping_range() from ashmem's vfs_fallocate() could hit precisely
+the VM_BUG_ON_VMA(), once it's vma_is_anonymous().
+
+Signed-off-by: Hugh Dickins <hughd@google.com>
+Cc: John Stultz <john.stultz@linaro.org>
+Cc: Kirill Shutemov <kirill.shutemov@linux.intel.com>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/memory.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/mm/memory.c b/mm/memory.c
+index 7206a634270b..dab1511294ad 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -1417,11 +1417,9 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
+ 	do {
+ 		next = pmd_addr_end(addr, end);
+ 		if (is_swap_pmd(*pmd) || pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
+-			if (next - addr != HPAGE_PMD_SIZE) {
+-				VM_BUG_ON_VMA(vma_is_anonymous(vma) &&
+-				    !rwsem_is_locked(&tlb->mm->mmap_sem), vma);
++			if (next - addr != HPAGE_PMD_SIZE)
+ 				__split_huge_pmd(vma, pmd, addr, false, NULL);
+-			} else if (zap_huge_pmd(tlb, vma, pmd, addr))
++			else if (zap_huge_pmd(tlb, vma, pmd, addr))
+ 				goto next;
+ 			/* fall through */
+ 		}
+-- 
+cgit 1.2-0.3.lf.el7
+
