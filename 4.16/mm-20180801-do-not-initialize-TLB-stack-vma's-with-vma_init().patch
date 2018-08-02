@@ -1,0 +1,177 @@
+From 8b11ec1b5ffb54f71cb5a5e5c8c4d36e5d113085 Mon Sep 17 00:00:00 2001
+From: Linus Torvalds <torvalds@linux-foundation.org>
+Date: Wed, 1 Aug 2018 13:43:38 -0700
+Subject: mm: do not initialize TLB stack vma's with vma_init()
+
+Commit 2c4541e24c55 ("mm: use vma_init() to initialize VMAs on stack and
+data segments") tried to initialize various left-over ad-hoc vma's
+"properly", but actually made things worse for the temporary vma's used
+for TLB flushing.
+
+vma_init() doesn't actually initialize all of the vma, just a few
+fields, so doing something like
+
+   -       struct vm_area_struct vma = { .vm_mm = tlb->mm, };
+   +       struct vm_area_struct vma;
+   +
+   +       vma_init(&vma, tlb->mm);
+
+was actually very bad: instead of having a nicely initialized vma with
+every field but "vm_mm" zeroed, you'd have an entirely uninitialized vma
+with only a couple of fields initialized.  And they weren't even fields
+that the code in question mostly cared about.
+
+The flush_tlb_range() function takes a "struct vma" rather than a
+"struct mm_struct", because a few architectures actually care about what
+kind of range it is - being able to only do an ITLB flush if it's a
+range that doesn't have data accesses enabled, for example.  And all the
+normal users already have the vma for doing the range invalidation.
+
+But a few people want to call flush_tlb_range() with a range they just
+made up, so they also end up using a made-up vma.  x86 just has a
+special "flush_tlb_mm_range()" function for this, but other
+architectures (arm and ia64) do the "use fake vma" thing instead, and
+thus got caught up in the vma_init() changes.
+
+At the same time, the TLB flushing code really doesn't care about most
+other fields in the vma, so vma_init() is just unnecessary and
+pointless.
+
+This fixes things by having an explicit "this is just an initializer for
+the TLB flush" initializer macro, which is used by the arm/arm64/ia64
+people who mis-use this interface with just a dummy vma.
+
+Fixes: 2c4541e24c55 ("mm: use vma_init() to initialize VMAs on stack and data segments")
+Cc: Dmitry Vyukov <dvyukov@google.com>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Andrea Arcangeli <aarcange@redhat.com>
+Cc: Kirill Shutemov <kirill.shutemov@linux.intel.com>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: John Stultz <john.stultz@linaro.org>
+Cc: Hugh Dickins <hughd@google.com>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ arch/arm/mach-rpc/ecard.c    |  5 +----
+ arch/arm64/include/asm/tlb.h |  4 +---
+ arch/arm64/mm/hugetlbpage.c  | 10 ++++------
+ arch/ia64/include/asm/tlb.h  |  7 +++----
+ include/linux/mm.h           |  3 +++
+ 5 files changed, 12 insertions(+), 17 deletions(-)
+
+diff --git a/arch/arm/mach-rpc/ecard.c b/arch/arm/mach-rpc/ecard.c
+index 8db62cc54a6a..04b2f22c2739 100644
+--- a/arch/arm/mach-rpc/ecard.c
++++ b/arch/arm/mach-rpc/ecard.c
+@@ -212,7 +212,7 @@ static DEFINE_MUTEX(ecard_mutex);
+  */
+ static void ecard_init_pgtables(struct mm_struct *mm)
+ {
+-	struct vm_area_struct vma;
++	struct vm_area_struct vma = TLB_FLUSH_VMA(mm, VM_EXEC);
+ 
+ 	/* We want to set up the page tables for the following mapping:
+ 	 *  Virtual	Physical
+@@ -237,9 +237,6 @@ static void ecard_init_pgtables(struct mm_struct *mm)
+ 
+ 	memcpy(dst_pgd, src_pgd, sizeof(pgd_t) * (EASI_SIZE / PGDIR_SIZE));
+ 
+-	vma_init(&vma, mm);
+-	vma.vm_flags = VM_EXEC;
+-
+ 	flush_tlb_range(&vma, IO_START, IO_START + IO_SIZE);
+ 	flush_tlb_range(&vma, EASI_START, EASI_START + EASI_SIZE);
+ }
+diff --git a/arch/arm64/include/asm/tlb.h b/arch/arm64/include/asm/tlb.h
+index d87f2d646caa..0ad1cf233470 100644
+--- a/arch/arm64/include/asm/tlb.h
++++ b/arch/arm64/include/asm/tlb.h
+@@ -37,9 +37,7 @@ static inline void __tlb_remove_table(void *_table)
+ 
+ static inline void tlb_flush(struct mmu_gather *tlb)
+ {
+-	struct vm_area_struct vma;
+-
+-	vma_init(&vma, tlb->mm);
++	struct vm_area_struct vma = TLB_FLUSH_VMA(tlb->mm, 0);
+ 
+ 	/*
+ 	 * The ASID allocator will either invalidate the ASID or mark
+diff --git a/arch/arm64/mm/hugetlbpage.c b/arch/arm64/mm/hugetlbpage.c
+index 1854e49aa18a..192b3ba07075 100644
+--- a/arch/arm64/mm/hugetlbpage.c
++++ b/arch/arm64/mm/hugetlbpage.c
+@@ -108,13 +108,10 @@ static pte_t get_clear_flush(struct mm_struct *mm,
+ 			     unsigned long pgsize,
+ 			     unsigned long ncontig)
+ {
+-	struct vm_area_struct vma;
+ 	pte_t orig_pte = huge_ptep_get(ptep);
+ 	bool valid = pte_valid(orig_pte);
+ 	unsigned long i, saddr = addr;
+ 
+-	vma_init(&vma, mm);
+-
+ 	for (i = 0; i < ncontig; i++, addr += pgsize, ptep++) {
+ 		pte_t pte = ptep_get_and_clear(mm, addr, ptep);
+ 
+@@ -127,8 +124,10 @@ static pte_t get_clear_flush(struct mm_struct *mm,
+ 			orig_pte = pte_mkdirty(orig_pte);
+ 	}
+ 
+-	if (valid)
++	if (valid) {
++		struct vm_area_struct vma = TLB_FLUSH_VMA(mm, 0);
+ 		flush_tlb_range(&vma, saddr, addr);
++	}
+ 	return orig_pte;
+ }
+ 
+@@ -147,10 +146,9 @@ static void clear_flush(struct mm_struct *mm,
+ 			     unsigned long pgsize,
+ 			     unsigned long ncontig)
+ {
+-	struct vm_area_struct vma;
++	struct vm_area_struct vma = TLB_FLUSH_VMA(mm, 0);
+ 	unsigned long i, saddr = addr;
+ 
+-	vma_init(&vma, mm);
+ 	for (i = 0; i < ncontig; i++, addr += pgsize, ptep++)
+ 		pte_clear(mm, addr, ptep);
+ 
+diff --git a/arch/ia64/include/asm/tlb.h b/arch/ia64/include/asm/tlb.h
+index db89e7306081..516355a774bf 100644
+--- a/arch/ia64/include/asm/tlb.h
++++ b/arch/ia64/include/asm/tlb.h
+@@ -115,12 +115,11 @@ ia64_tlb_flush_mmu_tlbonly(struct mmu_gather *tlb, unsigned long start, unsigned
+ 		flush_tlb_all();
+ 	} else {
+ 		/*
+-		 * XXX fix me: flush_tlb_range() should take an mm pointer instead of a
+-		 * vma pointer.
++		 * flush_tlb_range() takes a vma instead of a mm pointer because
++		 * some architectures want the vm_flags for ITLB/DTLB flush.
+ 		 */
+-		struct vm_area_struct vma;
++		struct vm_area_struct vma = TLB_FLUSH_VMA(tlb->mm, 0);
+ 
+-		vma_init(&vma, tlb->mm);
+ 		/* flush the address range from the tlb: */
+ 		flush_tlb_range(&vma, start, end);
+ 		/* now flush the virt. page-table area mapping the address range: */
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index 7ba6d356d18f..68a5121694ef 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -466,6 +466,9 @@ static inline void vma_set_anonymous(struct vm_area_struct *vma)
+ 	vma->vm_ops = NULL;
+ }
+ 
++/* flush_tlb_range() takes a vma, not a mm, and can care about flags */
++#define TLB_FLUSH_VMA(mm,flags) { .vm_mm = (mm), .vm_flags = (flags) }
++
+ struct mmu_gather;
+ struct inode;
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
