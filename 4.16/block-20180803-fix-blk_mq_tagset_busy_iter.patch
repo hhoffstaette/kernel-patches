@@ -1,0 +1,51 @@
+From 2d5ba0e2de24ec87636244a01d4e78d095cc1b20 Mon Sep 17 00:00:00 2001
+From: Ming Lei <ming.lei@redhat.com>
+Date: Fri, 3 Aug 2018 01:49:37 +0800
+Subject: blk-mq: fix blk_mq_tagset_busy_iter
+
+Commit d250bf4e776ff09d5("blk-mq: only iterate over inflight requests
+in blk_mq_tagset_busy_iter") uses 'blk_mq_rq_state(rq) == MQ_RQ_IN_FLIGHT'
+to replace 'blk_mq_request_started(req)', this way is wrong, and causes
+lots of test system hang during booting.
+
+Fix the issue by using blk_mq_request_started(req) inside bt_tags_iter().
+
+Fixes: d250bf4e776ff09d5 ("blk-mq: only iterate over inflight requests in blk_mq_tagset_busy_iter")
+Cc: Josef Bacik <josef@toxicpanda.com>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Guenter Roeck <linux@roeck-us.net>
+Cc: Mark Brown <broonie@kernel.org>
+Cc: Matt Hart <matthew.hart@linaro.org>
+Cc: Johannes Thumshirn <jthumshirn@suse.de>
+Cc: John Garry <john.garry@huawei.com>
+Cc: Hannes Reinecke <hare@suse.com>,
+Cc: "Martin K. Petersen" <martin.petersen@oracle.com>,
+Cc: James Bottomley <James.Bottomley@hansenpartnership.com>
+Cc: linux-scsi@vger.kernel.org
+Cc: linux-kernel@vger.kernel.org
+Reviewed-by: Bart Van Assche <bart.vanassche@wdc.com>
+Tested-by: Guenter Roeck <linux@roeck-us.net>
+Reported-by: Mark Brown <broonie@kernel.org>
+Reported-by: Guenter Roeck <linux@roeck-us.net>
+Signed-off-by: Ming Lei <ming.lei@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq-tag.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/block/blk-mq-tag.c b/block/blk-mq-tag.c
+index 09b2ee6694fb..3de0836163c2 100644
+--- a/block/blk-mq-tag.c
++++ b/block/blk-mq-tag.c
+@@ -271,7 +271,7 @@ static bool bt_tags_iter(struct sbitmap *bitmap, unsigned int bitnr, void *data)
+ 	 * test and set the bit before assining ->rqs[].
+ 	 */
+ 	rq = tags->rqs[bitnr];
+-	if (rq && blk_mq_rq_state(rq) == MQ_RQ_IN_FLIGHT)
++	if (rq && blk_mq_request_started(rq))
+ 		iter_data->fn(rq, iter_data->data, reserved);
+ 
+ 	return true;
+-- 
+cgit 1.2-0.3.lf.el7
+
