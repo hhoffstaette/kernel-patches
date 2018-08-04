@@ -1,0 +1,55 @@
+From 8fa9f556451a6796dfa11e8da040f57f79f2f090 Mon Sep 17 00:00:00 2001
+From: huhai <huhai@kylinos.cn>
+Date: Wed, 16 May 2018 08:21:21 -0600
+Subject: blk-mq: remove redundant insert case in blk_mq_make_request()
+
+We can use blk_mq_sched_insert_request() even if we don't have
+an IO scheduler attached, since that case will end up being
+exactly the same as what blk_mq_queue_io() was doing now.
+
+Signed-off-by: huhai <huhai@kylinos.cn>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c | 16 +---------------
+ 1 file changed, 1 insertion(+), 15 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 64630caaf27e..6c6aef44badd 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1723,15 +1723,6 @@ static void blk_mq_bio_to_request(struct request *rq, struct bio *bio)
+ 	blk_account_io_start(rq, true);
+ }
+ 
+-static inline void blk_mq_queue_io(struct blk_mq_hw_ctx *hctx,
+-				   struct blk_mq_ctx *ctx,
+-				   struct request *rq)
+-{
+-	spin_lock(&ctx->lock);
+-	__blk_mq_insert_request(hctx, rq, false);
+-	spin_unlock(&ctx->lock);
+-}
+-
+ static blk_qc_t request_to_qc_t(struct blk_mq_hw_ctx *hctx, struct request *rq)
+ {
+ 	if (rq->tag != -1)
+@@ -1956,15 +1947,10 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
+ 		blk_mq_put_ctx(data.ctx);
+ 		blk_mq_bio_to_request(rq, bio);
+ 		blk_mq_try_issue_directly(data.hctx, rq, &cookie);
+-	} else if (q->elevator) {
+-		blk_mq_put_ctx(data.ctx);
+-		blk_mq_bio_to_request(rq, bio);
+-		blk_mq_sched_insert_request(rq, false, true, true);
+ 	} else {
+ 		blk_mq_put_ctx(data.ctx);
+ 		blk_mq_bio_to_request(rq, bio);
+-		blk_mq_queue_io(data.hctx, data.ctx, rq);
+-		blk_mq_run_hw_queue(data.hctx, true);
++		blk_mq_sched_insert_request(rq, false, true, true);
+ 	}
+ 
+ 	return cookie;
+-- 
+cgit 1.2-0.3.lf.el7
+
