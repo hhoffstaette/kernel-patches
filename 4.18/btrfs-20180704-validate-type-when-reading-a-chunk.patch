@@ -1,0 +1,69 @@
+From 7576f563fcb00d191683968415ce720b517a9739 Mon Sep 17 00:00:00 2001
+From: Gu Jinxiang <gujx@cn.fujitsu.com>
+Date: Wed, 4 Jul 2018 18:16:39 +0800
+Subject: btrfs: validate type when reading a chunk
+
+Reported in https://bugzilla.kernel.org/show_bug.cgi?id=199839, with an
+image that has an invalid chunk type but does not return an error.
+
+Add chunk type check in btrfs_check_chunk_valid, to detect the wrong
+type combinations.
+
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=199839
+Reported-by: Xu Wen <wen.xu@gatech.edu>
+Reviewed-by: Qu Wenruo <wqu@suse.com>
+Signed-off-by: Gu Jinxiang <gujx@cn.fujitsu.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index eca67529e536..f237ef9e70a7 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6313,6 +6313,8 @@ static int btrfs_check_chunk_valid(struct btrfs_fs_info *fs_info,
+ 	u16 num_stripes;
+ 	u16 sub_stripes;
+ 	u64 type;
++	u64 features;
++	bool mixed = false;
+ 
+ 	length = btrfs_chunk_length(leaf, chunk);
+ 	stripe_len = btrfs_chunk_stripe_len(leaf, chunk);
+@@ -6351,6 +6353,32 @@ static int btrfs_check_chunk_valid(struct btrfs_fs_info *fs_info,
+ 			  btrfs_chunk_type(leaf, chunk));
+ 		return -EIO;
+ 	}
++
++	if ((type & BTRFS_BLOCK_GROUP_TYPE_MASK) == 0) {
++		btrfs_err(fs_info, "missing chunk type flag: 0x%llx", type);
++		return -EIO;
++	}
++
++	if ((type & BTRFS_BLOCK_GROUP_SYSTEM) &&
++	    (type & (BTRFS_BLOCK_GROUP_METADATA | BTRFS_BLOCK_GROUP_DATA))) {
++		btrfs_err(fs_info,
++			"system chunk with data or metadata type: 0x%llx", type);
++		return -EIO;
++	}
++
++	features = btrfs_super_incompat_flags(fs_info->super_copy);
++	if (features & BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS)
++		mixed = true;
++
++	if (!mixed) {
++		if ((type & BTRFS_BLOCK_GROUP_METADATA) &&
++		    (type & BTRFS_BLOCK_GROUP_DATA)) {
++			btrfs_err(fs_info,
++			"mixed chunk type in non-mixed mode: 0x%llx", type);
++			return -EIO;
++		}
++	}
++
+ 	if ((type & BTRFS_BLOCK_GROUP_RAID10 && sub_stripes != 2) ||
+ 	    (type & BTRFS_BLOCK_GROUP_RAID1 && num_stripes < 1) ||
+ 	    (type & BTRFS_BLOCK_GROUP_RAID5 && num_stripes < 2) ||
+-- 
+cgit 1.2-0.3.lf.el7
+

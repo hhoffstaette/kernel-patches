@@ -21,16 +21,14 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Stable Series: 4.16**
+**Stable Series: 4.18**
 
-- btrfs: fixes from 4.17+ (correctness, discard, error handling)
-- block: fixes from 4.17+ (blk-mq correctness, throttled discard)
-- build: support for GCC 8
+- btrfs: fixes from 4.19+ (correctness, discard, error handling)
+- block: fixes from 4.19+ (performance, correctness)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
-- net: fixes & improvements from 4.17+ ([improved BBR ACK handling](https://groups.google.com/forum/#!topic/bbr-dev/8pgyOyUavvY))
-- pds: [PDS-mq 0.98t](http://cchalpha.blogspot.com/2018/07/pds-098t-release.html) CPU scheduler backport for 4.16.x (**disabled** by default)
-- realtek: fixes & improvements from 4.17+ (interrupt handling)
+- mm: lazy TLB handling (performance)
+- net: fixes & improvements from 4.19+ (correctness)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: selected fixes from 4.17+ (cleanups, correctness, performance, reliability)
+- xfs: selected fixes from 4.19+ (performance, reliability)
 
