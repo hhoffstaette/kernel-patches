@@ -1,0 +1,51 @@
+From 86799ee06196d42f864c2544a9f2753955e9eba4 Mon Sep 17 00:00:00 2001
+From: Arnd Bergmann <arnd@arndb.de>
+Date: Thu, 21 Jun 2018 18:04:05 +0200
+Subject: btrfs: use monotonic time for transaction handling
+
+The transaction times were changed to ktime_get_real_seconds to avoid
+the y2038 overflow, but they still have a minor problem when they go
+backwards or jump due to settimeofday() or leap seconds.
+
+This changes the transaction handling to instead use ktime_get_seconds(),
+which returns a CLOCK_MONOTONIC timestamp that has neither of those
+problems.
+
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c     | 2 +-
+ fs/btrfs/transaction.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 6318ac2539d3..2de3da7b7bdc 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -1805,7 +1805,7 @@ static int transaction_kthread(void *arg)
+ 			goto sleep;
+ 		}
+ 
+-		now = ktime_get_real_seconds();
++		now = ktime_get_seconds();
+ 		if (cur->state < TRANS_STATE_BLOCKED &&
+ 		    !test_bit(BTRFS_FS_NEED_ASYNC_COMMIT, &fs_info->flags) &&
+ 		    (now < cur->start_time ||
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 56c8bab0b816..ebe50dfb8947 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -241,7 +241,7 @@ loop:
+ 	refcount_set(&cur_trans->use_count, 2);
+ 	atomic_set(&cur_trans->pending_ordered, 0);
+ 	cur_trans->flags = 0;
+-	cur_trans->start_time = ktime_get_real_seconds();
++	cur_trans->start_time = ktime_get_seconds();
+ 
+ 	memset(&cur_trans->delayed_refs, 0, sizeof(cur_trans->delayed_refs));
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
