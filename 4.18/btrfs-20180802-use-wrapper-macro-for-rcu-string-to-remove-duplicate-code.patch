@@ -1,0 +1,123 @@
+From 56e2e2587d4029857376f85361f9366a91a208dd Mon Sep 17 00:00:00 2001
+From: Misono Tomohiro <misono.tomohiro@jp.fujitsu.com>
+Date: Thu, 2 Aug 2018 16:19:07 +0900
+Subject: btrfs: Use wrapper macro for rcu string to remove duplicate code
+
+Cleanup patch and no functional changes.
+
+Signed-off-by: Misono Tomohiro <misono.tomohiro@jp.fujitsu.com>
+Reviewed-by: Qu Wenruo <wqu@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ioctl.c   |  6 ++----
+ fs/btrfs/scrub.c   |  8 ++------
+ fs/btrfs/super.c   |  9 +++------
+ fs/btrfs/volumes.c | 20 +++++---------------
+ 4 files changed, 12 insertions(+), 31 deletions(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 6eaadddaca9f..d3a5d2a41e5f 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -3157,10 +3157,8 @@ static long btrfs_ioctl_dev_info(struct btrfs_fs_info *fs_info,
+ 	di_args->total_bytes = btrfs_device_get_total_bytes(dev);
+ 	memcpy(di_args->uuid, dev->uuid, sizeof(di_args->uuid));
+ 	if (dev->name) {
+-		struct rcu_string *name;
+-
+-		name = rcu_dereference(dev->name);
+-		strncpy(di_args->path, name->str, sizeof(di_args->path) - 1);
++		strncpy(di_args->path, rcu_str_deref(dev->name),
++				sizeof(di_args->path) - 1);
+ 		di_args->path[sizeof(di_args->path) - 1] = 0;
+ 	} else {
+ 		di_args->path[0] = '\0';
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index c4eb9eca13b8..3be1456b5116 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -3779,7 +3779,6 @@ int btrfs_scrub_dev(struct btrfs_fs_info *fs_info, u64 devid, u64 start,
+ 	struct scrub_ctx *sctx;
+ 	int ret;
+ 	struct btrfs_device *dev;
+-	struct rcu_string *name;
+ 
+ 	if (btrfs_fs_closing(fs_info))
+ 		return -EINVAL;
+@@ -3833,11 +3832,8 @@ int btrfs_scrub_dev(struct btrfs_fs_info *fs_info, u64 devid, u64 start,
+ 	if (!is_dev_replace && !readonly &&
+ 	    !test_bit(BTRFS_DEV_STATE_WRITEABLE, &dev->dev_state)) {
+ 		mutex_unlock(&fs_info->fs_devices->device_list_mutex);
+-		rcu_read_lock();
+-		name = rcu_dereference(dev->name);
+-		btrfs_err(fs_info, "scrub: device %s is not writable",
+-			  name->str);
+-		rcu_read_unlock();
++		btrfs_err_in_rcu(fs_info, "scrub: device %s is not writable",
++				rcu_str_deref(dev->name));
+ 		return -EROFS;
+ 	}
+ 
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 67de3c0fc85b..6601c9aa5e35 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -2303,7 +2303,6 @@ static int btrfs_show_devname(struct seq_file *m, struct dentry *root)
+ 	struct btrfs_fs_devices *cur_devices;
+ 	struct btrfs_device *dev, *first_dev = NULL;
+ 	struct list_head *head;
+-	struct rcu_string *name;
+ 
+ 	/*
+ 	 * Lightweight locking of the devices. We should not need
+@@ -2327,12 +2326,10 @@ static int btrfs_show_devname(struct seq_file *m, struct dentry *root)
+ 		cur_devices = cur_devices->seed;
+ 	}
+ 
+-	if (first_dev) {
+-		name = rcu_dereference(first_dev->name);
+-		seq_escape(m, name->str, " \t\n\\");
+-	} else {
++	if (first_dev)
++		seq_escape(m, rcu_str_deref(first_dev->name), " \t\n\\");
++	else
+ 		WARN_ON(1);
+-	}
+ 	rcu_read_unlock();
+ 	return 0;
+ }
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index d86346f83a08..74977203fc85 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6094,21 +6094,11 @@ static void submit_stripe_bio(struct btrfs_bio *bbio, struct bio *bio,
+ 	btrfs_io_bio(bio)->stripe_index = dev_nr;
+ 	bio->bi_end_io = btrfs_end_bio;
+ 	bio->bi_iter.bi_sector = physical >> 9;
+-#ifdef DEBUG
+-	{
+-		struct rcu_string *name;
+-
+-		rcu_read_lock();
+-		name = rcu_dereference(dev->name);
+-		btrfs_debug(fs_info,
+-			"btrfs_map_bio: rw %d 0x%x, sector=%llu, dev=%lu (%s id %llu), size=%u",
+-			bio_op(bio), bio->bi_opf,
+-			(u64)bio->bi_iter.bi_sector,
+-			(u_long)dev->bdev->bd_dev, name->str, dev->devid,
+-			bio->bi_iter.bi_size);
+-		rcu_read_unlock();
+-	}
+-#endif
++	btrfs_debug_in_rcu(fs_info,
++	"btrfs_map_bio: rw %d 0x%x, sector=%llu, dev=%lu (%s id %llu), size=%u",
++		bio_op(bio), bio->bi_opf, (u64)bio->bi_iter.bi_sector,
++		(u_long)dev->bdev->bd_dev, rcu_str_deref(dev->name), dev->devid,
++		bio->bi_iter.bi_size);
+ 	bio_set_dev(bio, dev->bdev);
+ 
+ 	btrfs_bio_counter_inc_noblocked(fs_info);
+-- 
+cgit 1.2-0.3.lf.el7
+
