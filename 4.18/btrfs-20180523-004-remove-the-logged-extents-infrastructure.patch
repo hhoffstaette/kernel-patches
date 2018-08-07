@@ -1,0 +1,285 @@
+From a86ec73c88cc46510ee31b08112e4ae245c807e5 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <jbacik@fb.com>
+Date: Wed, 23 May 2018 11:58:36 -0400
+Subject: btrfs: remove the logged extents infrastructure
+
+This is no longer used anywhere, remove all of it.
+
+Signed-off-by: Josef Bacik <jbacik@fb.com>
+Reviewed-by: Filipe Manana <fdmanana@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ordered-data.c      | 123 -------------------------------------------
+ fs/btrfs/ordered-data.h      |  20 ++-----
+ fs/btrfs/tree-log.c          |  16 ------
+ include/trace/events/btrfs.h |   1 -
+ 4 files changed, 3 insertions(+), 157 deletions(-)
+
+diff --git a/fs/btrfs/ordered-data.c b/fs/btrfs/ordered-data.c
+index 2e1a1694a33d..c35d2aed5ff8 100644
+--- a/fs/btrfs/ordered-data.c
++++ b/fs/btrfs/ordered-data.c
+@@ -421,129 +421,6 @@ out:
+ 	return ret == 0;
+ }
+ 
+-/* Needs to either be called under a log transaction or the log_mutex */
+-void btrfs_get_logged_extents(struct btrfs_inode *inode,
+-			      struct list_head *logged_list,
+-			      const loff_t start,
+-			      const loff_t end)
+-{
+-	struct btrfs_ordered_inode_tree *tree;
+-	struct btrfs_ordered_extent *ordered;
+-	struct rb_node *n;
+-	struct rb_node *prev;
+-
+-	tree = &inode->ordered_tree;
+-	spin_lock_irq(&tree->lock);
+-	n = __tree_search(&tree->tree, end, &prev);
+-	if (!n)
+-		n = prev;
+-	for (; n; n = rb_prev(n)) {
+-		ordered = rb_entry(n, struct btrfs_ordered_extent, rb_node);
+-		if (ordered->file_offset > end)
+-			continue;
+-		if (entry_end(ordered) <= start)
+-			break;
+-		if (test_and_set_bit(BTRFS_ORDERED_LOGGED, &ordered->flags))
+-			continue;
+-		list_add(&ordered->log_list, logged_list);
+-		refcount_inc(&ordered->refs);
+-	}
+-	spin_unlock_irq(&tree->lock);
+-}
+-
+-void btrfs_put_logged_extents(struct list_head *logged_list)
+-{
+-	struct btrfs_ordered_extent *ordered;
+-
+-	while (!list_empty(logged_list)) {
+-		ordered = list_first_entry(logged_list,
+-					   struct btrfs_ordered_extent,
+-					   log_list);
+-		list_del_init(&ordered->log_list);
+-		btrfs_put_ordered_extent(ordered);
+-	}
+-}
+-
+-void btrfs_submit_logged_extents(struct list_head *logged_list,
+-				 struct btrfs_root *log)
+-{
+-	int index = log->log_transid % 2;
+-
+-	spin_lock_irq(&log->log_extents_lock[index]);
+-	list_splice_tail(logged_list, &log->logged_list[index]);
+-	spin_unlock_irq(&log->log_extents_lock[index]);
+-}
+-
+-void btrfs_wait_logged_extents(struct btrfs_trans_handle *trans,
+-			       struct btrfs_root *log, u64 transid)
+-{
+-	struct btrfs_ordered_extent *ordered;
+-	int index = transid % 2;
+-
+-	spin_lock_irq(&log->log_extents_lock[index]);
+-	while (!list_empty(&log->logged_list[index])) {
+-		struct inode *inode;
+-		ordered = list_first_entry(&log->logged_list[index],
+-					   struct btrfs_ordered_extent,
+-					   log_list);
+-		list_del_init(&ordered->log_list);
+-		inode = ordered->inode;
+-		spin_unlock_irq(&log->log_extents_lock[index]);
+-
+-		if (!test_bit(BTRFS_ORDERED_IO_DONE, &ordered->flags) &&
+-		    !test_bit(BTRFS_ORDERED_DIRECT, &ordered->flags)) {
+-			u64 start = ordered->file_offset;
+-			u64 end = ordered->file_offset + ordered->len - 1;
+-
+-			WARN_ON(!inode);
+-			filemap_fdatawrite_range(inode->i_mapping, start, end);
+-		}
+-		wait_event(ordered->wait, test_bit(BTRFS_ORDERED_IO_DONE,
+-						   &ordered->flags));
+-
+-		/*
+-		 * In order to keep us from losing our ordered extent
+-		 * information when committing the transaction we have to make
+-		 * sure that any logged extents are completed when we go to
+-		 * commit the transaction.  To do this we simply increase the
+-		 * current transactions pending_ordered counter and decrement it
+-		 * when the ordered extent completes.
+-		 */
+-		if (!test_bit(BTRFS_ORDERED_COMPLETE, &ordered->flags)) {
+-			struct btrfs_ordered_inode_tree *tree;
+-
+-			tree = &BTRFS_I(inode)->ordered_tree;
+-			spin_lock_irq(&tree->lock);
+-			if (!test_bit(BTRFS_ORDERED_COMPLETE, &ordered->flags)) {
+-				set_bit(BTRFS_ORDERED_PENDING, &ordered->flags);
+-				atomic_inc(&trans->transaction->pending_ordered);
+-			}
+-			spin_unlock_irq(&tree->lock);
+-		}
+-		btrfs_put_ordered_extent(ordered);
+-		spin_lock_irq(&log->log_extents_lock[index]);
+-	}
+-	spin_unlock_irq(&log->log_extents_lock[index]);
+-}
+-
+-void btrfs_free_logged_extents(struct btrfs_root *log, u64 transid)
+-{
+-	struct btrfs_ordered_extent *ordered;
+-	int index = transid % 2;
+-
+-	spin_lock_irq(&log->log_extents_lock[index]);
+-	while (!list_empty(&log->logged_list[index])) {
+-		ordered = list_first_entry(&log->logged_list[index],
+-					   struct btrfs_ordered_extent,
+-					   log_list);
+-		list_del_init(&ordered->log_list);
+-		spin_unlock_irq(&log->log_extents_lock[index]);
+-		btrfs_put_ordered_extent(ordered);
+-		spin_lock_irq(&log->log_extents_lock[index]);
+-	}
+-	spin_unlock_irq(&log->log_extents_lock[index]);
+-}
+-
+ /*
+  * used to drop a reference on an ordered extent.  This will free
+  * the extent if the last reference is dropped
+diff --git a/fs/btrfs/ordered-data.h b/fs/btrfs/ordered-data.h
+index 3be443fb3001..b2d3f6a091f7 100644
+--- a/fs/btrfs/ordered-data.h
++++ b/fs/btrfs/ordered-data.h
+@@ -54,15 +54,11 @@ struct btrfs_ordered_sum {
+ #define BTRFS_ORDERED_UPDATED_ISIZE 7 /* indicates whether this ordered extent
+ 				       * has done its due diligence in updating
+ 				       * the isize. */
+-#define BTRFS_ORDERED_LOGGED_CSUM 8 /* We've logged the csums on this ordered
+-				       ordered extent */
+-#define BTRFS_ORDERED_TRUNCATED 9 /* Set when we have to truncate an extent */
++#define BTRFS_ORDERED_TRUNCATED 8 /* Set when we have to truncate an extent */
+ 
+-#define BTRFS_ORDERED_LOGGED 10 /* Set when we've waited on this ordered extent
+-				 * in the logging code. */
+-#define BTRFS_ORDERED_PENDING 11 /* We are waiting for this ordered extent to
++#define BTRFS_ORDERED_PENDING 9 /* We are waiting for this ordered extent to
+ 				  * complete in the current transaction. */
+-#define BTRFS_ORDERED_REGULAR 12 /* Regular IO for COW */
++#define BTRFS_ORDERED_REGULAR 10 /* Regular IO for COW */
+ 
+ struct btrfs_ordered_extent {
+ 	/* logical offset in the file */
+@@ -193,16 +189,6 @@ u64 btrfs_wait_ordered_extents(struct btrfs_root *root, u64 nr,
+ 			       const u64 range_start, const u64 range_len);
+ u64 btrfs_wait_ordered_roots(struct btrfs_fs_info *fs_info, u64 nr,
+ 			      const u64 range_start, const u64 range_len);
+-void btrfs_get_logged_extents(struct btrfs_inode *inode,
+-			      struct list_head *logged_list,
+-			      const loff_t start,
+-			      const loff_t end);
+-void btrfs_put_logged_extents(struct list_head *logged_list);
+-void btrfs_submit_logged_extents(struct list_head *logged_list,
+-				 struct btrfs_root *log);
+-void btrfs_wait_logged_extents(struct btrfs_trans_handle *trans,
+-			       struct btrfs_root *log, u64 transid);
+-void btrfs_free_logged_extents(struct btrfs_root *log, u64 transid);
+ int __init ordered_data_init(void);
+ void __cold ordered_data_exit(void);
+ 
+diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
+index dce499071c86..daf32dc94dc3 100644
+--- a/fs/btrfs/tree-log.c
++++ b/fs/btrfs/tree-log.c
+@@ -2933,7 +2933,6 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 	/* bail out if we need to do a full commit */
+ 	if (btrfs_need_log_full_commit(fs_info, trans)) {
+ 		ret = -EAGAIN;
+-		btrfs_free_logged_extents(log, log_transid);
+ 		mutex_unlock(&root->log_mutex);
+ 		goto out;
+ 	}
+@@ -2951,7 +2950,6 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 	if (ret) {
+ 		blk_finish_plug(&plug);
+ 		btrfs_abort_transaction(trans, ret);
+-		btrfs_free_logged_extents(log, log_transid);
+ 		btrfs_set_log_full_commit(fs_info, trans);
+ 		mutex_unlock(&root->log_mutex);
+ 		goto out;
+@@ -3002,7 +3000,6 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 			goto out;
+ 		}
+ 		btrfs_wait_tree_log_extents(log, mark);
+-		btrfs_free_logged_extents(log, log_transid);
+ 		mutex_unlock(&log_root_tree->log_mutex);
+ 		ret = -EAGAIN;
+ 		goto out;
+@@ -3020,7 +3017,6 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 	if (atomic_read(&log_root_tree->log_commit[index2])) {
+ 		blk_finish_plug(&plug);
+ 		ret = btrfs_wait_tree_log_extents(log, mark);
+-		btrfs_wait_logged_extents(trans, log, log_transid);
+ 		wait_log_commit(log_root_tree,
+ 				root_log_ctx.log_transid);
+ 		mutex_unlock(&log_root_tree->log_mutex);
+@@ -3045,7 +3041,6 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 	if (btrfs_need_log_full_commit(fs_info, trans)) {
+ 		blk_finish_plug(&plug);
+ 		btrfs_wait_tree_log_extents(log, mark);
+-		btrfs_free_logged_extents(log, log_transid);
+ 		mutex_unlock(&log_root_tree->log_mutex);
+ 		ret = -EAGAIN;
+ 		goto out_wake_log_root;
+@@ -3058,7 +3053,6 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 	if (ret) {
+ 		btrfs_set_log_full_commit(fs_info, trans);
+ 		btrfs_abort_transaction(trans, ret);
+-		btrfs_free_logged_extents(log, log_transid);
+ 		mutex_unlock(&log_root_tree->log_mutex);
+ 		goto out_wake_log_root;
+ 	}
+@@ -3068,11 +3062,9 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
+ 						  EXTENT_NEW | EXTENT_DIRTY);
+ 	if (ret) {
+ 		btrfs_set_log_full_commit(fs_info, trans);
+-		btrfs_free_logged_extents(log, log_transid);
+ 		mutex_unlock(&log_root_tree->log_mutex);
+ 		goto out_wake_log_root;
+ 	}
+-	btrfs_wait_logged_extents(trans, log, log_transid);
+ 
+ 	btrfs_set_super_log_root(fs_info->super_for_commit,
+ 				 log_root_tree->node->start);
+@@ -3159,14 +3151,6 @@ static void free_log_tree(struct btrfs_trans_handle *trans,
+ 				  EXTENT_DIRTY | EXTENT_NEW | EXTENT_NEED_WAIT);
+ 	}
+ 
+-	/*
+-	 * We may have short-circuited the log tree with the full commit logic
+-	 * and left ordered extents on our list, so clear these out to keep us
+-	 * from leaking inodes and memory.
+-	 */
+-	btrfs_free_logged_extents(log, 0);
+-	btrfs_free_logged_extents(log, 1);
+-
+ 	free_extent_buffer(log->node);
+ 	kfree(log);
+ }
+diff --git a/include/trace/events/btrfs.h b/include/trace/events/btrfs.h
+index 39b94ec965be..7057cc99d267 100644
+--- a/include/trace/events/btrfs.h
++++ b/include/trace/events/btrfs.h
+@@ -433,7 +433,6 @@ DEFINE_EVENT(
+ 		{ (1 << BTRFS_ORDERED_DIRECT),	 	"DIRECT" 	}, \
+ 		{ (1 << BTRFS_ORDERED_IOERR), 		"IOERR" 	}, \
+ 		{ (1 << BTRFS_ORDERED_UPDATED_ISIZE), 	"UPDATED_ISIZE"	}, \
+-		{ (1 << BTRFS_ORDERED_LOGGED_CSUM), 	"LOGGED_CSUM"	}, \
+ 		{ (1 << BTRFS_ORDERED_TRUNCATED), 	"TRUNCATED"	})
+ 
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
