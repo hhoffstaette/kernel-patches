@@ -1,0 +1,155 @@
+From c0d6cd3bd3d3fe27222fe77b4d5859fbd255a7b2 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Fri, 13 Jul 2018 20:46:30 +0200
+Subject: btrfs: refactor block group replication factor calculation to a
+ helper
+
+There are many places that open code the duplicity factor of the block
+group profiles, create a common helper. This can be easily extended for
+more copies.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent-tree.c | 36 ++++++++----------------------------
+ fs/btrfs/super.c       | 11 +++--------
+ fs/btrfs/volumes.c     | 11 +++++++++++
+ fs/btrfs/volumes.h     |  2 ++
+ 4 files changed, 24 insertions(+), 36 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 4f19bdca3214..fd109bfd528d 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -3931,11 +3931,7 @@ static void update_space_info(struct btrfs_fs_info *info, u64 flags,
+ 	struct btrfs_space_info *found;
+ 	int factor;
+ 
+-	if (flags & (BTRFS_BLOCK_GROUP_DUP | BTRFS_BLOCK_GROUP_RAID1 |
+-		     BTRFS_BLOCK_GROUP_RAID10))
+-		factor = 2;
+-	else
+-		factor = 1;
++	factor = btrfs_bg_type_to_factor(flags);
+ 
+ 	found = __find_space_info(info, flags);
+ 	ASSERT(found);
+@@ -4576,6 +4572,7 @@ static int can_overcommit(struct btrfs_fs_info *fs_info,
+ 	u64 space_size;
+ 	u64 avail;
+ 	u64 used;
++	int factor;
+ 
+ 	/* Don't overcommit when in mixed mode. */
+ 	if (space_info->flags & BTRFS_BLOCK_GROUP_DATA)
+@@ -4610,10 +4607,8 @@ static int can_overcommit(struct btrfs_fs_info *fs_info,
+ 	 * doesn't include the parity drive, so we don't have to
+ 	 * change the math
+ 	 */
+-	if (profile & (BTRFS_BLOCK_GROUP_DUP |
+-		       BTRFS_BLOCK_GROUP_RAID1 |
+-		       BTRFS_BLOCK_GROUP_RAID10))
+-		avail >>= 1;
++	factor = btrfs_bg_type_to_factor(profile);
++	avail = div_u64(avail, factor);
+ 
+ 	/*
+ 	 * If we aren't flushing all things, let us overcommit up to
+@@ -6094,12 +6089,8 @@ static int update_block_group(struct btrfs_trans_handle *trans,
+ 		cache = btrfs_lookup_block_group(info, bytenr);
+ 		if (!cache)
+ 			return -ENOENT;
+-		if (cache->flags & (BTRFS_BLOCK_GROUP_DUP |
+-				    BTRFS_BLOCK_GROUP_RAID1 |
+-				    BTRFS_BLOCK_GROUP_RAID10))
+-			factor = 2;
+-		else
+-			factor = 1;
++		factor = btrfs_bg_type_to_factor(cache->flags);
++
+ 		/*
+ 		 * If this block group has free space cache written out, we
+ 		 * need to make sure to load it if we are removing space.  This
+@@ -9359,13 +9350,7 @@ u64 btrfs_account_ro_block_groups_free_space(struct btrfs_space_info *sinfo)
+ 			continue;
+ 		}
+ 
+-		if (block_group->flags & (BTRFS_BLOCK_GROUP_RAID1 |
+-					  BTRFS_BLOCK_GROUP_RAID10 |
+-					  BTRFS_BLOCK_GROUP_DUP))
+-			factor = 2;
+-		else
+-			factor = 1;
+-
++		factor = btrfs_bg_type_to_factor(block_group->flags);
+ 		free_bytes += (block_group->key.offset -
+ 			       btrfs_block_group_used(&block_group->item)) *
+ 			       factor;
+@@ -10175,12 +10160,7 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
+ 
+ 	memcpy(&key, &block_group->key, sizeof(key));
+ 	index = btrfs_bg_flags_to_raid_index(block_group->flags);
+-	if (block_group->flags & (BTRFS_BLOCK_GROUP_DUP |
+-				  BTRFS_BLOCK_GROUP_RAID1 |
+-				  BTRFS_BLOCK_GROUP_RAID10))
+-		factor = 2;
+-	else
+-		factor = 1;
++	factor = btrfs_bg_type_to_factor(block_group->flags);
+ 
+ 	/* make sure this block group isn't part of an allocation cluster */
+ 	cluster = &fs_info->data_alloc_cluster;
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index d7a54c648c5f..efe8b03ce380 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -2107,14 +2107,9 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 				btrfs_account_ro_block_groups_free_space(found);
+ 
+ 			for (i = 0; i < BTRFS_NR_RAID_TYPES; i++) {
+-				if (!list_empty(&found->block_groups[i])) {
+-					switch (i) {
+-					case BTRFS_RAID_DUP:
+-					case BTRFS_RAID_RAID1:
+-					case BTRFS_RAID_RAID10:
+-						factor = 2;
+-					}
+-				}
++				if (!list_empty(&found->block_groups[i]))
++					factor = btrfs_bg_type_to_factor(
++						btrfs_raid_array[i].bg_flag);
+ 			}
+ 		}
+ 
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 0b9023f52b2a..eca67529e536 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -7292,3 +7292,14 @@ void btrfs_reset_fs_info_ptr(struct btrfs_fs_info *fs_info)
+ 		fs_devices = fs_devices->seed;
+ 	}
+ }
++
++/*
++ * Multiplicity factor for simple profiles: DUP, RAID1-like and RAID10.
++ */
++int btrfs_bg_type_to_factor(u64 flags)
++{
++	if (flags & (BTRFS_BLOCK_GROUP_DUP | BTRFS_BLOCK_GROUP_RAID1 |
++		     BTRFS_BLOCK_GROUP_RAID10))
++		return 2;
++	return 1;
++}
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 06d8bb7dd557..6943aab9bdd7 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -559,4 +559,6 @@ void btrfs_reset_fs_info_ptr(struct btrfs_fs_info *fs_info);
+ bool btrfs_check_rw_degradable(struct btrfs_fs_info *fs_info,
+ 					struct btrfs_device *failing_dev);
+ 
++int btrfs_bg_type_to_factor(u64 flags);
++
+ #endif
+-- 
+cgit 1.2-0.3.lf.el7
+
