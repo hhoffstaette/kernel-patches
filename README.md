@@ -23,9 +23,8 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2018-05-31)**
+**Current status (2018-08-07)**
 
-- 4.18 will be the next series; no time for 4.17.
-- 4.16 is my current production series until EOL.
-- all other branches <4.16 are EOL.
+- 4.18 is my current production series until EOL.
+- all other branches <4.18 are EOL.
 
