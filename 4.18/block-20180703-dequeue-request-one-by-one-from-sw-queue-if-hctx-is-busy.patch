@@ -10,7 +10,6 @@ This patch takes the Exponential Weighted Moving Average(EWMA) to figure
 out if queue is busy, then only dequeue request one by one from sw queue
 when queue is busy.
 
-[HH: small context fix in blk-mq.h for 4.16.x]
 Fixes: b347689ffbca ("blk-mq-sched: improve dispatching from sw queue")
 Cc: Kashyap Desai <kashyap.desai@broadcom.com>
 Cc: Laurence Oberman <loberman@redhat.com>
@@ -144,8 +143,8 @@ index ea690254dab7..d710e92874cc 100644
  	unsigned int		nr_ctx;
 +	struct blk_mq_ctx	**ctxs;
  
+ 	spinlock_t		dispatch_wait_lock;
  	wait_queue_entry_t	dispatch_wait;
- 	atomic_t		wait_index;
 -- 
-cgit 1.2-0.2.lf.el7
+cgit 1.2-0.3.lf.el7
 
