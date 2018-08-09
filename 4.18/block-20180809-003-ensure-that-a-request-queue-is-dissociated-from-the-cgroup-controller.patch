@@ -1,13 +1,8 @@
+From 24ecc3585348b616993a3c4d6dc2c6b8007e358c Mon Sep 17 00:00:00 2001
 From: Bart Van Assche <bart.vanassche@wdc.com>
-Subject: [PATCH v4 2/2] block: Ensure that a request queue is dissociated from the cgroup controller
-Date: Mon, 30 Jul 2018 14:10:56 -0700
-Cc: linux-block@vger.kernel.org, Christoph Hellwig <hch@lst.de>,
-        Bart Van Assche <bart.vanassche@wdc.com>,
-        Tejun Heo <tj@kernel.org>, Ming Lei <ming.lei@redhat.com>,
-        Johannes Thumshirn <jthumshirn@suse.de>,
-        Alexandru Moise <00moses.alexander00@gmail.com>,
-        Joseph Qi <joseph.qi@linux.alibaba.com>, stable@vger.kernel.org
-To: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 9 Aug 2018 07:53:38 -0700
+Subject: block: Ensure that a request queue is dissociated from the cgroup
+ controller
 
 Several block drivers call alloc_disk() followed by put_disk() if
 something fails before device_add_disk() is called without calling
@@ -34,22 +29,23 @@ Reported-by: Alexandru Moise <00moses.alexander00@gmail.com>
 Fixes: a063057d7c73 ("block: Fix a race between request queue removal and the block cgroup controller") # v4.17
 Signed-off-by: Bart Van Assche <bart.vanassche@wdc.com>
 Tested-by: Alexandru Moise <00moses.alexander00@gmail.com>
+Reviewed-by: Johannes Thumshirn <jthumshirn@suse.de>
 Cc: Tejun Heo <tj@kernel.org>
 Cc: Christoph Hellwig <hch@lst.de>
 Cc: Ming Lei <ming.lei@redhat.com>
-Cc: Johannes Thumshirn <jthumshirn@suse.de>
 Cc: Alexandru Moise <00moses.alexander00@gmail.com>
 Cc: Joseph Qi <joseph.qi@linux.alibaba.com>
 Cc: <stable@vger.kernel.org>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
 ---
- block/blk-sysfs.c | 25 +++++++++++++++++++++++++
- 1 file changed, 25 insertions(+)
+ block/blk-sysfs.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
 
 diff --git a/block/blk-sysfs.c b/block/blk-sysfs.c
-index ca1984ecbdeb..26275d9babcb 100644
+index 49c29a5d06bb..380bc284ced1 100644
 --- a/block/blk-sysfs.c
 +++ b/block/blk-sysfs.c
-@@ -802,6 +802,31 @@ static void __blk_release_queue(struct work_struct *work)
+@@ -802,6 +802,21 @@ static void __blk_release_queue(struct work_struct *work)
  		blk_stat_remove_callback(q, q->poll_cb);
  	blk_stat_free_callback(q->poll_cb);
  
@@ -64,20 +60,13 @@ index ca1984ecbdeb..26275d9babcb 100644
 +		blk_exit_queue(q);
 +	}
 +
-+#ifdef CONFIG_BLK_CGROUP
-+	{
-+		struct blkcg_gq *blkg;
-+
-+		rcu_read_lock();
-+		blkg = blkg_lookup(&blkcg_root, q);
-+		rcu_read_unlock();
-+
-+		WARN(blkg,
-+		     "request queue %p is being released but it has not yet been removed from the blkcg controller\n",
-+		     q);
-+	}
-+#endif
++	WARN(blkg_root_lookup(q),
++	     "request queue %p is being released but it has not yet been removed from the blkcg controller\n",
++	     q);
 +
  	blk_free_queue_stats(q->stats);
  
  	blk_exit_rl(q, &q->root_rl);
+-- 
+cgit 1.2-0.3.lf.el7
+
