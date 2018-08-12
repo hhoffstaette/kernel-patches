@@ -1,0 +1,99 @@
+From fd2123a3d7527d4c7092633d55e877c0cc1d84a3 Mon Sep 17 00:00:00 2001
+From: Yuchung Cheng <ycheng@google.com>
+Date: Thu, 9 Aug 2018 09:38:12 -0700
+Subject: tcp: avoid resetting ACK timer upon receiving packet with ECN CWR
+ flag
+
+Previously commit 9aee40006190 ("tcp: ack immediately when a cwr
+packet arrives") calls tcp_enter_quickack_mode to force sending
+two immediate ACKs upon receiving a packet w/ CWR flag. The side
+effect is it'll also reset the delayed ACK timer and interactive
+session tracking. This patch removes that side effect by using the
+new ACK_NOW flag to force an immmediate ACK.
+
+Packetdrill to demonstrate:
+
+    0 socket(..., SOCK_STREAM, IPPROTO_TCP) = 3
+   +0 setsockopt(3, SOL_SOCKET, SO_REUSEADDR, [1], 4) = 0
+   +0 setsockopt(3, SOL_TCP, TCP_CONGESTION, "dctcp", 5) = 0
+   +0 bind(3, ..., ...) = 0
+   +0 listen(3, 1) = 0
+
+   +0 < [ect0] SEW 0:0(0) win 32792 <mss 1000,sackOK,nop,nop,nop,wscale 7>
+   +0 > SE. 0:0(0) ack 1 <mss 1460,nop,nop,sackOK,nop,wscale 8>
+  +.1 < [ect0] . 1:1(0) ack 1 win 257
+   +0 accept(3, ..., ...) = 4
+
+   +0 < [ect0] . 1:1001(1000) ack 1 win 257
+   +0 > [ect01] . 1:1(0) ack 1001
+
+   +0 write(4, ..., 1) = 1
+   +0 > [ect01] P. 1:2(1) ack 1001
+
+   +0 < [ect0] . 1001:2001(1000) ack 2 win 257
+   +0 write(4, ..., 1) = 1
+   +0 > [ect01] P. 2:3(1) ack 2001
+
+   +0 < [ect0] . 2001:3001(1000) ack 3 win 257
+   +0 < [ect0] . 3001:4001(1000) ack 3 win 257
+   // Ack delayed ...
+
+   +.01 < [ce] P. 4001:4501(500) ack 3 win 257
+   +0 > [ect01] . 3:3(0) ack 4001
+   +0 > [ect01] E. 3:3(0) ack 4501
+
++.001 read(4, ..., 4500) = 4500
+   +0 write(4, ..., 1) = 1
+   +0 > [ect01] PE. 3:4(1) ack 4501 win 100
+
+ +.01 < [ect0] W. 4501:5501(1000) ack 4 win 257
+   // No delayed ACK on CWR flag
+   +0 > [ect01] . 4:4(0) ack 5501
+
+ +.31 < [ect0] . 5501:6501(1000) ack 4 win 257
+   +0 > [ect01] . 4:4(0) ack 6501
+
+Fixes: 9aee40006190 ("tcp: ack immediately when a cwr packet arrives")
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_input.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 9a09ff3afef2..4c2dd9f863f7 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -245,16 +245,16 @@ static void tcp_ecn_queue_cwr(struct tcp_sock *tp)
+ 		tp->ecn_flags |= TCP_ECN_QUEUE_CWR;
+ }
+ 
+-static void tcp_ecn_accept_cwr(struct tcp_sock *tp, const struct sk_buff *skb)
++static void tcp_ecn_accept_cwr(struct sock *sk, const struct sk_buff *skb)
+ {
+ 	if (tcp_hdr(skb)->cwr) {
+-		tp->ecn_flags &= ~TCP_ECN_DEMAND_CWR;
++		tcp_sk(sk)->ecn_flags &= ~TCP_ECN_DEMAND_CWR;
+ 
+ 		/* If the sender is telling us it has entered CWR, then its
+ 		 * cwnd may be very low (even just 1 packet), so we should ACK
+ 		 * immediately.
+ 		 */
+-		tcp_enter_quickack_mode((struct sock *)tp, 2);
++		inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+ 	}
+ }
+ 
+@@ -4703,7 +4703,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
+ 	skb_dst_drop(skb);
+ 	__skb_pull(skb, tcp_hdr(skb)->doff * 4);
+ 
+-	tcp_ecn_accept_cwr(tp, skb);
++	tcp_ecn_accept_cwr(sk, skb);
+ 
+ 	tp->rx_opt.dsack = 0;
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
