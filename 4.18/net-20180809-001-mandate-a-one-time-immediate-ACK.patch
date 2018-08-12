@@ -1,0 +1,55 @@
+From 466466dc6c28ca9dc401f10e235b9cde9a7c9162 Mon Sep 17 00:00:00 2001
+From: Yuchung Cheng <ycheng@google.com>
+Date: Thu, 9 Aug 2018 09:38:09 -0700
+Subject: tcp: mandate a one-time immediate ACK
+
+Add a new flag to indicate a one-time immediate ACK. This flag is
+occasionaly set under specific TCP protocol states in addition to
+the more common quickack mechanism for interactive application.
+
+In several cases in the TCP code we want to force an immediate ACK
+but do not want to call tcp_enter_quickack_mode() because we do
+not want to forget the icsk_ack.pingpong or icsk_ack.ato state.
+
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: Wei Wang <weiwan@google.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ include/net/inet_connection_sock.h | 3 ++-
+ net/ipv4/tcp_input.c               | 4 +++-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/include/net/inet_connection_sock.h b/include/net/inet_connection_sock.h
+index 0a6c9e0f2b5a..fa43b82607d9 100644
+--- a/include/net/inet_connection_sock.h
++++ b/include/net/inet_connection_sock.h
+@@ -167,7 +167,8 @@ enum inet_csk_ack_state_t {
+ 	ICSK_ACK_SCHED	= 1,
+ 	ICSK_ACK_TIMER  = 2,
+ 	ICSK_ACK_PUSHED = 4,
+-	ICSK_ACK_PUSHED2 = 8
++	ICSK_ACK_PUSHED2 = 8,
++	ICSK_ACK_NOW = 16	/* Send the next ACK immediately (once) */
+ };
+ 
+ void inet_csk_init_xmit_timers(struct sock *sk,
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 715d541b52dd..b8849588c440 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -5179,7 +5179,9 @@ static void __tcp_ack_snd_check(struct sock *sk, int ofo_possible)
+ 	    (tp->rcv_nxt - tp->copied_seq < sk->sk_rcvlowat ||
+ 	     __tcp_select_window(sk) >= tp->rcv_wnd)) ||
+ 	    /* We ACK each frame or... */
+-	    tcp_in_quickack_mode(sk)) {
++	    tcp_in_quickack_mode(sk) ||
++	    /* Protocol state mandates a one-time immediate ACK */
++	    inet_csk(sk)->icsk_ack.pending & ICSK_ACK_NOW) {
+ send_now:
+ 		tcp_send_ack(sk);
+ 		return;
+-- 
+cgit 1.2-0.3.lf.el7
+
