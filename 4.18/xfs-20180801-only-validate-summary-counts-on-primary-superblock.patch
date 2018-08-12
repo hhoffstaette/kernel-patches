@@ -1,0 +1,58 @@
+From 1f31c98d650ca342e2f54cb17c4554ad110c5a11 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Wed, 1 Aug 2018 15:50:27 -0700
+Subject: xfs: only validate summary counts on primary superblock
+
+Skip the summary counter checks for secondary superblocks and inprogress
+primary superblocks because mkfs has always written those out with
+zeroed summary counters.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Carlos Maiolino <cmaiolino@redhat.com>
+---
+ fs/xfs/libxfs/xfs_sb.c | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_sb.c b/fs/xfs/libxfs/xfs_sb.c
+index ca1b3a7a9171..081f46e30556 100644
+--- a/fs/xfs/libxfs/xfs_sb.c
++++ b/fs/xfs/libxfs/xfs_sb.c
+@@ -148,6 +148,7 @@ xfs_validate_sb_read(
+ STATIC int
+ xfs_validate_sb_write(
+ 	struct xfs_mount	*mp,
++	struct xfs_buf		*bp,
+ 	struct xfs_sb		*sbp)
+ {
+ 	/*
+@@ -155,10 +156,15 @@ xfs_validate_sb_write(
+ 	 * the superblock.  We skip this in the read validator because there
+ 	 * could be newer superblocks in the log and if the values are garbage
+ 	 * even after replay we'll recalculate them at the end of log mount.
++	 *
++	 * mkfs has traditionally written zeroed counters to inprogress and
++	 * secondary superblocks, so allow this usage to continue because
++	 * we never read counters from such superblocks.
+ 	 */
+-	if (sbp->sb_fdblocks > sbp->sb_dblocks ||
+-	    !xfs_verify_icount(mp, sbp->sb_icount) ||
+-	    sbp->sb_ifree > sbp->sb_icount) {
++	if (XFS_BUF_ADDR(bp) == XFS_SB_DADDR && !sbp->sb_inprogress &&
++	    (sbp->sb_fdblocks > sbp->sb_dblocks ||
++	     !xfs_verify_icount(mp, sbp->sb_icount) ||
++	     sbp->sb_ifree > sbp->sb_icount)) {
+ 		xfs_warn(mp, "SB summary counter sanity check failed");
+ 		return -EFSCORRUPTED;
+ 	}
+@@ -756,7 +762,7 @@ xfs_sb_write_verify(
+ 	error = xfs_validate_sb_common(mp, bp, &sb);
+ 	if (error)
+ 		goto out_error;
+-	error = xfs_validate_sb_write(mp, &sb);
++	error = xfs_validate_sb_write(mp, bp, &sb);
+ 	if (error)
+ 		goto out_error;
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
