@@ -29,6 +29,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - loop: observe rotational property of underlying device
 - mm: lazy TLB handling (performance)
 - net: fixes & improvements from 4.19+ (correctness)
+- pds: [PDS-mq 0.98u](http://cchalpha.blogspot.com/2018/08/pds-098u-release.html) CPU scheduler (**disabled** by default)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 4.19+ (performance, reliability)
 
