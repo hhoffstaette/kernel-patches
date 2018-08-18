@@ -1,0 +1,418 @@
+From ddcf35d397976421a4ec1d0d00fbcc027a8cb034 Mon Sep 17 00:00:00 2001
+From: Michael Callahan <michaelcallahan@fb.com>
+Date: Wed, 18 Jul 2018 04:47:39 -0700
+Subject: block: Add and use op_stat_group() for indexing disk_stat fields.
+
+Add and use a new op_stat_group() function for indexing partition stat
+fields rather than indexing them by rq_data_dir() or bio_data_dir().
+This function works similarly to op_is_sync() in that it takes the
+request::cmd_flags or bio::bi_opf flags and determines which stats
+should et updated.
+
+In addition, the second parameter to generic_start_io_acct() and
+generic_end_io_acct() is now a REQ_OP rather than simply a read or
+write bit and it uses op_stat_group() on the parameter to determine
+the stat group.
+
+Note that the partition in_flight counts are not part of the per-cpu
+statistics and as such are not indexed via this function.  It's now
+indexed by op_is_write().
+
+tj: Refreshed on top of v4.17.  Updated to pass around REQ_OP.
+
+[HH: trivial context fix in lightnvm for 4.18]
+Signed-off-by: Michael Callahan <michaelcallahan@fb.com>
+Signed-off-by: Tejun Heo <tj@kernel.org>
+Cc: Minchan Kim <minchan@kernel.org>
+Cc: Dan Williams <dan.j.williams@intel.com>
+Cc: Joshua Morris <josh.h.morris@us.ibm.com>
+Cc: Philipp Reisner <philipp.reisner@linbit.com>
+Cc: Matias Bjorling <mb@lightnvm.io>
+Cc: Kent Overstreet <kent.overstreet@gmail.com>
+Cc: Alasdair Kergon <agk@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/bio.c                   | 16 +++++++++-------
+ block/blk-core.c              | 12 ++++++------
+ drivers/block/drbd/drbd_req.c |  4 ++--
+ drivers/block/rsxx/dev.c      |  6 +++---
+ drivers/block/zram/zram_drv.c |  5 ++---
+ drivers/lightnvm/pblk-cache.c |  5 +++--
+ drivers/lightnvm/pblk-read.c  |  5 +++--
+ drivers/md/bcache/request.c   | 13 +++++--------
+ drivers/md/dm.c               |  6 ++++--
+ drivers/md/md.c               |  5 +++--
+ drivers/nvdimm/nd.h           |  7 +++----
+ include/linux/bio.h           |  4 ++--
+ include/linux/blk_types.h     |  5 +++++
+ 13 files changed, 50 insertions(+), 43 deletions(-)
+
+diff --git a/block/bio.c b/block/bio.c
+index f3536bfc8298..8ecc95615941 100644
+--- a/block/bio.c
++++ b/block/bio.c
+@@ -1728,29 +1728,31 @@ void bio_check_pages_dirty(struct bio *bio)
+ }
+ EXPORT_SYMBOL_GPL(bio_check_pages_dirty);
+ 
+-void generic_start_io_acct(struct request_queue *q, int rw,
++void generic_start_io_acct(struct request_queue *q, int op,
+ 			   unsigned long sectors, struct hd_struct *part)
+ {
++	const int sgrp = op_stat_group(op);
+ 	int cpu = part_stat_lock();
+ 
+ 	part_round_stats(q, cpu, part);
+-	part_stat_inc(cpu, part, ios[rw]);
+-	part_stat_add(cpu, part, sectors[rw], sectors);
+-	part_inc_in_flight(q, part, rw);
++	part_stat_inc(cpu, part, ios[sgrp]);
++	part_stat_add(cpu, part, sectors[sgrp], sectors);
++	part_inc_in_flight(q, part, op_is_write(op));
+ 
+ 	part_stat_unlock();
+ }
+ EXPORT_SYMBOL(generic_start_io_acct);
+ 
+-void generic_end_io_acct(struct request_queue *q, int rw,
++void generic_end_io_acct(struct request_queue *q, int req_op,
+ 			 struct hd_struct *part, unsigned long start_time)
+ {
+ 	unsigned long duration = jiffies - start_time;
++	const int sgrp = op_stat_group(req_op);
+ 	int cpu = part_stat_lock();
+ 
+-	part_stat_add(cpu, part, ticks[rw], duration);
++	part_stat_add(cpu, part, ticks[sgrp], duration);
+ 	part_round_stats(q, cpu, part);
+-	part_dec_in_flight(q, part, rw);
++	part_dec_in_flight(q, part, op_is_write(req_op));
+ 
+ 	part_stat_unlock();
+ }
+diff --git a/block/blk-core.c b/block/blk-core.c
+index c4b57d8806fe..03a4ea93a5f3 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -2702,13 +2702,13 @@ EXPORT_SYMBOL_GPL(blk_rq_err_bytes);
+ void blk_account_io_completion(struct request *req, unsigned int bytes)
+ {
+ 	if (blk_do_io_stat(req)) {
+-		const int rw = rq_data_dir(req);
++		const int sgrp = op_stat_group(req_op(req));
+ 		struct hd_struct *part;
+ 		int cpu;
+ 
+ 		cpu = part_stat_lock();
+ 		part = req->part;
+-		part_stat_add(cpu, part, sectors[rw], bytes >> 9);
++		part_stat_add(cpu, part, sectors[sgrp], bytes >> 9);
+ 		part_stat_unlock();
+ 	}
+ }
+@@ -2722,7 +2722,7 @@ void blk_account_io_done(struct request *req, u64 now)
+ 	 */
+ 	if (blk_do_io_stat(req) && !(req->rq_flags & RQF_FLUSH_SEQ)) {
+ 		unsigned long duration;
+-		const int rw = rq_data_dir(req);
++		const int sgrp = op_stat_group(req_op(req));
+ 		struct hd_struct *part;
+ 		int cpu;
+ 
+@@ -2730,10 +2730,10 @@ void blk_account_io_done(struct request *req, u64 now)
+ 		cpu = part_stat_lock();
+ 		part = req->part;
+ 
+-		part_stat_inc(cpu, part, ios[rw]);
+-		part_stat_add(cpu, part, ticks[rw], duration);
++		part_stat_inc(cpu, part, ios[sgrp]);
++		part_stat_add(cpu, part, ticks[sgrp], duration);
+ 		part_round_stats(req->q, cpu, part);
+-		part_dec_in_flight(req->q, part, rw);
++		part_dec_in_flight(req->q, part, rq_data_dir(req));
+ 
+ 		hd_struct_put(part);
+ 		part_stat_unlock();
+diff --git a/drivers/block/drbd/drbd_req.c b/drivers/block/drbd/drbd_req.c
+index d146fedc38bb..19cac36e9737 100644
+--- a/drivers/block/drbd/drbd_req.c
++++ b/drivers/block/drbd/drbd_req.c
+@@ -38,7 +38,7 @@ static void _drbd_start_io_acct(struct drbd_device *device, struct drbd_request
+ {
+ 	struct request_queue *q = device->rq_queue;
+ 
+-	generic_start_io_acct(q, bio_data_dir(req->master_bio),
++	generic_start_io_acct(q, bio_op(req->master_bio),
+ 				req->i.size >> 9, &device->vdisk->part0);
+ }
+ 
+@@ -47,7 +47,7 @@ static void _drbd_end_io_acct(struct drbd_device *device, struct drbd_request *r
+ {
+ 	struct request_queue *q = device->rq_queue;
+ 
+-	generic_end_io_acct(q, bio_data_dir(req->master_bio),
++	generic_end_io_acct(q, bio_op(req->master_bio),
+ 			    &device->vdisk->part0, req->start_jif);
+ }
+ 
+diff --git a/drivers/block/rsxx/dev.c b/drivers/block/rsxx/dev.c
+index dddb3f2490b6..1a92f9e65937 100644
+--- a/drivers/block/rsxx/dev.c
++++ b/drivers/block/rsxx/dev.c
+@@ -112,7 +112,7 @@ static const struct block_device_operations rsxx_fops = {
+ 
+ static void disk_stats_start(struct rsxx_cardinfo *card, struct bio *bio)
+ {
+-	generic_start_io_acct(card->queue, bio_data_dir(bio), bio_sectors(bio),
++	generic_start_io_acct(card->queue, bio_op(bio), bio_sectors(bio),
+ 			     &card->gendisk->part0);
+ }
+ 
+@@ -120,8 +120,8 @@ static void disk_stats_complete(struct rsxx_cardinfo *card,
+ 				struct bio *bio,
+ 				unsigned long start_time)
+ {
+-	generic_end_io_acct(card->queue, bio_data_dir(bio),
+-				&card->gendisk->part0, start_time);
++	generic_end_io_acct(card->queue, bio_op(bio),
++			    &card->gendisk->part0, start_time);
+ }
+ 
+ static void bio_dma_done_cb(struct rsxx_cardinfo *card,
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index 78c29044684a..2907a8156aaf 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -1277,11 +1277,10 @@ static int zram_bvec_rw(struct zram *zram, struct bio_vec *bvec, u32 index,
+ 			int offset, unsigned int op, struct bio *bio)
+ {
+ 	unsigned long start_time = jiffies;
+-	int rw_acct = op_is_write(op) ? REQ_OP_WRITE : REQ_OP_READ;
+ 	struct request_queue *q = zram->disk->queue;
+ 	int ret;
+ 
+-	generic_start_io_acct(q, rw_acct, bvec->bv_len >> SECTOR_SHIFT,
++	generic_start_io_acct(q, op, bvec->bv_len >> SECTOR_SHIFT,
+ 			&zram->disk->part0);
+ 
+ 	if (!op_is_write(op)) {
+@@ -1293,7 +1292,7 @@ static int zram_bvec_rw(struct zram *zram, struct bio_vec *bvec, u32 index,
+ 		ret = zram_bvec_write(zram, bvec, index, offset, bio);
+ 	}
+ 
+-	generic_end_io_acct(q, rw_acct, &zram->disk->part0, start_time);
++	generic_end_io_acct(q, op, &zram->disk->part0, start_time);
+ 
+ 	zram_slot_lock(zram, index);
+ 	zram_accessed(zram, index);
+diff --git a/drivers/lightnvm/pblk-cache.c b/drivers/lightnvm/pblk-cache.c
+index 77d811962818..f565a56b898a 100644
+--- a/drivers/lightnvm/pblk-cache.c
++++ b/drivers/lightnvm/pblk-cache.c
+@@ -27,7 +27,8 @@ int pblk_write_to_cache(struct pblk *pblk, struct bio *bio, unsigned long flags)
+ 	int nr_entries = pblk_get_secs(bio);
+ 	int i, ret;
+ 
+-	generic_start_io_acct(q, WRITE, bio_sectors(bio), &pblk->disk->part0);
++	generic_start_io_acct(q, REQ_OP_WRITE, bio_sectors(bio),
++			      &pblk->disk->part0);
+ 
+ 	/* Update the write buffer head (mem) with the entries that we can
+ 	 * write. The write in itself cannot fail, so there is no need to
+@@ -75,7 +76,7 @@ retry:
+ 	pblk_rl_inserted(&pblk->rl, nr_entries);
+ 
+ out:
+-	generic_end_io_acct(q, WRITE, &pblk->disk->part0, start_time);
++	generic_end_io_acct(q, REQ_OP_WRITE, &pblk->disk->part0, start_time);
+ 	pblk_write_should_kick(pblk);
+ 	return ret;
+ }
+diff --git a/drivers/lightnvm/pblk-read.c b/drivers/lightnvm/pblk-read.c
+index 26d414ae25b6..5a46d7f9302f 100644
+--- a/drivers/lightnvm/pblk-read.c
++++ b/drivers/lightnvm/pblk-read.c
+@@ -199,7 +199,7 @@ static void __pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
+ 	struct bio *int_bio = rqd->bio;
+ 	unsigned long start_time = r_ctx->start_time;
+ 
+-	generic_end_io_acct(dev->q, READ, &pblk->disk->part0, start_time);
++	generic_end_io_acct(dev->q, REQ_OP_READ, &pblk->disk->part0, start_time);
+ 
+ 	if (rqd->error)
+ 		pblk_log_read_err(pblk, rqd);
+@@ -461,7 +461,8 @@ int pblk_submit_read(struct pblk *pblk, struct bio *bio)
+ 		return NVM_IO_ERR;
+ 	}
+ 
+-	generic_start_io_acct(q, READ, bio_sectors(bio), &pblk->disk->part0);
++	generic_start_io_acct(q, REQ_OP_READ, bio_sectors(bio),
++			      &pblk->disk->part0);
+ 
+ 	bitmap_zero(&read_bitmap, nr_secs);
+ 
+diff --git a/drivers/md/bcache/request.c b/drivers/md/bcache/request.c
+index ae67f5fa8047..97707b0c54ce 100644
+--- a/drivers/md/bcache/request.c
++++ b/drivers/md/bcache/request.c
+@@ -667,8 +667,7 @@ static void backing_request_endio(struct bio *bio)
+ static void bio_complete(struct search *s)
+ {
+ 	if (s->orig_bio) {
+-		generic_end_io_acct(s->d->disk->queue,
+-				    bio_data_dir(s->orig_bio),
++		generic_end_io_acct(s->d->disk->queue, bio_op(s->orig_bio),
+ 				    &s->d->disk->part0, s->start_time);
+ 
+ 		trace_bcache_request_end(s->d, s->orig_bio);
+@@ -1062,8 +1061,7 @@ static void detached_dev_end_io(struct bio *bio)
+ 	bio->bi_end_io = ddip->bi_end_io;
+ 	bio->bi_private = ddip->bi_private;
+ 
+-	generic_end_io_acct(ddip->d->disk->queue,
+-			    bio_data_dir(bio),
++	generic_end_io_acct(ddip->d->disk->queue, bio_op(bio),
+ 			    &ddip->d->disk->part0, ddip->start_time);
+ 
+ 	if (bio->bi_status) {
+@@ -1120,7 +1118,7 @@ static blk_qc_t cached_dev_make_request(struct request_queue *q,
+ 	}
+ 
+ 	atomic_set(&dc->backing_idle, 0);
+-	generic_start_io_acct(q, rw, bio_sectors(bio), &d->disk->part0);
++	generic_start_io_acct(q, bio_op(bio), bio_sectors(bio), &d->disk->part0);
+ 
+ 	bio_set_dev(bio, dc->bdev);
+ 	bio->bi_iter.bi_sector += dc->sb.data_offset;
+@@ -1229,7 +1227,6 @@ static blk_qc_t flash_dev_make_request(struct request_queue *q,
+ 	struct search *s;
+ 	struct closure *cl;
+ 	struct bcache_device *d = bio->bi_disk->private_data;
+-	int rw = bio_data_dir(bio);
+ 
+ 	if (unlikely(d->c && test_bit(CACHE_SET_IO_DISABLE, &d->c->flags))) {
+ 		bio->bi_status = BLK_STS_IOERR;
+@@ -1237,7 +1234,7 @@ static blk_qc_t flash_dev_make_request(struct request_queue *q,
+ 		return BLK_QC_T_NONE;
+ 	}
+ 
+-	generic_start_io_acct(q, rw, bio_sectors(bio), &d->disk->part0);
++	generic_start_io_acct(q, bio_op(bio), bio_sectors(bio), &d->disk->part0);
+ 
+ 	s = search_alloc(bio, d);
+ 	cl = &s->cl;
+@@ -1254,7 +1251,7 @@ static blk_qc_t flash_dev_make_request(struct request_queue *q,
+ 				      flash_dev_nodata,
+ 				      bcache_wq);
+ 		return BLK_QC_T_NONE;
+-	} else if (rw) {
++	} else if (bio_data_dir(bio)) {
+ 		bch_keybuf_check_overlapping(&s->iop.c->moving_gc_keys,
+ 					&KEY(d->id, bio->bi_iter.bi_sector, 0),
+ 					&KEY(d->id, bio_end_sector(bio), 0));
+diff --git a/drivers/md/dm.c b/drivers/md/dm.c
+index b0dd7027848b..20f7e4ef5342 100644
+--- a/drivers/md/dm.c
++++ b/drivers/md/dm.c
+@@ -609,7 +609,8 @@ static void start_io_acct(struct dm_io *io)
+ 
+ 	io->start_time = jiffies;
+ 
+-	generic_start_io_acct(md->queue, rw, bio_sectors(bio), &dm_disk(md)->part0);
++	generic_start_io_acct(md->queue, bio_op(bio), bio_sectors(bio),
++			      &dm_disk(md)->part0);
+ 
+ 	atomic_set(&dm_disk(md)->part0.in_flight[rw],
+ 		   atomic_inc_return(&md->pending[rw]));
+@@ -628,7 +629,8 @@ static void end_io_acct(struct dm_io *io)
+ 	int pending;
+ 	int rw = bio_data_dir(bio);
+ 
+-	generic_end_io_acct(md->queue, rw, &dm_disk(md)->part0, io->start_time);
++	generic_end_io_acct(md->queue, bio_op(bio), &dm_disk(md)->part0,
++			    io->start_time);
+ 
+ 	if (unlikely(dm_stats_used(&md->stats)))
+ 		dm_stats_account_io(&md->stats, bio_data_dir(bio),
+diff --git a/drivers/md/md.c b/drivers/md/md.c
+index dabe36723d60..f6e58dbca0d4 100644
+--- a/drivers/md/md.c
++++ b/drivers/md/md.c
+@@ -335,6 +335,7 @@ EXPORT_SYMBOL(md_handle_request);
+ static blk_qc_t md_make_request(struct request_queue *q, struct bio *bio)
+ {
+ 	const int rw = bio_data_dir(bio);
++	const int sgrp = op_stat_group(bio_op(bio));
+ 	struct mddev *mddev = q->queuedata;
+ 	unsigned int sectors;
+ 	int cpu;
+@@ -363,8 +364,8 @@ static blk_qc_t md_make_request(struct request_queue *q, struct bio *bio)
+ 	md_handle_request(mddev, bio);
+ 
+ 	cpu = part_stat_lock();
+-	part_stat_inc(cpu, &mddev->gendisk->part0, ios[rw]);
+-	part_stat_add(cpu, &mddev->gendisk->part0, sectors[rw], sectors);
++	part_stat_inc(cpu, &mddev->gendisk->part0, ios[sgrp]);
++	part_stat_add(cpu, &mddev->gendisk->part0, sectors[sgrp], sectors);
+ 	part_stat_unlock();
+ 
+ 	return BLK_QC_T_NONE;
+diff --git a/drivers/nvdimm/nd.h b/drivers/nvdimm/nd.h
+index 32e0364b48b9..6ee7fd7e4bbd 100644
+--- a/drivers/nvdimm/nd.h
++++ b/drivers/nvdimm/nd.h
+@@ -396,16 +396,15 @@ static inline bool nd_iostat_start(struct bio *bio, unsigned long *start)
+ 		return false;
+ 
+ 	*start = jiffies;
+-	generic_start_io_acct(disk->queue, bio_data_dir(bio),
+-			      bio_sectors(bio), &disk->part0);
++	generic_start_io_acct(disk->queue, bio_op(bio), bio_sectors(bio),
++			      &disk->part0);
+ 	return true;
+ }
+ static inline void nd_iostat_end(struct bio *bio, unsigned long start)
+ {
+ 	struct gendisk *disk = bio->bi_disk;
+ 
+-	generic_end_io_acct(disk->queue, bio_data_dir(bio), &disk->part0,
+-				start);
++	generic_end_io_acct(disk->queue, bio_op(bio), &disk->part0, start);
+ }
+ static inline bool is_bad_pmem(struct badblocks *bb, sector_t sector,
+ 		unsigned int len)
+diff --git a/include/linux/bio.h b/include/linux/bio.h
+index a00dfff51aa5..ab221c517f4e 100644
+--- a/include/linux/bio.h
++++ b/include/linux/bio.h
+@@ -496,9 +496,9 @@ extern struct bio *bio_copy_kern(struct request_queue *, void *, unsigned int,
+ extern void bio_set_pages_dirty(struct bio *bio);
+ extern void bio_check_pages_dirty(struct bio *bio);
+ 
+-void generic_start_io_acct(struct request_queue *q, int rw,
++void generic_start_io_acct(struct request_queue *q, int op,
+ 				unsigned long sectors, struct hd_struct *part);
+-void generic_end_io_acct(struct request_queue *q, int rw,
++void generic_end_io_acct(struct request_queue *q, int op,
+ 				struct hd_struct *part,
+ 				unsigned long start_time);
+ 
+diff --git a/include/linux/blk_types.h b/include/linux/blk_types.h
+index d2b44de56bc1..2960a96d833c 100644
+--- a/include/linux/blk_types.h
++++ b/include/linux/blk_types.h
+@@ -401,6 +401,11 @@ static inline bool op_is_sync(unsigned int op)
+ 		(op & (REQ_SYNC | REQ_FUA | REQ_PREFLUSH));
+ }
+ 
++static inline int op_stat_group(unsigned int op)
++{
++	return op_is_write(op);
++}
++
+ typedef unsigned int blk_qc_t;
+ #define BLK_QC_T_NONE		-1U
+ #define BLK_QC_T_SHIFT		16
+-- 
+cgit 1.2-0.3.lf.el7
+
