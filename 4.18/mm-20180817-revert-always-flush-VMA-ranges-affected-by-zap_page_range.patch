@@ -1,0 +1,72 @@
+From 50c150f26261e723523f077a67378736fa7511a4 Mon Sep 17 00:00:00 2001
+From: Rik van Riel <riel@surriel.com>
+Date: Fri, 17 Aug 2018 15:48:53 -0700
+Subject: Revert "mm: always flush VMA ranges affected by zap_page_range"
+
+There was a bug in Linux that could cause madvise (and mprotect?) system
+calls to return to userspace without the TLB having been flushed for all
+the pages involved.
+
+This could happen when multiple threads of a process made simultaneous
+madvise and/or mprotect calls.
+
+This was noticed in the summer of 2017, at which time two solutions
+were created:
+
+  56236a59556c ("mm: refactor TLB gathering API")
+  99baac21e458 ("mm: fix MADV_[FREE|DONTNEED] TLB flush miss problem")
+and
+  4647706ebeee ("mm: always flush VMA ranges affected by zap_page_range")
+
+We need only one of these solutions, and the former appears to be a
+little more efficient than the latter, so revert that one.
+
+This reverts 4647706ebeee6e50 ("mm: always flush VMA ranges affected by
+zap_page_range")
+
+Link: http://lkml.kernel.org/r/20180706131019.51e3a5f0@imladris.surriel.com
+Signed-off-by: Rik van Riel <riel@surriel.com>
+Acked-by: Mel Gorman <mgorman@techsingularity.net>
+Cc: Andy Lutomirski <luto@kernel.org>
+Cc: Michal Hocko <mhocko@suse.com>
+Cc: Minchan Kim <minchan@kernel.org>
+Cc: "Kirill A. Shutemov" <kirill.shutemov@linux.intel.com>
+Cc: Mel Gorman <mgorman@techsingularity.net>
+Cc: "Aneesh Kumar K.V" <aneesh.kumar@linux.vnet.ibm.com>
+Cc: Nicholas Piggin <npiggin@gmail.com>
+Cc: Nadav Amit <nadav.amit@gmail.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/memory.c | 14 +-------------
+ 1 file changed, 1 insertion(+), 13 deletions(-)
+
+diff --git a/mm/memory.c b/mm/memory.c
+index ae2ec887508b..19f47d7b9b86 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -1613,20 +1613,8 @@ void zap_page_range(struct vm_area_struct *vma, unsigned long start,
+ 	tlb_gather_mmu(&tlb, mm, start, end);
+ 	update_hiwater_rss(mm);
+ 	mmu_notifier_invalidate_range_start(mm, start, end);
+-	for ( ; vma && vma->vm_start < end; vma = vma->vm_next) {
++	for ( ; vma && vma->vm_start < end; vma = vma->vm_next)
+ 		unmap_single_vma(&tlb, vma, start, end, NULL);
+-
+-		/*
+-		 * zap_page_range does not specify whether mmap_sem should be
+-		 * held for read or write. That allows parallel zap_page_range
+-		 * operations to unmap a PTE and defer a flush meaning that
+-		 * this call observes pte_none and fails to flush the TLB.
+-		 * Rather than adding a complex API, ensure that no stale
+-		 * TLB entries exist when this call returns.
+-		 */
+-		flush_tlb_range(vma, start, end);
+-	}
+-
+ 	mmu_notifier_invalidate_range_end(mm, start, end);
+ 	tlb_finish_mmu(&tlb, start, end);
+ }
+-- 
+cgit 1.2-0.3.lf.el7
+
