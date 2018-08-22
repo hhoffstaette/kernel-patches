@@ -1,0 +1,32 @@
+From 00d22a1c367d03f469f8e1e924b062b09b0545e8 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Fri, 10 Aug 2018 17:55:56 -0700
+Subject: xfs: recalculate summary counters at mount time if icount is bad
+
+Since the sb write verifier trips on bad icounts, we should also force a
+mount time recalculation of the summary counters if the icount is bad.
+This helps us avoid blowing up at freeze/unmount time when the bad
+counter gets written back out.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Allison Henderson <allison.henderson@oracle.com>
+Reviewed-by: Carlos Maiolino <cmaiolino@redhat.com>
+---
+ fs/xfs/xfs_mount.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/xfs/xfs_mount.c b/fs/xfs/xfs_mount.c
+index 99db27d6ac8a..02d15098dbee 100644
+--- a/fs/xfs/xfs_mount.c
++++ b/fs/xfs/xfs_mount.c
+@@ -637,6 +637,7 @@ xfs_check_summary_counts(
+ 	 */
+ 	if (XFS_LAST_UNMOUNT_WAS_CLEAN(mp) &&
+ 	    (mp->m_sb.sb_fdblocks > mp->m_sb.sb_dblocks ||
++	     !xfs_verify_icount(mp, mp->m_sb.sb_icount) ||
+ 	     mp->m_sb.sb_ifree > mp->m_sb.sb_icount))
+ 		mp->m_flags |= XFS_MOUNT_BAD_SUMMARY;
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
