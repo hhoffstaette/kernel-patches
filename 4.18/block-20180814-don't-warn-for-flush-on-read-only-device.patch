@@ -1,0 +1,33 @@
+From b089cfd95d32638335c551651a8e00fd2c4edb0b Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Tue, 14 Aug 2018 10:52:40 -0600
+Subject: block: don't warn for flush on read-only device
+
+Don't warn for a flush issued to a read-only device. It's not strictly
+a writable command, as it doesn't change any on-media data by itself.
+
+Reported-by: Stefan Agner <stefan@agner.ch>
+Fixes: 721c7fc701c7 ("block: fail op_is_write() requests to read-only partitions")
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-core.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 49af34bf2119..7aeef19704f2 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -2162,7 +2162,9 @@ static inline bool should_fail_request(struct hd_struct *part,
+ 
+ static inline bool bio_check_ro(struct bio *bio, struct hd_struct *part)
+ {
+-	if (part->policy && op_is_write(bio_op(bio))) {
++	const int op = bio_op(bio);
++
++	if (part->policy && (op_is_write(op) && !op_is_flush(op))) {
+ 		char b[BDEVNAME_SIZE];
+ 
+ 		WARN_ONCE(1,
+-- 
+cgit 1.2-0.3.lf.el7
+
