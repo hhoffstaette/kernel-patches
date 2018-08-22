@@ -1,0 +1,73 @@
+From 01239d77b9dd978863d1a75f0d095ab942a1fe66 Mon Sep 17 00:00:00 2001
+From: Shan Hai <shan.hai@oracle.com>
+Date: Fri, 10 Aug 2018 17:55:55 -0700
+Subject: xfs: fix a null pointer dereference in xfs_bmap_extents_to_btree
+
+Fuzzing tool reports a write to null pointer error in the
+xfs_bmap_extents_to_btree, fix it by bailing out on encountering
+a null pointer.
+
+Signed-off-by: Shan Hai <shan.hai@oracle.com>
+Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+ fs/xfs/libxfs/xfs_bmap.c | 24 ++++++++++++++++--------
+ 1 file changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_bmap.c b/fs/xfs/libxfs/xfs_bmap.c
+index 5648a177e0ac..2760314fdf7f 100644
+--- a/fs/xfs/libxfs/xfs_bmap.c
++++ b/fs/xfs/libxfs/xfs_bmap.c
+@@ -712,19 +712,14 @@ xfs_bmap_extents_to_btree(
+ 	args.wasdel = wasdel;
+ 	*logflagsp = 0;
+ 	if ((error = xfs_alloc_vextent(&args))) {
+-		xfs_iroot_realloc(ip, -1, whichfork);
+ 		ASSERT(ifp->if_broot == NULL);
+-		XFS_IFORK_FMT_SET(ip, whichfork, XFS_DINODE_FMT_EXTENTS);
+-		xfs_btree_del_cursor(cur, XFS_BTREE_ERROR);
+-		return error;
++		goto err1;
+ 	}
+ 
+ 	if (WARN_ON_ONCE(args.fsbno == NULLFSBLOCK)) {
+-		xfs_iroot_realloc(ip, -1, whichfork);
+ 		ASSERT(ifp->if_broot == NULL);
+-		XFS_IFORK_FMT_SET(ip, whichfork, XFS_DINODE_FMT_EXTENTS);
+-		xfs_btree_del_cursor(cur, XFS_BTREE_ERROR);
+-		return -ENOSPC;
++		error = -ENOSPC;
++		goto err1;
+ 	}
+ 	/*
+ 	 * Allocation can't fail, the space was reserved.
+@@ -736,6 +731,10 @@ xfs_bmap_extents_to_btree(
+ 	ip->i_d.di_nblocks++;
+ 	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT, 1L);
+ 	abp = xfs_btree_get_bufl(mp, tp, args.fsbno, 0);
++	if (!abp) {
++		error = -ENOSPC;
++		goto err2;
++	}
+ 	/*
+ 	 * Fill in the child block.
+ 	 */
+@@ -775,6 +774,15 @@ xfs_bmap_extents_to_btree(
+ 	*curp = cur;
+ 	*logflagsp = XFS_ILOG_CORE | xfs_ilog_fbroot(whichfork);
+ 	return 0;
++
++err2:
++	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT, -1L);
++err1:
++	xfs_iroot_realloc(ip, -1, whichfork);
++	XFS_IFORK_FMT_SET(ip, whichfork, XFS_DINODE_FMT_EXTENTS);
++	xfs_btree_del_cursor(cur, XFS_BTREE_ERROR);
++
++	return error;
+ }
+ 
+ /*
+-- 
+cgit 1.2-0.3.lf.el7
+
