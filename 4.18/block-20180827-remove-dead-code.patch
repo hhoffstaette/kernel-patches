@@ -1,0 +1,31 @@
+From b0a84beb2e35536839ea289182684528f379b860 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Mon, 27 Aug 2018 13:32:12 -0600
+Subject: blk-wbt: remove dead code
+
+We already note and mark discard and swap IO from bio_to_wbt_flags().
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-wbt.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/block/blk-wbt.c b/block/blk-wbt.c
+index bfb0d21d19ce..8e20a0677dcf 100644
+--- a/block/blk-wbt.c
++++ b/block/blk-wbt.c
+@@ -636,11 +636,6 @@ static void wbt_wait(struct rq_qos *rqos, struct bio *bio, spinlock_t *lock)
+ 		return;
+ 	}
+ 
+-	if (current_is_kswapd())
+-		flags |= WBT_KSWAPD;
+-	if (bio_op(bio) == REQ_OP_DISCARD)
+-		flags |= WBT_DISCARD;
+-
+ 	__wbt_wait(rwb, flags, bio->bi_opf, lock);
+ 
+ 	if (!blk_stat_is_active(rwb->cb))
+-- 
+cgit 1.2-0.3.lf.el7
+
