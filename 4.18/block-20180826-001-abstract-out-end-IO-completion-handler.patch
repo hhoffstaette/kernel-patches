@@ -1,0 +1,59 @@
+From 061a5427530633de93ace4ef001b99961984af62 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Sun, 26 Aug 2018 10:09:06 -0600
+Subject: blk-wbt: abstract out end IO completion handler
+
+Prep patch for calling the handler from a different context,
+no functional changes in this patch.
+
+Tested-by: Agarwal, Anchal <anchalag@amazon.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-wbt.c | 21 ++++++++++++++-------
+ 1 file changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/block/blk-wbt.c b/block/blk-wbt.c
+index 84507d3e9a98..4575b4650370 100644
+--- a/block/blk-wbt.c
++++ b/block/blk-wbt.c
+@@ -123,16 +123,11 @@ static void rwb_wake_all(struct rq_wb *rwb)
+ 	}
+ }
+ 
+-static void __wbt_done(struct rq_qos *rqos, enum wbt_flags wb_acct)
++static void wbt_rqw_done(struct rq_wb *rwb, struct rq_wait *rqw,
++			 enum wbt_flags wb_acct)
+ {
+-	struct rq_wb *rwb = RQWB(rqos);
+-	struct rq_wait *rqw;
+ 	int inflight, limit;
+ 
+-	if (!(wb_acct & WBT_TRACKED))
+-		return;
+-
+-	rqw = get_rq_wait(rwb, wb_acct);
+ 	inflight = atomic_dec_return(&rqw->inflight);
+ 
+ 	/*
+@@ -170,6 +165,18 @@ static void __wbt_done(struct rq_qos *rqos, enum wbt_flags wb_acct)
+ 	}
+ }
+ 
++static void __wbt_done(struct rq_qos *rqos, enum wbt_flags wb_acct)
++{
++	struct rq_wb *rwb = RQWB(rqos);
++	struct rq_wait *rqw;
++
++	if (!(wb_acct & WBT_TRACKED))
++		return;
++
++	rqw = get_rq_wait(rwb, wb_acct);
++	wbt_rqw_done(rwb, rqw, wb_acct);
++}
++
+ /*
+  * Called on completion of a request. Note that it's also called when
+  * a request is merged, when the request gets freed.
+-- 
+cgit 1.2-0.3.lf.el7
+
