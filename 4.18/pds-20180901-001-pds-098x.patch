@@ -700,7 +700,7 @@ index 22627f80063e..ebc69c660546 100644
  /* Can be ORed in to make sure the process is reverted back to SCHED_NORMAL on fork */
  #define SCHED_RESET_ON_FORK     0x40000000
 diff --git a/init/Kconfig b/init/Kconfig
-index 041f3a022122..8ff625a371d8 100644
+index 041f3a022122..6c1b712a00a9 100644
 --- a/init/Kconfig
 +++ b/init/Kconfig
 @@ -45,6 +45,21 @@ config THREAD_INFO_IN_TASK
@@ -733,15 +733,16 @@ index 041f3a022122..8ff625a371d8 100644
  	help
  	  This option adds support for automatic NUMA aware memory/task placement.
  	  The mechanism is quite primitive and is based on migrating memory when
-@@ -715,6 +731,7 @@ config CGROUP_WRITEBACK
+@@ -721,7 +737,7 @@ menuconfig CGROUP_SCHED
+ 	  bandwidth allocation to such task groups. It uses cgroups to group
+ 	  tasks.
  
- menuconfig CGROUP_SCHED
- 	bool "CPU controller"
-+	depends on !SCHED_PDS
- 	default n
- 	help
- 	  This feature lets CPU scheduler recognize task groups and control CPU
-@@ -828,6 +845,7 @@ config CGROUP_DEVICE
+-if CGROUP_SCHED
++if CGROUP_SCHED && !SCHED_PDS
+ config FAIR_GROUP_SCHED
+ 	bool "Group scheduling for SCHED_OTHER"
+ 	depends on CGROUP_SCHED
+@@ -828,6 +844,7 @@ config CGROUP_DEVICE
  
  config CGROUP_CPUACCT
  	bool "Simple CPU accounting controller"
@@ -749,7 +750,7 @@ index 041f3a022122..8ff625a371d8 100644
  	help
  	  Provides a simple controller for monitoring the
  	  total CPU consumed by the tasks in a cgroup.
-@@ -934,6 +952,7 @@ endif # NAMESPACES
+@@ -934,6 +951,7 @@ endif # NAMESPACES
  
  config SCHED_AUTOGROUP
  	bool "Automatic process group scheduling"
@@ -758,7 +759,7 @@ index 041f3a022122..8ff625a371d8 100644
  	select CGROUP_SCHED
  	select FAIR_GROUP_SCHED
 diff --git a/init/init_task.c b/init/init_task.c
-index 74f60baa2799..1316c4f2083d 100644
+index 74f60baa2799..4421d6473086 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
 @@ -36,8 +36,7 @@ static struct signal_struct init_signals = {
@@ -771,7 +772,7 @@ index 74f60baa2799..1316c4f2083d 100644
  	.action		= { { { .sa_handler = SIG_DFL, } }, },
  	.siglock	= __SPIN_LOCK_UNLOCKED(init_sighand.siglock),
  	.signalfd_wqh	= __WAIT_QUEUE_HEAD_INITIALIZER(init_sighand.signalfd_wqh),
-@@ -52,6 +51,130 @@ struct task_struct init_task
+@@ -52,6 +51,129 @@ struct task_struct init_task
  	__init_task_data
  #endif
  = {
@@ -804,8 +805,7 @@ index 74f60baa2799..1316c4f2083d 100644
 +	.pushable_tasks	= PLIST_NODE_INIT(init_task.pushable_tasks, MAX_PRIO),
 +#endif
 +#ifdef CONFIG_CGROUP_SCHED
-+	/* PDS not supported yet
-+	.sched_task_group = &root_task_group,*/
++	.sched_task_group = &root_task_group,
 +#endif
 +	.ptraced	= LIST_HEAD_INIT(init_task.ptraced),
 +	.ptrace_entry	= LIST_HEAD_INIT(init_task.ptrace_entry),
@@ -902,7 +902,7 @@ index 74f60baa2799..1316c4f2083d 100644
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	.thread_info	= INIT_THREAD_INFO(init_task),
  	.stack_refcount	= ATOMIC_INIT(1),
-@@ -176,6 +299,7 @@ struct task_struct init_task
+@@ -176,6 +298,7 @@ struct task_struct init_task
  #ifdef CONFIG_SECURITY
  	.security	= NULL,
  #endif
@@ -1245,10 +1245,10 @@ index 1a3e9bddd17b..542f4823b262 100644
 +#endif
 diff --git a/kernel/sched/pds.c b/kernel/sched/pds.c
 new file mode 100644
-index 000000000000..8711bf7a5cb9
+index 000000000000..71e0339f543d
 --- /dev/null
 +++ b/kernel/sched/pds.c
-@@ -0,0 +1,6399 @@
+@@ -0,0 +1,6568 @@
 +/*
 + *  kernel/sched/pds.c, was kernel/sched.c
 + *
@@ -1341,7 +1341,7 @@ index 000000000000..8711bf7a5cb9
 +
 +static inline void print_scheduler_version(void)
 +{
-+	printk(KERN_INFO "pds: PDS-mq CPU Scheduler 0.98w by Alfred Chen.\n");
++	printk(KERN_INFO "pds: PDS-mq CPU Scheduler 0.98x by Alfred Chen.\n");
 +}
 +
 +/* task_struct::on_rq states: */
@@ -1656,19 +1656,27 @@ index 000000000000..8711bf7a5cb9
 +
 +static inline struct task_struct *rq_first_queued_task(struct rq *rq)
 +{
-+	return skiplist_entry(rq->sl_header->next[0],
-+			      struct task_struct, sl_node);
++	struct skiplist_node *node = rq->sl_header.next[0];
++
++	if (node == &rq->sl_header)
++		return rq->idle;
++
++	return skiplist_entry(node, struct task_struct, sl_node);
 +}
 +
 +static inline struct task_struct *rq_second_queued_task(struct rq *rq)
 +{
-+	return skiplist_entry(rq->sl_header->next[0]->next[0],
-+			      struct task_struct, sl_node);
++	struct skiplist_node *node = rq->sl_header.next[0]->next[0];
++
++	if (node == &rq->sl_header)
++		return rq->idle;
++
++	return skiplist_entry(node, struct task_struct, sl_node);
 +}
 +
 +static inline int is_second_in_rq(struct task_struct *p, struct rq *rq)
 +{
-+	return (p->sl_node.prev[0]->prev[0] == rq->sl_header);
++	return (p->sl_node.prev[0]->prev[0] == &rq->sl_header);
 +}
 +
 +static const int task_dl_hash_tbl[] = {
@@ -1735,11 +1743,11 @@ index 000000000000..8711bf7a5cb9
 +static inline void update_sched_rq_queued_masks(struct rq *rq)
 +{
 +	int cpu = cpu_of(rq);
++	struct task_struct *p = rq_first_queued_task(rq);
 +	unsigned long level;
 +#ifdef CONFIG_SCHED_SMT
 +	unsigned long last_level = rq->queued_level;
 +#endif
-+	struct task_struct *p = rq_first_queued_task(rq);
 +
 +	level = task_running_policy_level(p, rq);
 +	sched_rq_prio[cpu] = p->prio;
@@ -1828,7 +1836,7 @@ index 000000000000..8711bf7a5cb9
 +
 +	WARN_ONCE(task_rq(p) != rq, "pds: dequeue task reside on cpu%d from cpu%d\n",
 +		  task_cpu(p), cpu_of(rq));
-+	if (skiplist_del_init(rq->sl_header, &p->sl_node)) {
++	if (skiplist_del_init(&rq->sl_header, &p->sl_node)) {
 +		update_sched_rq_queued_masks(rq);
 +		update_sched_rq_pending_masks(rq);
 +	} else if (is_second_in_rq(p, rq))
@@ -1930,7 +1938,7 @@ index 000000000000..8711bf7a5cb9
 +		  task_cpu(p), cpu_of(rq));
 +
 +	p->sl_node.level = p->sl_level;
-+	if (pds_skiplist_insert(rq->sl_header, &p->sl_node)) {
++	if (pds_skiplist_insert(&rq->sl_header, &p->sl_node)) {
 +		update_sched_rq_queued_masks(rq);
 +		update_sched_rq_pending_masks(rq);
 +	} else if (is_second_in_rq(p, rq))
@@ -1959,11 +1967,11 @@ index 000000000000..8711bf7a5cb9
 +	WARN_ONCE(task_rq(p) != rq, "pds: cpu[%d] requeue task reside on cpu%d\n",
 +		  cpu_of(rq), task_cpu(p));
 +
-+	b_first = skiplist_del_init(rq->sl_header, &p->sl_node);
++	b_first = skiplist_del_init(&rq->sl_header, &p->sl_node);
 +	b_second = is_second_in_rq(p, rq);
 +
 +	p->sl_node.level = p->sl_level;
-+	if (pds_skiplist_insert(rq->sl_header, &p->sl_node) || b_first) {
++	if (pds_skiplist_insert(&rq->sl_header, &p->sl_node) || b_first) {
 +		update_sched_rq_queued_masks(rq);
 +		update_sched_rq_pending_masks(rq);
 +	} else if (is_second_in_rq(p, rq) || b_second)
@@ -4200,7 +4208,7 @@ index 000000000000..8711bf7a5cb9
 +	/*
 +	 * this function is called when rq is locked and nr_running >= 2
 +	 */
-+	node = rq->sl_header->next[0]->next[0];
++	node = rq->sl_header.next[0]->next[0];
 +	p = skiplist_entry(node, struct task_struct, sl_node);
 +
 +	/*
@@ -4526,9 +4534,9 @@ index 000000000000..8711bf7a5cb9
 +	int dest_cpu = cpu_of(dest_rq);
 +	int nr_migrated = 0;
 +	int nr_tries = min((rq->nr_running + 1) / 2, SCHED_RQ_NR_MIGRATION);
-+	struct skiplist_node *node = rq->sl_header->next[0];
++	struct skiplist_node *node = rq->sl_header.next[0];
 +
-+	while (nr_tries && node != rq->sl_header) {
++	while (nr_tries && node != &rq->sl_header) {
 +		p = skiplist_entry(node, struct task_struct, sl_node);
 +		node = node->next[0];
 +
@@ -4543,7 +4551,7 @@ index 000000000000..8711bf7a5cb9
 +		}
 +		nr_tries--;
 +		/* make a jump */
-+		if (node == rq->sl_header)
++		if (node == &rq->sl_header)
 +			break;
 +		node = node->next[0];
 +	}
@@ -6719,8 +6727,6 @@ index 000000000000..8711bf7a5cb9
 +	raw_spin_lock(&rq->lock);
 +	update_rq_clock(rq);
 +
-+	FULL_INIT_SKIPLIST_NODE(&idle->sl_node);
-+
 +	idle->last_ran = rq->clock_task;
 +	idle->state = TASK_RUNNING;
 +	idle->flags |= PF_IDLE;
@@ -6748,7 +6754,6 @@ index 000000000000..8711bf7a5cb9
 +
 +	rq->curr = rq->idle = idle;
 +	idle->on_cpu = 1;
-+	rq->sl_header = &idle->sl_node;
 +
 +	raw_spin_unlock(&rq->lock);
 +	raw_spin_unlock_irqrestore(&idle->pi_lock, flags);
@@ -6959,8 +6964,8 @@ index 000000000000..8711bf7a5cb9
 +	 */
 +	rq->stop = NULL;
 +
-+	node = rq->sl_header;
-+	while ((node = node->next[0]) != rq->sl_header) {
++	node = &rq->sl_header;
++	while ((node = node->next[0]) != &rq->sl_header) {
 +		int dest_cpu;
 +
 +		p = skiplist_entry(node, struct task_struct, sl_node);
@@ -7003,7 +7008,7 @@ index 000000000000..8711bf7a5cb9
 +		rq = dead_rq;
 +		raw_spin_lock(&rq->lock);
 +		/* Check queued task all over from the header again */
-+		node = rq->sl_header;
++		node = &rq->sl_header;
 +	}
 +
 +	rq->stop = stop;
@@ -7400,6 +7405,30 @@ index 000000000000..8711bf7a5cb9
 +		&& addr < (unsigned long)__sched_text_end);
 +}
 +
++#ifdef CONFIG_CGROUP_SCHED
++/* task group related information */
++struct task_group {
++	struct cgroup_subsys_state css;
++
++	struct rcu_head rcu;
++	struct list_head list;
++
++	struct task_group *parent;
++	struct list_head siblings;
++	struct list_head children;
++};
++
++/*
++ * Default task group.
++ * Every task in system belongs to this group at bootup.
++ */
++struct task_group root_task_group;
++LIST_HEAD(task_groups);
++
++/* Cacheline aligned slab cache for task_group */
++static struct kmem_cache *task_group_cache __read_mostly;
++#endif /* CONFIG_CGROUP_SCHED */
++
 +void __init sched_init(void)
 +{
 +	int i;
@@ -7422,11 +7451,18 @@ index 000000000000..8711bf7a5cb9
 +#else
 +	uprq = &per_cpu(runqueues, 0);
 +#endif
++
++#ifdef CONFIG_CGROUP_SCHED
++	task_group_cache = KMEM_CACHE(task_group, 0);
++
++	list_add(&root_task_group.list, &task_groups);
++	INIT_LIST_HEAD(&root_task_group.children);
++	INIT_LIST_HEAD(&root_task_group.siblings);
++#endif /* CONFIG_CGROUP_SCHED */
 +	for_each_possible_cpu(i) {
 +		rq = cpu_rq(i);
-+
++		FULL_INIT_SKIPLIST_NODE(&rq->sl_header);
 +		raw_spin_lock_init(&rq->lock);
-+		rq->sl_header = NULL;
 +		rq->dither = 0;
 +		rq->nr_running = rq->nr_uninterruptible = 0;
 +		rq->calc_load_active = 0;
@@ -7647,10 +7683,143 @@ index 000000000000..8711bf7a5cb9
 +{}
 +#endif
 +
++#ifdef CONFIG_CGROUP_SCHED
++static void sched_free_group(struct task_group *tg)
++{
++	kmem_cache_free(task_group_cache, tg);
++}
++
++/* allocate runqueue etc for a new task group */
++struct task_group *sched_create_group(struct task_group *parent)
++{
++	struct task_group *tg;
++
++	tg = kmem_cache_alloc(task_group_cache, GFP_KERNEL | __GFP_ZERO);
++	if (!tg)
++		return ERR_PTR(-ENOMEM);
++
++	return tg;
++}
++
++void sched_online_group(struct task_group *tg, struct task_group *parent)
++{
++}
++
++/* rcu callback to free various structures associated with a task group */
++static void sched_free_group_rcu(struct rcu_head *rhp)
++{
++	/* Now it should be safe to free those cfs_rqs */
++	sched_free_group(container_of(rhp, struct task_group, rcu));
++}
++
++void sched_destroy_group(struct task_group *tg)
++{
++	/* Wait for possible concurrent references to cfs_rqs complete */
++	call_rcu(&tg->rcu, sched_free_group_rcu);
++}
++
++void sched_offline_group(struct task_group *tg)
++{
++}
++
++static inline struct task_group *css_tg(struct cgroup_subsys_state *css)
++{
++	return css ? container_of(css, struct task_group, css) : NULL;
++}
++
++static struct cgroup_subsys_state *
++cpu_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
++{
++	struct task_group *parent = css_tg(parent_css);
++	struct task_group *tg;
++
++	if (!parent) {
++		/* This is early initialization for the top cgroup */
++		return &root_task_group.css;
++	}
++
++	tg = sched_create_group(parent);
++	if (IS_ERR(tg))
++		return ERR_PTR(-ENOMEM);
++	return &tg->css;
++}
++
++/* Expose task group only after completing cgroup initialization */
++static int cpu_cgroup_css_online(struct cgroup_subsys_state *css)
++{
++	struct task_group *tg = css_tg(css);
++	struct task_group *parent = css_tg(css->parent);
++
++	if (parent)
++		sched_online_group(tg, parent);
++	return 0;
++}
++
++static void cpu_cgroup_css_released(struct cgroup_subsys_state *css)
++{
++	struct task_group *tg = css_tg(css);
++
++	sched_offline_group(tg);
++}
++
++static void cpu_cgroup_css_free(struct cgroup_subsys_state *css)
++{
++	struct task_group *tg = css_tg(css);
++
++	/*
++	 * Relies on the RCU grace period between css_released() and this.
++	 */
++	sched_free_group(tg);
++}
++
++static void cpu_cgroup_fork(struct task_struct *task)
++{
++}
++
++static int cpu_cgroup_can_attach(struct cgroup_taskset *tset)
++{
++	return 0;
++}
++
++static void cpu_cgroup_attach(struct cgroup_taskset *tset)
++{
++}
++
++static struct cftype cpu_legacy_files[] = {
++	{ }	/* Terminate */
++};
++
++static struct cftype cpu_files[] = {
++	{ }	/* terminate */
++};
++
++static int cpu_extra_stat_show(struct seq_file *sf,
++			       struct cgroup_subsys_state *css)
++{
++	return 0;
++}
++
++struct cgroup_subsys cpu_cgrp_subsys = {
++	.css_alloc	= cpu_cgroup_css_alloc,
++	.css_online	= cpu_cgroup_css_online,
++	.css_released	= cpu_cgroup_css_released,
++	.css_free	= cpu_cgroup_css_free,
++	.css_extra_stat_show = cpu_extra_stat_show,
++	.fork		= cpu_cgroup_fork,
++	.can_attach	= cpu_cgroup_can_attach,
++	.attach		= cpu_cgroup_attach,
++	.legacy_cftypes	= cpu_files,
++	.legacy_cftypes	= cpu_legacy_files,
++	.dfl_cftypes	= cpu_files,
++	.early_init	= true,
++	.threaded	= true,
++};
++#endif	/* CONFIG_CGROUP_SCHED */
++
 +#undef CREATE_TRACE_POINTS
 diff --git a/kernel/sched/pds_sched.h b/kernel/sched/pds_sched.h
 new file mode 100644
-index 000000000000..1bc5be10919c
+index 000000000000..6d20158b123a
 --- /dev/null
 +++ b/kernel/sched/pds_sched.h
 @@ -0,0 +1,352 @@
@@ -7711,7 +7880,7 @@ index 000000000000..1bc5be10919c
 +	struct task_struct *curr, *idle, *stop;
 +	struct mm_struct *prev_mm;
 +
-+	struct skiplist_node *sl_header;
++	struct skiplist_node sl_header;
 +
 +	/* switch count */
 +	u64 nr_switches;
