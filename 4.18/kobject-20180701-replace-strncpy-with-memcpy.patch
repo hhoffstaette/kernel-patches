@@ -1,0 +1,39 @@
+From 77d2a24b6107bd9b3bf2403a65c1428a9da83dd0 Mon Sep 17 00:00:00 2001
+From: Guenter Roeck <linux@roeck-us.net>
+Date: Sun, 1 Jul 2018 13:57:16 -0700
+Subject: kobject: Replace strncpy with memcpy
+
+gcc 8.1.0 complains:
+
+lib/kobject.c:128:3: warning:
+	'strncpy' output truncated before terminating nul copying as many
+	bytes from a string as its length [-Wstringop-truncation]
+lib/kobject.c: In function 'kobject_get_path':
+lib/kobject.c:125:13: note: length computed here
+
+Using strncpy() is indeed less than perfect since the length of data to
+be copied has already been determined with strlen(). Replace strncpy()
+with memcpy() to address the warning and optimize the code a little.
+
+Signed-off-by: Guenter Roeck <linux@roeck-us.net>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ lib/kobject.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/kobject.c b/lib/kobject.c
+index 18989b5b3b56..e876957743c8 100644
+--- a/lib/kobject.c
++++ b/lib/kobject.c
+@@ -125,7 +125,7 @@ static void fill_kobj_path(struct kobject *kobj, char *path, int length)
+ 		int cur = strlen(kobject_name(parent));
+ 		/* back up enough to print this name with '/' */
+ 		length -= cur;
+-		strncpy(path + length, kobject_name(parent), cur);
++		memcpy(path + length, kobject_name(parent), cur);
+ 		*(path + --length) = '/';
+ 	}
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
