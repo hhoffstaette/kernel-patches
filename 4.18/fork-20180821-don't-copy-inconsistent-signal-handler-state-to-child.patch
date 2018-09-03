@@ -1,0 +1,48 @@
+From 06e62a46bbba20aa5286102016a04214bb446141 Mon Sep 17 00:00:00 2001
+From: Jann Horn <jannh@google.com>
+Date: Tue, 21 Aug 2018 22:00:58 -0700
+Subject: fork: don't copy inconsistent signal handler state to child
+
+Before this change, if a multithreaded process forks while one of its
+threads is changing a signal handler using sigaction(), the memcpy() in
+copy_sighand() can race with the struct assignment in do_sigaction().  It
+isn't clear whether this can cause corruption of the userspace signal
+handler pointer, but it definitely can cause inconsistency between
+different fields of struct sigaction.
+
+Take the appropriate spinlock to avoid this.
+
+I have tested that this patch prevents inconsistency between sa_sigaction
+and sa_flags, which is possible before this patch.
+
+Link: http://lkml.kernel.org/r/20180702145108.73189-1-jannh@google.com
+Signed-off-by: Jann Horn <jannh@google.com>
+Acked-by: Michal Hocko <mhocko@suse.com>
+Reviewed-by: Andrew Morton <akpm@linux-foundation.org>
+Cc: Rik van Riel <riel@redhat.com>
+Cc: "Peter Zijlstra (Intel)" <peterz@infradead.org>
+Cc: Kees Cook <keescook@chromium.org>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ kernel/fork.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 8bcef2413f1b..23eb960c701d 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1427,7 +1427,9 @@ static int copy_sighand(unsigned long clone_flags, struct task_struct *tsk)
+ 		return -ENOMEM;
+ 
+ 	atomic_set(&sig->count, 1);
++	spin_lock_irq(&current->sighand->siglock);
+ 	memcpy(sig->action, current->sighand->action, sizeof(sig->action));
++	spin_unlock_irq(&current->sighand->siglock);
+ 	return 0;
+ }
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
