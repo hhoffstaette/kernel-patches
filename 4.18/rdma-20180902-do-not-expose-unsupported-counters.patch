@@ -1,0 +1,70 @@
+From e194e28cf657dc079950d2953ec33371d5c251fa Mon Sep 17 00:00:00 2001
+From: Parav Pandit <parav@mellanox.com>
+Date: Sun, 2 Sep 2018 18:45:20 -0500
+Subject: [PATCH] RDMA/core: Do not expose unsupported counters
+
+If the provider driver doesn't support pma counters, avoid exposing its
+directory.
+If fails to read the PMA counter, return an error so that user can retry
+later.
+
+Fixes: 35c4cbb17811 ("IB/core: Create get_perf_mad function in sysfs.c")
+
+Signed-off-by: Parav Pandit <parav@mellanox.com>
+---
+ drivers/infiniband/core/sysfs.c | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/infiniband/core/sysfs.c b/drivers/infiniband/core/sysfs.c
+index c23b610..1784aec 100644
+--- a/drivers/infiniband/core/sysfs.c
++++ b/drivers/infiniband/core/sysfs.c
+@@ -512,7 +512,7 @@ static ssize_t show_pma_counter(struct i
+ 	ret = get_perf_mad(p->ibdev, p->port_num, tab_attr->attr_id, &data,
+ 			40 + offset / 8, sizeof(data));
+ 	if (ret < 0)
+-		return sprintf(buf, "N/A (no PMA)\n");
++		return ret;
+ 
+ 	switch (width) {
+ 	case 4:
+@@ -1057,10 +1057,12 @@ static int add_port(struct ib_device *de
+ 		goto err_put;
+ 	}
+ 
+-	p->pma_table = get_counter_table(device, port_num);
+-	ret = sysfs_create_group(&p->kobj, p->pma_table);
+-	if (ret)
+-		goto err_put_gid_attrs;
++		if (device->process_mad) {
++			p->pma_table = get_counter_table(device, port_num);
++			ret = sysfs_create_group(&p->kobj, p->pma_table);
++			if (ret)
++				goto err_put_gid_attrs;
++		}
+ 
+ 	p->gid_group.name  = "gids";
+ 	p->gid_group.attrs = alloc_group_attrs(show_port_gid, attr.gid_tbl_len);
+@@ -1173,7 +1175,8 @@ err_free_gid:
+ 	p->gid_group.attrs = NULL;
+ 
+ err_remove_pma:
+-	sysfs_remove_group(&p->kobj, p->pma_table);
++	if (device->process_mad)
++		sysfs_remove_group(&p->kobj, p->pma_table);
+ 
+ err_put_gid_attrs:
+ 	kobject_put(&p->gid_attr_group->kobj);
+@@ -1285,7 +1288,9 @@ static void free_port_list_attributes(st
+ 			kfree(port->hw_stats);
+ 			free_hsag(&port->kobj, port->hw_stats_ag);
+ 		}
+-		sysfs_remove_group(p, port->pma_table);
++
++		if (port->pma_table)
++			sysfs_remove_group(p, port->pma_table);
+ 		sysfs_remove_group(p, &port->pkey_group);
+ 		sysfs_remove_group(p, &port->gid_group);
+ 		sysfs_remove_group(&port->gid_attr_group->kobj,
+--
+1.8.3.1
