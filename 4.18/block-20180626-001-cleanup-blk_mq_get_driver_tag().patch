@@ -9,6 +9,7 @@ with the flush cleanup, commit 0c2a6fe4dc3e.
 
 So cleanup the usage and remove the two extra parameters.
 
+[HH: context fixup for 4.18.8]
 Cc: Bart Van Assche <bart.vanassche@wdc.com>
 Cc: Christoph Hellwig <hch@lst.de>
 Tested-by: Andrew Jones <drjones@redhat.com>
@@ -24,7 +25,7 @@ diff --git a/block/blk-mq.c b/block/blk-mq.c
 index 95919268564b..ae8a6b2c7c22 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
-@@ -964,17 +964,14 @@ static inline unsigned int queued_to_index(unsigned int queued)
+@@ -964,18 +964,15 @@ static inline unsigned int queued_to_index(unsigned int queued)
  	return min(BLK_MQ_MAX_DISPATCH_ORDER - 1, ilog2(queued) + 1);
  }
  
@@ -38,6 +39,7 @@ index 95919268564b..ae8a6b2c7c22 100644
 -		.flags = wait ? 0 : BLK_MQ_REQ_NOWAIT,
 +		.flags = BLK_MQ_REQ_NOWAIT,
  	};
+	bool shared;
  
 -	might_sleep_if(wait);
 -
