@@ -1,0 +1,147 @@
+From: Omar Sandoval <osandov@osandov.com>
+Subject: [PATCH] block: use nanosecond resolution for iostat
+Date: Fri, 21 Sep 2018 16:44:34 -0700
+Cc: Jens Axboe <axboe@fb.com>, kernel-team@fb.com,
+        stable@vger.kernel.org
+To: linux-block@vger.kernel.org
+
+From: Omar Sandoval <osandov@fb.com>
+
+Klaus Kusche reported that the I/O busy time in /proc/diskstats was not
+updating properly on 4.18. This is because we started using ktime to
+track elapsed time, and we convert nanoseconds to jiffies when we update
+the partition counter. However, this gets rounded down, so any I/Os that
+take less than a jiffy are not accounted for. Previously in this case,
+the value of jiffies would sometimes increment while we were doing I/O,
+so at least some I/Os were accounted for.
+
+Let's convert the stats to use nanoseconds internally. We still report
+milliseconds as before, now more accurately than ever. The value is
+still truncated to 32 bits for backwards compatibility.
+
+Fixes: 522a777566f5 ("block: consolidate struct request timestamp fields")
+Cc: stable@vger.kernel.org
+Reported-by: Klaus Kusche <klaus.kusche@computerix.info>
+Signed-off-by: Omar Sandoval <osandov@fb.com>
+---
+ block/bio.c               | 2 +-
+ block/blk-core.c          | 4 +---
+ block/genhd.c             | 6 +++---
+ block/partition-generic.c | 6 +++---
+ include/linux/genhd.h     | 5 ++++-
+ 5 files changed, 12 insertions(+), 11 deletions(-)
+
+diff --git a/block/bio.c b/block/bio.c
+index 8c680a776171..0093bed81c0e 100644
+--- a/block/bio.c
++++ b/block/bio.c
+@@ -1684,7 +1684,7 @@ void generic_end_io_acct(struct request_queue *q, int req_op,
+ 	const int sgrp = op_stat_group(req_op);
+ 	int cpu = part_stat_lock();
+ 
+-	part_stat_add(cpu, part, ticks[sgrp], duration);
++	part_stat_add(cpu, part, nsecs[sgrp], jiffies_to_nsecs(duration));
+ 	part_round_stats(q, cpu, part);
+ 	part_dec_in_flight(q, part, op_is_write(req_op));
+ 
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 4dbc93f43b38..cff0a60ee200 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -2733,17 +2733,15 @@ void blk_account_io_done(struct request *req, u64 now)
+ 	 * containing request is enough.
+ 	 */
+ 	if (blk_do_io_stat(req) && !(req->rq_flags & RQF_FLUSH_SEQ)) {
+-		unsigned long duration;
+ 		const int sgrp = op_stat_group(req_op(req));
+ 		struct hd_struct *part;
+ 		int cpu;
+ 
+-		duration = nsecs_to_jiffies(now - req->start_time_ns);
+ 		cpu = part_stat_lock();
+ 		part = req->part;
+ 
+ 		part_stat_inc(cpu, part, ios[sgrp]);
+-		part_stat_add(cpu, part, ticks[sgrp], duration);
++		part_stat_add(cpu, part, nsecs[sgrp], now - req->start_time_ns);
+ 		part_round_stats(req->q, cpu, part);
+ 		part_dec_in_flight(req->q, part, rq_data_dir(req));
+ 
+diff --git a/block/genhd.c b/block/genhd.c
+index 8cc719a37b32..be5bab20b2ab 100644
+--- a/block/genhd.c
++++ b/block/genhd.c
+@@ -1343,18 +1343,18 @@ static int diskstats_show(struct seq_file *seqf, void *v)
+ 			   part_stat_read(hd, ios[STAT_READ]),
+ 			   part_stat_read(hd, merges[STAT_READ]),
+ 			   part_stat_read(hd, sectors[STAT_READ]),
+-			   jiffies_to_msecs(part_stat_read(hd, ticks[STAT_READ])),
++			   (unsigned int)part_stat_read_msecs(hd, STAT_READ),
+ 			   part_stat_read(hd, ios[STAT_WRITE]),
+ 			   part_stat_read(hd, merges[STAT_WRITE]),
+ 			   part_stat_read(hd, sectors[STAT_WRITE]),
+-			   jiffies_to_msecs(part_stat_read(hd, ticks[STAT_WRITE])),
++			   (unsigned int)part_stat_read_msecs(hd, STAT_WRITE),
+ 			   inflight[0],
+ 			   jiffies_to_msecs(part_stat_read(hd, io_ticks)),
+ 			   jiffies_to_msecs(part_stat_read(hd, time_in_queue)),
+ 			   part_stat_read(hd, ios[STAT_DISCARD]),
+ 			   part_stat_read(hd, merges[STAT_DISCARD]),
+ 			   part_stat_read(hd, sectors[STAT_DISCARD]),
+-			   jiffies_to_msecs(part_stat_read(hd, ticks[STAT_DISCARD]))
++			   (unsigned int)part_stat_read_msecs(hd, STAT_DISCARD)
+ 			);
+ 	}
+ 	disk_part_iter_exit(&piter);
+diff --git a/block/partition-generic.c b/block/partition-generic.c
+index 5a8975a1201c..d3d14e81fb12 100644
+--- a/block/partition-generic.c
++++ b/block/partition-generic.c
+@@ -136,18 +136,18 @@ ssize_t part_stat_show(struct device *dev,
+ 		part_stat_read(p, ios[STAT_READ]),
+ 		part_stat_read(p, merges[STAT_READ]),
+ 		(unsigned long long)part_stat_read(p, sectors[STAT_READ]),
+-		jiffies_to_msecs(part_stat_read(p, ticks[STAT_READ])),
++		(unsigned int)part_stat_read_msecs(p, STAT_READ),
+ 		part_stat_read(p, ios[STAT_WRITE]),
+ 		part_stat_read(p, merges[STAT_WRITE]),
+ 		(unsigned long long)part_stat_read(p, sectors[STAT_WRITE]),
+-		jiffies_to_msecs(part_stat_read(p, ticks[STAT_WRITE])),
++		(unsigned int)part_stat_read_msecs(p, STAT_WRITE),
+ 		inflight[0],
+ 		jiffies_to_msecs(part_stat_read(p, io_ticks)),
+ 		jiffies_to_msecs(part_stat_read(p, time_in_queue)),
+ 		part_stat_read(p, ios[STAT_DISCARD]),
+ 		part_stat_read(p, merges[STAT_DISCARD]),
+ 		(unsigned long long)part_stat_read(p, sectors[STAT_DISCARD]),
+-		jiffies_to_msecs(part_stat_read(p, ticks[STAT_DISCARD])));
++		(unsigned int)part_stat_read_msecs(p, STAT_DISCARD));
+ }
+ 
+ ssize_t part_inflight_show(struct device *dev, struct device_attribute *attr,
+diff --git a/include/linux/genhd.h b/include/linux/genhd.h
+index 57864422a2c8..25c08c6c7f99 100644
+--- a/include/linux/genhd.h
++++ b/include/linux/genhd.h
+@@ -83,10 +83,10 @@ struct partition {
+ } __attribute__((packed));
+ 
+ struct disk_stats {
++	u64 nsecs[NR_STAT_GROUPS];
+ 	unsigned long sectors[NR_STAT_GROUPS];
+ 	unsigned long ios[NR_STAT_GROUPS];
+ 	unsigned long merges[NR_STAT_GROUPS];
+-	unsigned long ticks[NR_STAT_GROUPS];
+ 	unsigned long io_ticks;
+ 	unsigned long time_in_queue;
+ };
+@@ -354,6 +354,9 @@ static inline void free_part_stats(struct hd_struct *part)
+ 
+ #endif /* CONFIG_SMP */
+ 
++#define part_stat_read_msecs(part, which)				\
++	div_u64(part_stat_read(part, nsecs[which]), NSEC_PER_MSEC)
++
+ #define part_stat_read_accum(part, field)				\
+ 	(part_stat_read(part, field[STAT_READ]) +			\
+ 	 part_stat_read(part, field[STAT_WRITE]) +			\
