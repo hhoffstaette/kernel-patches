@@ -1,0 +1,34 @@
+From 8f6c72a9e08c2a74d2159d2fc986fa9b29ceb851 Mon Sep 17 00:00:00 2001
+From: Zhihui Zhang <zzhsuny@gmail.com>
+Date: Mon, 2 Jul 2018 20:00:54 -0400
+Subject: Btrfs: free space cache: make sure there is always room for generation number
+
+io_ctl_set_generation() assumes that the generation number shares
+the same page with inline CRCs. Let's make sure this is always true.
+
+Signed-off-by: Zhihui Zhang <zzhsuny@gmail.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/free-space-cache.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/free-space-cache.c b/fs/btrfs/free-space-cache.c
+index d5f80cb300be..d2c0bdbd79ec 100644
+--- a/fs/btrfs/free-space-cache.c
++++ b/fs/btrfs/free-space-cache.c
+@@ -300,9 +300,9 @@ static int io_ctl_init(struct btrfs_io_ctl *io_ctl, struct inode *inode,
+ 	if (btrfs_ino(BTRFS_I(inode)) != BTRFS_FREE_INO_OBJECTID)
+ 		check_crcs = 1;
+ 
+-	/* Make sure we can fit our crcs into the first page */
++	/* Make sure we can fit our crcs and generation into the first page */
+ 	if (write && check_crcs &&
+-	    (num_pages * sizeof(u32)) >= PAGE_SIZE)
++	    (num_pages * sizeof(u32) + sizeof(u64)) > PAGE_SIZE)
+ 		return -ENOSPC;
+ 
+ 	memset(io_ctl, 0, sizeof(struct btrfs_io_ctl));
+-- 
+cgit 1.2-0.3.lf.el7
+
