@@ -1,0 +1,63 @@
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] btrfs: qgroup: Avoid calling qgroup functions if qgroup is not enabled
+Date:   Tue,  9 Oct 2018 14:36:45 +0800
+
+Some qgroup trace events like btrfs_qgroup_release_data() and
+btrfs_qgroup_free_delayed_ref() can still be triggered even qgroup is
+not enabled.
+
+This is caused by the lack of qgroup status check before really calling
+qgroup functions.
+Thankfully related functions can handle quota disabled case well and just
+do nothing for qgroup disabled case.
+
+This patch will do earlier check before triggering related trace events.
+
+And for enabled <-> disabled race case:
+1) For enabled->disabled case
+   Disable will wipe out all qgroups data including reservation and
+   excl/rfer. Even we leaks some reserveration or numbers, it will
+   still be wiped, so nothing can go wrong.
+
+2) For disabled -> enabled case
+   Current btrfs_qgroup_release_data() will use extent_io tree to ensure
+   we won't underflow reservation. And for delayed_ref we use
+   head->qgroup_reserved to record reserved space, so in that case
+   head->qgroup_reserved should be 0 and we won't underflow.
+
+Reported-by: Chris Murphy <lists@colorremedies.com>
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+---
+ fs/btrfs/qgroup.c | 4 ++++
+ fs/btrfs/qgroup.h | 2 ++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 4353bb69bb86..0656f4e78db6 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -3107,6 +3107,10 @@ static int __btrfs_qgroup_release_data(struct inode *inode,
+ 	int trace_op = QGROUP_RELEASE;
+ 	int ret;
+ 
++	if (!test_bit(BTRFS_FS_QUOTA_ENABLED,
++		      &BTRFS_I(inode)->root->fs_info->flags))
++		return 0;
++
+ 	/* In release case, we shouldn't have @reserved */
+ 	WARN_ON(!free && reserved);
+ 	if (free && reserved)
+diff --git a/fs/btrfs/qgroup.h b/fs/btrfs/qgroup.h
+index 54b8bb282c0e..4bbcc1e92a93 100644
+--- a/fs/btrfs/qgroup.h
++++ b/fs/btrfs/qgroup.h
+@@ -249,6 +249,8 @@ void btrfs_qgroup_free_refroot(struct btrfs_fs_info *fs_info,
+ static inline void btrfs_qgroup_free_delayed_ref(struct btrfs_fs_info *fs_info,
+ 						 u64 ref_root, u64 num_bytes)
+ {
++	if (!test_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags))
++		return;
+ 	trace_btrfs_qgroup_free_delayed_ref(fs_info, ref_root, num_bytes);
+ 	btrfs_qgroup_free_refroot(fs_info, ref_root, num_bytes,
+ 				  BTRFS_QGROUP_RSV_DATA);
