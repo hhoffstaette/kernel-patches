@@ -1,0 +1,81 @@
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Subject: [PATCH net-next] r8169: add support for Byte Queue Limits
+To: David Miller <davem@davemloft.net>,
+ Realtek linux nic maintainers <nic_swsd@realtek.com>
+Cc: "netdev@vger.kernel.org" <netdev@vger.kernel.org>,
+ Florian Westphal <fw@strlen.de>,
+ =?UTF-8?Q?Holger_Hoffst=c3=a4tte?= <holger@applied-asynchrony.com>
+
+From: Florian Westphal <fw@strlen.de>
+This patch is basically a resubmit of 1e918876853a ("r8169: add support
+for Byte Queue Limits") which was reverted later. The problems causing
+the revert seem to have been fixed in the meantime.
+Only change to the original patch is that the call to
+netdev_reset_queue was moved to rtl8169_tx_clear.
+
+The Tested-by refers to a system using the RTL8168evl chip version.
+
+Signed-off-by: Florian Westphal <fw@strlen.de>
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Tested-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+---
+ drivers/net/ethernet/realtek/r8169.c | 18 +++++++++++++-----
+ 1 file changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 114bd9e54..006b0aa8c 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -5851,6 +5851,7 @@ static void rtl8169_tx_clear(struct rtl8169_private *tp)
+ {
+ 	rtl8169_tx_clear_range(tp, tp->dirty_tx, NUM_TX_DESC);
+ 	tp->cur_tx = tp->dirty_tx = 0;
++	netdev_reset_queue(tp->dev);
+ }
+ 
+ static void rtl_reset_work(struct rtl8169_private *tp)
+@@ -6153,6 +6154,8 @@ static netdev_tx_t rtl8169_start_xmit(struct sk_buff *skb,
+ 
+ 	txd->opts2 = cpu_to_le32(opts[1]);
+ 
++	netdev_sent_queue(dev, skb->len);
++
+ 	skb_tx_timestamp(skb);
+ 
+ 	/* Force memory writes to complete before releasing descriptor */
+@@ -6251,7 +6254,7 @@ static void rtl8169_pcierr_interrupt(struct net_device *dev)
+ 
+ static void rtl_tx(struct net_device *dev, struct rtl8169_private *tp)
+ {
+-	unsigned int dirty_tx, tx_left;
++	unsigned int dirty_tx, tx_left, bytes_compl = 0, pkts_compl = 0;
+ 
+ 	dirty_tx = tp->dirty_tx;
+ 	smp_rmb();
+@@ -6275,10 +6278,8 @@ static void rtl_tx(struct net_device *dev, struct rtl8169_private *tp)
+ 		rtl8169_unmap_tx_skb(tp_to_dev(tp), tx_skb,
+ 				     tp->TxDescArray + entry);
+ 		if (status & LastFrag) {
+-			u64_stats_update_begin(&tp->tx_stats.syncp);
+-			tp->tx_stats.packets++;
+-			tp->tx_stats.bytes += tx_skb->skb->len;
+-			u64_stats_update_end(&tp->tx_stats.syncp);
++			pkts_compl++;
++			bytes_compl += tx_skb->skb->len;
+ 			dev_consume_skb_any(tx_skb->skb);
+ 			tx_skb->skb = NULL;
+ 		}
+@@ -6287,6 +6288,13 @@ static void rtl_tx(struct net_device *dev, struct rtl8169_private *tp)
+ 	}
+ 
+ 	if (tp->dirty_tx != dirty_tx) {
++		netdev_completed_queue(dev, pkts_compl, bytes_compl);
++
++		u64_stats_update_begin(&tp->tx_stats.syncp);
++		tp->tx_stats.packets += pkts_compl;
++		tp->tx_stats.bytes += bytes_compl;
++		u64_stats_update_end(&tp->tx_stats.syncp);
++
+ 		tp->dirty_tx = dirty_tx;
+ 		/* Sync with rtl8169_start_xmit:
+ 		 * - publish dirty_tx ring index (write barrier)

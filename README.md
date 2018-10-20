@@ -29,6 +29,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - loop: observe rotational property of underlying device
 - net: fixes & improvements from 4.19+ (correctness)
 - pds: [PDS-mq 0.98u](https://cchalpha.blogspot.com/2018/08/pds-098u-release.html) CPU scheduler
+- realtek: fixes from 4.19+ (stability, performance, Byte Queue Limits)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 4.19+ (performance, reliability)
 
