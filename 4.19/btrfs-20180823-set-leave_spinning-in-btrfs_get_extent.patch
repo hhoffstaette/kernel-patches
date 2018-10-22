@@ -14,7 +14,6 @@ rather than that in blocking mode.
 Also fixes the misalignment of the prototype, which is too trivial for
 a single patch.
 
-[HH: trivial context fix in inode.c for 4.18]
 Signed-off-by: Liu Bo <bo.liu@linux.alibaba.com>
 ---
 v2: send out the correct patch.
@@ -53,7 +52,7 @@ index 10e86f7b5398..31d43355f052 100644
 +				    size_t pg_offset, u64 start, u64 len,
 +				    int create)
  {
- 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->vfs_inode.i_sb);
+ 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
  	int ret;
 @@ -6843,6 +6843,12 @@ struct extent_map *btrfs_get_extent(struct btrfs_inode *inode,
  	 */
@@ -77,3 +76,25 @@ index 10e86f7b5398..31d43355f052 100644
  		if (!PageUptodate(page)) {
  			if (btrfs_file_extent_compression(leaf, item) !=
  			    BTRFS_COMPRESS_NONE) {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

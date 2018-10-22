@@ -30,7 +30,7 @@ fio --time_based --name=benchmark --runtime=30 --filename=/dev/md0 --nrfiles=1 \
     --ioengine=libaio --iodepth=32 --direct=1 --invalidate=1 --verify=0 \
     --verify_fatal=0 --numjobs=32 --rw=randread --blocksize=4k
 
-[HH: merged on top of "block: fix integer overflow of latency targets on 32 bit in kyber"]
+[HH: merged on top of "block: move call of scheduler's ->completed_request() hook"]
 Cc: Dongli Zhang <dongli.zhang@oracle.com>
 Cc: Zach Marano <zmarano@google.com>
 Cc: Christoph Hellwig <hch@lst.de>

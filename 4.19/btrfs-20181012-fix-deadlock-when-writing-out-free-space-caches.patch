@@ -186,4 +186,4 @@ index 2f9748599268..577878324799 100644
 +	btrfs_trans_release_chunk_metadata(trans);
  }
  
- int btrfs_make_block_group(struct btrfs_trans_handle *trans,
+ int btrfs_make_block_group(struct btrfs_trans_handle *trans, u64 bytes_used,
