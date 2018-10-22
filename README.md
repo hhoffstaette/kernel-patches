@@ -28,6 +28,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - net: fixes & improvements from 4.20+ (performance)
+- pds: [PDS-mq 0.99b](https://cchalpha.blogspot.com/2018/10/pds-099b-release.html) CPU scheduler
 - realtek: fixes from 4.20+ (stability, performance, Byte Queue Limits)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 4.19+ (performance, reliability)
