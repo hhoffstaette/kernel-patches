@@ -1,0 +1,47 @@
+From 9bc2ceff660580454f971ed3f891a2c82085433a Mon Sep 17 00:00:00 2001
+From: Al Viro <viro@zeniv.linux.org.uk>
+Date: Sun, 29 Jul 2018 23:04:50 +0100
+Subject: btrfs: lift make_bad_inode into btrfs_iget
+
+We don't need to check is_bad_inode() after the call of
+btrfs_read_locked_inode() - it's exactly the same as checking return
+value for being non-zero.
+
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/inode.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 7e56a203c109..cd99ce8583a8 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -3771,7 +3771,6 @@ cache_acl:
+ 
+ make_bad:
+ 	btrfs_free_path(path);
+-	make_bad_inode(inode);
+ 	return ret;
+ }
+ 
+@@ -5697,12 +5696,13 @@ struct inode *btrfs_iget(struct super_block *s, struct btrfs_key *location,
+ 		int ret;
+ 
+ 		ret = btrfs_read_locked_inode(inode);
+-		if (!is_bad_inode(inode)) {
++		if (!ret) {
+ 			inode_tree_add(inode);
+ 			unlock_new_inode(inode);
+ 			if (new)
+ 				*new = 1;
+ 		} else {
++			make_bad_inode(inode);
+ 			unlock_new_inode(inode);
+ 			iput(inode);
+ 			ASSERT(ret < 0);
+-- 
+cgit 1.2-0.3.lf.el7
+
