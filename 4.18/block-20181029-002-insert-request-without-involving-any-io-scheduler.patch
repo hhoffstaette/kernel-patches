@@ -1,0 +1,85 @@
+From: Jianchao Wang <jianchao.w.wang@oracle.com>
+To: axboe@kernel.dk
+Cc: ming.lei@redhat.com, linux-block@vger.kernel.org,
+        linux-kernel@vger.kernel.org
+Subject: [PATCH V3 2/4] blk-mq: insert request without involving any io scheduler
+Date: Mon, 29 Oct 2018 16:49:09 +0800
+
+When try to issue request directly, if the queue is stopped or
+quiesced, 'bypass_insert' will be ignored and return BLK_STS_OK to
+caller to avoid it dispatch request again. Then the request will
+be inserted with blk_mq_sched_insert_request. This is not correct
+for dm-rq case where we should avoid to pass through the underlying
+paths' io scheduler.
+
+To fix it, use blk_mq_request_bypass_insert to insert the request
+into hctx->dispatch directly.
+
+Signed-off-by: Jianchao Wang <jianchao.w.wang@oracle.com>
+---
+ block/blk-mq.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 0f6328b..e0aa068 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1729,13 +1729,14 @@ static blk_status_t __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx,
+ }
+ 
+ enum mq_decision {
++	MQ_INSERT_DISPATCH,
+ 	MQ_INSERT_QUEUE,
+ 	MQ_END_REQUEST,
+ 	MQ_DO_NOTHING,
+ };
+ 
+ static inline enum mq_decision
+-	blk_mq_make_dicision(blk_status_t ret, bool bypass_insert)
++	blk_mq_make_dicision(blk_status_t ret, bool bypass_insert, bool force)
+ {
+ 	enum mq_decision dec;
+ 
+@@ -1745,7 +1746,10 @@ static inline enum mq_decision
+ 		break;
+ 	case BLK_STS_DEV_RESOURCE:
+ 	case BLK_STS_RESOURCE:
+-		dec = bypass_insert ? MQ_DO_NOTHING : MQ_INSERT_QUEUE;
++		if (force)
++			dec = bypass_insert ? MQ_INSERT_DISPATCH : MQ_INSERT_QUEUE;
++		else
++			dec = bypass_insert ? MQ_DO_NOTHING : MQ_INSERT_QUEUE;
+ 		break;
+ 	default:
+ 		dec = bypass_insert ? MQ_DO_NOTHING : MQ_END_REQUEST;
+@@ -1761,7 +1765,7 @@ static blk_status_t blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
+ 						bool bypass_insert)
+ {
+ 	struct request_queue *q = rq->q;
+-	bool run_queue = true;
++	bool run_queue = true, force = false;
+ 	enum mq_decision dec;
+ 	blk_status_t ret = BLK_STS_RESOURCE;
+ 	int srcu_idx;
+@@ -1776,7 +1780,7 @@ static blk_status_t blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
+ 	 */
+ 	if (blk_mq_hctx_stopped(hctx) || blk_queue_quiesced(q)) {
+ 		run_queue = false;
+-		bypass_insert = false;
++		force = true;
+ 		goto out_unlock;
+ 	}
+ 
+@@ -1795,8 +1799,11 @@ static blk_status_t blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
+ out_unlock:
+ 	hctx_unlock(hctx, srcu_idx);
+ 
+-	dec = blk_mq_make_dicision(ret, bypass_insert);
++	dec = blk_mq_make_dicision(ret, bypass_insert, force);
+ 	switch(dec) {
++	case MQ_INSERT_DISPATCH:
++		blk_mq_request_bypass_insert(rq, run_queue);
++		break;
+ 	case MQ_INSERT_QUEUE:
+ 		blk_mq_sched_insert_request(rq, false, run_queue, false);
+ 		break;
