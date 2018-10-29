@@ -1,0 +1,120 @@
+From: Jianchao Wang <jianchao.w.wang@oracle.com>
+Subject: [PATCH V4] block: fix the DISCARD request merge
+Date: Fri, 26 Oct 2018 17:28:36 +0800
+Cc: martin.petersen@oracle.com, tom.leiming@gmail.com, hch@lst.de,
+        linux-block@vger.kernel.org, linux-kernel@vger.kernel.org
+To: axboe@kernel.dk
+
+There are two cases when handle DISCARD merge.
+If max_discard_segments == 1, the bios/requests need to be contiguous
+to merge. If max_discard_segments > 1, it takes every bio as a range
+and different range needn't to be contiguous.
+
+But now, attempt_merge screws this up. It always consider contiguity
+for DISCARD for the case max_discard_segments > 1 and cannot merge
+contiguous DISCARD for the case max_discard_segments == 1, because
+rq_attempt_discard_merge always returns false in this case.
+This patch fixes both of the two cases above.
+
+[HH: removed extra "else" in hunk #1]
+Signed-off-by: Jianchao Wang <jianchao.w.wang@oracle.com>
+---
+
+V4:
+ - introduce blk_try_req_merge as suggestion of Christoph.
+
+V3:
+ - Introduce blk_discard_mergable into attempt_merge and
+   blk_try_merge.
+ - Some comment changes.
+
+V2:
+ - Add max_discard_segments > 1 checking in attempt_merge.
+ - Change patch title and comment.
+ - Add more comment in attempt_merge
+
+ block/blk-merge.c | 47 +++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 37 insertions(+), 10 deletions(-)
+
+diff --git a/block/blk-merge.c b/block/blk-merge.c
+index 42a4674..cf817c7a 100644
+--- a/block/blk-merge.c
++++ b/block/blk-merge.c
+@@ -714,6 +714,32 @@ static void blk_account_io_merge(struct request *req)
+ 		part_stat_unlock();
+ 	}
+ }
++/*
++ * Two cases of handling DISCARD merge:
++ * If max_discard_segments > 1, the driver takes every bio
++ * as a range and send them to controller together. The ranges
++ * needn't to be contiguous.
++ * Otherwise, the bios/requests will be handled as same as
++ * others which should be contiguous.
++ */
++static inline bool blk_discard_mergable(struct request *req)
++{
++	if (req_op(req) == REQ_OP_DISCARD &&
++	    queue_max_discard_segments(req->q) > 1)
++		return true;
++
++	return false;
++}
++
++enum elv_merge blk_try_req_merge(struct request *req, struct request *next)
++{
++	if (blk_discard_mergable(req))
++		return ELEVATOR_DISCARD_MERGE;
++	else if (blk_rq_pos(req) + blk_rq_sectors(req) == blk_rq_pos(next))
++		return ELEVATOR_BACK_MERGE;
++
++	return ELEVATOR_NO_MERGE;
++}
+ 
+ /*
+  * For non-mq, this has to be called with the request spinlock acquired.
+@@ -731,12 +757,6 @@ static struct request *attempt_merge(struct request_queue *q,
+ 	if (req_op(req) != req_op(next))
+ 		return NULL;
+ 
+-	/*
+-	 * not contiguous
+-	 */
+-	if (blk_rq_pos(req) + blk_rq_sectors(req) != blk_rq_pos(next))
+-		return NULL;
+-
+ 	if (rq_data_dir(req) != rq_data_dir(next)
+ 	    || req->rq_disk != next->rq_disk
+ 	    || req_no_special_merge(next))
+@@ -760,11 +780,19 @@ static struct request *attempt_merge(struct request_queue *q,
+ 	 * counts here. Handle DISCARDs separately, as they
+ 	 * have separate settings.
+ 	 */
+-	if (req_op(req) == REQ_OP_DISCARD) {
++
++	switch (blk_try_req_merge(req, next)) {
++	case ELEVATOR_DISCARD_MERGE:
+ 		if (!req_attempt_discard_merge(q, req, next))
+ 			return NULL;
+-	} else if (!ll_merge_requests_fn(q, req, next))
++		break;
++	case ELEVATOR_BACK_MERGE:
++		if (!ll_merge_requests_fn(q, req, next))
++			return NULL;
++		break;
++	default:
+ 		return NULL;
++	}
+ 
+ 	/*
+ 	 * If failfast settings disagree or any of the two is already
+@@ -888,8 +916,7 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
+ 
+ enum elv_merge blk_try_merge(struct request *rq, struct bio *bio)
+ {
+-	if (req_op(rq) == REQ_OP_DISCARD &&
+-	    queue_max_discard_segments(rq->q) > 1)
++	if (blk_discard_mergable(rq))
+ 		return ELEVATOR_DISCARD_MERGE;
+ 	else if (blk_rq_pos(rq) + blk_rq_sectors(rq) == bio->bi_iter.bi_sector)
+ 		return ELEVATOR_BACK_MERGE;
