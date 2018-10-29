@@ -1,0 +1,59 @@
+From: Jianchao Wang <jianchao.w.wang@oracle.com>
+To: axboe@kernel.dk
+Cc: ming.lei@redhat.com, linux-block@vger.kernel.org,
+        linux-kernel@vger.kernel.org
+Subject: [PATCH V3 3/4] blk-mq: issue directly with bypass_insert 'false' in blk_mq_sched_insert_requests
+Date: Mon, 29 Oct 2018 16:49:10 +0800
+
+It is not necessary to issue request directly with bypass_insert
+'true' in blk_mq_sched_insert_requests and insert the non-issued
+requests itself. Just set bypass_insert to 'false' and let
+blk_mq_try_issue_directly handle them.
+
+Signed-off-by: Jianchao Wang <jianchao.w.wang@oracle.com>
+---
+ block/blk-mq-sched.c |  8 +++-----
+ block/blk-mq.c       | 10 +---------
+ 2 files changed, 4 insertions(+), 14 deletions(-)
+
+diff --git a/block/blk-mq-sched.c b/block/blk-mq-sched.c
+index 29bfe80..23cd97e 100644
+--- a/block/blk-mq-sched.c
++++ b/block/blk-mq-sched.c
+@@ -411,12 +411,10 @@ void blk_mq_sched_insert_requests(struct request_queue *q,
+ 		 * busy in case of 'none' scheduler, and this way may save
+ 		 * us one extra enqueue & dequeue to sw queue.
+ 		 */
+-		if (!hctx->dispatch_busy && !e && !run_queue_async) {
++		if (!hctx->dispatch_busy && !e && !run_queue_async)
+ 			blk_mq_try_issue_list_directly(hctx, list);
+-			if (list_empty(list))
+-				return;
+-		}
+-		blk_mq_insert_requests(hctx, ctx, list);
++		else
++			blk_mq_insert_requests(hctx, ctx, list);
+ 	}
+ 
+ 	blk_mq_run_hw_queue(hctx, run_queue_async);
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index e0aa068..9c6c858 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1834,15 +1834,7 @@ void blk_mq_try_issue_list_directly(struct blk_mq_hw_ctx *hctx,
+ 				queuelist);
+ 
+ 		list_del_init(&rq->queuelist);
+-		ret = blk_mq_request_issue_directly(rq);
+-		if (ret != BLK_STS_OK) {
+-			if (ret == BLK_STS_RESOURCE ||
+-					ret == BLK_STS_DEV_RESOURCE) {
+-				list_add(&rq->queuelist, list);
+-				break;
+-			}
+-			blk_mq_end_request(rq, ret);
+-		}
++		ret = blk_mq_try_issue_directly(hctx, rq, NULL, false);
+ 	}
+ }
+ 
