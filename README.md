@@ -21,6 +21,9 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
+**NOTE:** This branch will no longer receive updates!
+-----------------------------------------------------
+
 **Stable Series: 4.18**
 
 - btrfs: fixes from 4.19+ (correctness, discard, error handling)
