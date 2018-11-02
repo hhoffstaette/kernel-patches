@@ -1,0 +1,77 @@
+From: "Paul E. McKenney" <paulmck@linux.ibm.com>
+Subject: Fix for 10-second delay bug for -stable
+Date: Wed, 31 Oct 2018 15:45:15 -0700
+Cc: peterz@infradead.org, linux-kernel@vger.kernel.org
+To: mhillenb@amazon.de, dwmw2@infradead.org
+
+Hello!
+
+I have lightly tested the following backport of 92aa39e9dc77 ("rcu:
+Make need_resched() respond to urgent RCU-QS needs") on v4.12-v4.19.
+Does it look reasonable from your viewpoint?
+
+If I don't hear otherwise, I will send it along to -stable at the end
+of this coming weekend, Pacific Time.
+
+This patch does not apply to v4.11 and earlier.  I will therefore
+ignore those releases unless someone reproduces the problem on them.
+
+							Thanx, Paul
+
+------------------------------------------------------------------------
+
+commit 0a555b6d58f80dcd93a116c5b197208aeaf9f7ef
+Author: Paul E. McKenney <paulmck@linux.vnet.ibm.com>
+Date:   Mon Jul 9 13:47:30 2018 -0700
+
+    rcu: Make need_resched() respond to urgent RCU-QS needs
+    
+    commit 92aa39e9dc77 upstream.
+    
+    The per-CPU rcu_dynticks.rcu_urgent_qs variable communicates an urgent
+    need for an RCU quiescent state from the force-quiescent-state processing
+    within the grace-period kthread to context switches and to cond_resched().
+    Unfortunately, such urgent needs are not communicated to need_resched(),
+    which is sometimes used to decide when to invoke cond_resched(), for
+    but one example, within the KVM vcpu_run() function.  As of v4.15, this
+    can result in synchronize_sched() being delayed by up to ten seconds,
+    which can be problematic, to say nothing of annoying.
+    
+    This commit therefore checks rcu_dynticks.rcu_urgent_qs from within
+    rcu_check_callbacks(), which is invoked from the scheduling-clock
+    interrupt handler.  If the current task is not an idle task and is
+    not executing in usermode, a context switch is forced, and either way,
+    the rcu_dynticks.rcu_urgent_qs variable is set to false.  If the current
+    task is an idle task, then RCU's dyntick-idle code will detect the
+    quiescent state, so no further action is required.  Similarly, if the
+    task is executing in usermode, other code in rcu_check_callbacks() and
+    its called functions will report the corresponding quiescent state.
+    
+    Reported-by: Marius Hillenbrand <mhillenb@amazon.de>
+    Reported-by: David Woodhouse <dwmw2@infradead.org>
+    Suggested-by: Peter Zijlstra <peterz@infradead.org>
+    Signed-off-by: Paul E. McKenney <paulmck@linux.vnet.ibm.com>
+    [ paulmck: Backported to make patch apply cleanly on older versions. ]
+    Tested-by: Marius Hillenbrand <mhillenb@amazon.de>
+    Cc: <stable@vger.kernel.org> # 4.12.x - 4.19.x
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 0b760c1369f7..15301ed19da6 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -2662,6 +2662,15 @@ void rcu_check_callbacks(int user)
+ 		rcu_bh_qs();
+ 	}
+ 	rcu_preempt_check_callbacks();
++	/* The load-acquire pairs with the store-release setting to true. */
++	if (smp_load_acquire(this_cpu_ptr(&rcu_dynticks.rcu_urgent_qs))) {
++		/* Idle and userspace execution already are quiescent states. */
++		if (!rcu_is_cpu_rrupt_from_idle() && !user) {
++			set_tsk_need_resched(current);
++			set_preempt_need_resched();
++		}
++		__this_cpu_write(rcu_dynticks.rcu_urgent_qs, false);
++	}
+ 	if (rcu_pending())
+ 		invoke_rcu_core();
+ 
