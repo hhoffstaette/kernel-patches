@@ -23,9 +23,8 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2018-10-22)**
+**Current status (2018-11-02)**
 
-- 4.19.0 is all fresh.
-- 4.18 will receive one or two more updates.
-- all other branches <4.18 are EOL.
+- 4.19.0 is my current production branch.
+- all other branches <4.19 are EOL.
 
