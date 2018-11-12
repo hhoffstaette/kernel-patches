@@ -19,6 +19,7 @@ reduce the time we block other tasks from starting a new transaction.
 So fix this by traversing the extent io tree once and cleaning up all its
 records in one go while traversing it.
 
+[HH: small context fix for 'btrfs: fix error handling in free_log_tree' in 4.19.2]
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
  fs/btrfs/tree-log.c | 16 ++--------------
@@ -37,9 +38,9 @@ index d49edd25f2e5..aac3749f697f 100644
  	struct walk_control wc = {
  		.free = 1,
  		.process_func = process_one_buffer
-@@ -3216,18 +3214,8 @@ static void free_log_tree(struct btrfs_trans_handle *trans,
- 	if (ret)
- 		btrfs_abort_transaction(trans, ret);
+@@ -3219,18 +3217,8 @@ static void free_log_tree(struct btrfs_trans_handle *trans,
+ 			btrfs_handle_fs_error(log->fs_info, ret, NULL);
+ 	}
  
 -	while (1) {
 -		ret = find_first_extent_bit(&log->dirty_log_pages,
