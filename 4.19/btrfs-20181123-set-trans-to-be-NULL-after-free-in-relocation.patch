@@ -1,0 +1,36 @@
+From:   Pan Bian <bianpan2016@163.com>
+To:     Chris Mason <clm@fb.com>, Josef Bacik <josef@toxicpanda.com>,
+        David Sterba <dsterba@suse.com>
+Cc:     Wang Shilong <wangsl.fnst@cn.fujitsu.com>,
+        linux-btrfs@vger.kernel.org, linux-kernel@vger.kernel.org,
+        Pan Bian <bianpan2016@163.com>
+Subject: [PATCH] btrfs: relocation: set trans to be NULL after free
+Date:   Fri, 23 Nov 2018 18:10:15 +0800
+
+The function relocate_block_group calls btrfs_end_transaction to release
+trans when update_backref_cache returns 1, and then continues the loop
+body. If btrfs_block_rsv_refill fails this time, it will jump out the
+loop and the freed trans will be accessed. This may result in a
+use-after-free bug. The patch assigns NULL to trans after trans is
+released so that it will not be accessed.
+
+Fixes: 0647bf564f1("Btrfs: improve forever loop when doing balance
+relocation")
+
+Signed-off-by: Pan Bian <bianpan2016@163.com>
+---
+ fs/btrfs/relocation.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 924116f..a3f75b8 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -3959,6 +3959,7 @@ static noinline_for_stack int relocate_block_group(struct reloc_control *rc)
+ restart:
+ 		if (update_backref_cache(trans, &rc->backref_cache)) {
+ 			btrfs_end_transaction(trans);
++			trans = NULL;
+ 			continue;
+ 		}
+ 
