@@ -1,0 +1,28 @@
+From:   Eric Sandeen <sandeen@redhat.com>
+To:     linux-xfs <linux-xfs@vger.kernel.org>
+Subject: [PATCH] xfs: fix inverted return from xfs_btree_sblock_verify_crc
+Date:   Thu, 29 Nov 2018 20:48:25 -0600
+
+xfs_btree_sblock_verify_crc is a bool so should not be returning
+a failaddr_t; worse, if xfs_log_check_lsn fails it returns
+__this_address which looks like a boolean true (i.e. success)
+to the caller.
+
+(interestingly xfs_btree_lblock_verify_crc doesn't have the issue)
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+---
+
+diff --git a/fs/xfs/libxfs/xfs_btree.c b/fs/xfs/libxfs/xfs_btree.c
+index 34c6d7bd4d18..bbdae2b4559f 100644
+--- a/fs/xfs/libxfs/xfs_btree.c
++++ b/fs/xfs/libxfs/xfs_btree.c
+@@ -330,7 +330,7 @@ xfs_btree_sblock_verify_crc(
+ 
+ 	if (xfs_sb_version_hascrc(&mp->m_sb)) {
+ 		if (!xfs_log_check_lsn(mp, be64_to_cpu(block->bb_u.s.bb_lsn)))
+-			return __this_address;
++			return false;
+ 		return xfs_buf_verify_cksum(bp, XFS_BTREE_SBLOCK_CRC_OFF);
+ 	}
+ 
