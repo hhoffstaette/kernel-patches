@@ -136,8 +136,8 @@ index 1a0be022f91d..698da2fa0337 100644
 --- a/arch/x86/Kconfig
 +++ b/arch/x86/Kconfig
 @@ -1013,6 +1013,22 @@ config SCHED_SMT
- 	  cost of slightly increased overhead in some places. If unsure say
- 	  N here.
+ config SCHED_SMT
+ 	def_bool y if SMP
  
 +config SMT_NICE
 +	bool "SMT (Hyperthreading) aware nice priority and policy support"
@@ -1164,7 +1164,7 @@ new file mode 100644
 index 000000000000..0421a050d61c
 --- /dev/null
 +++ b/kernel/sched/pds.c
-@@ -0,0 +1,6426 @@
+@@ -0,0 +1,6427 @@
 +/*
 + *  kernel/sched/pds.c, was kernel/sched.c
 + *
@@ -1357,6 +1357,7 @@ index 000000000000..0421a050d61c
 +DEFINE_PER_CPU(cpumask_t *, sched_cpu_affinity_chk_end_masks);
 +
 +#ifdef CONFIG_SCHED_SMT
++DEFINE_STATIC_KEY_FALSE(sched_smt_present);
 +DEFINE_PER_CPU(int, sched_sibling_cpu);
 +
 +static cpumask_t sched_cpu_sg_idle_mask ____cacheline_aligned_in_smp;
