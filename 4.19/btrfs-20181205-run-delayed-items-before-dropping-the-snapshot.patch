@@ -1,8 +1,8 @@
-From:   Josef Bacik <josef@toxicpanda.com>
-To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com
-Cc:     Josef Bacik <jbacik@fb.com>, stable@vger.kernel.org
-Subject: [PATCH 2/2] btrfs: run delayed items before dropping the snapshot
-Date:   Fri, 30 Nov 2018 11:52:14 -0500
+From: Josef Bacik <josef@toxicpanda.com>
+Subject: [PATCH][v2] btrfs: run delayed items before dropping the snapshot
+Date: Wed,  5 Dec 2018 12:12:21 -0500
+Cc: Josef Bacik <jbacik@fb.com>, stable@vger.kernel.org
+To: kernel-team@fb.com, linux-btrfs@vger.kernel.org
 
 From: Josef Bacik <jbacik@fb.com>
 
@@ -60,18 +60,25 @@ delete.  But for now just a quick and easy solution is the safest.
 Cc: stable@vger.kernel.org
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 ---
- fs/btrfs/extent-tree.c | 2 ++
- 1 file changed, 2 insertions(+)
+v1->v2:
+- check for errors from btrfs_run_delayed_items.
+- Dave I can reroll the series, but the second version of patch 1 is the same,
+  let me know what you want.
+
+ fs/btrfs/extent-tree.c | 4 ++++
+ 1 file changed, 4 insertions(+)
 
 diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
-index dcb699dd57f3..965702034b22 100644
+index dcb699dd57f3..473084eb7a2d 100644
 --- a/fs/btrfs/extent-tree.c
 +++ b/fs/btrfs/extent-tree.c
-@@ -9330,6 +9330,8 @@ int btrfs_drop_snapshot(struct btrfs_root *root,
+@@ -9330,6 +9330,10 @@ int btrfs_drop_snapshot(struct btrfs_root *root,
  		goto out_free;
  	}
  
-+	btrfs_run_delayed_items(trans);
++	err = btrfs_run_delayed_items(trans);
++	if (err)
++		goto out_end_trans;
 +
  	if (block_rsv)
  		trans->block_rsv = block_rsv;
