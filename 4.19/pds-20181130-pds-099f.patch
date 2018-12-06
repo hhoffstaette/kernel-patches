@@ -1164,7 +1164,7 @@ new file mode 100644
 index 000000000000..0421a050d61c
 --- /dev/null
 +++ b/kernel/sched/pds.c
-@@ -0,0 +1,6427 @@
+@@ -0,0 +1,6426 @@
 +/*
 + *  kernel/sched/pds.c, was kernel/sched.c
 + *
@@ -1357,7 +1357,6 @@ index 000000000000..0421a050d61c
 +DEFINE_PER_CPU(cpumask_t *, sched_cpu_affinity_chk_end_masks);
 +
 +#ifdef CONFIG_SCHED_SMT
-+DEFINE_STATIC_KEY_FALSE(sched_smt_present);
 +DEFINE_PER_CPU(int, sched_sibling_cpu);
 +
 +static cpumask_t sched_cpu_sg_idle_mask ____cacheline_aligned_in_smp;
