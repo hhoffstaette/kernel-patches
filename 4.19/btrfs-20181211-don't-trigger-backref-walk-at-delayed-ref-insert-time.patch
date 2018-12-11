@@ -1,0 +1,172 @@
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] btrfs: qgroup: Don't trigger backref walk at delayed ref insert time
+Date:   Tue, 11 Dec 2018 13:02:37 +0800
+
+[BUG]
+Since fb235dc06fac ("btrfs: qgroup: Move half of the qgroup accounting
+time out of commit trans"), kernel may lockup with quota enabled.
+
+There is one backref trace triggered by snapshot dropping along with
+write operation in the source subvolume.
+The example can be stably reproduced.
+
+  btrfs-cleaner   D    0  4062      2 0x80000000
+  Call Trace:
+   schedule+0x32/0x90
+   btrfs_tree_read_lock+0x93/0x130 [btrfs]
+   find_parent_nodes+0x29b/0x1170 [btrfs]
+   btrfs_find_all_roots_safe+0xa8/0x120 [btrfs]
+   btrfs_find_all_roots+0x57/0x70 [btrfs]
+   btrfs_qgroup_trace_extent_post+0x37/0x70 [btrfs]
+   btrfs_qgroup_trace_leaf_items+0x10b/0x140 [btrfs]
+   btrfs_qgroup_trace_subtree+0xc8/0xe0 [btrfs]
+   do_walk_down+0x541/0x5e3 [btrfs]
+   walk_down_tree+0xab/0xe7 [btrfs]
+   btrfs_drop_snapshot+0x356/0x71a [btrfs]
+   btrfs_clean_one_deleted_snapshot+0xb8/0xf0 [btrfs]
+   cleaner_kthread+0x12b/0x160 [btrfs]
+   kthread+0x112/0x130
+   ret_from_fork+0x27/0x50
+
+[CAUSE]
+When dropping snapshots with qgroup enabled, we will trigger backref
+walk.
+
+However such backref walk at that timing is pretty dangerous, as if one
+of the parent nodes get WRITE locked by other thread, we could cause a
+dead lock.
+
+For example:
+
+           FS 260     FS 261 (Dropped)
+            node A        node B
+           /      \      /      \
+       node C      node D      node E
+      /   \         /  \        /     \
+  leaf F|leaf G|leaf H|leaf I|leaf J|leaf K
+
+The lock sequence would be:
+
+      Thread A (cleaner)             |       Thread B (other writer)
+-----------------------------------------------------------------------
+write_lock(B)                        |
+write_lock(D)                        |
+^^^ called by walk_down_tree()       |
+                                     |       write_lock(A)
+                                     |       write_lock(D) << Stall
+read_lock(H) << for backref walk     |
+read_lock(D) << lock owner is        |
+                the same thread A    |
+                so read lock is OK   |
+read_lock(A) << Stall                |
+
+So thread A hold write lock D, and needs read lock A to unlock.
+While thread B holds write lock A, while needs lock D to unlock.
+
+This will cause a dead lock.
+
+This is not only limited to snapshot dropping case.
+As the backref walk, even only happens on commit trees, is breaking the
+normal top-down locking order, makes it deadlock prone.
+
+[FIX]
+The solution is not to trigger backref walk with any write lock hold.
+This means we can't do backref walk at delayed ref insert time.
+
+So this patch will mostly revert commit fb235dc06fac ("btrfs: qgroup:
+Move half of the qgroup accounting time out of commit trans").
+
+Reported-by: David Sterba <dsterba@suse.cz>
+Reported-by: Filipe Manana <fdmanana@suse.com>
+Fixes: fb235dc06fac ("btrfs: qgroup: Move half of the qgroup accounting time out of commit trans")
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+---
+ fs/btrfs/delayed-ref.c |  6 ------
+ fs/btrfs/qgroup.c      | 35 ++---------------------------------
+ 2 files changed, 2 insertions(+), 39 deletions(-)
+
+diff --git a/fs/btrfs/delayed-ref.c b/fs/btrfs/delayed-ref.c
+index 9301b3ad9217..7aaae8436986 100644
+--- a/fs/btrfs/delayed-ref.c
++++ b/fs/btrfs/delayed-ref.c
+@@ -788,9 +788,6 @@ int btrfs_add_delayed_tree_ref(struct btrfs_trans_handle *trans,
+ 	if (ret > 0)
+ 		kmem_cache_free(btrfs_delayed_tree_ref_cachep, ref);
+ 
+-	if (qrecord_inserted)
+-		btrfs_qgroup_trace_extent_post(fs_info, record);
+-
+ 	return 0;
+ }
+ 
+@@ -869,9 +866,6 @@ int btrfs_add_delayed_data_ref(struct btrfs_trans_handle *trans,
+ 	if (ret > 0)
+ 		kmem_cache_free(btrfs_delayed_data_ref_cachep, ref);
+ 
+-
+-	if (qrecord_inserted)
+-		return btrfs_qgroup_trace_extent_post(fs_info, record);
+ 	return 0;
+ }
+ 
+diff --git a/fs/btrfs/qgroup.c b/fs/btrfs/qgroup.c
+index 45868fd76209..7d485b1e0efb 100644
+--- a/fs/btrfs/qgroup.c
++++ b/fs/btrfs/qgroup.c
+@@ -1553,33 +1553,6 @@ int btrfs_qgroup_trace_extent_nolock(struct btrfs_fs_info *fs_info,
+ 	return 0;
+ }
+ 
+-int btrfs_qgroup_trace_extent_post(struct btrfs_fs_info *fs_info,
+-				   struct btrfs_qgroup_extent_record *qrecord)
+-{
+-	struct ulist *old_root;
+-	u64 bytenr = qrecord->bytenr;
+-	int ret;
+-
+-	ret = btrfs_find_all_roots(NULL, fs_info, bytenr, 0, &old_root, false);
+-	if (ret < 0) {
+-		fs_info->qgroup_flags |= BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT;
+-		btrfs_warn(fs_info,
+-"error accounting new delayed refs extent (err code: %d), quota inconsistent",
+-			ret);
+-		return 0;
+-	}
+-
+-	/*
+-	 * Here we don't need to get the lock of
+-	 * trans->transaction->delayed_refs, since inserted qrecord won't
+-	 * be deleted, only qrecord->node may be modified (new qrecord insert)
+-	 *
+-	 * So modifying qrecord->old_roots is safe here
+-	 */
+-	qrecord->old_roots = old_root;
+-	return 0;
+-}
+-
+ int btrfs_qgroup_trace_extent(struct btrfs_trans_handle *trans, u64 bytenr,
+ 			      u64 num_bytes, gfp_t gfp_flag)
+ {
+@@ -1607,7 +1580,7 @@ int btrfs_qgroup_trace_extent(struct btrfs_trans_handle *trans, u64 bytenr,
+ 		kfree(record);
+ 		return 0;
+ 	}
+-	return btrfs_qgroup_trace_extent_post(fs_info, record);
++	return 0;
+ }
+ 
+ int btrfs_qgroup_trace_leaf_items(struct btrfs_trans_handle *trans,
+@@ -2557,11 +2530,7 @@ int btrfs_qgroup_account_extents(struct btrfs_trans_handle *trans)
+ 		trace_btrfs_qgroup_account_extents(fs_info, record);
+ 
+ 		if (!ret) {
+-			/*
+-			 * Old roots should be searched when inserting qgroup
+-			 * extent record
+-			 */
+-			if (WARN_ON(!record->old_roots)) {
++			if (!record->old_roots) {
+ 				/* Search commit root to find old_roots */
+ 				ret = btrfs_find_all_roots(NULL, fs_info,
+ 						record->bytenr, 0,
