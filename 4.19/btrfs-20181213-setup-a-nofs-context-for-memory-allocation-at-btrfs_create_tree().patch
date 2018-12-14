@@ -1,0 +1,47 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: setup a nofs context for memory allocation at btrfs_create_tree()
+Date:   Thu, 13 Dec 2018 21:16:45 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+We are holding a transaction handle when creating a tree, therefore we can
+not allocate the root using GFP_KERNEL, as we could deadlock if reclaim is
+triggered by the allocation, therefore setup a nofs context.
+
+Fixes: 74e4d82757f74 ("btrfs: let callers of btrfs_alloc_root pass gfp flags")
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/disk-io.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 67afeaf28a41..3e1b846156dd 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -17,6 +17,7 @@
+ #include <linux/semaphore.h>
+ #include <linux/error-injection.h>
+ #include <linux/crc32c.h>
++#include <linux/sched/mm.h>
+ #include <asm/unaligned.h>
+ #include "ctree.h"
+ #include "disk-io.h"
+@@ -1235,10 +1236,17 @@ struct btrfs_root *btrfs_create_tree(struct btrfs_trans_handle *trans,
+ 	struct btrfs_root *tree_root = fs_info->tree_root;
+ 	struct btrfs_root *root;
+ 	struct btrfs_key key;
++	unsigned int nofs_flag;
+ 	int ret = 0;
+ 	uuid_le uuid = NULL_UUID_LE;
+ 
++	/*
++	 * We're holding a transaction handle, so use a NOFS memory allocation
++	 * context to avoid deadlock if reclaim happens.
++	 */
++	nofs_flag = memalloc_nofs_save();
+ 	root = btrfs_alloc_root(fs_info, GFP_KERNEL);
++	memalloc_nofs_restore(nofs_flag);
+ 	if (!root)
+ 		return ERR_PTR(-ENOMEM);
+ 
