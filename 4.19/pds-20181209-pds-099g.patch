@@ -1,3 +1,6 @@
+
+[HH: context fixes to apply cleanly due to changes in Kconfig & 4.19.11]
+
 diff --git a/Documentation/scheduler/sched-PDS-mq.txt b/Documentation/scheduler/sched-PDS-mq.txt
 new file mode 100644
 index 000000000000..709e86f6487e
@@ -8007,7 +8010,7 @@ index 35475c0c5419..2407b876fa42 100644
  }
 +#endif
  
- #if defined(CONFIG_IRQ_TIME_ACCOUNTING) || defined(CONFIG_PARAVIRT_TIME_ACCOUNTING)
+ #ifdef CONFIG_HAVE_SCHED_AVG_IRQ
  /*
 diff --git a/kernel/sched/pelt.h b/kernel/sched/pelt.h
 index d2894db28955..fb71e7130ee7 100644
@@ -8024,7 +8027,7 @@ index d2894db28955..fb71e7130ee7 100644
  int update_dl_rq_load_avg(u64 now, struct rq *rq, int running);
 +#endif
  
- #if defined(CONFIG_IRQ_TIME_ACCOUNTING) || defined(CONFIG_PARAVIRT_TIME_ACCOUNTING)
+ #ifdef CONFIG_HAVE_SCHED_AVG_IRQ
  int update_irq_load_avg(struct rq *rq, u64 running);
 @@ -16,6 +18,7 @@ update_irq_load_avg(struct rq *rq, u64 running)
  }
