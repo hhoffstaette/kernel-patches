@@ -1,0 +1,45 @@
+From:   "Darrick J. Wong" <darrick.wong@oracle.com>
+To:     xfs <linux-xfs@vger.kernel.org>
+Cc:     Dave Chinner <david@fromorbit.com>
+Subject: [PATCH v2] xfs: don't crash when read verifier reports errors with null b_ops
+Date:   Tue, 15 Jan 2019 14:42:56 -0800
+
+From: Darrick J. Wong <darrick.wong@oracle.com>
+
+In xrep_findroot_block, we work out the btree type and correctness of a
+given block by calling different btree verifiers on root block
+candidates.  However, we leave the NULL b_ops while ->verify_read
+validates the block, which means that if the verifier calls
+xfs_buf_verifier_error it'll crash on the null b_ops.  Fix it to avoid
+this crash.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+v2: leave a comment about what we're doing above the function
+---
+ fs/xfs/xfs_error.c |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_error.c b/fs/xfs/xfs_error.c
+index 9866f542e77b..6e80e438b27a 100644
+--- a/fs/xfs/xfs_error.c
++++ b/fs/xfs/xfs_error.c
+@@ -340,6 +340,9 @@ xfs_corruption_error(
+ /*
+  * Warnings specifically for verifier errors.  Differentiate CRC vs. invalid
+  * values, and omit the stack trace unless the error level is tuned high.
++ *
++ * NOTE: Some callers might be calling the verifiers directly (rather than
++ * through the b_ops structure) so bp->b_ops may be NULL.
+  */
+ void
+ xfs_buf_verifier_error(
+@@ -359,7 +362,7 @@ xfs_buf_verifier_error(
+ 
+ 	xfs_alert(mp, "Metadata %s detected at %pS, %s block 0x%llx %s",
+ 		  bp->b_error == -EFSBADCRC ? "CRC error" : "corruption",
+-		  fa, bp->b_ops->name, bp->b_bn, name);
++		  fa, bp->b_ops ? bp->b_ops->name : "unknown", bp->b_bn, name);
+ 
+ 	xfs_alert(mp, "Unmount and run xfs_repair");
+ 
