@@ -1,0 +1,38 @@
+From:   robbieko <robbieko@synology.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     Robbie Ko <robbieko@synology.com>
+Subject: [PATCH] Btrfs: fix data bytes_may_use underflow with fallocate due to failed quota reserve
+Date:   Mon, 14 Jan 2019 11:15:47 +0800
+
+From: Robbie Ko <robbieko@synology.com>
+
+When doing fallocate, we first add the range to the reserve_list
+and then reserve the qutoa.
+If quota reservation fails, we'll release all reserved parts of
+reserve_list.
+However, cur_offset doen't update to indicate that this range is
+already been inserted into the list.
+Therefore, the same range is freed twice.
+One at list_for_each_entry loop, and the other at the end of the
+function.
+This will result in WARN_ON on bytes_may_use when we free the
+remaining space.
+
+Fixes: ("btrfs: update btrfs_space_info's bytes_may_use timely")
+Signed-off-by: Robbie Ko <robbieko@synology.com>
+---
+ fs/btrfs/file.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index d38dc8c..43c6c8a 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -3132,6 +3132,7 @@ static long btrfs_fallocate(struct file *file, int mode,
+ 			ret = btrfs_qgroup_reserve_data(inode, &data_reserved,
+ 					cur_offset, last_byte - cur_offset);
+ 			if (ret < 0) {
++				cur_offset = last_byte;
+ 				free_extent_map(em);
+ 				break;
+ 			}
