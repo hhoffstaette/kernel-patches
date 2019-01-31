@@ -1,0 +1,39 @@
+From:   Brian Foster <bfoster@redhat.com>
+To:     linux-xfs@vger.kernel.org
+Subject: [PATCH] xfs: end sync buffer I/O properly on shutdown error
+Date:   Mon, 28 Jan 2019 09:55:48 -0500
+
+As of commit e339dd8d8b ("xfs: use sync buffer I/O for sync delwri
+queue submission"), the delwri submission code uses sync buffer I/O
+for sync delwri I/O. Instead of waiting on async I/O to unlock the
+buffer, it uses the underlying sync I/O completion mechanism.
+
+If delwri buffer submission fails due to a shutdown scenario, an
+error is set on the buffer and buffer completion never occurs. This
+can cause xfs_buf_delwri_submit() to deadlock waiting on a
+completion event.
+
+We could check the error state before waiting on such buffers, but
+that doesn't serialize against the case of an error set via a racing
+I/O completion. Instead, invoke I/O completion in the shutdown case
+regardless of buffer I/O type.
+
+Signed-off-by: Brian Foster <bfoster@redhat.com>
+---
+ fs/xfs/xfs_buf.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/fs/xfs/xfs_buf.c b/fs/xfs/xfs_buf.c
+index eedc5e0156ff..1f9857e3630a 100644
+--- a/fs/xfs/xfs_buf.c
++++ b/fs/xfs/xfs_buf.c
+@@ -1536,8 +1536,7 @@ __xfs_buf_submit(
+ 		xfs_buf_ioerror(bp, -EIO);
+ 		bp->b_flags &= ~XBF_DONE;
+ 		xfs_buf_stale(bp);
+-		if (bp->b_flags & XBF_ASYNC)
+-			xfs_buf_ioend(bp);
++		xfs_buf_ioend(bp);
+ 		return -EIO;
+ 	}
+ 
