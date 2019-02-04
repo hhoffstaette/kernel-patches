@@ -1,0 +1,75 @@
+From 698cef173983b086977e633e46476e0f925ca01e Mon Sep 17 00:00:00 2001
+From: Ming Lei <ming.lei@redhat.com>
+Date: Tue, 22 Jan 2019 16:20:17 +0800
+Subject: block: cover another queue enter recursion via BIO_QUEUE_ENTERED
+
+Except for blk_queue_split(), bio_split() is used for splitting bio too,
+then the remained bio is often resubmit to queue via generic_make_request().
+So the same queue enter recursion exits in this case too. Unfortunatley
+commit cd4a4ae4683dc2 doesn't help this case.
+
+This patch covers the above case by setting BIO_QUEUE_ENTERED before calling
+q->make_request_fn.
+
+In theory the per-bio flag is used to simulate one stack variable, it is
+just fine to clear it after q->make_request_fn is returned. Especially
+the same bio can't be submitted from another context.
+
+Fixes: cd4a4ae4683dc2 ("block: don't use blocking queue entered for recursive bio submits")
+Cc: Tetsuo Handa <penguin-kernel@I-love.SAKURA.ne.jp>
+Cc: NeilBrown <neilb@suse.com>
+Reviewed-by:  Mike Snitzer <snitzer@redhat.com>
+Signed-off-by: Ming Lei <ming.lei@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-core.c  | 11 +++++++++++
+ block/blk-merge.c | 10 ----------
+ 2 files changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index 3c5f61ceeb67..1ccec27d20c3 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -1083,7 +1083,18 @@ blk_qc_t generic_make_request(struct bio *bio)
+ 			/* Create a fresh bio_list for all subordinate requests */
+ 			bio_list_on_stack[1] = bio_list_on_stack[0];
+ 			bio_list_init(&bio_list_on_stack[0]);
++
++			/*
++			 * Since we're recursing into make_request here, ensure
++			 * that we mark this bio as already having entered the queue.
++			 * If not, and the queue is going away, we can get stuck
++			 * forever on waiting for the queue reference to drop. But
++			 * that will never happen, as we're already holding a
++			 * reference to it.
++			 */
++			bio_set_flag(bio, BIO_QUEUE_ENTERED);
+ 			ret = q->make_request_fn(q, bio);
++			bio_clear_flag(bio, BIO_QUEUE_ENTERED);
+ 
+ 			/* sort new bios into those for a lower level
+ 			 * and those for the same level
+diff --git a/block/blk-merge.c b/block/blk-merge.c
+index 71e9ac03f621..d79a22f111d1 100644
+--- a/block/blk-merge.c
++++ b/block/blk-merge.c
+@@ -272,16 +272,6 @@ void blk_queue_split(struct request_queue *q, struct bio **bio)
+ 		/* there isn't chance to merge the splitted bio */
+ 		split->bi_opf |= REQ_NOMERGE;
+ 
+-		/*
+-		 * Since we're recursing into make_request here, ensure
+-		 * that we mark this bio as already having entered the queue.
+-		 * If not, and the queue is going away, we can get stuck
+-		 * forever on waiting for the queue reference to drop. But
+-		 * that will never happen, as we're already holding a
+-		 * reference to it.
+-		 */
+-		bio_set_flag(*bio, BIO_QUEUE_ENTERED);
+-
+ 		bio_chain(split, *bio);
+ 		trace_block_split(q, split, (*bio)->bi_iter.bi_sector);
+ 		generic_make_request(*bio);
+-- 
+cgit 1.2-0.3.lf.el7
+
