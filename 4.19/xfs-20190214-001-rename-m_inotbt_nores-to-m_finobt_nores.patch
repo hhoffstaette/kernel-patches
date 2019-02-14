@@ -1,0 +1,84 @@
+From darrick.wong@oracle.com Thu Feb 14 20:13:32 2019
+Date: Thu, 14 Feb 2019 11:04:53 -0800
+From: Darrick J. Wong <darrick.wong@oracle.com>
+To: darrick.wong@oracle.com
+Cc: linux-xfs@vger.kernel.org, Christoph Hellwig <hch@lst.de>
+Subject: [PATCH 1/2] xfs: rename m_inotbt_nores to m_finobt_nores
+
+From: Darrick J. Wong <darrick.wong@oracle.com>
+
+Rename this flag variable to imply more strongly that it's related to
+the free inode btree (finobt) operation.  No functional changes.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+---
+ fs/xfs/libxfs/xfs_ag_resv.c      |    2 +-
+ fs/xfs/libxfs/xfs_ialloc_btree.c |    4 ++--
+ fs/xfs/xfs_inode.c               |    2 +-
+ fs/xfs/xfs_mount.h               |    2 +-
+ 4 files changed, 5 insertions(+), 5 deletions(-)
+
+
+diff --git a/fs/xfs/libxfs/xfs_ag_resv.c b/fs/xfs/libxfs/xfs_ag_resv.c
+index e701ebc36c06..e2ba2a3b63b2 100644
+--- a/fs/xfs/libxfs/xfs_ag_resv.c
++++ b/fs/xfs/libxfs/xfs_ag_resv.c
+@@ -281,7 +281,7 @@ xfs_ag_resv_init(
+ 			 */
+ 			ask = used = 0;
+ 
+-			mp->m_inotbt_nores = true;
++			mp->m_finobt_nores = true;
+ 
+ 			error = xfs_refcountbt_calc_reserves(mp, tp, agno, &ask,
+ 					&used);
+diff --git a/fs/xfs/libxfs/xfs_ialloc_btree.c b/fs/xfs/libxfs/xfs_ialloc_btree.c
+index c2df1f89eec8..1080381ff243 100644
+--- a/fs/xfs/libxfs/xfs_ialloc_btree.c
++++ b/fs/xfs/libxfs/xfs_ialloc_btree.c
+@@ -124,7 +124,7 @@ xfs_finobt_alloc_block(
+ 	union xfs_btree_ptr	*new,
+ 	int			*stat)
+ {
+-	if (cur->bc_mp->m_inotbt_nores)
++	if (cur->bc_mp->m_finobt_nores)
+ 		return xfs_inobt_alloc_block(cur, start, new, stat);
+ 	return __xfs_inobt_alloc_block(cur, start, new, stat,
+ 			XFS_AG_RESV_METADATA);
+@@ -154,7 +154,7 @@ xfs_finobt_free_block(
+ 	struct xfs_btree_cur	*cur,
+ 	struct xfs_buf		*bp)
+ {
+-	if (cur->bc_mp->m_inotbt_nores)
++	if (cur->bc_mp->m_finobt_nores)
+ 		return xfs_inobt_free_block(cur, bp);
+ 	return __xfs_inobt_free_block(cur, bp, XFS_AG_RESV_METADATA);
+ }
+diff --git a/fs/xfs/xfs_inode.c b/fs/xfs/xfs_inode.c
+index 9aaa3143a277..d1411c168700 100644
+--- a/fs/xfs/xfs_inode.c
++++ b/fs/xfs/xfs_inode.c
+@@ -1754,7 +1754,7 @@ xfs_inactive_ifree(
+ 	 * now remains allocated and sits on the unlinked list until the fs is
+ 	 * repaired.
+ 	 */
+-	if (unlikely(mp->m_inotbt_nores)) {
++	if (unlikely(mp->m_finobt_nores)) {
+ 		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_ifree,
+ 				XFS_IFREE_SPACE_RES(mp), 0, XFS_TRANS_RESERVE,
+ 				&tp);
+diff --git a/fs/xfs/xfs_mount.h b/fs/xfs/xfs_mount.h
+index a33f45077867..864ecf27aa75 100644
+--- a/fs/xfs/xfs_mount.h
++++ b/fs/xfs/xfs_mount.h
+@@ -138,7 +138,7 @@ typedef struct xfs_mount {
+ 	struct mutex		m_growlock;	/* growfs mutex */
+ 	int			m_fixedfsid[2];	/* unchanged for life of FS */
+ 	uint64_t		m_flags;	/* global mount flags */
+-	bool			m_inotbt_nores; /* no per-AG finobt resv. */
++	bool			m_finobt_nores; /* no per-AG finobt resv. */
+ 	int			m_ialloc_inos;	/* inodes in inode allocation */
+ 	int			m_ialloc_blks;	/* blocks in inode allocation */
+ 	int			m_ialloc_min_blks;/* min blocks in sparse inode
+
