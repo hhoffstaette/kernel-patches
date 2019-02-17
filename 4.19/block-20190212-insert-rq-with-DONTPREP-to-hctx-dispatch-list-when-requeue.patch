@@ -1,0 +1,64 @@
+From aef1897cd36dcf5e296f1d2bae7e0d268561b685 Mon Sep 17 00:00:00 2001
+From: Jianchao Wang <jianchao.w.wang@oracle.com>
+Date: Tue, 12 Feb 2019 09:56:25 +0800
+Subject: blk-mq: insert rq with DONTPREP to hctx dispatch list when requeue
+
+When requeue, if RQF_DONTPREP, rq has contained some driver
+specific data, so insert it to hctx dispatch list to avoid any
+merge. Take scsi as example, here is the trace event log (no
+io scheduler, because RQF_STARTED would prevent merging),
+
+   kworker/0:1H-339   [000] ...1  2037.209289: block_rq_insert: 8,0 R 4096 () 32768 + 8 [kworker/0:1H]
+scsi_inert_test-1987  [000] ....  2037.220465: block_bio_queue: 8,0 R 32776 + 8 [scsi_inert_test]
+scsi_inert_test-1987  [000] ...2  2037.220466: block_bio_backmerge: 8,0 R 32776 + 8 [scsi_inert_test]
+   kworker/0:1H-339   [000] ....  2047.220913: block_rq_issue: 8,0 R 8192 () 32768 + 16 [kworker/0:1H]
+scsi_inert_test-1996  [000] ..s1  2047.221007: block_rq_complete: 8,0 R () 32768 + 8 [0]
+scsi_inert_test-1996  [000] .Ns1  2047.221045: block_rq_requeue: 8,0 R () 32776 + 8 [0]
+   kworker/0:1H-339   [000] ...1  2047.221054: block_rq_insert: 8,0 R 4096 () 32776 + 8 [kworker/0:1H]
+   kworker/0:1H-339   [000] ...1  2047.221056: block_rq_issue: 8,0 R 4096 () 32776 + 8 [kworker/0:1H]
+scsi_inert_test-1986  [000] ..s1  2047.221119: block_rq_complete: 8,0 R () 32776 + 8 [0]
+
+(32768 + 8) was requeued by scsi_queue_insert and had RQF_DONTPREP.
+Then it was merged with (32776 + 8) and issued. Due to RQF_DONTPREP,
+the sdb only contained the part of (32768 + 8), then only that part
+was completed. The lucky thing was that scsi_io_completion detected
+it and requeued the remaining part. So we didn't get corrupted data.
+However, the requeue of (32776 + 8) is not expected.
+
+Suggested-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Jianchao Wang <jianchao.w.wang@oracle.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 8f5b533764ca..9437a5eb07cf 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -737,12 +737,20 @@ static void blk_mq_requeue_work(struct work_struct *work)
+ 	spin_unlock_irq(&q->requeue_lock);
+ 
+ 	list_for_each_entry_safe(rq, next, &rq_list, queuelist) {
+-		if (!(rq->rq_flags & RQF_SOFTBARRIER))
++		if (!(rq->rq_flags & (RQF_SOFTBARRIER | RQF_DONTPREP)))
+ 			continue;
+ 
+ 		rq->rq_flags &= ~RQF_SOFTBARRIER;
+ 		list_del_init(&rq->queuelist);
+-		blk_mq_sched_insert_request(rq, true, false, false);
++		/*
++		 * If RQF_DONTPREP, rq has contained some driver specific
++		 * data, so insert it to hctx dispatch list to avoid any
++		 * merge.
++		 */
++		if (rq->rq_flags & RQF_DONTPREP)
++			blk_mq_request_bypass_insert(rq, false);
++		else
++			blk_mq_sched_insert_request(rq, true, false, false);
+ 	}
+ 
+ 	while (!list_empty(&rq_list)) {
+-- 
+cgit 1.2-0.3.lf.el7
+
