@@ -1,0 +1,45 @@
+From 3bed3cc4156eedf652b4df72bdb35d4f1a2a739d Mon Sep 17 00:00:00 2001
+From: Alexander Duyck <alexander.h.duyck@linux.intel.com>
+Date: Fri, 15 Feb 2019 14:44:18 -0800
+Subject: net: Do not allocate page fragments that are not skb aligned
+
+This patch addresses the fact that there are drivers, specifically tun,
+that will call into the network page fragment allocators with buffer sizes
+that are not cache aligned. Doing this could result in data alignment
+and DMA performance issues as these fragment pools are also shared with the
+skb allocator and any other devices that will use napi_alloc_frags or
+netdev_alloc_frags.
+
+Fixes: ffde7328a36d ("net: Split netdev_alloc_frag into __alloc_page_frag and add __napi_alloc_frag")
+Reported-by: Jann Horn <jannh@google.com>
+Signed-off-by: Alexander Duyck <alexander.h.duyck@linux.intel.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/core/skbuff.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/net/core/skbuff.c b/net/core/skbuff.c
+index 26d848484912..2415d9cb9b89 100644
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -356,6 +356,8 @@ static void *__netdev_alloc_frag(unsigned int fragsz, gfp_t gfp_mask)
+  */
+ void *netdev_alloc_frag(unsigned int fragsz)
+ {
++	fragsz = SKB_DATA_ALIGN(fragsz);
++
+ 	return __netdev_alloc_frag(fragsz, GFP_ATOMIC);
+ }
+ EXPORT_SYMBOL(netdev_alloc_frag);
+@@ -369,6 +371,8 @@ static void *__napi_alloc_frag(unsigned int fragsz, gfp_t gfp_mask)
+ 
+ void *napi_alloc_frag(unsigned int fragsz)
+ {
++	fragsz = SKB_DATA_ALIGN(fragsz);
++
+ 	return __napi_alloc_frag(fragsz, GFP_ATOMIC);
+ }
+ EXPORT_SYMBOL(napi_alloc_frag);
+-- 
+cgit 1.2-0.3.lf.el7
+
