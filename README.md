@@ -21,15 +21,12 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Stable Series: 4.19**
+**Stable Series: 5.0**
 
-- block: fixes from 4.20+ (BFQ, Kyber, performance, correctness)
-- btrfs: fixes from 4.20+ (correctness, discard)
+- block: fixes from 5.1+ (BFQ)
+- btrfs: fixes from 5.1+ (correctness, reliabliity)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
-- net: fixes & improvements from 4.20+ (performance)
-- pds: [PDS-mq 0.99g](https://cchalpha.blogspot.com/2018/12/pds-099g-release.html) CPU scheduler
-- realtek: fixes from 4.20+ (stability, performance, Byte Queue Limits)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: selected fixes from 4.19+ (performance, reliability)
+- xfs: selected fixes from 5.1+ (performance, reliability)
 
