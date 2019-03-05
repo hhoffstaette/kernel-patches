@@ -27,6 +27,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - btrfs: fixes from 5.1+ (correctness, reliabliity)
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
+- pds: [PDS-mq 0.99o](https://cchalpha.blogspot.com/2019/03/pds-099o-release.html) CPU scheduler
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 5.1+ (performance, reliability)
 
