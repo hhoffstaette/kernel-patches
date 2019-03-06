@@ -23,9 +23,8 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2019-01-12)**
+**Current status (2019-03-06)**
 
-- the next release will be for 5.0 (I'm skipping 4.20 due to lack of time)
-- 4.19.0 is my current production branch.
-- all other branches <4.19 are EOL.
+- 5.0.x is my current production branch.
+- all other branches < 5.0 are EOL.
 
