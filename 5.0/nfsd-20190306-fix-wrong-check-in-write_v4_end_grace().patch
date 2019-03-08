@@ -1,0 +1,37 @@
+From: Yihao Wu <wuyihao@linux.alibaba.com>
+Subject: [PATCH] nfsd: fix wrong check in write_v4_end_grace()
+Date: Wed, 6 Mar 2019 21:47:14 +0800
+Cc: stable@vger.kernel.org, Joseph Qi <joseph.qi@linux.alibaba.com>
+To: "J. Bruce Fields" <bfields@fieldses.org>,
+        Jeff Layton <jlayton@kernel.org>, linux-nfs@vger.kernel.org
+
+From 04ddefd79a5cd410d65b7a30593ac915b9fab687 Mon Sep 17 00:00:00 2001
+From: Yihao Wu <wuyihao@linux.alibaba.com>
+Date: Wed, 6 Mar 2019 21:03:50 +0800
+Subject: [PATCH] nfsd: fix wrong check in write_v4_end_grace()
+
+Commit 62a063b8e7d1 "nfsd4: fix crash on writing v4_end_grace before
+nfsd startup" is trying to fix a NULL dereference issue, but it
+mistakenly checks if the nfsd server is started. So fix it.
+
+Fixes: 62a063b8e7d1 "nfsd4: fix crash on writing v4_end_grace before nfsd startup"
+Cc: stable@vger.kernel.org
+Reviewed-by: Joseph Qi <joseph.qi@linux.alibaba.com>
+Signed-off-by: Yihao Wu <wuyihao@linux.alibaba.com>
+---
+ fs/nfsd/nfsctl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/nfsd/nfsctl.c b/fs/nfsd/nfsctl.c
+index 72a7681..f2feb2d 100644
+--- a/fs/nfsd/nfsctl.c
++++ b/fs/nfsd/nfsctl.c
+@@ -1126,7 +1126,7 @@ static ssize_t write_v4_end_grace(struct file *file, char *buf, size_t size)
+ 		case 'Y':
+ 		case 'y':
+ 		case '1':
+-			if (nn->nfsd_serv)
++			if (!nn->nfsd_serv)
+ 				return -EBUSY;
+ 			nfsd4_end_grace(nn);
+ 			break;
