@@ -1,0 +1,108 @@
+From aa12c02778a9719283fc3c32cfe5cffb902a7685 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Wed, 4 Apr 2018 01:52:31 +0200
+Subject: btrfs: split btrfs_clear_lock_blocking_rw to read and write helpers
+
+There are many callers that hardcode the desired lock type so we can
+avoid the switch and call them directly. Split the current function to
+two. There are no remaining users of btrfs_clear_lock_blocking_rw so
+it's removed.  The call sites will be converted in followup patches.
+
+Reviewed-by: Johannes Thumshirn <jthumshirn@suse.de>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/locking.c | 47 +++++++++++++++++++++++++----------------------
+ fs/btrfs/locking.h |  7 ++-----
+ 2 files changed, 27 insertions(+), 27 deletions(-)
+
+diff --git a/fs/btrfs/locking.c b/fs/btrfs/locking.c
+index 7201d000f61d..7f89ca6f1fbc 100644
+--- a/fs/btrfs/locking.c
++++ b/fs/btrfs/locking.c
+@@ -48,11 +48,24 @@ void btrfs_set_lock_blocking_write(struct extent_buffer *eb)
+ 	}
+ }
+ 
+-/*
+- * if we currently have a blocking lock, take the spinlock
+- * and drop our blocking count
+- */
+-void btrfs_clear_lock_blocking_rw(struct extent_buffer *eb, int rw)
++void btrfs_clear_lock_blocking_read(struct extent_buffer *eb)
++{
++	/*
++	 * No lock is required.  The lock owner may change if we have a read
++	 * lock, but it won't change to or away from us.  If we have the write
++	 * lock, we are the owner and it'll never change.
++	 */
++	if (eb->lock_nested && current->pid == eb->lock_owner)
++		return;
++	BUG_ON(atomic_read(&eb->blocking_readers) == 0);
++	read_lock(&eb->lock);
++	atomic_inc(&eb->spinning_readers);
++	/* atomic_dec_and_test implies a barrier */
++	if (atomic_dec_and_test(&eb->blocking_readers))
++		cond_wake_up_nomb(&eb->read_lock_wq);
++}
++
++void btrfs_clear_lock_blocking_write(struct extent_buffer *eb)
+ {
+ 	/*
+ 	 * no lock is required.  The lock owner may change if
+@@ -62,23 +75,13 @@ void btrfs_clear_lock_blocking_rw(struct extent_buffer *eb, int rw)
+ 	 */
+ 	if (eb->lock_nested && current->pid == eb->lock_owner)
+ 		return;
+-
+-	if (rw == BTRFS_WRITE_LOCK_BLOCKING) {
+-		BUG_ON(atomic_read(&eb->blocking_writers) != 1);
+-		write_lock(&eb->lock);
+-		WARN_ON(atomic_read(&eb->spinning_writers));
+-		atomic_inc(&eb->spinning_writers);
+-		/* atomic_dec_and_test implies a barrier */
+-		if (atomic_dec_and_test(&eb->blocking_writers))
+-			cond_wake_up_nomb(&eb->write_lock_wq);
+-	} else if (rw == BTRFS_READ_LOCK_BLOCKING) {
+-		BUG_ON(atomic_read(&eb->blocking_readers) == 0);
+-		read_lock(&eb->lock);
+-		atomic_inc(&eb->spinning_readers);
+-		/* atomic_dec_and_test implies a barrier */
+-		if (atomic_dec_and_test(&eb->blocking_readers))
+-			cond_wake_up_nomb(&eb->read_lock_wq);
+-	}
++	BUG_ON(atomic_read(&eb->blocking_writers) != 1);
++	write_lock(&eb->lock);
++	WARN_ON(atomic_read(&eb->spinning_writers));
++	atomic_inc(&eb->spinning_writers);
++	/* atomic_dec_and_test implies a barrier */
++	if (atomic_dec_and_test(&eb->blocking_writers))
++		cond_wake_up_nomb(&eb->write_lock_wq);
+ }
+ 
+ /*
+diff --git a/fs/btrfs/locking.h b/fs/btrfs/locking.h
+index 0453a4797693..3f81d6900c71 100644
+--- a/fs/btrfs/locking.h
++++ b/fs/btrfs/locking.h
+@@ -19,7 +19,8 @@ void btrfs_tree_read_unlock(struct extent_buffer *eb);
+ void btrfs_tree_read_unlock_blocking(struct extent_buffer *eb);
+ void btrfs_set_lock_blocking_read(struct extent_buffer *eb);
+ void btrfs_set_lock_blocking_write(struct extent_buffer *eb);
+-void btrfs_clear_lock_blocking_rw(struct extent_buffer *eb, int rw);
++void btrfs_clear_lock_blocking_read(struct extent_buffer *eb);
++void btrfs_clear_lock_blocking_write(struct extent_buffer *eb);
+ void btrfs_assert_tree_locked(struct extent_buffer *eb);
+ int btrfs_try_tree_read_lock(struct extent_buffer *eb);
+ int btrfs_try_tree_write_lock(struct extent_buffer *eb);
+@@ -55,8 +56,4 @@ static inline void btrfs_set_lock_blocking(struct extent_buffer *eb)
+ 	btrfs_set_lock_blocking_rw(eb, BTRFS_WRITE_LOCK);
+ }
+ 
+-static inline void btrfs_clear_lock_blocking(struct extent_buffer *eb)
+-{
+-	btrfs_clear_lock_blocking_rw(eb, BTRFS_WRITE_LOCK_BLOCKING);
+-}
+ #endif
+-- 
+cgit 1.2-0.3.lf.el7
+

@@ -1,0 +1,80 @@
+From 352646c7bfa9fddb80c4ae87dce4a9ebd7dd0bb4 Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <nborisov@suse.com>
+Date: Wed, 30 Jan 2019 16:51:00 +0200
+Subject: btrfs: Fix grossly misleading argument names in extent io search
+
+The variables and function parameters of __etree_search which pertain to
+prev/next are grossly misnamed. Namely, prev_ret holds the next state
+and not the previous. Similarly, next_ret actually holds the previous
+extent state relating to the offset we are interested in. Fix this by
+renaming the variables as well as switching the arguments order. No
+functional changes.
+
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent_io.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 67fec85c94d9..90ecce857263 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -281,8 +281,8 @@ do_insert:
+ }
+ 
+ static struct rb_node *__etree_search(struct extent_io_tree *tree, u64 offset,
+-				      struct rb_node **prev_ret,
+ 				      struct rb_node **next_ret,
++				      struct rb_node **prev_ret,
+ 				      struct rb_node ***p_ret,
+ 				      struct rb_node **parent_ret)
+ {
+@@ -311,23 +311,23 @@ static struct rb_node *__etree_search(struct extent_io_tree *tree, u64 offset,
+ 	if (parent_ret)
+ 		*parent_ret = prev;
+ 
+-	if (prev_ret) {
++	if (next_ret) {
+ 		orig_prev = prev;
+ 		while (prev && offset > prev_entry->end) {
+ 			prev = rb_next(prev);
+ 			prev_entry = rb_entry(prev, struct tree_entry, rb_node);
+ 		}
+-		*prev_ret = prev;
++		*next_ret = prev;
+ 		prev = orig_prev;
+ 	}
+ 
+-	if (next_ret) {
++	if (prev_ret) {
+ 		prev_entry = rb_entry(prev, struct tree_entry, rb_node);
+ 		while (prev && offset < prev_entry->start) {
+ 			prev = rb_prev(prev);
+ 			prev_entry = rb_entry(prev, struct tree_entry, rb_node);
+ 		}
+-		*next_ret = prev;
++		*prev_ret = prev;
+ 	}
+ 	return NULL;
+ }
+@@ -338,12 +338,12 @@ tree_search_for_insert(struct extent_io_tree *tree,
+ 		       struct rb_node ***p_ret,
+ 		       struct rb_node **parent_ret)
+ {
+-	struct rb_node *prev = NULL;
++	struct rb_node *next= NULL;
+ 	struct rb_node *ret;
+ 
+-	ret = __etree_search(tree, offset, &prev, NULL, p_ret, parent_ret);
++	ret = __etree_search(tree, offset, &next, NULL, p_ret, parent_ret);
+ 	if (!ret)
+-		return prev;
++		return next;
+ 	return ret;
+ }
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+

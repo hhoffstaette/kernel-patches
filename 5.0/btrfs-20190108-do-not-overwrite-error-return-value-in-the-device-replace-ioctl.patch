@@ -1,0 +1,34 @@
+From d3a53286c191c3d598eae09a68bb99a0db4e2466 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Tue, 8 Jan 2019 11:42:09 +0000
+Subject: Btrfs: do not overwrite error return value in the device replace
+ ioctl
+
+If the call to btrfs_dev_replace_by_ioctl() failed we would overwrite the
+error returned to user space with -EFAULT if the call to copy_to_user()
+failed as well. Fix that by calling copy_to_user() only if no error
+happened before or a device replace operation was canceled.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ioctl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 816fa7dce79f..b07b19acdbb1 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -4475,7 +4475,7 @@ static long btrfs_ioctl_dev_replace(struct btrfs_fs_info *fs_info,
+ 		break;
+ 	}
+ 
+-	if (copy_to_user(arg, p, sizeof(*p)))
++	if ((ret == 0 || ret == -ECANCELED) && copy_to_user(arg, p, sizeof(*p)))
+ 		ret = -EFAULT;
+ out:
+ 	kfree(p);
+-- 
+cgit 1.2-0.3.lf.el7
+

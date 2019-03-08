@@ -1,0 +1,77 @@
+From 8a1bbe1d5cba415c771fe5ff68b83b93701c1d7f Mon Sep 17 00:00:00 2001
+From: Josef Bacik <josef@toxicpanda.com>
+Date: Wed, 21 Nov 2018 14:03:12 -0500
+Subject: btrfs: be more explicit about allowed flush states
+
+For FLUSH_LIMIT flushers we really can only allocate chunks and flush
+delayed inode items, everything else is problematic.  I added a bunch of
+new states and it lead to weirdness in the FLUSH_LIMIT case because I
+forgot about how it worked.  So instead explicitly declare the states
+that are ok for flushing with FLUSH_LIMIT and use that for our state
+machine.  Then as we add new things that are safe we can just add them
+to this list.
+
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent-tree.c | 22 +++++++++++-----------
+ 1 file changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index cb97ada7f410..3c9ae2a0c0be 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -5143,12 +5143,18 @@ void btrfs_init_async_reclaim_work(struct work_struct *work)
+ 	INIT_WORK(work, btrfs_async_reclaim_metadata_space);
+ }
+ 
++static const enum btrfs_flush_state priority_flush_states[] = {
++	FLUSH_DELAYED_ITEMS_NR,
++	FLUSH_DELAYED_ITEMS,
++	ALLOC_CHUNK,
++};
++
+ static void priority_reclaim_metadata_space(struct btrfs_fs_info *fs_info,
+ 					    struct btrfs_space_info *space_info,
+ 					    struct reserve_ticket *ticket)
+ {
+ 	u64 to_reclaim;
+-	int flush_state = FLUSH_DELAYED_ITEMS_NR;
++	int flush_state;
+ 
+ 	spin_lock(&space_info->lock);
+ 	to_reclaim = btrfs_calc_reclaim_metadata_size(fs_info, space_info,
+@@ -5159,8 +5165,10 @@ static void priority_reclaim_metadata_space(struct btrfs_fs_info *fs_info,
+ 	}
+ 	spin_unlock(&space_info->lock);
+ 
++	flush_state = 0;
+ 	do {
+-		flush_space(fs_info, space_info, to_reclaim, flush_state);
++		flush_space(fs_info, space_info, to_reclaim,
++			    priority_flush_states[flush_state]);
+ 		flush_state++;
+ 		spin_lock(&space_info->lock);
+ 		if (ticket->bytes == 0) {
+@@ -5168,15 +5176,7 @@ static void priority_reclaim_metadata_space(struct btrfs_fs_info *fs_info,
+ 			return;
+ 		}
+ 		spin_unlock(&space_info->lock);
+-
+-		/*
+-		 * Priority flushers can't wait on delalloc without
+-		 * deadlocking.
+-		 */
+-		if (flush_state == FLUSH_DELALLOC ||
+-		    flush_state == FLUSH_DELALLOC_WAIT)
+-			flush_state = ALLOC_CHUNK;
+-	} while (flush_state < COMMIT_TRANS);
++	} while (flush_state < ARRAY_SIZE(priority_flush_states));
+ }
+ 
+ static int wait_reserve_ticket(struct btrfs_fs_info *fs_info,
+-- 
+cgit 1.2-0.3.lf.el7
+

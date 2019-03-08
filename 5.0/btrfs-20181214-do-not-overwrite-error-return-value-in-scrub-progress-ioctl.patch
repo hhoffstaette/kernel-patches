@@ -1,0 +1,35 @@
+From 4fa99b008fb53ade9bacea51d29b24efee8914a8 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Fri, 14 Dec 2018 19:45:13 +0000
+Subject: Btrfs: do not overwrite error return value in scrub progress ioctl
+
+If the call to btrfs_scrub_progress() failed we would overwrite the error
+returned to user space with -EFAULT if the call to copy_to_user() failed
+as well. Fix that by calling copy_to_user() only if btrfs_scrub_progress()
+returned success.
+
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Reviewed-by: Johannes Thumshirn <jthumshirn@suse.de>
+Reviewed-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ioctl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index d34e54d80149..02ea03d220e8 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -4414,7 +4414,7 @@ static long btrfs_ioctl_scrub_progress(struct btrfs_fs_info *fs_info,
+ 
+ 	ret = btrfs_scrub_progress(fs_info, sa->devid, &sa->progress);
+ 
+-	if (copy_to_user(arg, sa, sizeof(*sa)))
++	if (ret == 0 && copy_to_user(arg, sa, sizeof(*sa)))
+ 		ret = -EFAULT;
+ 
+ 	kfree(sa);
+-- 
+cgit 1.2-0.3.lf.el7
+

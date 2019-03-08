@@ -1,0 +1,67 @@
+From 766ece54f4c9c29b25eabd091a2ee939feb1669e Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Wed, 23 Jan 2019 18:07:14 +0100
+Subject: btrfs: merge btrfs_set_lock_blocking_rw with it's caller
+
+The last caller that does not have a fixed value of lock is
+btrfs_set_path_blocking, that actually does the same conditional swtich
+by the lock type so we can merge the branches together and remove the
+helper.
+
+Reviewed-by: Johannes Thumshirn <jthumshirn@suse.de>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c   | 13 ++++++++++---
+ fs/btrfs/locking.h | 12 ------------
+ 2 files changed, 10 insertions(+), 15 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 3940d707fcf3..4fac5cc2e648 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -46,11 +46,18 @@ noinline void btrfs_set_path_blocking(struct btrfs_path *p)
+ 	for (i = 0; i < BTRFS_MAX_LEVEL; i++) {
+ 		if (!p->nodes[i] || !p->locks[i])
+ 			continue;
+-		btrfs_set_lock_blocking_rw(p->nodes[i], p->locks[i]);
+-		if (p->locks[i] == BTRFS_READ_LOCK)
++		/*
++		 * If we currently have a spinning reader or writer lock this
++		 * will bump the count of blocking holders and drop the
++		 * spinlock.
++		 */
++		if (p->locks[i] == BTRFS_READ_LOCK) {
++			btrfs_set_lock_blocking_read(p->nodes[i]);
+ 			p->locks[i] = BTRFS_READ_LOCK_BLOCKING;
+-		else if (p->locks[i] == BTRFS_WRITE_LOCK)
++		} else if (p->locks[i] == BTRFS_WRITE_LOCK) {
++			btrfs_set_lock_blocking_write(p->nodes[i]);
+ 			p->locks[i] = BTRFS_WRITE_LOCK_BLOCKING;
++		}
+ 	}
+ }
+ 
+diff --git a/fs/btrfs/locking.h b/fs/btrfs/locking.h
+index 84ea6ed60047..595014f64830 100644
+--- a/fs/btrfs/locking.h
++++ b/fs/btrfs/locking.h
+@@ -39,16 +39,4 @@ static inline void btrfs_tree_unlock_rw(struct extent_buffer *eb, int rw)
+ 		BUG();
+ }
+ 
+-/*
+- * If we currently have a spinning reader or writer lock (indicated by the rw
+- * flag) this will bump the count of blocking holders and drop the spinlock.
+- */
+-static inline void btrfs_set_lock_blocking_rw(struct extent_buffer *eb, int rw)
+-{
+-	if (rw == BTRFS_WRITE_LOCK)
+-		btrfs_set_lock_blocking_write(eb);
+-	else if (rw == BTRFS_READ_LOCK)
+-		btrfs_set_lock_blocking_read(eb);
+-}
+-
+ #endif
+-- 
+cgit 1.2-0.3.lf.el7
+

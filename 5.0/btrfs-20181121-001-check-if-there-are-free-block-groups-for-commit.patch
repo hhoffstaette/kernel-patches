@@ -1,0 +1,83 @@
+From d89dbefb8c5f7289ad404676869135501437c04e Mon Sep 17 00:00:00 2001
+From: Josef Bacik <josef@toxicpanda.com>
+Date: Wed, 21 Nov 2018 14:03:06 -0500
+Subject: btrfs: check if there are free block groups for commit
+
+may_commit_transaction will skip committing the transaction if we don't
+have enough pinned space or if we're trying to find space for a SYSTEM
+chunk.  However, if we have pending free block groups in this transaction
+we still want to commit as we may be able to allocate a chunk to make
+our reservation.  So instead of just returning ENOSPC, check if we have
+free block groups pending, and if so commit the transaction to allow us
+to use that free space.
+
+Reviewed-by: Omar Sandoval <osandov@fb.com>
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent-tree.c | 31 +++++++++++++++++++------------
+ 1 file changed, 19 insertions(+), 12 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index f72935646fb1..b85cd66ac583 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -4865,10 +4865,19 @@ static int may_commit_transaction(struct btrfs_fs_info *fs_info,
+ 	if (!bytes_needed)
+ 		return 0;
+ 
+-	/* See if there is enough pinned space to make this reservation */
+-	if (__percpu_counter_compare(&space_info->total_bytes_pinned,
+-				   bytes_needed,
+-				   BTRFS_TOTAL_BYTES_PINNED_BATCH) >= 0)
++	trans = btrfs_join_transaction(fs_info->extent_root);
++	if (IS_ERR(trans))
++		return PTR_ERR(trans);
++
++	/*
++	 * See if there is enough pinned space to make this reservation, or if
++	 * we have block groups that are going to be freed, allowing us to
++	 * possibly do a chunk allocation the next loop through.
++	 */
++	if (test_bit(BTRFS_TRANS_HAVE_FREE_BGS, &trans->transaction->flags) ||
++	    __percpu_counter_compare(&space_info->total_bytes_pinned,
++				     bytes_needed,
++				     BTRFS_TOTAL_BYTES_PINNED_BATCH) >= 0)
+ 		goto commit;
+ 
+ 	/*
+@@ -4876,7 +4885,7 @@ static int may_commit_transaction(struct btrfs_fs_info *fs_info,
+ 	 * this reservation.
+ 	 */
+ 	if (space_info != delayed_rsv->space_info)
+-		return -ENOSPC;
++		goto enospc;
+ 
+ 	spin_lock(&delayed_rsv->lock);
+ 	reclaim_bytes += delayed_rsv->reserved;
+@@ -4891,16 +4900,14 @@ static int may_commit_transaction(struct btrfs_fs_info *fs_info,
+ 
+ 	if (__percpu_counter_compare(&space_info->total_bytes_pinned,
+ 				   bytes_needed,
+-				   BTRFS_TOTAL_BYTES_PINNED_BATCH) < 0) {
+-		return -ENOSPC;
+-	}
++				   BTRFS_TOTAL_BYTES_PINNED_BATCH) < 0)
++		goto enospc;
+ 
+ commit:
+-	trans = btrfs_join_transaction(fs_info->extent_root);
+-	if (IS_ERR(trans))
+-		return -ENOSPC;
+-
+ 	return btrfs_commit_transaction(trans);
++enospc:
++	btrfs_end_transaction(trans);
++	return -ENOSPC;
+ }
+ 
+ /*
+-- 
+cgit 1.2-0.3.lf.el7
+

@@ -1,0 +1,67 @@
+From 2eec5f004205be12b5a35628236b593fe1d1cbd5 Mon Sep 17 00:00:00 2001
+From: Anders Roxell <anders.roxell@linaro.org>
+Date: Tue, 29 Jan 2019 14:01:46 +0100
+Subject: btrfs: let the assertion expression compile in all configs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A compiler warning (in a patch in development) pointed to a variable
+that was used only inside and ASSERT:
+
+  u64 root_objectid = root->root_key.objectid;
+  ASSERT(root_objectid == ...);
+
+  fs/btrfs/relocation.c: In function ‘insert_dirty_subv’:
+  fs/btrfs/relocation.c:2138:6: warning: unused variable ‘root_objectid’ [-Wunused-variable]
+    u64 root_objectid = root->root_key.objectid;
+	^~~~~~~~~~~~~
+
+When CONFIG_BRTFS_ASSERT isn't enabled, variable root_objectid isn't used.
+
+Rework the assertion helper by adding a runtime check instead of the
+'#ifdef CONFIG_BTRFS_ASSERT #else ...", so the compiler sees the
+condition being passed into an inline function after preprocessing.
+
+Signed-off-by: Anders Roxell <anders.roxell@linaro.org>
+Reviewed-by: David Sterba <dsterba@suse.com>
+[ update changelog ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h | 13 +++++--------
+ 1 file changed, 5 insertions(+), 8 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 007b0e81992a..2399f56d8a54 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -3518,21 +3518,18 @@ do {								\
+ 	rcu_read_unlock();					\
+ } while (0)
+ 
+-#ifdef CONFIG_BTRFS_ASSERT
+-
+ __cold
+ static inline void assfail(const char *expr, const char *file, int line)
+ {
+-	pr_err("assertion failed: %s, file: %s, line: %d\n",
+-	       expr, file, line);
+-	BUG();
++	if (IS_ENABLED(CONFIG_BTRFS_ASSERT)) {
++		pr_err("assertion failed: %s, file: %s, line: %d\n",
++		       expr, file, line);
++		BUG();
++	}
+ }
+ 
+ #define ASSERT(expr)	\
+ 	(likely(expr) ? (void)0 : assfail(#expr, __FILE__, __LINE__))
+-#else
+-#define ASSERT(expr)	((void)0)
+-#endif
+ 
+ /*
+  * Use that for functions that are conditionally exported for sanity tests but
+-- 
+cgit 1.2-0.3.lf.el7
+

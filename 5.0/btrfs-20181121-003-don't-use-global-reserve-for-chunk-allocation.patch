@@ -1,0 +1,125 @@
+From 450114fc0db0cd5c2e7324b917e5de52cff991d7 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <josef@toxicpanda.com>
+Date: Wed, 21 Nov 2018 14:03:08 -0500
+Subject: btrfs: don't use global reserve for chunk allocation
+
+We've done this forever because of the voodoo around knowing how much
+space we have.  However, we have better ways of doing this now, and on
+normal file systems we'll easily have a global reserve of 512MiB, and
+since metadata chunks are usually 1GiB that means we'll allocate
+metadata chunks more readily.  Instead use the actual used amount when
+determining if we need to allocate a chunk or not.
+
+This has a side effect for mixed block group fs'es where we are no
+longer allocating enough chunks for the data/metadata requirements.  To
+deal with this add a ALLOC_CHUNK_FORCE step to the flushing state
+machine.  This will only get used if we've already made a full loop
+through the flushing machinery and tried committing the transaction.
+
+If we have then we can try and force a chunk allocation since we likely
+need it to make progress.  This resolves issues I was seeing with
+the mixed bg tests in xfstests without the new flushing state.
+
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+[ merged with patch "add ALLOC_CHUNK_FORCE to the flushing code" ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.h             |  3 ++-
+ fs/btrfs/extent-tree.c       | 26 ++++++++++++++++----------
+ include/trace/events/btrfs.h |  1 +
+ 3 files changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 6e0fd98c6bd9..9306925b6790 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -2805,7 +2805,8 @@ enum btrfs_flush_state {
+ 	FLUSH_DELALLOC		=	5,
+ 	FLUSH_DELALLOC_WAIT	=	6,
+ 	ALLOC_CHUNK		=	7,
+-	COMMIT_TRANS		=	8,
++	ALLOC_CHUNK_FORCE	=	8,
++	COMMIT_TRANS		=	9,
+ };
+ 
+ int btrfs_alloc_data_chunk_ondemand(struct btrfs_inode *inode, u64 bytes);
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 9e74ce2d4cf2..d637f4c4bcd0 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -4399,21 +4399,12 @@ static inline u64 calc_global_rsv_need_space(struct btrfs_block_rsv *global)
+ static int should_alloc_chunk(struct btrfs_fs_info *fs_info,
+ 			      struct btrfs_space_info *sinfo, int force)
+ {
+-	struct btrfs_block_rsv *global_rsv = &fs_info->global_block_rsv;
+ 	u64 bytes_used = btrfs_space_info_used(sinfo, false);
+ 	u64 thresh;
+ 
+ 	if (force == CHUNK_ALLOC_FORCE)
+ 		return 1;
+ 
+-	/*
+-	 * We need to take into account the global rsv because for all intents
+-	 * and purposes it's used space.  Don't worry about locking the
+-	 * global_rsv, it doesn't change except when the transaction commits.
+-	 */
+-	if (sinfo->flags & BTRFS_BLOCK_GROUP_METADATA)
+-		bytes_used += calc_global_rsv_need_space(global_rsv);
+-
+ 	/*
+ 	 * in limited mode, we want to have some free space up to
+ 	 * about 1% of the FS size.
+@@ -4960,6 +4951,7 @@ static void flush_space(struct btrfs_fs_info *fs_info,
+ 		btrfs_end_transaction(trans);
+ 		break;
+ 	case ALLOC_CHUNK:
++	case ALLOC_CHUNK_FORCE:
+ 		trans = btrfs_join_transaction(root);
+ 		if (IS_ERR(trans)) {
+ 			ret = PTR_ERR(trans);
+@@ -4967,7 +4959,8 @@ static void flush_space(struct btrfs_fs_info *fs_info,
+ 		}
+ 		ret = do_chunk_alloc(trans,
+ 				     btrfs_metadata_alloc_profile(fs_info),
+-				     CHUNK_ALLOC_NO_FORCE);
++				     (state == ALLOC_CHUNK) ?
++				      CHUNK_ALLOC_NO_FORCE : CHUNK_ALLOC_FORCE);
+ 		btrfs_end_transaction(trans);
+ 		if (ret > 0 || ret == -ENOSPC)
+ 			ret = 0;
+@@ -5111,6 +5104,19 @@ static void btrfs_async_reclaim_metadata_space(struct work_struct *work)
+ 				commit_cycles--;
+ 		}
+ 
++		/*
++		 * We don't want to force a chunk allocation until we've tried
++		 * pretty hard to reclaim space.  Think of the case where we
++		 * freed up a bunch of space and so have a lot of pinned space
++		 * to reclaim.  We would rather use that than possibly create a
++		 * underutilized metadata chunk.  So if this is our first run
++		 * through the flushing state machine skip ALLOC_CHUNK_FORCE and
++		 * commit the transaction.  If nothing has changed the next go
++		 * around then we can force a chunk allocation.
++		 */
++		if (flush_state == ALLOC_CHUNK_FORCE && !commit_cycles)
++			flush_state++;
++
+ 		if (flush_state > COMMIT_TRANS) {
+ 			commit_cycles++;
+ 			if (commit_cycles > 2) {
+diff --git a/include/trace/events/btrfs.h b/include/trace/events/btrfs.h
+index 2887503e4d12..3f08b652363b 100644
+--- a/include/trace/events/btrfs.h
++++ b/include/trace/events/btrfs.h
+@@ -1051,6 +1051,7 @@ TRACE_EVENT(btrfs_trigger_flush,
+ 		{ FLUSH_DELAYED_REFS_NR,	"FLUSH_DELAYED_REFS_NR"},	\
+ 		{ FLUSH_DELAYED_REFS,		"FLUSH_ELAYED_REFS"},		\
+ 		{ ALLOC_CHUNK,			"ALLOC_CHUNK"},			\
++		{ ALLOC_CHUNK_FORCE,		"ALLOC_CHUNK_FORCE"},		\
+ 		{ COMMIT_TRANS,			"COMMIT_TRANS"})
+ 
+ TRACE_EVENT(btrfs_flush_space,
+-- 
+cgit 1.2-0.3.lf.el7
+
