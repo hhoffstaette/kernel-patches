@@ -1,0 +1,38 @@
+From:   Nathan Chancellor <natechancellor@gmail.com>
+To:     Chris Mason <clm@fb.com>, Josef Bacik <josef@toxicpanda.com>,
+        David Sterba <dsterba@suse.com>
+Cc:     linux-btrfs@vger.kernel.org, linux-kernel@vger.kernel.org,
+        clang-built-linux@googlegroups.com,
+        Nathan Chancellor <natechancellor@gmail.com>,
+        Nick Desaulniers <ndesaulniers@google.com>
+Subject: [PATCH] btrfs: Turn an 'else if' into an 'else' in btrfs_uuid_tree_add
+Date:   Thu,  7 Mar 2019 09:35:15 -0700
+
+When building with -Wsometimes-uninitialized, Clang warns:
+
+fs/btrfs/uuid-tree.c:129:13: warning: variable 'eb' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+fs/btrfs/uuid-tree.c:129:13: warning: variable 'offset' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+
+Clang can't tell that all cases are covered with this final else if.
+Just turn it into an else so that it is clear.
+
+Link: https://github.com/ClangBuiltLinux/linux/issues/385
+Suggested-by: Nick Desaulniers <ndesaulniers@google.com>
+Signed-off-by: Nathan Chancellor <natechancellor@gmail.com>
+---
+ fs/btrfs/uuid-tree.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/uuid-tree.c b/fs/btrfs/uuid-tree.c
+index 3b2ae342e649..c1cc9a5c0024 100644
+--- a/fs/btrfs/uuid-tree.c
++++ b/fs/btrfs/uuid-tree.c
+@@ -126,7 +126,7 @@ int btrfs_uuid_tree_add(struct btrfs_trans_handle *trans, u8 *uuid, u8 type,
+ 		slot = path->slots[0];
+ 		offset = btrfs_item_ptr_offset(eb, slot);
+ 		offset += btrfs_item_size_nr(eb, slot) - sizeof(subid_le);
+-	} else if (ret < 0) {
++	} else {
+ 		btrfs_warn(fs_info,
+ 			   "insert uuid item failed %d (0x%016llx, 0x%016llx) type %u!",
+ 			   ret, (unsigned long long)key.objectid,
