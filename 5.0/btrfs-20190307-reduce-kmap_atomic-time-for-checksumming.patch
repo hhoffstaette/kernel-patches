@@ -1,0 +1,92 @@
+From:   Johannes Thumshirn <jthumshirn@suse.de>
+To:     David Sterba <dsterba@suse.com>
+Cc:     Linux BTRFS Mailinglist <linux-btrfs@vger.kernel.org>,
+        Johannes Thumshirn <jthumshirn@suse.de>
+Subject: [PATCH] btrfs: reduce kmap_atomic time for checksumming
+Date:   Thu,  7 Mar 2019 17:14:00 +0100
+
+Since commit c40a3d38aff4 ("Btrfs: Compute and look up csums based on
+sectorsized blocks") we do a kmap_atomic() on the contents of a bvec.
+
+kmap_atomic() in turn does a preempt_disable() and pagefault_disable(),
+so we shouldn't map the data for too long. Reduce the time the bvec's
+page is mapped to when we actually need it.
+
+Performance wise it doesn't seem to make a huge difference with a 2 vcpu VM
+on a /dev/zram device:
+
+       vanilla      patched      delta
+write  17.4MiB/s    17.8MiB/s	+0.4MiB/s (+2%)
+read   40.6MiB/s    41.5MiB/s   +0.9MiB/s (+2%)
+
+The following fio job profile was used in the comparision:
+
+[global]
+ioengine=libaio
+direct=1
+sync=1
+norandommap
+time_based
+runtime=10m
+size=100m
+group_reporting
+numjobs=2
+
+[test]
+filename=/mnt/test/fio
+rw=randrw
+rwmixread=70
+
+Signed-off-by: Johannes Thumshirn <jthumshirn@suse.de>
+---
+ fs/btrfs/file-item.c | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/file-item.c b/fs/btrfs/file-item.c
+index 920bf3b4b0ef..aa40e66df1e1 100644
+--- a/fs/btrfs/file-item.c
++++ b/fs/btrfs/file-item.c
+@@ -453,8 +453,6 @@ blk_status_t btrfs_csum_one_bio(struct inode *inode, struct bio *bio,
+ 			BUG_ON(!ordered); /* Logic error */
+ 		}
+ 
+-		data = kmap_atomic(bvec.bv_page);
+-
+ 		nr_sectors = BTRFS_BYTES_TO_BLKS(fs_info,
+ 						 bvec.bv_len + fs_info->sectorsize
+ 						 - 1);
+@@ -464,7 +462,6 @@ blk_status_t btrfs_csum_one_bio(struct inode *inode, struct bio *bio,
+ 				offset < ordered->file_offset) {
+ 				unsigned long bytes_left;
+ 
+-				kunmap_atomic(data);
+ 				sums->len = this_sum_bytes;
+ 				this_sum_bytes = 0;
+ 				btrfs_add_ordered_sum(inode, ordered, sums);
+@@ -482,16 +479,16 @@ blk_status_t btrfs_csum_one_bio(struct inode *inode, struct bio *bio,
+ 				sums->bytenr = ((u64)bio->bi_iter.bi_sector << 9)
+ 					+ total_bytes;
+ 				index = 0;
+-
+-				data = kmap_atomic(bvec.bv_page);
+ 			}
+ 
+ 			sums->sums[index] = ~(u32)0;
++			data = kmap_atomic(bvec.bv_page);
+ 			sums->sums[index]
+ 				= btrfs_csum_data(data + bvec.bv_offset
+ 						+ (i * fs_info->sectorsize),
+ 						sums->sums[index],
+ 						fs_info->sectorsize);
++			kunmap_atomic(data);
+ 			btrfs_csum_final(sums->sums[index],
+ 					(char *)(sums->sums + index));
+ 			index++;
+@@ -500,7 +497,6 @@ blk_status_t btrfs_csum_one_bio(struct inode *inode, struct bio *bio,
+ 			total_bytes += fs_info->sectorsize;
+ 		}
+ 
+-		kunmap_atomic(data);
+ 	}
+ 	this_sum_bytes = 0;
+ 	btrfs_add_ordered_sum(inode, ordered, sums);
