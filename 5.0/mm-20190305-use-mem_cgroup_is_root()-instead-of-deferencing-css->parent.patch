@@ -1,0 +1,35 @@
+From 59118c42a60b997d277ad04d2309a6ec30682e5e Mon Sep 17 00:00:00 2001
+From: Yang Shi <yang.shi@linux.alibaba.com>
+Date: Tue, 5 Mar 2019 15:48:02 -0800
+Subject: mm: swap: use mem_cgroup_is_root() instead of deferencing css->parent
+
+mem_cgroup_is_root() is the preferred API to check if memcg is root or
+not.  Use it instead of deferencing css->parent.
+
+Link: http://lkml.kernel.org/r/1547232913-118148-1-git-send-email-yang.shi@linux.alibaba.com
+Signed-off-by: Yang Shi <yang.shi@linux.alibaba.com>
+Acked-by: Michal Hocko <mhocko@suse.com>
+Cc: Huang Ying <ying.huang@intel.com>
+Cc: Tim Chen <tim.c.chen@intel.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ include/linux/swap.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/linux/swap.h b/include/linux/swap.h
+index 622025ac1461..649529be91f2 100644
+--- a/include/linux/swap.h
++++ b/include/linux/swap.h
+@@ -625,7 +625,7 @@ static inline int mem_cgroup_swappiness(struct mem_cgroup *memcg)
+ 		return vm_swappiness;
+ 
+ 	/* root ? */
+-	if (mem_cgroup_disabled() || !memcg->css.parent)
++	if (mem_cgroup_disabled() || mem_cgroup_is_root(memcg))
+ 		return vm_swappiness;
+ 
+ 	return memcg->swappiness;
+-- 
+cgit 1.2-0.3.lf.el7
+
