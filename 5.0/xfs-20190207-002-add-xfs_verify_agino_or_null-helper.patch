@@ -1,0 +1,99 @@
+From 7d36c19538d38f9ff6b93d2a3d23ee879b076dc6 Mon Sep 17 00:00:00 2001
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Thu, 7 Feb 2019 10:37:13 -0800
+Subject: xfs: add xfs_verify_agino_or_null helper
+
+Add a new helper to check that a per-AG inode pointer is either null or
+points somewhere valid within that AG.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+---
+ fs/xfs/libxfs/xfs_inode_buf.c |  3 +--
+ fs/xfs/libxfs/xfs_types.c     | 13 +++++++++++++
+ fs/xfs/libxfs/xfs_types.h     |  2 ++
+ fs/xfs/scrub/agheader.c       |  8 +++-----
+ 4 files changed, 19 insertions(+), 7 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_inode_buf.c b/fs/xfs/libxfs/xfs_inode_buf.c
+index 09d9c8cfa4a0..82c4374acb4c 100644
+--- a/fs/xfs/libxfs/xfs_inode_buf.c
++++ b/fs/xfs/libxfs/xfs_inode_buf.c
+@@ -99,8 +99,7 @@ xfs_inode_buf_verify(
+ 		unlinked_ino = be32_to_cpu(dip->di_next_unlinked);
+ 		di_ok = dip->di_magic == cpu_to_be16(XFS_DINODE_MAGIC) &&
+ 			xfs_dinode_good_version(mp, dip->di_version) &&
+-			(unlinked_ino == NULLAGINO ||
+-			 xfs_verify_agino(mp, agno, unlinked_ino));
++			xfs_verify_agino_or_null(mp, agno, unlinked_ino);
+ 		if (unlikely(XFS_TEST_ERROR(!di_ok, mp,
+ 						XFS_ERRTAG_ITOBP_INOTOBP))) {
+ 			if (readahead) {
+diff --git a/fs/xfs/libxfs/xfs_types.c b/fs/xfs/libxfs/xfs_types.c
+index 451608b5a37b..de310712dd6d 100644
+--- a/fs/xfs/libxfs/xfs_types.c
++++ b/fs/xfs/libxfs/xfs_types.c
+@@ -115,6 +115,19 @@ xfs_verify_agino(
+ 	return agino >= first && agino <= last;
+ }
+ 
++/*
++ * Verify that an AG inode number pointer neither points outside the AG
++ * nor points at static metadata, or is NULLAGINO.
++ */
++bool
++xfs_verify_agino_or_null(
++	struct xfs_mount	*mp,
++	xfs_agnumber_t		agno,
++	xfs_agino_t		agino)
++{
++	return agino == NULLAGINO || xfs_verify_agino(mp, agno, agino);
++}
++
+ /*
+  * Verify that an FS inode number pointer neither points outside the
+  * filesystem nor points at static AG metadata.
+diff --git a/fs/xfs/libxfs/xfs_types.h b/fs/xfs/libxfs/xfs_types.h
+index 704b4f308780..c5a25403b4db 100644
+--- a/fs/xfs/libxfs/xfs_types.h
++++ b/fs/xfs/libxfs/xfs_types.h
+@@ -183,6 +183,8 @@ void xfs_agino_range(struct xfs_mount *mp, xfs_agnumber_t agno,
+ 		xfs_agino_t *first, xfs_agino_t *last);
+ bool xfs_verify_agino(struct xfs_mount *mp, xfs_agnumber_t agno,
+ 		xfs_agino_t agino);
++bool xfs_verify_agino_or_null(struct xfs_mount *mp, xfs_agnumber_t agno,
++		xfs_agino_t agino);
+ bool xfs_verify_ino(struct xfs_mount *mp, xfs_ino_t ino);
+ bool xfs_internal_inum(struct xfs_mount *mp, xfs_ino_t ino);
+ bool xfs_verify_dir_ino(struct xfs_mount *mp, xfs_ino_t ino);
+diff --git a/fs/xfs/scrub/agheader.c b/fs/xfs/scrub/agheader.c
+index 90955ab1e895..9d4e8293d37e 100644
+--- a/fs/xfs/scrub/agheader.c
++++ b/fs/xfs/scrub/agheader.c
+@@ -864,19 +864,17 @@ xchk_agi(
+ 
+ 	/* Check inode pointers */
+ 	agino = be32_to_cpu(agi->agi_newino);
+-	if (agino != NULLAGINO && !xfs_verify_agino(mp, agno, agino))
++	if (!xfs_verify_agino_or_null(mp, agno, agino))
+ 		xchk_block_set_corrupt(sc, sc->sa.agi_bp);
+ 
+ 	agino = be32_to_cpu(agi->agi_dirino);
+-	if (agino != NULLAGINO && !xfs_verify_agino(mp, agno, agino))
++	if (!xfs_verify_agino_or_null(mp, agno, agino))
+ 		xchk_block_set_corrupt(sc, sc->sa.agi_bp);
+ 
+ 	/* Check unlinked inode buckets */
+ 	for (i = 0; i < XFS_AGI_UNLINKED_BUCKETS; i++) {
+ 		agino = be32_to_cpu(agi->agi_unlinked[i]);
+-		if (agino == NULLAGINO)
+-			continue;
+-		if (!xfs_verify_agino(mp, agno, agino))
++		if (!xfs_verify_agino_or_null(mp, agno, agino))
+ 			xchk_block_set_corrupt(sc, sc->sa.agi_bp);
+ 	}
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
