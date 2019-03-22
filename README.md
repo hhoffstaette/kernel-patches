@@ -29,7 +29,8 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - loop: observe rotational property of underlying device
 - mm: fixes from 5.1+ (reclaim correctness & stability)
-- net: fixes from 5.1+ (BBR, epoll)
+- net: fixes from 5.1+ (BBR, epoll, performance)
+- r8169: fixes from 5.1+ (stability, reliability)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: selected fixes from 5.1+ (performance, reliability)
 
