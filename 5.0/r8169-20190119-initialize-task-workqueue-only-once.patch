@@ -1,0 +1,40 @@
+From 5c41e78fe2a57e04e3080de75ec45d724d492622 Mon Sep 17 00:00:00 2001
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Date: Sat, 19 Jan 2019 22:03:49 +0100
+Subject: r8169: initialize task workqueue only once
+
+It's sufficient to initialize the workqueue once, therefore remove the
+additional initialization whenever rtl_open() is called.
+
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index fd3c6a5487fd..c4d53bc6a50d 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -6630,10 +6630,6 @@ static int rtl_open(struct net_device *dev)
+ 	if (retval < 0)
+ 		goto err_free_rx_1;
+ 
+-	INIT_WORK(&tp->wk.work, rtl_task);
+-
+-	smp_mb();
+-
+ 	rtl_request_firmware(tp);
+ 
+ 	retval = pci_request_irq(pdev, 0, rtl8169_interrupt, NULL, tp,
+@@ -7293,6 +7289,7 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 	tp->saved_wolopts = __rtl8169_get_wol(tp);
+ 
+ 	mutex_init(&tp->wk.mutex);
++	INIT_WORK(&tp->wk.work, rtl_task);
+ 	u64_stats_init(&tp->rx_stats.syncp);
+ 	u64_stats_init(&tp->tx_stats.syncp);
+ 
+-- 
+cgit 1.2-0.3.lf.el7
+
