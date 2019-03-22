@@ -1,0 +1,33 @@
+From: Heiner Kallweit <hkallweit1@gmail.com>
+To: Realtek linux nic maintainers <nic_swsd@realtek.com>,
+        David Miller <davem@davemloft.net>
+Cc: Alexander Duyck <alexander.h.duyck@linux.intel.com>,
+        "netdev@vger.kernel.org" <netdev@vger.kernel.org>
+Subject: [PATCH net-next] r8169: use netif_start_queue instead of netif_wake_qeueue in rtl8169_start_xmit
+Date: Thu, 21 Mar 2019 21:41:48 +0100
+
+Replace the call to netif_wake_queue in rtl8169_start_xmit with
+netif_start_queue as we don't need to actually wake up the queue since
+we are still in mid transmit so we just need to reset the bit so it
+doesn't prevent the next transmit.
+(Description shamelessly copied from a mail sent by Alex.)
+
+Suggested-by: Alexander Duyck <alexander.h.duyck@linux.intel.com>
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+---
+ drivers/net/ethernet/realtek/r8169.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 9dd1cd2c0..a542cd121 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -6267,7 +6267,7 @@ static netdev_tx_t rtl8169_start_xmit(struct sk_buff *skb,
+ 		 */
+ 		smp_mb();
+ 		if (rtl_tx_slots_avail(tp, MAX_SKB_FRAGS))
+-			netif_wake_queue(dev);
++			netif_start_queue(dev);
+ 	}
+ 
+ 	return NETDEV_TX_OK;
