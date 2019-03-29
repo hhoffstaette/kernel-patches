@@ -1,0 +1,44 @@
+From: Konstantin Khlebnikov <khlebnikov@yandex-team.ru>
+To: linux-block@vger.kernel.org, Jens Axboe <axboe@kernel.dk>,
+    Paolo Valente <paolo.valente@linaro.org>, linux-kernel@vger.kernel.org
+Subject: [PATCH] block/bfq: fix ifdef for CONFIG_BFQ_GROUP_IOSCHED=y
+Date: Fri, 29 Mar 2019 17:01:18 +0300
+
+Replace BFQ_GROUP_IOSCHED_ENABLED with CONFIG_BFQ_GROUP_IOSCHED.
+Code under these ifdefs never worked, something might be broken.
+
+[HH: context fix to match 'block-20190312-002-do-not-idle-for-lowest-weight-queues.patch']
+Fixes: 0471559c2fbd ("block, bfq: add/remove entity weights correctly")
+Fixes: 73d58118498b ("block, bfq: consider also ioprio classes in symmetry detection")
+Signed-off-by: Konstantin Khlebnikov <khlebnikov@yandex-team.ru>
+---
+ block/bfq-iosched.c |    2 +-
+ block/bfq-wf2q.c    |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/block/bfq-iosched.c b/block/bfq-iosched.c
+index 4c592496a16a..fac188dd78fa 100644
+--- a/block/bfq-iosched.c
++++ b/block/bfq-iosched.c
+@@ -674,7 +674,7 @@ static bool bfq_symmetric_scenario(struct bfq_data *bfqd)
+ 		(bfqd->busy_queues[1] && bfqd->busy_queues[2]);
+ 
+ 	return varied_queue_weights || multiple_classes_busy
+-#ifdef BFQ_GROUP_IOSCHED_ENABLED
++#ifdef CONFIG_BFQ_GROUP_IOSCHED
+ 	       || bfqd->num_groups_with_pending_reqs > 0
+ #endif
+ 		;
+diff --git a/block/bfq-wf2q.c b/block/bfq-wf2q.c
+index 63311d1ff1ed..a11bef75483d 100644
+--- a/block/bfq-wf2q.c
++++ b/block/bfq-wf2q.c
+@@ -1012,7 +1012,7 @@ static void __bfq_activate_entity(struct bfq_entity *entity,
+ 		entity->on_st = true;
+ 	}
+ 
+-#ifdef BFQ_GROUP_IOSCHED_ENABLED
++#ifdef CONFIG_BFQ_GROUP_IOSCHED
+ 	if (!bfq_entity_to_bfqq(entity)) { /* bfq_group */
+ 		struct bfq_group *bfqg =
+ 			container_of(entity, struct bfq_group, entity);
