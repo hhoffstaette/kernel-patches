@@ -245,8 +245,8 @@ index 72adbbe975d5..ce37d709a34f 100644
 -	bfqd->busy_queues--;
 +	bfqd->busy_queues[bfqq->ioprio_class - 1]--;
  
- 	if (!bfqq->dispatched)
- 		bfq_weights_tree_remove(bfqd, bfqq);
+ 	if (bfqq->wr_coeff > 1)
+ 		bfqd->wr_busy_queues--;
 @@ -1688,7 +1694,7 @@ void bfq_add_bfqq_busy(struct bfq_data *bfqd, struct bfq_queue *bfqq)
  	bfq_activate_bfqq(bfqd, bfqq);
  
