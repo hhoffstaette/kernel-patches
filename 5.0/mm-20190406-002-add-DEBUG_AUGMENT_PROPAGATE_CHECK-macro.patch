@@ -1,0 +1,94 @@
+From: "Uladzislau Rezki (Sony)" <urezki@gmail.com>
+To: Andrew Morton <akpm@linux-foundation.org>, Roman Gushchin <guro@fb.com>
+Cc: Michal Hocko <mhocko@suse.com>, Matthew Wilcox <willy@infradead.org>,
+    linux-mm@kvack.org, LKML <linux-kernel@vger.kernel.org>, Thomas Garnier <thgarnie@google.com>, Oleksiy Avramchenko <oleksiy.avramchenko@sonymobile.com>, Steven Rostedt <rostedt@goodmis.org>, Joel Fernandes <joelaf@google.com>, Thomas Gleixner <tglx@linutronix.de>, Ingo Molnar <mingo@elte.hu>, Tejun Heo <tj@kernel.org>, "Uladzislau Rezki (Sony)" <urezki@gmail.com>
+Subject: [PATCH v4 2/3] mm/vmap: add DEBUG_AUGMENT_PROPAGATE_CHECK macro
+Date: Sat,  6 Apr 2019 20:35:07 +0200
+
+This macro adds some debug code to check that the augment tree
+is maintained correctly, meaning that every node contains valid
+subtree_max_size value.
+
+By default this option is set to 0 and not active. It requires
+recompilation of the kernel to activate it. Set to 1, compile
+the kernel.
+
+Signed-off-by: Uladzislau Rezki (Sony) <urezki@gmail.com>
+Reviewed-by: Roman Gushchin <guro@fb.com>
+---
+ mm/vmalloc.c | 48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 48 insertions(+)
+
+diff --git a/mm/vmalloc.c b/mm/vmalloc.c
+index c6f9d0637464..a74e605e042f 100644
+--- a/mm/vmalloc.c
++++ b/mm/vmalloc.c
+@@ -324,6 +324,8 @@ EXPORT_SYMBOL(vmalloc_to_pfn);
+ 
+ /*** Global kva allocator ***/
+ 
++#define DEBUG_AUGMENT_PROPAGATE_CHECK 0
++
+ #define VM_LAZY_FREE	0x02
+ #define VM_VM_AREA	0x04
+ 
+@@ -538,6 +540,48 @@ unlink_va(struct vmap_area *va, struct rb_root *root)
+ 	}
+ }
+ 
++#if DEBUG_AUGMENT_PROPAGATE_CHECK
++static void
++augment_tree_propagate_check(struct rb_node *n)
++{
++	struct vmap_area *va;
++	struct rb_node *node;
++	unsigned long size;
++	bool found = false;
++
++	if (n == NULL)
++		return;
++
++	va = rb_entry(n, struct vmap_area, rb_node);
++	size = va->subtree_max_size;
++	node = n;
++
++	while (node) {
++		va = rb_entry(node, struct vmap_area, rb_node);
++
++		if (get_subtree_max_size(node->rb_left) == size) {
++			node = node->rb_left;
++		} else {
++			if (va_size(va) == size) {
++				found = true;
++				break;
++			}
++
++			node = node->rb_right;
++		}
++	}
++
++	if (!found) {
++		va = rb_entry(n, struct vmap_area, rb_node);
++		pr_emerg("tree is corrupted: %lu, %lu\n",
++			va_size(va), va->subtree_max_size);
++	}
++
++	augment_tree_propagate_check(n->rb_left);
++	augment_tree_propagate_check(n->rb_right);
++}
++#endif
++
+ /*
+  * This function populates subtree_max_size from bottom to upper
+  * levels starting from VA point. The propagation must be done
+@@ -587,6 +631,10 @@ augment_tree_propagate_from(struct vmap_area *va)
+ 		va->subtree_max_size = new_va_sub_max_size;
+ 		node = rb_parent(&va->rb_node);
+ 	}
++
++#if DEBUG_AUGMENT_PROPAGATE_CHECK
++	augment_tree_propagate_check(free_vmap_area_root.rb_node);
++#endif
+ }
+ 
+ static void

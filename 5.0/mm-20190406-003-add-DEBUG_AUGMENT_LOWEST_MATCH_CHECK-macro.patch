@@ -1,0 +1,88 @@
+From: "Uladzislau Rezki (Sony)" <urezki@gmail.com>
+To: Andrew Morton <akpm@linux-foundation.org>, Roman Gushchin <guro@fb.com>
+Cc: Michal Hocko <mhocko@suse.com>, Matthew Wilcox <willy@infradead.org>,
+    linux-mm@kvack.org, LKML <linux-kernel@vger.kernel.org>, Thomas Garnier <thgarnie@google.com>, Oleksiy Avramchenko <oleksiy.avramchenko@sonymobile.com>, Steven Rostedt <rostedt@goodmis.org>, Joel Fernandes <joelaf@google.com>, Thomas Gleixner <tglx@linutronix.de>, Ingo Molnar <mingo@elte.hu>, Tejun Heo <tj@kernel.org>, "Uladzislau Rezki (Sony)" <urezki@gmail.com>
+Subject: [PATCH v4 3/3] mm/vmap: add DEBUG_AUGMENT_LOWEST_MATCH_CHECK macro
+Date: Sat,  6 Apr 2019 20:35:08 +0200
+
+This macro adds some debug code to check that vmap allocations
+are happened in ascending order.
+
+By default this option is set to 0 and not active. It requires
+recompilation of the kernel to activate it. Set to 1, compile
+the kernel.
+
+Signed-off-by: Uladzislau Rezki (Sony) <urezki@gmail.com>
+Reviewed-by: Roman Gushchin <guro@fb.com>
+---
+ mm/vmalloc.c | 43 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 43 insertions(+)
+
+diff --git a/mm/vmalloc.c b/mm/vmalloc.c
+index a74e605e042f..92b784d8088c 100644
+--- a/mm/vmalloc.c
++++ b/mm/vmalloc.c
+@@ -325,6 +325,7 @@ EXPORT_SYMBOL(vmalloc_to_pfn);
+ /*** Global kva allocator ***/
+ 
+ #define DEBUG_AUGMENT_PROPAGATE_CHECK 0
++#define DEBUG_AUGMENT_LOWEST_MATCH_CHECK 0
+ 
+ #define VM_LAZY_FREE	0x02
+ #define VM_VM_AREA	0x04
+@@ -833,6 +834,44 @@ find_vmap_lowest_match(unsigned long size,
+ 	return NULL;
+ }
+ 
++#if DEBUG_AUGMENT_LOWEST_MATCH_CHECK
++#include <linux/random.h>
++
++static struct vmap_area *
++find_vmap_lowest_linear_match(unsigned long size,
++	unsigned long align, unsigned long vstart)
++{
++	struct vmap_area *va;
++
++	list_for_each_entry(va, &free_vmap_area_list, list) {
++		if (!is_within_this_va(va, size, align, vstart))
++			continue;
++
++		return va;
++	}
++
++	return NULL;
++}
++
++static void
++find_vmap_lowest_match_check(unsigned long size)
++{
++	struct vmap_area *va_1, *va_2;
++	unsigned long vstart;
++	unsigned int rnd;
++
++	get_random_bytes(&rnd, sizeof(rnd));
++	vstart = VMALLOC_START + rnd;
++
++	va_1 = find_vmap_lowest_match(size, 1, vstart);
++	va_2 = find_vmap_lowest_linear_match(size, 1, vstart);
++
++	if (va_1 != va_2)
++		pr_emerg("not lowest: t: 0x%p, l: 0x%p, v: 0x%lx\n",
++			va_1, va_2, vstart);
++}
++#endif
++
+ enum fit_type {
+ 	NOTHING_FIT = 0,
+ 	FL_FIT_TYPE = 1,	/* full fit */
+@@ -975,6 +1014,10 @@ __alloc_vmap_area(unsigned long size, unsigned long align,
+ 	if (ret)
+ 		return vend;
+ 
++#if DEBUG_AUGMENT_LOWEST_MATCH_CHECK
++	find_vmap_lowest_match_check(size);
++#endif
++
+ 	return nva_start_addr;
+ }
+ 
