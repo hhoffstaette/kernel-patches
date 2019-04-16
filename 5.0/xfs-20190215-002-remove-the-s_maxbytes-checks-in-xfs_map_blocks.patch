@@ -1,0 +1,46 @@
+From b4e29032f254fed39ef2251807322f36c3ede1aa Mon Sep 17 00:00:00 2001
+From: Christoph Hellwig <hch@lst.de>
+Date: Fri, 15 Feb 2019 08:02:47 -0800
+Subject: xfs: remove the s_maxbytes checks in xfs_map_blocks
+
+We already ensure all data fits into s_maxbytes in the write / fault
+path.  The only reason we have them here is that they were copy and
+pasted from xfs_bmapi_read when we stopped using that function.
+
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+ fs/xfs/xfs_aops.c | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/fs/xfs/xfs_aops.c b/fs/xfs/xfs_aops.c
+index a3fa60d1d2df..8bfb62d8776f 100644
+--- a/fs/xfs/xfs_aops.c
++++ b/fs/xfs/xfs_aops.c
+@@ -338,7 +338,8 @@ xfs_map_blocks(
+ 	struct xfs_inode	*ip = XFS_I(inode);
+ 	struct xfs_mount	*mp = ip->i_mount;
+ 	ssize_t			count = i_blocksize(inode);
+-	xfs_fileoff_t		offset_fsb = XFS_B_TO_FSBT(mp, offset), end_fsb;
++	xfs_fileoff_t		offset_fsb = XFS_B_TO_FSBT(mp, offset);
++	xfs_fileoff_t		end_fsb = XFS_B_TO_FSB(mp, offset + count);
+ 	xfs_fileoff_t		cow_fsb = NULLFILEOFF;
+ 	struct xfs_bmbt_irec	imap;
+ 	struct xfs_iext_cursor	icur;
+@@ -374,11 +375,6 @@ xfs_map_blocks(
+ 	xfs_ilock(ip, XFS_ILOCK_SHARED);
+ 	ASSERT(ip->i_d.di_format != XFS_DINODE_FMT_BTREE ||
+ 	       (ip->i_df.if_flags & XFS_IFEXTENTS));
+-	ASSERT(offset <= mp->m_super->s_maxbytes);
+-
+-	if (offset > mp->m_super->s_maxbytes - count)
+-		count = mp->m_super->s_maxbytes - offset;
+-	end_fsb = XFS_B_TO_FSB(mp, (xfs_ufsize_t)offset + count);
+ 
+ 	/*
+ 	 * Check if this is offset is covered by a COW extents, and if yes use
+-- 
+cgit 1.2-0.3.lf.el7
+
