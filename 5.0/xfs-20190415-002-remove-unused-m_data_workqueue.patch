@@ -1,0 +1,67 @@
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+To: darrick.wong@oracle.com
+Cc: linux-xfs@vger.kernel.org
+Subject: [PATCH 2/3] xfs: remove unused m_data_workqueue
+Date: Sun, 14 Apr 2019 19:07:55 -0700
+
+From: Darrick J. Wong <darrick.wong@oracle.com>
+
+Now that we're no longer using m_data_workqueue, remove it.
+
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+---
+ fs/xfs/xfs_mount.h |    1 -
+ fs/xfs/xfs_super.c |   10 +---------
+ 2 files changed, 1 insertion(+), 10 deletions(-)
+
+diff --git a/fs/xfs/xfs_mount.h b/fs/xfs/xfs_mount.h
+index 110f927cf943..1d3a4b2bdc2f 100644
+--- a/fs/xfs/xfs_mount.h
++++ b/fs/xfs/xfs_mount.h
+@@ -175,7 +175,6 @@ typedef struct xfs_mount {
+ 	struct xstats		m_stats;	/* per-fs stats */
+ 
+ 	struct workqueue_struct *m_buf_workqueue;
+-	struct workqueue_struct	*m_data_workqueue;
+ 	struct workqueue_struct	*m_unwritten_workqueue;
+ 	struct workqueue_struct	*m_cil_workqueue;
+ 	struct workqueue_struct	*m_reclaim_workqueue;
+diff --git a/fs/xfs/xfs_super.c b/fs/xfs/xfs_super.c
+index f093ea244849..df917f41ca46 100644
+--- a/fs/xfs/xfs_super.c
++++ b/fs/xfs/xfs_super.c
+@@ -838,15 +838,10 @@ xfs_init_mount_workqueues(
+ 	if (!mp->m_buf_workqueue)
+ 		goto out;
+ 
+-	mp->m_data_workqueue = alloc_workqueue("xfs-data/%s",
+-			WQ_MEM_RECLAIM|WQ_FREEZABLE, 0, mp->m_fsname);
+-	if (!mp->m_data_workqueue)
+-		goto out_destroy_buf;
+-
+ 	mp->m_unwritten_workqueue = alloc_workqueue("xfs-conv/%s",
+ 			WQ_MEM_RECLAIM|WQ_FREEZABLE, 0, mp->m_fsname);
+ 	if (!mp->m_unwritten_workqueue)
+-		goto out_destroy_data_iodone_queue;
++		goto out_destroy_buf;
+ 
+ 	mp->m_cil_workqueue = alloc_workqueue("xfs-cil/%s",
+ 			WQ_MEM_RECLAIM|WQ_FREEZABLE, 0, mp->m_fsname);
+@@ -886,8 +881,6 @@ xfs_init_mount_workqueues(
+ 	destroy_workqueue(mp->m_cil_workqueue);
+ out_destroy_unwritten:
+ 	destroy_workqueue(mp->m_unwritten_workqueue);
+-out_destroy_data_iodone_queue:
+-	destroy_workqueue(mp->m_data_workqueue);
+ out_destroy_buf:
+ 	destroy_workqueue(mp->m_buf_workqueue);
+ out:
+@@ -903,7 +896,6 @@ xfs_destroy_mount_workqueues(
+ 	destroy_workqueue(mp->m_log_workqueue);
+ 	destroy_workqueue(mp->m_reclaim_workqueue);
+ 	destroy_workqueue(mp->m_cil_workqueue);
+-	destroy_workqueue(mp->m_data_workqueue);
+ 	destroy_workqueue(mp->m_unwritten_workqueue);
+ 	destroy_workqueue(mp->m_buf_workqueue);
+ }
