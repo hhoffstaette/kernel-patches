@@ -53,6 +53,7 @@ journaling daemon enjoying a higher weight than normal processes.
 With this commit, the throughput grows from ~100 MB/s to ~150 MB/s on
 a PLEXTOR PX-256M5.
 
+[HH: small context fix for 5.0.11]
 Tested-by: Holger Hoffstätte <holger@applied-asynchrony.com>
 Tested-by: Oleksandr Natalenko <oleksandr@natalenko.name>
 Tested-by: Francesco Pollicino <fra.fra.800@gmail.com>
@@ -229,7 +230,7 @@ index 2be504f25b09..41364c0cca8c 100644
  	 * Increase, decrease or leave budget unchanged according to
  	 * reason.
 @@ -3372,8 +3492,6 @@ void bfq_bfqq_expire(struct bfq_data *bfqd,
- 	if (ref == 1) /* bfqq is gone, no more actions on it */
+ 		/* bfqq is gone, no more actions on it */
  		return;
  
 -	bfqq->injected_service = 0;
