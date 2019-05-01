@@ -1,0 +1,75 @@
+From: robbieko <robbieko@synology.com>
+To: linux-btrfs@vger.kernel.org
+Cc: Robbie Ko <robbieko@synology.com>
+Subject: [PATCH] Btrfs: avoid allocating too many data chunks on massive concurrent write
+Date: Fri, 26 Apr 2019 19:09:22 +0800
+
+From: Robbie Ko <robbieko@synology.com>
+
+I found a issue when btrfs allocates much more space than it actual needed
+on massive concurrent writes. That may consume all free space and when it
+need to allocate more space for metadata that result in ENOSPC.
+
+I did a test that issue by 5000 dd to do write stress concurrently.
+
+The space info after ENOSPC:
+Overall:
+Device size: 926.91GiB
+Device allocated: 926.91GiB
+Device unallocated: 1.00MiB
+Device missing: 0.00B
+Used: 211.59GiB
+Free (estimated): 714.18GiB (min: 714.18GiB)
+Data ratio: 1.00
+Metadata ratio: 2.00
+Global reserve: 512.00MiB (used: 0.00B)
+
+Data,single: Size:923.77GiB, Used:209.59GiB
+/dev/devname 923.77GiB
+
+Metadata,DUP: Size:1.50GiB, Used:1022.50MiB
+/dev/devname 3.00GiB
+
+System,DUP: Size:72.00MiB, Used:128.00KiB
+/dev/devname 144.00MiB
+
+We can see that the Metadata space (1022.50MiB + 512.00MiB) is almost full.
+But Data allocated much more space (923.77GiB) than it actually needed
+(209.59GiB).
+
+When the data space is not enough, this 5000 dd process will call
+do_chunk_alloc() to allocate more space.
+
+In the while loop of do_chunk_alloc, the variable force will be changed
+to CHUNK_ALLOC_FORCE in second run and should_alloc_chunk() will always
+return true when force is CHUNK_ALLOC_FORCE. That means every concurrent
+dd process will allocate a chunk in do_chunk_alloc().
+
+Fix this by keeping original value of force and re-assign it to force in
+the end of the loop.
+
+Signed-off-by: Robbie Ko <robbieko@synology.com>
+---
+ fs/btrfs/extent-tree.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index c5880329ae37..73856f70db31 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -4511,6 +4511,7 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans, u64 flags,
+ 	bool wait_for_alloc = false;
+ 	bool should_alloc = false;
+ 	int ret = 0;
++	int orig_force = force;
+ 
+ 	/* Don't re-enter if we're already allocating a chunk */
+ 	if (trans->allocating_chunk)
+@@ -4544,6 +4545,7 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans, u64 flags,
+ 			 */
+ 			wait_for_alloc = true;
+ 			spin_unlock(&space_info->lock);
++			force = orig_force;
+ 			mutex_lock(&fs_info->chunk_mutex);
+ 			mutex_unlock(&fs_info->chunk_mutex);
+ 		} else {
