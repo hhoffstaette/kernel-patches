@@ -1,0 +1,31 @@
+From:   Josef Bacik <josef@toxicpanda.com>
+To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Subject: [PATCH] btrfs: don't double unlock on error in btrfs_punch_hole
+Date:   Fri,  3 May 2019 11:10:06 -0400
+
+If we have an error writing out a delalloc range in
+btrfs_punch_hole_lock_range we'll unlock the inode and then goto
+out_only_mutex, where we will again unlock the inode.  This is bad,
+don't do this.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+---
+ fs/btrfs/file.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 7f7833149cb7..d23ea0b388e0 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2554,10 +2554,8 @@ static int btrfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 
+ 	ret = btrfs_punch_hole_lock_range(inode, lockstart, lockend,
+ 					  &cached_state);
+-	if (ret) {
+-		inode_unlock(inode);
++	if (ret)
+ 		goto out_only_mutex;
+-	}
+ 
+ 	path = btrfs_alloc_path();
+ 	if (!path) {
