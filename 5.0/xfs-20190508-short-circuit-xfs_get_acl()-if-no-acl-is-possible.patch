@@ -1,0 +1,29 @@
+From:   Eric Sandeen <sandeen@redhat.com>
+To:     linux-xfs <linux-xfs@vger.kernel.org>
+Cc:     David Valin <dvalin@redhat.com>
+Subject: [PATCH] xfs: short circuit xfs_get_acl() if no acl is possible
+Date:   Wed, 8 May 2019 14:28:09 -0500
+
+If there are no attributes on the inode, don't go through the
+cost of memory allocation and callling xfs_attr_get when we
+already know we'll just get -ENOATTR.
+
+Reported-by: David Valin <dvalin@redhat.com>
+Suggested-by: Dave Chinner <david@fromorbit.com>
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+---
+
+diff --git a/fs/xfs/xfs_acl.c b/fs/xfs/xfs_acl.c
+index 8039e35147dd..b469b44e9e71 100644
+--- a/fs/xfs/xfs_acl.c
++++ b/fs/xfs/xfs_acl.c
+@@ -132,6 +132,9 @@ xfs_get_acl(struct inode *inode, int type)
+ 		BUG();
+ 	}
+ 
++	if (!xfs_inode_hasattr(ip))
++		return NULL;
++
+ 	/*
+ 	 * If we have a cached ACLs value just return it, not need to
+ 	 * go out to the disk.
