@@ -395,7 +395,7 @@ diff --git a/mm/vmscan.c b/mm/vmscan.c
 index e979705bbf32..7db6d8242613 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
-@@ -447,37 +447,21 @@ void unregister_shrinker(struct shrinker *shrinker)
+@@ -447,37 +447,20 @@ void unregister_shrinker(struct shrinker *shrinker)
  }
  EXPORT_SYMBOL(unregister_shrinker);
  
@@ -416,7 +416,7 @@ index e979705bbf32..7db6d8242613 100644
 -	long freeable;
 -	long nr;
 -	long new_nr;
- 	int nid = shrinkctl->nid;
+-	int nid = shrinkctl->nid;
 -	long batch_size = shrinker->batch ? shrinker->batch
 -					  : SHRINK_BATCH;
 -	long scanned = 0, next_deferred;
