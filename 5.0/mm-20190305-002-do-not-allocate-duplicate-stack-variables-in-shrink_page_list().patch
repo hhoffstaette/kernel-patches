@@ -1,0 +1,169 @@
+From 060f005f074791ec15e3ea111a0b0cac28abab06 Mon Sep 17 00:00:00 2001
+From: Kirill Tkhai <ktkhai@virtuozzo.com>
+Date: Tue, 5 Mar 2019 15:48:15 -0800
+Subject: mm/vmscan.c: do not allocate duplicate stack variables in shrink_page_list()
+
+On path shrink_inactive_list() ---> shrink_page_list() we allocate stack
+variables for the statistics twice.  This is completely useless, and
+this just consumes stack much more, then we really need.
+
+The patch kills duplicate stack variables from shrink_page_list(), and
+this reduce stack usage and object file size significantly:
+
+Stack usage:
+  Before: vmscan.c:1122:22:shrink_page_list	648	static
+  After:  vmscan.c:1122:22:shrink_page_list	616	static
+
+Size of vmscan.o:
+           text	   data	    bss	    dec	    hex	filename
+  Before: 56866	   4720	    128	  61714	   f112	mm/vmscan.o
+  After:  56770	   4720	    128	  61618	   f0b2	mm/vmscan.o
+
+Link: http://lkml.kernel.org/r/154894900030.5211.12104993874109647641.stgit@localhost.localdomain
+Signed-off-by: Kirill Tkhai <ktkhai@virtuozzo.com>
+Reviewed-by: Daniel Jordan <daniel.m.jordan@oracle.com>
+Reviewed-by: Andrew Morton <akpm@linux-foundation.org>
+Acked-by: Michal Hocko <mhocko@suse.com>
+Cc: Johannes Weiner <hannes@cmpxchg.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/vmscan.c | 44 ++++++++++++++------------------------------
+ 1 file changed, 14 insertions(+), 30 deletions(-)
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 07a68dcd5f58..209c2c78a087 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -1106,16 +1106,9 @@ static unsigned long shrink_page_list(struct list_head *page_list,
+ {
+ 	LIST_HEAD(ret_pages);
+ 	LIST_HEAD(free_pages);
+-	int pgactivate = 0;
+-	unsigned nr_unqueued_dirty = 0;
+-	unsigned nr_dirty = 0;
+-	unsigned nr_congested = 0;
+ 	unsigned nr_reclaimed = 0;
+-	unsigned nr_writeback = 0;
+-	unsigned nr_immediate = 0;
+-	unsigned nr_ref_keep = 0;
+-	unsigned nr_unmap_fail = 0;
+ 
++	memset(stat, 0, sizeof(*stat));
+ 	cond_resched();
+ 
+ 	while (!list_empty(page_list)) {
+@@ -1159,10 +1152,10 @@ static unsigned long shrink_page_list(struct list_head *page_list,
+ 		 */
+ 		page_check_dirty_writeback(page, &dirty, &writeback);
+ 		if (dirty || writeback)
+-			nr_dirty++;
++			stat->nr_dirty++;
+ 
+ 		if (dirty && !writeback)
+-			nr_unqueued_dirty++;
++			stat->nr_unqueued_dirty++;
+ 
+ 		/*
+ 		 * Treat this page as congested if the underlying BDI is or if
+@@ -1174,7 +1167,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
+ 		if (((dirty || writeback) && mapping &&
+ 		     inode_write_congested(mapping->host)) ||
+ 		    (writeback && PageReclaim(page)))
+-			nr_congested++;
++			stat->nr_congested++;
+ 
+ 		/*
+ 		 * If a page at the tail of the LRU is under writeback, there
+@@ -1223,7 +1216,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
+ 			if (current_is_kswapd() &&
+ 			    PageReclaim(page) &&
+ 			    test_bit(PGDAT_WRITEBACK, &pgdat->flags)) {
+-				nr_immediate++;
++				stat->nr_immediate++;
+ 				goto activate_locked;
+ 
+ 			/* Case 2 above */
+@@ -1241,7 +1234,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
+ 				 * and it's also appropriate in global reclaim.
+ 				 */
+ 				SetPageReclaim(page);
+-				nr_writeback++;
++				stat->nr_writeback++;
+ 				goto activate_locked;
+ 
+ 			/* Case 3 above */
+@@ -1261,7 +1254,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
+ 		case PAGEREF_ACTIVATE:
+ 			goto activate_locked;
+ 		case PAGEREF_KEEP:
+-			nr_ref_keep++;
++			stat->nr_ref_keep++;
+ 			goto keep_locked;
+ 		case PAGEREF_RECLAIM:
+ 		case PAGEREF_RECLAIM_CLEAN:
+@@ -1326,7 +1319,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
+ 			if (unlikely(PageTransHuge(page)))
+ 				flags |= TTU_SPLIT_HUGE_PMD;
+ 			if (!try_to_unmap(page, flags)) {
+-				nr_unmap_fail++;
++				stat->nr_unmap_fail++;
+ 				goto activate_locked;
+ 			}
+ 		}
+@@ -1474,7 +1467,7 @@ activate_locked:
+ 		VM_BUG_ON_PAGE(PageActive(page), page);
+ 		if (!PageMlocked(page)) {
+ 			SetPageActive(page);
+-			pgactivate++;
++			stat->nr_activate++;
+ 			count_memcg_page_event(page, PGACTIVATE);
+ 		}
+ keep_locked:
+@@ -1489,18 +1482,8 @@ keep:
+ 	free_unref_page_list(&free_pages);
+ 
+ 	list_splice(&ret_pages, page_list);
+-	count_vm_events(PGACTIVATE, pgactivate);
+-
+-	if (stat) {
+-		stat->nr_dirty = nr_dirty;
+-		stat->nr_congested = nr_congested;
+-		stat->nr_unqueued_dirty = nr_unqueued_dirty;
+-		stat->nr_writeback = nr_writeback;
+-		stat->nr_immediate = nr_immediate;
+-		stat->nr_activate = pgactivate;
+-		stat->nr_ref_keep = nr_ref_keep;
+-		stat->nr_unmap_fail = nr_unmap_fail;
+-	}
++	count_vm_events(PGACTIVATE, stat->nr_activate);
++
+ 	return nr_reclaimed;
+ }
+ 
+@@ -1512,6 +1495,7 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
+ 		.priority = DEF_PRIORITY,
+ 		.may_unmap = 1,
+ 	};
++	struct reclaim_stat dummy_stat;
+ 	unsigned long ret;
+ 	struct page *page, *next;
+ 	LIST_HEAD(clean_pages);
+@@ -1525,7 +1509,7 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
+ 	}
+ 
+ 	ret = shrink_page_list(&clean_pages, zone->zone_pgdat, &sc,
+-			TTU_IGNORE_ACCESS, NULL, true);
++			TTU_IGNORE_ACCESS, &dummy_stat, true);
+ 	list_splice(&clean_pages, page_list);
+ 	mod_node_page_state(zone->zone_pgdat, NR_ISOLATED_FILE, -ret);
+ 	return ret;
+@@ -1900,7 +1884,7 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
+ 	unsigned long nr_scanned;
+ 	unsigned long nr_reclaimed = 0;
+ 	unsigned long nr_taken;
+-	struct reclaim_stat stat = {};
++	struct reclaim_stat stat;
+ 	int file = is_file_lru(lru);
+ 	struct pglist_data *pgdat = lruvec_pgdat(lruvec);
+ 	struct zone_reclaim_stat *reclaim_stat = &lruvec->reclaim_stat;
