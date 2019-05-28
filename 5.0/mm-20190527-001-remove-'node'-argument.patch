@@ -1,0 +1,45 @@
+From: "Uladzislau Rezki (Sony)" <urezki@gmail.com>
+Subject: [PATCH v4 1/4] mm/vmap: remove "node" argument
+Date: Mon, 27 May 2019 17:18:40 +0200
+Cc: Roman Gushchin <guro@fb.com>, Uladzislau Rezki <urezki@gmail.com>,
+        Hillf Danton <hdanton@sina.com>,
+        Michal Hocko <mhocko@suse.com>,
+        Matthew Wilcox <willy@infradead.org>,
+        LKML <linux-kernel@vger.kernel.org>,
+        Thomas Garnier <thgarnie@google.com>,
+        Oleksiy Avramchenko <oleksiy.avramchenko@sonymobile.com>,
+        Steven Rostedt <rostedt@goodmis.org>,
+        Joel Fernandes <joelaf@google.com>,
+        Thomas Gleixner <tglx@linutronix.de>,
+        Ingo Molnar <mingo@elte.hu>, Tejun Heo <tj@kernel.org>
+To: Andrew Morton <akpm@linux-foundation.org>, linux-mm@kvack.org
+
+Remove unused argument from the __alloc_vmap_area() function.
+
+Signed-off-by: Uladzislau Rezki (Sony) <urezki@gmail.com>
+---
+ mm/vmalloc.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mm/vmalloc.c b/mm/vmalloc.c
+index c42872ed82ac..ea1b65fac599 100644
+--- a/mm/vmalloc.c
++++ b/mm/vmalloc.c
+@@ -985,7 +985,7 @@ adjust_va_to_fit_type(struct vmap_area *va,
+  */
+ static __always_inline unsigned long
+ __alloc_vmap_area(unsigned long size, unsigned long align,
+-	unsigned long vstart, unsigned long vend, int node)
++	unsigned long vstart, unsigned long vend)
+ {
+ 	unsigned long nva_start_addr;
+ 	struct vmap_area *va;
+@@ -1062,7 +1062,7 @@ static struct vmap_area *alloc_vmap_area(unsigned long size,
+ 	 * If an allocation fails, the "vend" address is
+ 	 * returned. Therefore trigger the overflow path.
+ 	 */
+-	addr = __alloc_vmap_area(size, align, vstart, vend, node);
++	addr = __alloc_vmap_area(size, align, vstart, vend);
+ 	if (unlikely(addr == vend))
+ 		goto overflow;
+ 
