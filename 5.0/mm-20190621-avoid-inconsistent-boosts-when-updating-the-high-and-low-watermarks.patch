@@ -1,0 +1,121 @@
+From: Alan Jenkins <alan.christopher.jenkins@gmail.com>
+To: linux-mm@kvack.org
+Cc: Vlastimil Babka <vbabka@suse.cz>, Mel Gorman <mgorman@techsingularity.net>,
+    linux-kernel@vger.kernel.org, Bharath Vedartham <linux.bhar@gmail.com>,
+    Alan Jenkins <alan.christopher.jenkins@gmail.com>
+Subject: [PATCH v2] mm: avoid inconsistent "boosts" when updating the high and low watermarks
+Date: Fri, 21 Jun 2019 16:31:07 +0100
+
+When setting the low and high watermarks we use min_wmark_pages(zone).
+I guess this was to reduce the line length.  Then this macro was modified
+to include zone->watermark_boost.  So we needed to set watermark_boost
+before we set the high and low watermarks... but we did not.
+
+It seems mostly harmless.  It might set the watermarks a bit higher than
+needed: when 1) the watermarks have been "boosted" and 2) you then
+triggered __setup_per_zone_wmarks() (by setting one of the sysctls, or
+hotplugging memory...).
+
+I noticed it because it also breaks the documented equality
+(high - low == low - min).  Below is an example of reproducing the bug.
+
+First sample.  Equality is met (high - low == low - min):
+
+Node 0, zone   Normal
+  pages free     11962
+        min      9531
+        low      11913
+        high     14295
+        spanned  1173504
+        present  1173504
+        managed  1134235
+
+A later sample.  Something has caused us to boost the watermarks:
+
+Node 0, zone   Normal
+  pages free     12614
+        min      10043
+        low      12425
+        high     14807
+
+Now trigger the watermarks to be recalculated.  "cd /proc/sys/vm" and
+"cat watermark_scale_factor > watermark_scale_factor".  Then the watermarks
+are boosted inconsistently.  The equality is broken:
+
+Node 0, zone   Normal
+  pages free     12412
+        min      9531
+        low      12425
+        high     14807
+
+14807 - 12425 = 2382
+12425 -  9531 = 2894
+
+Co-developed-by: Vlastimil Babka <vbabka@suse.cz>
+Signed-off-by: Vlastimil Babka <vbabka@suse.cz>
+Signed-off-by: Alan Jenkins <alan.christopher.jenkins@gmail.com>
+Fixes: 1c30844d2dfe ("mm: reclaim small amounts of memory when an external
+                      fragmentation event occurs")
+Acked-by: Mel Gorman <mgorman@techsingularity.net>
+
+---
+
+Changes since v1:
+
+Use Vlastimil's suggested code.  It is much cleaner, thanks :-).
+I considered this "Co-developed-by" and s-o-b credit.
+
+Update commit message to be specific about expected effects.
+
+Node data is always allocated with kzalloc().  So there is no risk of
+the code reading arbitrary unintialized data from ->watermark_boost,
+the first time it is run.
+
+AFAICT the bug is mostly harmless.  I do not require a -stable port.
+I leave it to anyone else, if they think it's worth adding
+"Cc: stable@vger.kernel.org".
+
+
+ mm/page_alloc.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+ 
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index c02cff1ed56e..01233705e490 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -7570,6 +7570,7 @@ static void __setup_per_zone_wmarks(void)
+ 
+ 	for_each_zone(zone) {
+ 		u64 tmp;
++		unsigned long wmark_min;
+ 
+ 		spin_lock_irqsave(&zone->lock, flags);
+ 		tmp = (u64)pages_min * zone_managed_pages(zone);
+@@ -7588,13 +7589,13 @@ static void __setup_per_zone_wmarks(void)
+ 
+ 			min_pages = zone_managed_pages(zone) / 1024;
+ 			min_pages = clamp(min_pages, SWAP_CLUSTER_MAX, 128UL);
+-			zone->_watermark[WMARK_MIN] = min_pages;
++			wmark_min = min_pages;
+ 		} else {
+ 			/*
+ 			 * If it's a lowmem zone, reserve a number of pages
+ 			 * proportionate to the zone's size.
+ 			 */
+-			zone->_watermark[WMARK_MIN] = tmp;
++			wmark_min = tmp;
+ 		}
+ 
+ 		/*
+@@ -7606,8 +7607,9 @@ static void __setup_per_zone_wmarks(void)
+ 			    mult_frac(zone_managed_pages(zone),
+ 				      watermark_scale_factor, 10000));
+ 
+-		zone->_watermark[WMARK_LOW]  = min_wmark_pages(zone) + tmp;
+-		zone->_watermark[WMARK_HIGH] = min_wmark_pages(zone) + tmp * 2;
++		zone->_watermark[WMARK_MIN]  = wmark_min;
++		zone->_watermark[WMARK_LOW]  = wmark_min + tmp;
++		zone->_watermark[WMARK_HIGH] = wmark_min + tmp * 2;
+ 		zone->watermark_boost = 0;
+ 
+ 		spin_unlock_irqrestore(&zone->lock, flags);
