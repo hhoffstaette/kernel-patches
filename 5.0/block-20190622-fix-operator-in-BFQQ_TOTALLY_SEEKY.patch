@@ -1,0 +1,31 @@
+From: Paolo Valente <paolo.valente@linaro.org>
+To: Jens Axboe <axboe@kernel.dk>
+Cc: linux-block@vger.kernel.org, linux-kernel@vger.kernel.org, ulf.hansson@linaro.org,
+    linus.walleij@linaro.org, bfq-iosched@googlegroups.com, oleksandr@natalenko.name,
+    Paolo Valente <paolo.valente@linaro.org>
+Subject: [PATCH BUGFIX V2] block, bfq: fix operator in BFQQ_TOTALLY_SEEKY
+Date: Sat, 22 Jun 2019 22:44:16 +0200
+
+By mistake, there is a '&' instead of a '==' in the definition of the
+macro BFQQ_TOTALLY_SEEKY. This commit replaces the wrong operator with
+the correct one.
+
+Fixes: commit 7074f076ff15 ("block, bfq: do not tag totally seeky queues as soft rt")
+Signed-off-by: Paolo Valente <paolo.valente@linaro.org>
+---
+ block/bfq-iosched.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/block/bfq-iosched.c b/block/bfq-iosched.c
+index f8d430f88d25..f9269ae6da9c 100644
+--- a/block/bfq-iosched.c
++++ b/block/bfq-iosched.c
+@@ -240,7 +240,7 @@ static struct kmem_cache *bfq_pool;
+  * containing only random (seeky) I/O are prevented from being tagged
+  * as soft real-time.
+  */
+-#define BFQQ_TOTALLY_SEEKY(bfqq)	(bfqq->seek_history & -1)
++#define BFQQ_TOTALLY_SEEKY(bfqq)	(bfqq->seek_history == -1)
+ 
+ /* Min number of samples required to perform peak-rate update */
+ #define BFQ_RATE_MIN_SAMPLES	32
