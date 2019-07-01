@@ -1,39 +1,32 @@
 From: Kuo-Hsin Yang <vovoy@chromium.org>
-To: Andrew Morton <akpm@linux-foundation.org>, Johannes Weiner <hannes@cmpxchg.org>
-Cc: Michal Hocko <mhocko@suse.com>, Sonny Rao <sonnyrao@chromium.org>,
-    Kuo-Hsin Yang <vovoy@chromium.org>, linux-kernel@vger.kernel.org, linux-mm@kvack.org
-Subject: [PATCH] mm: vmscan: fix not scanning anonymous pages when detecting file refaults
-Date: Wed, 19 Jun 2019 16:08:35 +0800
+Subject: [PATCH v2] mm: vmscan: fix not scanning anonymous pages when detecting file refaults
+Date: Fri, 28 Jun 2019 19:16:27 +0800
+Cc: Minchan Kim <minchan@kernel.org>, Michal Hocko <mhocko@suse.com>,
+        Sonny Rao <sonnyrao@chromium.org>,
+        linux-kernel@vger.kernel.org, linux-mm@kvack.org
+To: Andrew Morton <akpm@linux-foundation.org>,
+        Johannes Weiner <hannes@cmpxchg.org>
 
 When file refaults are detected and there are many inactive file pages,
 the system never reclaim anonymous pages, the file pages are dropped
 aggressively when there are still a lot of cold anonymous pages and
-system thrashes. This issue impacts the performance of applications with
-large executable, e.g. chrome.
+system thrashes.  This issue impacts the performance of applications
+with large executable, e.g. chrome.
 
-When file refaults are detected. inactive_list_is_low() may return
-different values depends on the actual_reclaim parameter, the following
-2 conditions could be satisfied at the same time.
+Commit 2a2e48854d70 ("mm: vmscan: fix IO/refault regression in cache
+workingset transition") introduced actual_reclaim parameter.  When file
+refaults are detected, inactive_list_is_low() may return different
+values depends on the actual_reclaim parameter.  Vmscan would only scan
+active/inactive file lists at file thrashing state when the following 2
+conditions are satisfied.
 
 1) inactive_list_is_low() returns false in get_scan_count() to trigger
    scanning file lists only.
 2) inactive_list_is_low() returns true in shrink_list() to allow
    scanning active file list.
 
-In that case vmscan would only scan file lists, and as active file list
-is also scanned, inactive_list_is_low() may keep returning false in
-get_scan_count() until file cache is very low.
-
-Before commit 2a2e48854d70 ("mm: vmscan: fix IO/refault regression in
-cache workingset transition"), inactive_list_is_low() never returns
-different value in get_scan_count() and shrink_list() in one
-shrink_node_memcg() run. The original design should be that when
-inactive_list_is_low() returns false for file lists, vmscan only scan
-inactive file list. As only inactive file list is scanned,
-inactive_list_is_low() would soon return true.
-
 This patch makes the return value of inactive_list_is_low() independent
-of actual_reclaim.
+of actual_reclaim and rename the parameter back to trace.
 
 The problem can be reproduced by the following test program.
 
@@ -140,7 +133,7 @@ int main(int argc, char *argv[])
 
 Running the test program on 2GB RAM VM with kernel 5.2.0-rc5, the
 program fills ram with 2048 MB memory, access a 200 MB file for 10
-times. Without this patch, the file cache is dropped aggresively and
+times.  Without this patch, the file cache is dropped aggresively and
 every access to the file is from disk.
 
   $ ./thrash 2048 200 10
@@ -173,23 +166,43 @@ With this patch, these file pages can be cached.
   File access time, round 8: 0.000738 (sec)
   File access time, round 9: 0.000747 (sec)
 
-[HH: backported to 5.0]
-Fixes: 2a2e48854d70 ("mm: vmscan: fix IO/refault regression in cache workingset transition")
+[HH: updated Fixes: tags according to Johannes Weiner]
+Fixes: e9868505987a ("mm,vmscan: only evict file pages when we have plenty")
+Fixes: 7c5bd705d8f9 ("mm: memcg: only evict file pages when we have plenty")
 Signed-off-by: Kuo-Hsin Yang <vovoy@chromium.org>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
 ---
- mm/vmscan.c | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+ mm/vmscan.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/mm/vmscan.c b/mm/vmscan.c
-index 7889f583ced9f..b95d05fe828d1 100644
+index 7889f583ced9f..da0b97204372e 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
+@@ -2125,7 +2125,7 @@ static void shrink_active_list(unsigned long nr_to_scan,
+  *   10TB     320        32GB
+  */
+ static bool inactive_list_is_low(struct lruvec *lruvec, bool file,
+-				 struct scan_control *sc, bool actual_reclaim)
++				 struct scan_control *sc, bool trace)
+ {
+ 	enum lru_list active_lru = file * LRU_FILE + LRU_ACTIVE;
+ 	struct pglist_data *pgdat = lruvec_pgdat(lruvec);
 @@ -2151,7 +2151,7 @@ static bool inactive_list_is_low(struct lruvec *lruvec, bool file,
  	 * rid of the stale workingset quickly.
  	 */
- 	refaults = lruvec_page_state(lruvec, WORKINGSET_ACTIVATE);
+ 	refaults = lruvec_page_state_local(lruvec, WORKINGSET_ACTIVATE);
 -	if (file && actual_reclaim && lruvec->refaults != refaults) {
 +	if (file && lruvec->refaults != refaults) {
  		inactive_ratio = 0;
  	} else {
  		gb = (inactive + active) >> (30 - PAGE_SHIFT);
+@@ -2161,7 +2161,7 @@ static bool inactive_list_is_low(struct lruvec *lruvec, bool file,
+ 			inactive_ratio = 1;
+ 	}
+ 
+-	if (actual_reclaim)
++	if (trace)
+ 		trace_mm_vmscan_inactive_list_is_low(pgdat->node_id, sc->reclaim_idx,
+ 			lruvec_lru_size(lruvec, inactive_lru, MAX_NR_ZONES), inactive,
+ 			lruvec_lru_size(lruvec, active_lru, MAX_NR_ZONES), active,

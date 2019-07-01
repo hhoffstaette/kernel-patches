@@ -21,16 +21,12 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Stable Series: 5.0**
+**Stable Series: 5.2**
 
-- block: fixes from 5.1+ (BFQ)
-- bmq: [BMQ 0.93](https://cchalpha.blogspot.com/2019/04/bmq-093-release.html) CPU scheduler + updates
-- btrfs: fixes from 5.1+ (correctness, reliability)
-- kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
-- loop: observe rotational property of underlying device
-- mm: fixes from 5.1+ (reclaim correctness & stability)
-- net: fixes from 5.1+ (BBR, epoll, performance)
-- r8169: fixes from 5.1+ (stability, reliability)
+- block: fixes from 5.3+ (BFQ)
+- btrfs: fixes from 5.3+ (correctness, reliability)
+- kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch)) + '-O3'
+- mm: fixes from 5.3+ (reclaim correctness & stability)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: fixes from 5.1+ (performance, reliability)
+- xfs: fixes from 5.3+ (performance)
 
