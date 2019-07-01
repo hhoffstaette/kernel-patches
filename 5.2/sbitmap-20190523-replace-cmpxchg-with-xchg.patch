@@ -1,0 +1,49 @@
+From: "Pavel Begunkov (Silence)" <asml.silence@gmail.com>
+To: Jens Axboe <axboe@kernel.dk>, linux-block@vger.kernel.org, linux-kernel@vger.kernel.org
+Cc: Pavel Begunkov <asml.silence@gmail.com>
+Subject: [PATCH 1/1] sbitmap: Replace cmpxchg with xchg
+Date: Thu, 23 May 2019 18:39:16 +0300
+
+From: Pavel Begunkov <asml.silence@gmail.com>
+
+cmpxchg() with an immediate value could be replaced with less expensive
+xchg(). The same true if new value don't _depend_ on the old one.
+
+In the second block, atomic_cmpxchg() return value isn't checked, so
+after atomic_cmpxchg() ->  atomic_xchg() conversion it could be replaced
+with atomic_set(). Comparison with atomic_read() in the second chunk was
+left as an optimisation (if that was the initial intention).
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+---
+ lib/sbitmap.c | 10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/lib/sbitmap.c b/lib/sbitmap.c
+index 155fe38756ec..7d7e0e278523 100644
+--- a/lib/sbitmap.c
++++ b/lib/sbitmap.c
+@@ -37,9 +37,7 @@ static inline bool sbitmap_deferred_clear(struct sbitmap *sb, int index)
+ 	/*
+ 	 * First get a stable cleared mask, setting the old mask to 0.
+ 	 */
+-	do {
+-		mask = sb->map[index].cleared;
+-	} while (cmpxchg(&sb->map[index].cleared, mask, 0) != mask);
++	mask = xchg(&sb->map[index].cleared, 0);
+ 
+ 	/*
+ 	 * Now clear the masked bits in our free word
+@@ -527,10 +525,8 @@ static struct sbq_wait_state *sbq_wake_ptr(struct sbitmap_queue *sbq)
+ 		struct sbq_wait_state *ws = &sbq->ws[wake_index];
+ 
+ 		if (waitqueue_active(&ws->wait)) {
+-			int o = atomic_read(&sbq->wake_index);
+-
+-			if (wake_index != o)
+-				atomic_cmpxchg(&sbq->wake_index, o, wake_index);
++			if (wake_index != atomic_read(&sbq->wake_index))
++				atomic_set(&sbq->wake_index, wake_index);
+ 			return ws;
+ 		}
+ 
