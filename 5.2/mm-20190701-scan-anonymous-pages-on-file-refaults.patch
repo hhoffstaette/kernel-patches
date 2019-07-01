@@ -1,9 +1,10 @@
 From: Kuo-Hsin Yang <vovoy@chromium.org>
-Subject: [PATCH v2] mm: vmscan: fix not scanning anonymous pages when detecting file refaults
-Date: Fri, 28 Jun 2019 19:16:27 +0800
+Subject: [PATCH] mm: vmscan: scan anonymous pages on file refaults
+Date: Mon, 1 Jul 2019 16:10:38 +0800
 Cc: Minchan Kim <minchan@kernel.org>, Michal Hocko <mhocko@suse.com>,
         Sonny Rao <sonnyrao@chromium.org>,
-        linux-kernel@vger.kernel.org, linux-mm@kvack.org
+        linux-kernel@vger.kernel.org, linux-mm@kvack.org,
+        stable@vger.kernel.org
 To: Andrew Morton <akpm@linux-foundation.org>,
         Johannes Weiner <hannes@cmpxchg.org>
 
@@ -13,20 +14,9 @@ aggressively when there are still a lot of cold anonymous pages and
 system thrashes.  This issue impacts the performance of applications
 with large executable, e.g. chrome.
 
-Commit 2a2e48854d70 ("mm: vmscan: fix IO/refault regression in cache
-workingset transition") introduced actual_reclaim parameter.  When file
-refaults are detected, inactive_list_is_low() may return different
-values depends on the actual_reclaim parameter.  Vmscan would only scan
-active/inactive file lists at file thrashing state when the following 2
-conditions are satisfied.
-
-1) inactive_list_is_low() returns false in get_scan_count() to trigger
-   scanning file lists only.
-2) inactive_list_is_low() returns true in shrink_list() to allow
-   scanning active file list.
-
-This patch makes the return value of inactive_list_is_low() independent
-of actual_reclaim and rename the parameter back to trace.
+With this patch, when file refault is detected, inactive_list_is_low()
+always returns true for file pages in get_scan_count() to enable
+scanning anonymous pages.
 
 The problem can be reproduced by the following test program.
 
@@ -166,11 +156,11 @@ With this patch, these file pages can be cached.
   File access time, round 8: 0.000738 (sec)
   File access time, round 9: 0.000747 (sec)
 
-[HH: updated Fixes: tags according to Johannes Weiner]
 Fixes: e9868505987a ("mm,vmscan: only evict file pages when we have plenty")
 Fixes: 7c5bd705d8f9 ("mm: memcg: only evict file pages when we have plenty")
 Signed-off-by: Kuo-Hsin Yang <vovoy@chromium.org>
 Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Cc: <stable@vger.kernel.org> # 4.12+
 ---
  mm/vmscan.c | 6 +++---
  1 file changed, 3 insertions(+), 3 deletions(-)
