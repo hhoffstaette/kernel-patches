@@ -1,0 +1,173 @@
+From: Dave Chinner <david@fromorbit.com>
+To: linux-xfs@vger.kernel.org
+Subject: [PATCH 4/5] xfs: speed up directory bestfree block scanning
+Date: Thu, 25 Oct 2018 09:57:15 +1100
+
+From: Dave Chinner <dchinner@redhat.com>
+
+When running a "create millions inodes in a directory" test
+recently, I noticed we were spending a huge amount of time
+converting freespace block headers from disk format to in-memory
+format:
+
+ 31.47%  [kernel]  [k] xfs_dir2_node_addname
+ 17.86%  [kernel]  [k] xfs_dir3_free_hdr_from_disk
+  3.55%  [kernel]  [k] xfs_dir3_free_bests_p
+
+We shouldn't be hitting the best free block scanning code so hard
+when doing sequential directory creates, and it turns out there's
+a highly suboptimal loop searching the the best free array in
+the freespace block - it decodes the block header before checking
+each entry inside a loop, instead of decoding the header once before
+running the entry search loop.
+
+This makes a massive difference to create rates. Profile now looks
+like this:
+
+  13.15%  [kernel]  [k] xfs_dir2_node_addname
+   3.52%  [kernel]  [k] xfs_dir3_leaf_check_int
+   3.11%  [kernel]  [k] xfs_log_commit_cil
+
+And the wall time/average file create rate differences are
+just as stark:
+
+		create time(sec) / rate (files/s)
+File count	     vanilla		    patched
+  10k		   0.54 / 18.5k		   0.53 / 18.9k
+  20k		   1.10	/ 18.1k		   1.05 / 19.0k
+ 100k		   4.21	/ 23.8k		   3.91 / 25.6k
+ 200k		   9.66	/ 20,7k		   7.37 / 27.1k
+   1M		  86.61	/ 11.5k		  48.26 / 20.7k
+   2M		 206.13	/  9.7k		 129.71 / 15.4k
+
+The larger the directory, the bigger the performance improvement.
+
+Signed-Off-By: Dave Chinner <dchinner@redhat.com>
+---
+ fs/xfs/libxfs/xfs_dir2_node.c | 83 ++++++++++++++---------------------
+ 1 file changed, 32 insertions(+), 51 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_dir2_node.c b/fs/xfs/libxfs/xfs_dir2_node.c
+index 1ecf41e380fb..621f63de075c 100644
+--- a/fs/xfs/libxfs/xfs_dir2_node.c
++++ b/fs/xfs/libxfs/xfs_dir2_node.c
+@@ -1754,7 +1754,7 @@ xfs_dir2_node_find_freeblk(
+ 	xfs_dir2_db_t		fbno = -1;
+ 	xfs_dir2_free_t		*free = NULL;
+ 	struct xfs_dir3_icfree_hdr freehdr;
+-	__be16			*bests;
++	__be16			*bests = NULL;
+ 	xfs_fileoff_t		fo;
+ 	int			error;
+ 
+@@ -1767,11 +1767,10 @@ xfs_dir2_node_find_freeblk(
+ 		fbp = fblk->bp;
+ 		free = fbp->b_addr;
+ 		findex = fblk->index;
++		bests = dp->d_ops->free_bests_p(free);
++		dp->d_ops->free_hdr_from_disk(&freehdr, free);
+ 		if (findex >= 0) {
+ 			/* caller already found the freespace for us. */
+-			bests = dp->d_ops->free_bests_p(free);
+-			dp->d_ops->free_hdr_from_disk(&freehdr, free);
+-
+ 			ASSERT(findex < freehdr.nvalid);
+ 			ASSERT(be16_to_cpu(bests[findex]) != NULLDATAOFF);
+ 			ASSERT(be16_to_cpu(bests[findex]) >= length);
+@@ -1805,29 +1804,19 @@ xfs_dir2_node_find_freeblk(
+ 
+ 	/*
+ 	 * While we haven't identified a data block, search the freeblock
+-	 * data for a good data block.  If we find a null freeblock entry,
+-	 * indicating a hole in the data blocks, remember that.
++	 * data for a data block with enough free space in it.
+ 	 */
+-	while (dbno == -1) {
+-		/*
+-		 * If we don't have a freeblock in hand, get the next one.
+-		 */
++	for ( ; fbno < lastfbno; fbno++) {
++		/* If we don't have a freeblock in hand, get the next one. */
+ 		if (fbp == NULL) {
++			/* If it's ifbno we already looked at it. */
++			if (fbno == ifbno)
++				continue;
++
+ 			/*
+-			 * If it's ifbno we already looked at it.
+-			 */
+-			if (++fbno == ifbno)
+-				fbno++;
+-			/*
+-			 * If it's off the end we're done.
+-			 */
+-			if (fbno >= lastfbno)
+-				break;
+-			/*
+-			 * Read the block.  There can be holes in the
+-			 * freespace blocks, so this might not succeed.
+-			 * This should be really rare, so there's no reason
+-			 * to avoid it.
++			 * Read the block.  There can be holes in the freespace
++			 * blocks, so this might not succeed.  This should be
++			 * really rare, so there's no reason to avoid it.
+ 			 */
+ 			error = xfs_dir2_free_try_read(tp, dp,
+ 					xfs_dir2_db_to_da(args->geo, fbno),
+@@ -1836,37 +1825,29 @@ xfs_dir2_node_find_freeblk(
+ 				return error;
+ 			if (!fbp)
+ 				continue;
+-			free = fbp->b_addr;
++
+ 			findex = 0;
++			free = fbp->b_addr;
++			bests = dp->d_ops->free_bests_p(free);
++			dp->d_ops->free_hdr_from_disk(&freehdr, free);
+ 		}
+-		/*
+-		 * Look at the current free entry.  Is it good enough?
+-		 *
+-		 * The bests initialisation should be where the bufer is read in
+-		 * the above branch. But gcc is too stupid to realise that bests
+-		 * and the freehdr are actually initialised if they are placed
+-		 * there, so we have to do it here to avoid warnings. Blech.
+-		 */
+-		bests = dp->d_ops->free_bests_p(free);
+-		dp->d_ops->free_hdr_from_disk(&freehdr, free);
+-		if (be16_to_cpu(bests[findex]) != NULLDATAOFF &&
+-		    be16_to_cpu(bests[findex]) >= length)
+-			dbno = freehdr.firstdb + findex;
+-		else {
+-			/*
+-			 * Are we done with the freeblock?
+-			 */
+-			if (++findex == freehdr.nvalid) {
+-				/*
+-				 * Drop the block.
+-				 */
+-				xfs_trans_brelse(tp, fbp);
+-				fbp = NULL;
+-				if (fblk && fblk->bp)
+-					fblk->bp = NULL;
++
++		/* Scan the free entry array for a large enough free space. */
++		do {
++			if (be16_to_cpu(bests[findex]) != NULLDATAOFF &&
++			    be16_to_cpu(bests[findex]) >= length) {
++				dbno = freehdr.firstdb + findex;
++				goto out;
+ 			}
+-		}
++		} while (++findex < freehdr.nvalid);
++
++		/* Didn't find free space, go on to next free block */
++		xfs_trans_brelse(tp, fbp);
++		fbp = NULL;
++		if (fblk)
++			fblk->bp = NULL;
+ 	}
++
+ out:
+ 	*dbnop = dbno;
+ 	*fbpp = fbp;

@@ -1,0 +1,161 @@
+From: Dave Chinner <david@fromorbit.com>
+To: linux-xfs@vger.kernel.org
+Subject: [PATCH 5/5] xfs: reverse search directory freespace indexes
+Date: Thu, 25 Oct 2018 09:57:16 +1100
+
+From: Dave Chinner <dchinner@redhat.com>
+
+When a directory is growing rapidly, new blocks tend to get added at
+the end of the directory. These end up at the end of the freespace
+index, and when the directory gets large finding these new
+freespaces gets expensive. The code does a linear search across the
+frespace index from the first block in the directory to the last,
+hence meaning the newly added space is the last index searched.
+
+Instead, do a reverse order index search, starting from the last
+block and index in the freespace index. This makes most lookups for
+free space on rapidly growing directories O(1) instead of O(N), but
+should not have any impact on random insert workloads because the
+average search length is the same regardless of which end of the
+array we start at.
+
+The result is a major improvement in large directory grow rates:
+
+                create time(sec) / rate (files/s)
+ File count     vanilla             patched
+   10k        0.54 / 18.5k         0.52 / 19.3k
+   20k        1.10 / 18.1k         1.00 / 20.0k
+  100k        4.21 / 23.8k         3.58 / 27.9k
+  200k        9.66 / 20,7k         7.08 / 28.3k
+    1M       86.61 / 11.5k        38.33 / 26.1k
+    2M      206.13 /  9.7k        82.20 / 24.3k
+   10M     2843.57 /  3.5k       591.78 / 16.9k
+
+Signed-Off-By: Dave Chinner <dchinner@redhat.com>
+---
+ fs/xfs/libxfs/xfs_dir2_node.c | 69 +++++++++++++++++------------------
+ 1 file changed, 34 insertions(+), 35 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_dir2_node.c b/fs/xfs/libxfs/xfs_dir2_node.c
+index 621f63de075c..aa52dc740305 100644
+--- a/fs/xfs/libxfs/xfs_dir2_node.c
++++ b/fs/xfs/libxfs/xfs_dir2_node.c
+@@ -1747,7 +1747,8 @@ xfs_dir2_node_find_freeblk(
+ 	struct xfs_inode	*dp = args->dp;
+ 	struct xfs_trans	*tp = args->trans;
+ 	struct xfs_buf		*fbp = NULL;
+-	int			findex;
++	int			findex = 0;
++	xfs_dir2_db_t		firstfbno;
+ 	xfs_dir2_db_t		lastfbno;
+ 	xfs_dir2_db_t		ifbno = -1;
+ 	xfs_dir2_db_t		dbno = -1;
+@@ -1775,7 +1776,7 @@ xfs_dir2_node_find_freeblk(
+ 			ASSERT(be16_to_cpu(bests[findex]) != NULLDATAOFF);
+ 			ASSERT(be16_to_cpu(bests[findex]) >= length);
+ 			dbno = freehdr.firstdb + findex;
+-			goto out;
++			goto found_block;
+ 		}
+ 
+ 		/*
+@@ -1784,9 +1785,10 @@ xfs_dir2_node_find_freeblk(
+ 		 */
+ 		ifbno = fblk->blkno;
+ 		fbno = ifbno;
++		xfs_trans_brelse(tp, fbp);
++		fbp = NULL;
++		fblk->bp = NULL;
+ 	}
+-	ASSERT(dbno == -1);
+-	findex = 0;
+ 
+ 	/*
+ 	 * If we don't have a data block yet, we're going to scan the freespace
+@@ -1797,6 +1799,7 @@ xfs_dir2_node_find_freeblk(
+ 	if (error)
+ 		return error;
+ 	lastfbno = xfs_dir2_da_to_db(args->geo, (xfs_dablk_t)fo);
++	firstfbno = xfs_dir2_byte_to_db(args->geo, XFS_DIR2_FREE_OFFSET);
+ 
+ 	/* If we haven't get a search start block, set it now */
+ 	if (fbno == -1)
+@@ -1804,51 +1807,47 @@ xfs_dir2_node_find_freeblk(
+ 
+ 	/*
+ 	 * While we haven't identified a data block, search the freeblock
+-	 * data for a data block with enough free space in it.
++	 * data for a good data block. Do a reverse order search, as growing
++	 * directories will put new blocks with free space at the end of the
++	 * free space index.
+ 	 */
+-	for ( ; fbno < lastfbno; fbno++) {
+-		/* If we don't have a freeblock in hand, get the next one. */
+-		if (fbp == NULL) {
+-			/* If it's ifbno we already looked at it. */
+-			if (fbno == ifbno)
+-				continue;
++	for (fbno = lastfbno - 1; fbno >= firstfbno; fbno--) {
++		/* If it's ifbno we already looked at it. */
++		if (fbno == ifbno)
++			continue;
+ 
+-			/*
+-			 * Read the block.  There can be holes in the freespace
+-			 * blocks, so this might not succeed.  This should be
+-			 * really rare, so there's no reason to avoid it.
+-			 */
+-			error = xfs_dir2_free_try_read(tp, dp,
+-					xfs_dir2_db_to_da(args->geo, fbno),
+-					&fbp);
+-			if (error)
+-				return error;
+-			if (!fbp)
+-				continue;
++		/*
++		 * Read the block.  There can be holes in the freespace
++		 * blocks, so this might not succeed.  This should be
++		 * really rare, so there's no reason to avoid it.
++		 */
++		error = xfs_dir2_free_try_read(tp, dp,
++				xfs_dir2_db_to_da(args->geo, fbno),
++				&fbp);
++		if (error)
++			return error;
++		if (!fbp)
++			continue;
+ 
+-			findex = 0;
+-			free = fbp->b_addr;
+-			bests = dp->d_ops->free_bests_p(free);
+-			dp->d_ops->free_hdr_from_disk(&freehdr, free);
+-		}
++		findex = 0;
++		free = fbp->b_addr;
++		bests = dp->d_ops->free_bests_p(free);
++		dp->d_ops->free_hdr_from_disk(&freehdr, free);
+ 
+ 		/* Scan the free entry array for a large enough free space. */
+-		do {
++		for (findex = freehdr.nvalid - 1; findex >= 0; findex--) {
+ 			if (be16_to_cpu(bests[findex]) != NULLDATAOFF &&
+ 			    be16_to_cpu(bests[findex]) >= length) {
+ 				dbno = freehdr.firstdb + findex;
+-				goto out;
++				goto found_block;
+ 			}
+-		} while (++findex < freehdr.nvalid);
++		}
+ 
+ 		/* Didn't find free space, go on to next free block */
+ 		xfs_trans_brelse(tp, fbp);
+-		fbp = NULL;
+-		if (fblk)
+-			fblk->bp = NULL;
+ 	}
+ 
+-out:
++found_block:
+ 	*dbnop = dbno;
+ 	*fbpp = fbp;
+ 	*findexp = findex;
