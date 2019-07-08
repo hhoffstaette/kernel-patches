@@ -24,9 +24,11 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **Stable Series: 5.2**
 
 - block: fixes from 5.3+ (BFQ)
-- btrfs: fixes from 5.3+ (correctness, reliability)
-- kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch)) + '-O3'
-- mm: fixes from 5.3+ (reclaim correctness & stability)
+- bmq: [BMQ 0.97](https://cchalpha.blogspot.com/2019/07/bmq-097-release.html) CPU scheduler
+- btrfs: fixes from 5.3+
+- kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch)) + `-O3`
+- mm: fixes from 5.3+
+- sched: fixes from 5.3+
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: fixes from 5.3+ (performance)
 
