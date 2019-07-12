@@ -1,0 +1,17 @@
+
+Increase the default timeout to 3 seconds in order to prevent suspend failures.
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+diff -rup a/drivers/usb/host/xhci.c b/drivers/usb/host/xhci.c
+--- a/drivers/usb/host/xhci.c	2019-07-08 00:41:56.000000000 +0200
++++ b/drivers/usb/host/xhci.c	2019-07-12 11:57:32.825132955 +0200
+@@ -1013,7 +1013,7 @@ int xhci_suspend(struct xhci_hcd *xhci,
+ 	writel(command, &xhci->op_regs->command);
+ 
+ 	/* Some chips from Fresco Logic need an extraordinary delay */
+-	delay *= (xhci->quirks & XHCI_SLOW_SUSPEND) ? 10 : 1;
++	delay *= (xhci->quirks & XHCI_SLOW_SUSPEND) ? 10 : 3;
+ 
+ 	if (xhci_handshake(&xhci->op_regs->status,
+ 		      STS_HALT, STS_HALT, delay)) {
