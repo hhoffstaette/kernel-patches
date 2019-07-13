@@ -1,0 +1,53 @@
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Wed, 10 Jul 2019 12:57:36 +0200
+Subject: sched/core: Fix preempt warning in ttwu
+
+John reported a DEBUG_PREEMPT warning caused by commit:
+
+  aacedf26fb76 ("sched/core: Optimize try_to_wake_up() for local wakeups")
+
+I overlooked that ttwu_stat() requires preemption disabled.
+
+Reported-by: John Stultz <john.stultz@linaro.org>
+Tested-by: John Stultz <john.stultz@linaro.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Fixes: aacedf26fb76 ("sched/core: Optimize try_to_wake_up() for local wakeups")
+Link: https://lkml.kernel.org/r/20190710105736.GK3402@hirez.programming.kicks-ass.net
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+---
+ kernel/sched/core.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index fa43ce3962e7..2b037f195473 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2399,6 +2399,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
+ 	unsigned long flags;
+ 	int cpu, success = 0;
+ 
++	preempt_disable();
+ 	if (p == current) {
+ 		/*
+ 		 * We're waking current, this means 'p->on_rq' and 'task_cpu(p)
+@@ -2412,7 +2413,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
+ 		 *    it disabling IRQs (this allows not taking ->pi_lock).
+ 		 */
+ 		if (!(p->state & state))
+-			return false;
++			goto out;
+ 
+ 		success = 1;
+ 		cpu = task_cpu(p);
+@@ -2526,6 +2527,7 @@ unlock:
+ out:
+ 	if (success)
+ 		ttwu_stat(p, cpu, wake_flags);
++	preempt_enable();
+ 
+ 	return success;
+ }
