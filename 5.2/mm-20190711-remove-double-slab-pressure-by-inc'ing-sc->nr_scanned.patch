@@ -1,0 +1,56 @@
+From: Yang Shi <yang.shi@linux.alibaba.com>
+Date: Thu, 11 Jul 2019 20:59:27 -0700
+Subject: mm: vmscan: remove double slab pressure by inc'ing sc->nr_scanned
+
+Commit 9092c71bb724 ("mm: use sc->priority for slab shrink targets") has
+broken up the relationship between sc->nr_scanned and slab pressure.
+The sc->nr_scanned can't double slab pressure anymore.  So, it sounds no
+sense to still keep sc->nr_scanned inc'ed.  Actually, it would prevent
+from adding pressure on slab shrink since excessive sc->nr_scanned would
+prevent from scan->priority raise.
+
+The bonnie test doesn't show this would change the behavior of slab
+shrinkers.
+
+				w/		w/o
+			  /sec    %CP      /sec      %CP
+Sequential delete: 	3960.6    94.6    3997.6     96.2
+Random delete: 		2518      63.8    2561.6     64.6
+
+The slight increase of "/sec" without the patch would be caused by the
+slight increase of CPU usage.
+
+Link: http://lkml.kernel.org/r/1559025859-72759-1-git-send-email-yang.shi@linux.alibaba.com
+Signed-off-by: Yang Shi <yang.shi@linux.alibaba.com>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Cc: Josef Bacik <josef@toxicpanda.com>
+Cc: Michal Hocko <mhocko@kernel.org>
+Cc: Mel Gorman <mgorman@techsingularity.net>
+Cc: "Kirill A . Shutemov" <kirill.shutemov@linux.intel.com>
+Cc: Hugh Dickins <hughd@google.com>
+Cc: Shakeel Butt <shakeelb@google.com>
+Cc: Hillf Danton <hdanton@sina.com>
+Cc: "Huang, Ying" <ying.huang@intel.com>
+Cc: Michal Hocko <mhocko@suse.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/vmscan.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 96aafbf8ce4e..277a36de11c1 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -1137,11 +1137,6 @@ static unsigned long shrink_page_list(struct list_head *page_list,
+ 		if (!sc->may_unmap && page_mapped(page))
+ 			goto keep_locked;
+ 
+-		/* Double the slab pressure for mapped and swapcache pages */
+-		if ((page_mapped(page) || PageSwapCache(page)) &&
+-		    !(PageAnon(page) && !PageSwapBacked(page)))
+-			sc->nr_scanned++;
+-
+ 		may_enter_fs = (sc->gfp_mask & __GFP_FS) ||
+ 			(PageSwapCache(page) && (sc->gfp_mask & __GFP_IO));
+ 
