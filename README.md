@@ -24,7 +24,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **Stable Series: 5.2**
 
 - block: fixes from 5.3+ (BFQ)
-- bmq: [BMQ 0.97](https://cchalpha.blogspot.com/2019/07/bmq-097-release.html) CPU scheduler
+- bmq: [BMQ 0.98](https://cchalpha.blogspot.com/2019/07/bmq-098-release.html) CPU scheduler
 - btrfs: fixes from 5.3+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch)) + `-O3`
 - mm: fixes from 5.3+
