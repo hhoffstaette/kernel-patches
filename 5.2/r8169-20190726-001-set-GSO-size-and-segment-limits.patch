@@ -1,0 +1,42 @@
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Date: Fri, 26 Jul 2019 21:48:32 +0200
+Subject: r8169: set GSO size and segment limits
+
+Set GSO max size and max segment number as in the vendor driver.
+
+[HH: backported to 5.2.x]
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 5c337234b7bc..52a9e2d2fc73 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -569,6 +569,11 @@ enum rtl_rx_desc_bit {
+ 
+ #define RsvdMask	0x3fffc000
+ 
++#define RTL_GSO_MAX_SIZE_V1	32000
++#define RTL_GSO_MAX_SEGS_V1	24
++#define RTL_GSO_MAX_SIZE_V2	64000
++#define RTL_GSO_MAX_SEGS_V2	64
++
+ struct TxDesc {
+ 	__le32 opts1;
+ 	__le32 opts2;
+@@ -6919,8 +6924,12 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 	if (rtl_chip_supports_csum_v2(tp)) {
+ 		tp->tso_csum = rtl8169_tso_csum_v2;
+ 		dev->hw_features |= NETIF_F_IPV6_CSUM | NETIF_F_TSO6;
++		dev->gso_max_size = RTL_GSO_MAX_SIZE_V2;
++		dev->gso_max_segs = RTL_GSO_MAX_SEGS_V2;
+ 	} else {
+ 		tp->tso_csum = rtl8169_tso_csum_v1;
++		dev->gso_max_size = RTL_GSO_MAX_SIZE_V1;
++		dev->gso_max_segs = RTL_GSO_MAX_SEGS_V1;
+ 	}
+ 
+ 	dev->hw_features |= NETIF_F_RXALL;
