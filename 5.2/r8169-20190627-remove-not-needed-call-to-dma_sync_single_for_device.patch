@@ -1,0 +1,29 @@
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Date: Thu, 27 Jun 2019 23:19:09 +0200
+Subject: r8169: remove not needed call to dma_sync_single_for_device
+
+DMA_API_HOWTO.txt includes an example explaining when
+dma_sync_single_for_device() is not needed, and that example matches
+our use case. The buffer isn't changed by the CPU and direction is
+DMA_FROM_DEVICE, so we can remove the call to
+dma_sync_single_for_device().
+
+[HH: trivial fixup to apply to 5.2]
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index 1b5f125e1b6c..a73f2532115b 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -5785,7 +5785,6 @@ static struct sk_buff *rtl8169_try_rx_copy(void *data,
+ 	skb = napi_alloc_skb(&tp->napi, pkt_size);
+ 	if (skb)
+ 		skb_copy_to_linear_data(skb, data, pkt_size);
+-	dma_sync_single_for_device(d, addr, pkt_size, DMA_FROM_DEVICE);
+ 
+ 	return skb;
+ }
