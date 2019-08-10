@@ -25,7 +25,7 @@ index f16d5f196c6b..d2c9076643cf 100644
  	if (unlikely(error && !quiet)) {
  		xfs_err_ratelimited(XFS_I(inode)->i_mount,
 -			"writeback error on sector %llu", start);
-+			"writeback error %d on inode %llu sector %llu", error, inode->i_ino, start);
++			"writeback error %d on inode %lu sector %llu", error, inode->i_ino, start);
  	}
  }
  
