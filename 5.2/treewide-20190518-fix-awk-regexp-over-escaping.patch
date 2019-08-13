@@ -1,0 +1,133 @@
+From:   "Alex Xu (Hello71)" <alex_y_xu@yahoo.ca>
+To:     linux-kernel@vger.kernel.org
+Cc:     x86@kernel.org, jpoimboe@redhat.com, peterz@infradead.org,
+        hpa@zytor.com, masami.hiramatsu.pt@hitachi.com,
+        ben-linux@fluff.org, adrian.hunter@intel.com,
+        "Alex Xu (Hello71)" <alex_y_xu@yahoo.ca>
+Subject: [PATCH] treewide: fix awk regexp over-escaping
+Date:   Sat, 18 May 2019 15:53:52 -0400
+
+Fix "warning: regexp escape sequence is not a known regexp operator" on
+gawk 5.0.0.
+
+Results found by:
+
+- grepping '\\[^\[\\^$.|?*+()a-z]' on *.awk
+- grepping 'awk.*\\[^\[\\^$.|?*+()a-z]'
+- running awk --lint -f </dev/null >/dev/null on *.awk
+
+Signed-off-by: Alex Xu (Hello71) <alex_y_xu@yahoo.ca>
+---
+ Documentation/arm/Samsung/clksrc-change-registers.awk  | 2 +-
+ arch/x86/tools/gen-insn-attr-x86.awk                   | 4 ++--
+ lib/raid6/unroll.awk                                   | 2 +-
+ tools/objtool/arch/x86/tools/gen-insn-attr-x86.awk     | 4 ++--
+ tools/perf/arch/x86/tests/gen-insn-x86-dat.awk         | 2 +-
+ tools/perf/util/intel-pt-decoder/gen-insn-attr-x86.awk | 4 ++--
+ 6 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/Documentation/arm/Samsung/clksrc-change-registers.awk b/Documentation/arm/Samsung/clksrc-change-registers.awk
+index 7be1b8aa7cd9..d853f750c861 100755
+--- a/Documentation/arm/Samsung/clksrc-change-registers.awk
++++ b/Documentation/arm/Samsung/clksrc-change-registers.awk
+@@ -67,7 +67,7 @@ BEGIN {
+ # to replace and create an associative array of values
+ 
+     while (getline line < ARGV[1] > 0) {
+-	if (line ~ /\#define.*_MASK/ &&
++	if (line ~ /#define.*_MASK/ &&
+ 	    !(line ~ /USB_SIG_MASK/)) {
+ 	    splitdefine(line, fields)
+ 	    name = fields[0]
+diff --git a/arch/x86/tools/gen-insn-attr-x86.awk b/arch/x86/tools/gen-insn-attr-x86.awk
+index b02a36b2c14f..a42015b305f4 100644
+--- a/arch/x86/tools/gen-insn-attr-x86.awk
++++ b/arch/x86/tools/gen-insn-attr-x86.awk
+@@ -69,7 +69,7 @@ BEGIN {
+ 
+ 	lprefix1_expr = "\\((66|!F3)\\)"
+ 	lprefix2_expr = "\\(F3\\)"
+-	lprefix3_expr = "\\((F2|!F3|66\\&F2)\\)"
++	lprefix3_expr = "\\((F2|!F3|66&F2)\\)"
+ 	lprefix_expr = "\\((66|F2|F3)\\)"
+ 	max_lprefix = 4
+ 
+@@ -257,7 +257,7 @@ function convert_operands(count,opnd,       i,j,imm,mod)
+ 	return add_flags(imm, mod)
+ }
+ 
+-/^[0-9a-f]+\:/ {
++/^[0-9a-f]+:/ {
+ 	if (NR == 1)
+ 		next
+ 	# get index
+diff --git a/lib/raid6/unroll.awk b/lib/raid6/unroll.awk
+index c6aa03631df8..0809805a7e23 100644
+--- a/lib/raid6/unroll.awk
++++ b/lib/raid6/unroll.awk
+@@ -13,7 +13,7 @@ BEGIN {
+ 	for (i = 0; i < rep; ++i) {
+ 		tmp = $0
+ 		gsub(/\$\$/, i, tmp)
+-		gsub(/\$\#/, n, tmp)
++		gsub(/\$#/, n, tmp)
+ 		gsub(/\$\*/, "$", tmp)
+ 		print tmp
+ 	}
+diff --git a/tools/objtool/arch/x86/tools/gen-insn-attr-x86.awk b/tools/objtool/arch/x86/tools/gen-insn-attr-x86.awk
+index b02a36b2c14f..a42015b305f4 100644
+--- a/tools/objtool/arch/x86/tools/gen-insn-attr-x86.awk
++++ b/tools/objtool/arch/x86/tools/gen-insn-attr-x86.awk
+@@ -69,7 +69,7 @@ BEGIN {
+ 
+ 	lprefix1_expr = "\\((66|!F3)\\)"
+ 	lprefix2_expr = "\\(F3\\)"
+-	lprefix3_expr = "\\((F2|!F3|66\\&F2)\\)"
++	lprefix3_expr = "\\((F2|!F3|66&F2)\\)"
+ 	lprefix_expr = "\\((66|F2|F3)\\)"
+ 	max_lprefix = 4
+ 
+@@ -257,7 +257,7 @@ function convert_operands(count,opnd,       i,j,imm,mod)
+ 	return add_flags(imm, mod)
+ }
+ 
+-/^[0-9a-f]+\:/ {
++/^[0-9a-f]+:/ {
+ 	if (NR == 1)
+ 		next
+ 	# get index
+diff --git a/tools/perf/arch/x86/tests/gen-insn-x86-dat.awk b/tools/perf/arch/x86/tests/gen-insn-x86-dat.awk
+index a21454835cd4..27585d032ee6 100644
+--- a/tools/perf/arch/x86/tests/gen-insn-x86-dat.awk
++++ b/tools/perf/arch/x86/tests/gen-insn-x86-dat.awk
+@@ -31,7 +31,7 @@ BEGIN {
+ 	going = 0
+ }
+ 
+-/^\s*[0-9a-fA-F]+\:/ {
++/^\s*[0-9a-fA-F]+:/ {
+ 	if (going) {
+ 		colon_pos = index($0, ":")
+ 		useful_line = substr($0, colon_pos + 1)
+diff --git a/tools/perf/util/intel-pt-decoder/gen-insn-attr-x86.awk b/tools/perf/util/intel-pt-decoder/gen-insn-attr-x86.awk
+index ddd5c4c21129..606ccd154392 100644
+--- a/tools/perf/util/intel-pt-decoder/gen-insn-attr-x86.awk
++++ b/tools/perf/util/intel-pt-decoder/gen-insn-attr-x86.awk
+@@ -69,7 +69,7 @@ BEGIN {
+ 
+ 	lprefix1_expr = "\\((66|!F3)\\)"
+ 	lprefix2_expr = "\\(F3\\)"
+-	lprefix3_expr = "\\((F2|!F3|66\\&F2)\\)"
++	lprefix3_expr = "\\((F2|!F3|66&F2)\\)"
+ 	lprefix_expr = "\\((66|F2|F3)\\)"
+ 	max_lprefix = 4
+ 
+@@ -257,7 +257,7 @@ function convert_operands(count,opnd,       i,j,imm,mod)
+ 	return add_flags(imm, mod)
+ }
+ 
+-/^[0-9a-f]+\:/ {
++/^[0-9a-f]+:/ {
+ 	if (NR == 1)
+ 		next
+ 	# get index
