@@ -1,0 +1,33 @@
+From: Heiner Kallweit <hkallweit1@gmail.com>
+Date: Thu, 6 Jun 2019 07:49:17 +0200
+Subject: r8169: silence sparse warning in rtl8169_start_xmit
+
+The opts[] array is of type u32. Therefore remove the wrong
+cpu_to_le32(). The opts[] array members are converted to little endian
+later when being assigned to the respective descriptor fields.
+
+This is not a new issue, it just popped up due to r8169.c having
+been renamed and more thoroughly checked. Due to the renaming
+this patch applies to net-next only.
+
+[HH: trivial fixup to apply to 5.2]
+Reported-by: kbuild test robot <lkp@intel.com>
+Signed-off-by: Heiner Kallweit <hkallweit1@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ drivers/net/ethernet/realtek/r8169.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek/r8169.c
+index d34cc855f7db..8b7d45ff1d03 100644
+--- a/drivers/net/ethernet/realtek/r8169.c
++++ b/drivers/net/ethernet/realtek/r8169.c
+@@ -5621,7 +5621,7 @@ static netdev_tx_t rtl8169_start_xmit(struct sk_buff *skb,
+ 	if (unlikely(le32_to_cpu(txd->opts1) & DescOwn))
+ 		goto err_stop_0;
+ 
+-	opts[1] = cpu_to_le32(rtl8169_tx_vlan_tag(skb));
++	opts[1] = rtl8169_tx_vlan_tag(skb);
+ 	opts[0] = DescOwn;
+ 
+ 	if (!tp->tso_csum(tp, skb, opts)) {
