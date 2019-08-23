@@ -32,6 +32,7 @@ There're some drawbacks if we don't calculate the reclaimed slab caches.
    case. While after this patch applied the number is greater than 300M
    and the sc->priority only drops to 3.
 
+[HH: updated for 5.2.10]
 Link: http://lkml.kernel.org/r/1561112086-6169-3-git-send-email-laoar.shao@gmail.com
 Signed-off-by: Yafang Shao <laoar.shao@gmail.com>
 Reviewed-by: Kirill Tkhai <ktkhai@virtuozzo.com>
@@ -84,7 +85,7 @@ index a01897fdfdac..88d740db3216 100644
  }
  
 @@ -3265,6 +3270,7 @@ unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
- 		.may_shrinkslab = 1,
+ 		.may_swap = may_swap,
  	};
  
 +	current->reclaim_state = &sc.reclaim_state;

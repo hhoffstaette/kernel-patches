@@ -6,6 +6,7 @@ Six sites are presently altering current->reclaim_state.  There is a
 risk that one function stomps on a caller's value.  Use a helper
 function to catch such errors.
 
+[HH: updated for 5.2.10]
 Cc: Yafang Shao <laoar.shao@gmail.com>
 Cc: Kirill Tkhai <ktkhai@virtuozzo.com>
 Cc: Michal Hocko <mhocko@suse.com>
@@ -76,7 +77,7 @@ index 88d740db3216..44df66a98f2a 100644
  
  	return sc.nr_reclaimed;
 @@ -3270,7 +3282,7 @@ unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
- 		.may_shrinkslab = 1,
+ 		.may_swap = may_swap,
  	};
  
 -	current->reclaim_state = &sc.reclaim_state;

@@ -22,7 +22,7 @@ diff --git a/drivers/net/ethernet/realtek/r8169.c b/drivers/net/ethernet/realtek
 index 6272115b2848..9c743d2fc29d 100644
 --- a/drivers/net/ethernet/realtek/r8169.c
 +++ b/drivers/net/ethernet/realtek/r8169.c
-@@ -5908,23 +5908,6 @@ static inline void rtl8169_rx_csum(struct sk_buff *skb, u32 opts1)
+@@ -5908,24 +5908,6 @@ static inline void rtl8169_rx_csum(struct sk_buff *skb, u32 opts1)
  		skb_checksum_none_assert(skb);
  }
  
@@ -39,6 +39,7 @@ index 6272115b2848..9c743d2fc29d 100644
 -	skb = napi_alloc_skb(&tp->napi, pkt_size);
 -	if (skb)
 -		skb_copy_to_linear_data(skb, data, pkt_size);
+-	dma_sync_single_for_device(d, addr, pkt_size, DMA_FROM_DEVICE);
 -
 -	return skb;
 -}
