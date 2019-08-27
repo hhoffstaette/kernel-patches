@@ -4,8 +4,8 @@ Cc:     "Darrick J. Wong" <darrick.wong@oracle.com>,
         Dave Chinner <david@fromorbit.com>,
         Brian Foster <bfoster@redhat.com>, newtongao@tencent.com,
         jasperwang@tencent.com, xiakaixu1987@gmail.com
-Subject: [PATCH] xfs: Fix ABBA deadlock between AGI and AGF in rename()
-Date:   Fri, 23 Aug 2019 12:56:53 +0800
+Subject: [PATCH v3] xfs: Fix ABBA deadlock between AGI and AGF when performing rename() with RENAME_WHITEOUT flag
+Date:   Tue, 27 Aug 2019 10:54:12 +0800
 
 When performing rename operation with RENAME_WHITEOUT flag, we will
 hold AGF lock to allocate or free extents in manipulating the dirents
@@ -78,15 +78,16 @@ before acquiring the AGF lock to preserve correct AGI/AGF locking
 order.
 
 Signed-off-by: kaixuxia <kaixuxia@tencent.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
 ---
- fs/xfs/xfs_inode.c | 85 +++++++++++++++++++++++++++---------------------------
- 1 file changed, 43 insertions(+), 42 deletions(-)
+ fs/xfs/xfs_inode.c | 83 +++++++++++++++++++++++++++---------------------------
+ 1 file changed, 42 insertions(+), 41 deletions(-)
 
 diff --git a/fs/xfs/xfs_inode.c b/fs/xfs/xfs_inode.c
-index 6467d5e..584b9d1 100644
+index 6467d5e..8ffd44f 100644
 --- a/fs/xfs/xfs_inode.c
 +++ b/fs/xfs/xfs_inode.c
-@@ -3282,9 +3282,10 @@ struct xfs_iunlink {
+@@ -3282,7 +3282,8 @@ struct xfs_iunlink {
  					spaceres);
  
  	/*
@@ -94,11 +95,8 @@ index 6467d5e..584b9d1 100644
 +	 * Check for expected errors before we dirty the transaction
 +	 * so we can return an error without a transaction abort.
  	 */
--	if (target_ip == NULL) {
-+	if (!target_ip) {
+ 	if (target_ip == NULL) {
  		/*
- 		 * If there's no space reservation, check the entry will
- 		 * fit before actually inserting it.
 @@ -3294,6 +3295,46 @@ struct xfs_iunlink {
  			if (error)
  				goto out_trans_cancel;
@@ -109,8 +107,8 @@ index 6467d5e..584b9d1 100644
 +		 * it can be destroyed.
 +		 */
 +		if (S_ISDIR(VFS_I(target_ip)->i_mode) &&
-+		    (!(xfs_dir_isempty(target_ip)) ||
-+		    (VFS_I(target_ip)->i_nlink > 2))) {
++		    (!xfs_dir_isempty(target_ip) ||
++		     (VFS_I(target_ip)->i_nlink > 2))) {
 +			error = -EEXIST;
 +			goto out_trans_cancel;
 +		}
