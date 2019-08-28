@@ -1,0 +1,123 @@
+From: "Darrick J. Wong" <darrick.wong@oracle.com>
+Date: Tue, 2 Jul 2019 09:39:38 -0700
+Subject: xfs: create iterator error codes
+
+Currently, xfs doesn't have generic error codes defined for "stop
+iterating"; we just reuse the XFS_BTREE_QUERY_* return values.  This
+looks a little weird if we're not actually iterating a btree index.
+Before we start adding more iterators, we should create general
+XFS_ITER_{CONTINUE,ABORT} return values and define the XFS_BTREE_QUERY_*
+ones from that.
+
+[HH: small context fix for 5.2]
+Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Brian Foster <bfoster@redhat.com>
+---
+ fs/xfs/libxfs/xfs_alloc.c  | 2 +-
+ fs/xfs/libxfs/xfs_btree.h  | 4 ++--
+ fs/xfs/libxfs/xfs_shared.h | 6 ++++++
+ fs/xfs/scrub/agheader.c    | 4 ++--
+ fs/xfs/scrub/repair.c      | 4 ++--
+ fs/xfs/xfs_dquot.c         | 2 +-
+ 6 files changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/fs/xfs/libxfs/xfs_alloc.c b/fs/xfs/libxfs/xfs_alloc.c
+index ae2d91b0e9e9..372ad55631fc 100644
+--- a/fs/xfs/libxfs/xfs_alloc.c
++++ b/fs/xfs/libxfs/xfs_alloc.c
+@@ -3137,7 +3137,7 @@ xfs_alloc_has_record(
+ 
+ /*
+  * Walk all the blocks in the AGFL.  The @walk_fn can return any negative
+- * error code or XFS_BTREE_QUERY_RANGE_ABORT.
++ * error code or XFS_ITER_*.
+  */
+ int
+ xfs_agfl_walk(
+diff --git a/fs/xfs/libxfs/xfs_btree.h b/fs/xfs/libxfs/xfs_btree.h
+index 8d2b250c6828..fa3cd8ab9aba 100644
+--- a/fs/xfs/libxfs/xfs_btree.h
++++ b/fs/xfs/libxfs/xfs_btree.h
+@@ -465,8 +465,8 @@ uint xfs_btree_compute_maxlevels(uint *limits, unsigned long len);
+ unsigned long long xfs_btree_calc_size(uint *limits, unsigned long long len);
+ 
+ /* return codes */
+-#define XFS_BTREE_QUERY_RANGE_CONTINUE	0	/* keep iterating */
+-#define XFS_BTREE_QUERY_RANGE_ABORT	1	/* stop iterating */
++#define XFS_BTREE_QUERY_RANGE_CONTINUE	(XFS_ITER_CONTINUE) /* keep iterating */
++#define XFS_BTREE_QUERY_RANGE_ABORT	(XFS_ITER_ABORT)    /* stop iterating */
+ typedef int (*xfs_btree_query_range_fn)(struct xfs_btree_cur *cur,
+ 		union xfs_btree_rec *rec, void *priv);
+ 
+diff --git a/fs/xfs/libxfs/xfs_shared.h b/fs/xfs/libxfs/xfs_shared.h
+index c45acbd3add9..e0641b7337b3 100644
+--- a/fs/xfs/libxfs/xfs_shared.h
++++ b/fs/xfs/libxfs/xfs_shared.h
+@@ -177,4 +177,10 @@ void xfs_symlink_local_to_remote(struct xfs_trans *tp, struct xfs_buf *bp,
+ 				 struct xfs_inode *ip, struct xfs_ifork *ifp);
+ xfs_failaddr_t xfs_symlink_shortform_verify(struct xfs_inode *ip);
+ 
++/* Keep iterating the data structure. */
++#define XFS_ITER_CONTINUE	(0)
++
++/* Stop iterating the data structure. */
++#define XFS_ITER_ABORT		(1)
++
+ #endif /* __XFS_SHARED_H__ */
+diff --git a/fs/xfs/scrub/agheader.c b/fs/xfs/scrub/agheader.c
+index 5e3fc9f3de13..16b09b941441 100644
+--- a/fs/xfs/scrub/agheader.c
++++ b/fs/xfs/scrub/agheader.c
+@@ -639,7 +639,7 @@ xchk_agfl_block(
+ 	xchk_agfl_block_xref(sc, agbno);
+ 
+ 	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
+-		return XFS_BTREE_QUERY_RANGE_ABORT;
++		return XFS_ITER_ABORT;
+ 
+ 	return 0;
+ }
+@@ -730,7 +730,7 @@ xchk_agfl(
+ 	/* Check the blocks in the AGFL. */
+ 	error = xfs_agfl_walk(sc->mp, XFS_BUF_TO_AGF(sc->sa.agf_bp),
+ 			sc->sa.agfl_bp, xchk_agfl_block, &sai);
+-	if (error == XFS_BTREE_QUERY_RANGE_ABORT) {
++	if (error == XFS_ITER_ABORT) {
+ 		error = 0;
+ 		goto out_free;
+ 	}
+diff --git a/fs/xfs/scrub/repair.c b/fs/xfs/scrub/repair.c
+index 4d3194a2327a..4cfeec57fb05 100644
+--- a/fs/xfs/scrub/repair.c
++++ b/fs/xfs/scrub/repair.c
+@@ -664,7 +664,7 @@ xrep_findroot_agfl_walk(
+ {
+ 	xfs_agblock_t		*agbno = priv;
+ 
+-	return (*agbno == bno) ? XFS_BTREE_QUERY_RANGE_ABORT : 0;
++	return (*agbno == bno) ? XFS_ITER_ABORT : 0;
+ }
+ 
+ /* Does this block match the btree information passed in? */
+@@ -694,7 +694,7 @@ xrep_findroot_block(
+ 	if (owner == XFS_RMAP_OWN_AG) {
+ 		error = xfs_agfl_walk(mp, ri->agf, ri->agfl_bp,
+ 				xrep_findroot_agfl_walk, &agbno);
+-		if (error == XFS_BTREE_QUERY_RANGE_ABORT)
++		if (error == XFS_ITER_ABORT)
+ 			return 0;
+ 		if (error)
+ 			return error;
+diff --git a/fs/xfs/xfs_dquot.c b/fs/xfs/xfs_dquot.c
+index 2dfbfcdc16f4..fb1ad4483081 100644
+--- a/fs/xfs/xfs_dquot.c
++++ b/fs/xfs/xfs_dquot.c
+@@ -1239,7 +1239,7 @@ xfs_qm_exit(void)
+ /*
+  * Iterate every dquot of a particular type.  The caller must ensure that the
+  * particular quota type is active.  iter_fn can return negative error codes,
+- * or XFS_BTREE_QUERY_RANGE_ABORT to indicate that it wants to stop iterating.
++ * or XFS_ITER_ABORT to indicate that it wants to stop iterating.
+  */
+ int
+ xfs_qm_dqiterate(
