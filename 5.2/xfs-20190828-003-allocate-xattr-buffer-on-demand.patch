@@ -1,7 +1,7 @@
-From: Dave Chinner <david@fromorbit.com>
-To: linux-xfs@vger.kernel.org
-Subject: [PATCH V2] xfs: allocate xattr buffer on demand
-Date: Wed, 24 Jul 2019 14:59:11 +1000
+From:   Dave Chinner <david@fromorbit.com>
+To:     linux-xfs@vger.kernel.org
+Subject: [PATCH 3/3] xfs: allocate xattr buffer on demand
+Date:   Wed, 28 Aug 2019 14:23:50 +1000
 
 From: Dave Chinner <dchinner@redhat.com>
 
@@ -39,30 +39,21 @@ a multi-page allocation occur. Hence the common ACL case will be
 much faster, too.
 
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
-Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
 ---
-
-V2:
-o removed stale GFP_NOFS stuff from commit message
-o changed xfs_attr_get() to only return allocated buffer for
-  ATTR_ALLOC on successful retrieval
-o documented xfs_attr_get() behaviour for ATTR_KERNOVAL, ATTR_ALLOC,
-  and when -ERANGE errors are returned.
-
- fs/xfs/libxfs/xfs_attr.c      | 51 ++++++++++++++++++--------
+ fs/xfs/libxfs/xfs_attr.c      | 42 +++++++++++++---
  fs/xfs/libxfs/xfs_attr.h      |  6 ++-
- fs/xfs/libxfs/xfs_attr_leaf.c | 85 ++++++++++++++++++++++++++-----------------
+ fs/xfs/libxfs/xfs_attr_leaf.c | 95 +++++++++++++++++++++--------------
  fs/xfs/libxfs/xfs_da_btree.h  |  4 +-
- fs/xfs/xfs_acl.c              | 16 ++------
+ fs/xfs/xfs_acl.c              | 16 ++----
  fs/xfs/xfs_ioctl.c            |  2 +-
  fs/xfs/xfs_xattr.c            |  2 +-
- 7 files changed, 99 insertions(+), 67 deletions(-)
+ 7 files changed, 105 insertions(+), 62 deletions(-)
 
 diff --git a/fs/xfs/libxfs/xfs_attr.c b/fs/xfs/libxfs/xfs_attr.c
-index d48fcf11cc35..875b35b373cb 100644
+index 5e6b6846e607..99f9e0cf05a6 100644
 --- a/fs/xfs/libxfs/xfs_attr.c
 +++ b/fs/xfs/libxfs/xfs_attr.c
-@@ -115,12 +115,28 @@ xfs_attr_get_ilocked(
+@@ -118,12 +118,28 @@ xfs_attr_get_ilocked(
  		return xfs_attr_node_get(args);
  }
  
@@ -93,7 +84,7 @@ index d48fcf11cc35..875b35b373cb 100644
  	int			*valuelenp,
  	int			flags)
  {
-@@ -128,6 +144,8 @@ xfs_attr_get(
+@@ -131,6 +147,8 @@ xfs_attr_get(
  	uint			lock_mode;
  	int			error;
  
@@ -102,7 +93,7 @@ index d48fcf11cc35..875b35b373cb 100644
  	XFS_STATS_INC(ip->i_mount, xs_attr_get);
  
  	if (XFS_FORCED_SHUTDOWN(ip->i_mount))
-@@ -137,17 +155,29 @@ xfs_attr_get(
+@@ -140,17 +158,29 @@ xfs_attr_get(
  	if (error)
  		return error;
  
@@ -119,48 +110,23 @@ index d48fcf11cc35..875b35b373cb 100644
  	lock_mode = xfs_ilock_attr_map_shared(ip);
  	error = xfs_attr_get_ilocked(ip, &args);
  	xfs_iunlock(ip, lock_mode);
- 
+-
  	*valuelenp = args.valuelen;
--	return error == -EEXIST ? 0 : error;
-+	if (error == -EEXIST) {
-+		*value = args.value;
-+		return 0;
-+	}
+-	return error;
 +
-+	if (flags & ATTR_ALLOC) {
-+		kmem_free(args.value);
-+		*value = NULL;
++	/* on error, we have to clean up allocated value buffers */
++	if (error) {
++		if (flags & ATTR_ALLOC) {
++			kmem_free(args.value);
++			*value = NULL;
++		}
++		return error;
 +	}
-+	return error;
++	*value = args.value;
++	return 0;
  }
  
  /*
-@@ -789,9 +819,6 @@ xfs_attr_leaf_get(xfs_da_args_t *args)
- 	}
- 	error = xfs_attr3_leaf_getvalue(bp, args);
- 	xfs_trans_brelse(args->trans, bp);
--	if (!error && (args->rmtblkno > 0) && !(args->flags & ATTR_KERNOVAL)) {
--		error = xfs_attr_rmtval_get(args);
--	}
- 	return error;
- }
- 
-@@ -1298,15 +1325,7 @@ xfs_attr_node_get(xfs_da_args_t *args)
- 		blk = &state->path.blk[ state->path.active-1 ];
- 		ASSERT(blk->bp != NULL);
- 		ASSERT(blk->magic == XFS_ATTR_LEAF_MAGIC);
--
--		/*
--		 * Get the value, local or "remote"
--		 */
- 		retval = xfs_attr3_leaf_getvalue(blk->bp, args);
--		if (!retval && (args->rmtblkno > 0)
--		    && !(args->flags & ATTR_KERNOVAL)) {
--			retval = xfs_attr_rmtval_get(args);
--		}
- 	}
- 
- 	/*
 diff --git a/fs/xfs/libxfs/xfs_attr.h b/fs/xfs/libxfs/xfs_attr.h
 index ff28ebf3b635..94badfa1743e 100644
 --- a/fs/xfs/libxfs/xfs_attr.h
@@ -193,10 +159,10 @@ index ff28ebf3b635..94badfa1743e 100644
  		 unsigned char *value, int valuelen, int flags);
  int xfs_attr_set_args(struct xfs_da_args *args);
 diff --git a/fs/xfs/libxfs/xfs_attr_leaf.c b/fs/xfs/libxfs/xfs_attr_leaf.c
-index 70eb941d02e4..61717caf22db 100644
+index e325cdbc9818..fe3c164d5cfe 100644
 --- a/fs/xfs/libxfs/xfs_attr_leaf.c
 +++ b/fs/xfs/libxfs/xfs_attr_leaf.c
-@@ -393,6 +393,32 @@ xfs_attr_namesp_match(int arg_flags, int ondisk_flags)
+@@ -393,6 +393,51 @@ xfs_attr_namesp_match(int arg_flags, int ondisk_flags)
  	return XFS_ATTR_NSP_ONDISK(ondisk_flags) == XFS_ATTR_NSP_ARGS_TO_ONDISK(arg_flags);
  }
  
@@ -206,6 +172,17 @@ index 70eb941d02e4..61717caf22db 100644
 +	unsigned char		*value,
 +	int			valuelen)
 +{
++	/*
++	 * No copy if all we have to do is get the length
++	 */
++	if (args->flags & ATTR_KERNOVAL) {
++		args->valuelen = valuelen;
++		return 0;
++	}
++
++	/*
++	 * No copy if the length of the existing buffer is too small
++	 */
 +	if (args->valuelen < valuelen) {
 +		args->valuelen = valuelen;
 +		return -ERANGE;
@@ -222,6 +199,14 @@ index 70eb941d02e4..61717caf22db 100644
 +	if (args->rmtblkno)
 +		return xfs_attr_rmtval_get(args);
 +
++	/*
++	 * This is to prevent a GCC warning because the remote xattr case
++	 * doesn't have a value to pass in. In that case, we never reach here,
++	 * but GCC can't work that out and so throws a "passing NULL to
++	 * memcpy" warning.
++	 */
++	if (!value)
++		return -EINVAL;
 +	memcpy(args->value, value, valuelen);
 +	return 0;
 +}
@@ -229,9 +214,9 @@ index 70eb941d02e4..61717caf22db 100644
  
  /*========================================================================
   * External routines when attribute fork size < XFS_LITINO(mp).
-@@ -724,11 +750,13 @@ xfs_attr_shortform_lookup(xfs_da_args_t *args)
+@@ -727,11 +772,12 @@ xfs_attr_shortform_lookup(xfs_da_args_t *args)
+  * exist or we can't retrieve the value.
   */
- /*ARGSUSED*/
  int
 -xfs_attr_shortform_getvalue(xfs_da_args_t *args)
 +xfs_attr_shortform_getvalue(
@@ -242,15 +227,18 @@ index 70eb941d02e4..61717caf22db 100644
 -	int i;
 +	struct xfs_attr_shortform *sf;
 +	struct xfs_attr_sf_entry *sfe;
-+	int			error;
 +	int			i;
  
  	ASSERT(args->dp->i_afp->if_flags == XFS_IFINLINE);
  	sf = (xfs_attr_shortform_t *)args->dp->i_afp->if_u1.if_data;
-@@ -745,13 +773,10 @@ xfs_attr_shortform_getvalue(xfs_da_args_t *args)
- 			args->valuelen = sfe->valuelen;
- 			return -EEXIST;
- 		}
+@@ -744,18 +790,8 @@ xfs_attr_shortform_getvalue(xfs_da_args_t *args)
+ 			continue;
+ 		if (!xfs_attr_namesp_match(args->flags, sfe->flags))
+ 			continue;
+-		if (args->flags & ATTR_KERNOVAL) {
+-			args->valuelen = sfe->valuelen;
+-			return 0;
+-		}
 -		if (args->valuelen < sfe->valuelen) {
 -			args->valuelen = sfe->valuelen;
 -			return -ERANGE;
@@ -258,56 +246,56 @@ index 70eb941d02e4..61717caf22db 100644
 -		args->valuelen = sfe->valuelen;
 -		memcpy(args->value, &sfe->nameval[args->namelen],
 -						    args->valuelen);
-+		error = xfs_attr_copy_value(args, &sfe->nameval[args->namelen],
+-		return 0;
++		return xfs_attr_copy_value(args, &sfe->nameval[args->namelen],
 +						sfe->valuelen);
-+		if (error)
-+			return error;
- 		return -EEXIST;
  	}
  	return -ENOATTR;
-@@ -2378,31 +2403,23 @@ xfs_attr3_leaf_getvalue(
- 			args->valuelen = valuelen;
- 			return 0;
- 		}
+ }
+@@ -2368,7 +2404,6 @@ xfs_attr3_leaf_getvalue(
+ 	struct xfs_attr_leaf_entry *entry;
+ 	struct xfs_attr_leaf_name_local *name_loc;
+ 	struct xfs_attr_leaf_name_remote *name_rmt;
+-	int			valuelen;
+ 
+ 	leaf = bp->b_addr;
+ 	xfs_attr3_leaf_hdr_from_disk(args->geo, &ichdr, leaf);
+@@ -2380,18 +2415,9 @@ xfs_attr3_leaf_getvalue(
+ 		name_loc = xfs_attr3_leaf_name_local(leaf, args->index);
+ 		ASSERT(name_loc->namelen == args->namelen);
+ 		ASSERT(memcmp(args->name, name_loc->nameval, args->namelen) == 0);
+-		valuelen = be16_to_cpu(name_loc->valuelen);
+-		if (args->flags & ATTR_KERNOVAL) {
+-			args->valuelen = valuelen;
+-			return 0;
+-		}
 -		if (args->valuelen < valuelen) {
 -			args->valuelen = valuelen;
 -			return -ERANGE;
 -		}
 -		args->valuelen = valuelen;
 -		memcpy(args->value, &name_loc->nameval[args->namelen], valuelen);
--	} else {
--		name_rmt = xfs_attr3_leaf_name_remote(leaf, args->index);
--		ASSERT(name_rmt->namelen == args->namelen);
--		ASSERT(memcmp(args->name, name_rmt->name, args->namelen) == 0);
--		args->rmtvaluelen = be32_to_cpu(name_rmt->valuelen);
--		args->rmtblkno = be32_to_cpu(name_rmt->valueblk);
--		args->rmtblkcnt = xfs_attr3_rmt_blocks(args->dp->i_mount,
--						       args->rmtvaluelen);
--		if (args->flags & ATTR_KERNOVAL) {
--			args->valuelen = args->rmtvaluelen;
--			return 0;
--		}
--		if (args->valuelen < args->rmtvaluelen) {
--			args->valuelen = args->rmtvaluelen;
--			return -ERANGE;
--		}
+-		return 0;
 +		return xfs_attr_copy_value(args,
 +					&name_loc->nameval[args->namelen],
-+					valuelen);
-+	}
-+
-+	name_rmt = xfs_attr3_leaf_name_remote(leaf, args->index);
-+	ASSERT(name_rmt->namelen == args->namelen);
-+	ASSERT(memcmp(args->name, name_rmt->name, args->namelen) == 0);
-+	args->rmtvaluelen = be32_to_cpu(name_rmt->valuelen);
-+	args->rmtblkno = be32_to_cpu(name_rmt->valueblk);
-+	args->rmtblkcnt = xfs_attr3_rmt_blocks(args->dp->i_mount,
-+					       args->rmtvaluelen);
-+	if (args->flags & ATTR_KERNOVAL) {
- 		args->valuelen = args->rmtvaluelen;
-+		return 0;
++					be16_to_cpu(name_loc->valuelen));
  	}
--	return 0;
+ 
+ 	name_rmt = xfs_attr3_leaf_name_remote(leaf, args->index);
+@@ -2401,16 +2427,7 @@ xfs_attr3_leaf_getvalue(
+ 	args->rmtblkno = be32_to_cpu(name_rmt->valueblk);
+ 	args->rmtblkcnt = xfs_attr3_rmt_blocks(args->dp->i_mount,
+ 					       args->rmtvaluelen);
+-	if (args->flags & ATTR_KERNOVAL) {
+-		args->valuelen = args->rmtvaluelen;
+-		return 0;
+-	}
+-	if (args->valuelen < args->rmtvaluelen) {
+-		args->valuelen = args->rmtvaluelen;
+-		return -ERANGE;
+-	}
+-	args->valuelen = args->rmtvaluelen;
+-	return xfs_attr_rmtval_get(args);
 +	return xfs_attr_copy_value(args, NULL, args->rmtvaluelen);
  }
  
