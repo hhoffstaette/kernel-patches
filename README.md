@@ -28,6 +28,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - btrfs: fixes from 5.3+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch)) + `-O3`
 - mm: fixes from 5.3+
+- net: BBR v2 (['alpha' release](https://groups.google.com/forum/?hl=en#!topic/bbr-dev/_ydL31oYnoI)
 - r8169: fixes from 5.3+ (stability, performance, xmit_more)
 - sched: fixes from 5.3+
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
