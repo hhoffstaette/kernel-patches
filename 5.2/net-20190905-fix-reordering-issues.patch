@@ -1,0 +1,83 @@
+From: Eric Dumazet <edumazet@google.com>
+To: David S . Miller <davem@davemloft.net>
+Cc: netdev <netdev@vger.kernel.org>, Eric Dumazet <edumazet@google.com>,
+    Eric Dumazet <eric.dumazet@gmail.com>, John Fastabend <john.fastabend@gmail.com>
+Subject: [PATCH net] net: sched: fix reordering issues
+Date: Thu,  5 Sep 2019 05:20:22 -0700
+
+Whenever MQ is not used on a multiqueue device, we experience
+serious reordering problems. Bisection found the cited
+commit.
+
+The issue can be described this way :
+
+- A single qdisc hierarchy is shared by all transmit queues.
+  (eg : tc qdisc replace dev eth0 root fq_codel)
+
+- When/if try_bulk_dequeue_skb_slow() dequeues a packet targetting
+  a different transmit queue than the one used to build a packet train,
+  we stop building the current list and save the 'bad' skb (P1) in a
+  special queue. (bad_txq)
+
+- When dequeue_skb() calls qdisc_dequeue_skb_bad_txq() and finds this
+  skb (P1), it checks if the associated transmit queues is still in frozen
+  state. If the queue is still blocked (by BQL or NIC tx ring full),
+  we leave the skb in bad_txq and return NULL.
+
+- dequeue_skb() calls q->dequeue() to get another packet (P2)
+
+  The other packet can target the problematic queue (that we found
+  in frozen state for the bad_txq packet), but another cpu just ran
+  TX completion and made room in the txq that is now ready to accept
+  new packets.
+
+- Packet P2 is sent while P1 is still held in bad_txq, P1 might be sent
+  at next round. In practice P2 is the lead of a big packet train
+  (P2,P3,P4 ...) filling the BQL budget and delaying P1 by many packets :/
+
+To solve this problem, we have to block the dequeue process as long
+as the first packet in bad_txq can not be sent. Reordering issues
+disappear and no side effects have been seen.
+
+Fixes: a53851e2c321 ("net: sched: explicit locking in gso_cpu fallback")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Cc: John Fastabend <john.fastabend@gmail.com>
+---
+ net/sched/sch_generic.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/net/sched/sch_generic.c b/net/sched/sch_generic.c
+index 137db1cbde8538e124133c6e148acc3e92e56a74..ac28f6a5d70e0b38ae8ce7858f08e9d15778c22f 100644
+--- a/net/sched/sch_generic.c
++++ b/net/sched/sch_generic.c
+@@ -46,6 +46,8 @@ EXPORT_SYMBOL(default_qdisc_ops);
+  * - updates to tree and tree walking are only done under the rtnl mutex.
+  */
+ 
++#define SKB_XOFF_MAGIC ((struct sk_buff *)1UL)
++
+ static inline struct sk_buff *__skb_dequeue_bad_txq(struct Qdisc *q)
+ {
+ 	const struct netdev_queue *txq = q->dev_queue;
+@@ -71,7 +73,7 @@ static inline struct sk_buff *__skb_dequeue_bad_txq(struct Qdisc *q)
+ 				q->q.qlen--;
+ 			}
+ 		} else {
+-			skb = NULL;
++			skb = SKB_XOFF_MAGIC;
+ 		}
+ 	}
+ 
+@@ -253,8 +255,11 @@ static struct sk_buff *dequeue_skb(struct Qdisc *q, bool *validate,
+ 		return skb;
+ 
+ 	skb = qdisc_dequeue_skb_bad_txq(q);
+-	if (unlikely(skb))
++	if (unlikely(skb)) {
++		if (skb == SKB_XOFF_MAGIC)
++			return NULL;
+ 		goto bulk;
++	}
+ 	skb = q->dequeue(q);
+ 	if (skb) {
+ bulk:
