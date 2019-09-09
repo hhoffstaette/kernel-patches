@@ -1,0 +1,18 @@
+
+Remove a WARN_ON_ONCE that was deemed a false positive.
+See the following mailing list thread for discussion:
+https://groups.google.com/forum/?hl=en#!topic/bbr-dev/5qe_ARx4s4s
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+diff -rup a/net/ipv4/tcp_bbr2.c b/net/ipv4/tcp_bbr2.c
+--- a/net/ipv4/tcp_bbr2.c	2019-09-10 00:18:01.323553697 +0200
++++ b/net/ipv4/tcp_bbr2.c	2019-09-10 00:20:44.524884769 +0200
+@@ -2417,7 +2417,6 @@ static void bbr_set_state(struct sock *s
+ 			/* bbr_adapt_lower_bounds() needs cwnd before
+ 			 * we suffered an RTO, to update inflight_lo:
+ 			 */
+-			WARN_ON_ONCE(bbr->prior_cwnd == 0);
+ 			WARN_ON_ONCE(bbr->prior_cwnd == ~0U);
+ 			bbr->inflight_lo = bbr->prior_cwnd;
+ 		}
