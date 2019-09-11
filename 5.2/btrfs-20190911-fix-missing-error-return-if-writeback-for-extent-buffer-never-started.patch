@@ -1,0 +1,38 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: fix missing error return if writeback for extent buffer never started
+Date:   Wed, 11 Sep 2019 17:42:28 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+If lock_extent_buffer_for_io() fails, it returns a negative value, but its
+caller btree_write_cache_pages() ignores such error. This means that a
+call to flush_write_bio(), from lock_extent_buffer_for_io(), might have
+failed. We should make btree_write_cache_pages() notice such error values
+and stop immediatelly, making sure filemap_fdatawrite_range() returns an
+error to the transaction commit path. A failure from flush_write_bio()
+should also result in the endio callback end_bio_extent_buffer_writepage()
+being invoked, which sets the BTRFS_FS_*_ERR bits appropriately, so that
+there's no risk a transaction or log commit doesn't catch a writeback
+failure.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/extent_io.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 1ff438fd5bc2..13a683da71d2 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -3969,6 +3969,10 @@ int btree_write_cache_pages(struct address_space *mapping,
+ 			if (!ret) {
+ 				free_extent_buffer(eb);
+ 				continue;
++			} else if (ret < 0) {
++				done = 1;
++				free_extent_buffer(eb);
++				break;
+ 			}
+ 
+ 			ret = write_one_eb(eb, wbc, &epd);
