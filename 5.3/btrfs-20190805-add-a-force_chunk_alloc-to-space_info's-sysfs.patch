@@ -10,6 +10,7 @@ file to enable forcing of chunk allocation for the owning space info in
 order to enable us to add testcases in the future to test these various
 features easier.
 
+[HH: context fixes for 5.3]
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 ---
 v2->v3:
@@ -36,7 +37,7 @@ index e6493b068294..12cff81aa8ea 100644
  static u64 get_features(struct btrfs_fs_info *fs_info,
  			enum btrfs_feature_set set)
 @@ -321,6 +322,58 @@ struct kobj_type btrfs_raid_ktype = {
- 	.default_attrs = raid_attributes,
+ 	.default_groups = raid_groups,
  };
  
 +static ssize_t btrfs_space_info_force_chunk_alloc_show(struct kobject *kobj,
@@ -101,7 +102,7 @@ index e6493b068294..12cff81aa8ea 100644
 +	BTRFS_ATTR_PTR(space_info, force_chunk_alloc),
  	NULL,
  };
- 
+ ATTRIBUTE_GROUPS(space_info);
 @@ -556,6 +610,16 @@ static inline struct btrfs_fs_info *to_fs_info(struct kobject *kobj)
  	return to_fs_devs(kobj)->fs_info;
  }
