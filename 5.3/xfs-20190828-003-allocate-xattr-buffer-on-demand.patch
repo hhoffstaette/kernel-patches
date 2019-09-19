@@ -38,6 +38,7 @@ page), and only for the rarer "we have a remote xattr" will we have
 a multi-page allocation occur. Hence the common ACL case will be
 much faster, too.
 
+[HH: fixed up to remove KM_SLEEP]
 Signed-off-by: Dave Chinner <dchinner@redhat.com>
 ---
  fs/xfs/libxfs/xfs_attr.c      | 42 +++++++++++++---
@@ -189,7 +190,7 @@ index e325cdbc9818..fe3c164d5cfe 100644
 +	}
 +
 +	if (args->op_flags & XFS_DA_OP_ALLOCVAL) {
-+		args->value = kmem_alloc_large(valuelen, KM_SLEEP);
++		args->value = kmem_alloc_large(valuelen, 0);
 +		if (!args->value)
 +			return -ENOMEM;
 +	}
@@ -343,7 +344,7 @@ index cbda40d40326..78c5e590b771 100644
 -	 * go out to the disk.
 -	 */
  	len = XFS_ACL_MAX_SIZE(ip->i_mount);
--	xfs_acl = kmem_zalloc_large(len, KM_SLEEP);
+-	xfs_acl = kmem_zalloc_large(len, 0);
 -	if (!xfs_acl)
 -		return ERR_PTR(-ENOMEM);
 -
