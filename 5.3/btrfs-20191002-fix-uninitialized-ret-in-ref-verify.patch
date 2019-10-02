@@ -1,0 +1,30 @@
+From:   Josef Bacik <josef@toxicpanda.com>
+To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Cc:     Colin Ian King <colin.king@canonical.com>
+Subject: [PATCH] btrfs: fix uninitialized ret in ref-verify
+Date:   Wed,  2 Oct 2019 10:03:36 -0400
+
+Coverity caught a case where we could return with a uninitialized value
+in ret in process_leaf.  This is actually pretty likely because we could
+very easily run into a block group item key and have a garbage value in
+ret and think there was an errror.  Fix this by initializing ret to 0.
+
+Reported-by: Colin Ian King <colin.king@canonical.com>
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+---
+ fs/btrfs/ref-verify.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ref-verify.c b/fs/btrfs/ref-verify.c
+index e87cbdad02a3..b57f3618e58e 100644
+--- a/fs/btrfs/ref-verify.c
++++ b/fs/btrfs/ref-verify.c
+@@ -500,7 +500,7 @@ static int process_leaf(struct btrfs_root *root,
+ 	struct btrfs_extent_data_ref *dref;
+ 	struct btrfs_shared_data_ref *sref;
+ 	u32 count;
+-	int i = 0, tree_block_level = 0, ret;
++	int i = 0, tree_block_level = 0, ret = 0;
+ 	struct btrfs_key key;
+ 	int nritems = btrfs_header_nritems(leaf);
+ 
