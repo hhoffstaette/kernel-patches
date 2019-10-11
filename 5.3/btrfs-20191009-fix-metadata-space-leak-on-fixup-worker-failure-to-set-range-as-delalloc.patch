@@ -1,0 +1,50 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: fix metadata space leak on fixup worker failure to set range as delalloc
+Date:   Wed,  9 Oct 2019 17:43:59 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+In the fixup worker, if we fail to mark the range as delalloc in the io
+tree, we must release the previously reserved metadata, as well as update
+the outstanding extents counter for the inode, otherwise we leak metadata
+space.
+
+In pratice we can't return an error from btrfs_set_extent_delalloc(),
+which is just a wrapper around __set_extent_bit(), as for most errors
+__set_extent_bit() does a BUG_ON() (or panics which hits a BUG_ON() as
+well) and returning an -EEXIST error doesn't happen in this case since
+the exclusive bits parameter always has a value of 0 through this code
+path. Nevertheless, just fix the error handling in the fixup worker,
+in case one day __set_extent_bit() can return an error to this code
+path.
+
+Fixes: f3038ee3a3f101 ("btrfs: Handle btrfs_set_extent_delalloc failure in fixup worker")
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/inode.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 0f2754eaa05b..f23b14ec743a 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -2201,12 +2201,16 @@ static void btrfs_writepage_fixup_worker(struct btrfs_work *work)
+ 		mapping_set_error(page->mapping, ret);
+ 		end_extent_writepage(page, ret, page_start, page_end);
+ 		ClearPageChecked(page);
+-		goto out;
++		goto out_reserved;
+ 	}
+ 
+ 	ClearPageChecked(page);
+ 	set_page_dirty(page);
+-	btrfs_delalloc_release_extents(BTRFS_I(inode), PAGE_SIZE, false);
++out_reserved:
++	btrfs_delalloc_release_extents(BTRFS_I(inode), PAGE_SIZE, ret != 0);
++	if (ret)
++		btrfs_delalloc_release_space(inode, data_reserved, page_start,
++					     PAGE_SIZE, true);
+ out:
+ 	unlock_extent_cached(&BTRFS_I(inode)->io_tree, page_start, page_end,
+ 			     &cached_state);
