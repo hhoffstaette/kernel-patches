@@ -23,6 +23,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **Stable Series: 5.3**
 
+- aquantia: fixes from 5.4+ (correctness)
 - block: fixes from 5.4+ (BFQ)
 - bmq: [BMQ 5.31](https://cchalpha.blogspot.com/2019/10/bmq-v531-release.html) CPU scheduler
 - btrfs: fixes from 5.4+
