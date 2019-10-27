@@ -1,0 +1,37 @@
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH v4 1/2] btrfs: volumes: Use more straightforward way to calculate map length
+Date:   Fri, 25 Oct 2019 16:59:55 +0800
+
+The old code goes:
+
+ 	offset = logical - em->start;
+	length = min_t(u64, em->len - offset, length);
+
+Where @length calculate is dependent on offset, it can take reader
+several more seconds to find it's just the same code as:
+
+ 	offset = logical - em->start;
+	length = min_t(u64, em->start + em->len - logical, length);
+
+Use above code to make the length calculate independent from other
+variable, thus slightly increase the readability.
+
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+---
+ fs/btrfs/volumes.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index cdd7af424033..a6db11e821a5 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -5616,7 +5616,7 @@ static int __btrfs_map_block_for_discard(struct btrfs_fs_info *fs_info,
+ 	}
+ 
+ 	offset = logical - em->start;
+-	length = min_t(u64, em->len - offset, length);
++	length = min_t(u64, em->start + em->len - logical, length);
+ 
+ 	stripe_len = map->stripe_len;
+ 	/*
