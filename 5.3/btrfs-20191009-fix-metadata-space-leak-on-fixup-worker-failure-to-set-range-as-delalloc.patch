@@ -19,6 +19,7 @@ path. Nevertheless, just fix the error handling in the fixup worker,
 in case one day __set_extent_bit() can return an error to this code
 path.
 
+[HH: rebased for 5.3.9]
 Fixes: f3038ee3a3f101 ("btrfs: Handle btrfs_set_extent_delalloc failure in fixup worker")
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
@@ -39,9 +40,9 @@ index 0f2754eaa05b..f23b14ec743a 100644
  
  	ClearPageChecked(page);
  	set_page_dirty(page);
--	btrfs_delalloc_release_extents(BTRFS_I(inode), PAGE_SIZE, false);
+-	btrfs_delalloc_release_extents(BTRFS_I(inode), PAGE_SIZE);
 +out_reserved:
-+	btrfs_delalloc_release_extents(BTRFS_I(inode), PAGE_SIZE, ret != 0);
++	btrfs_delalloc_release_extents(BTRFS_I(inode), PAGE_SIZE);
 +	if (ret)
 +		btrfs_delalloc_release_space(inode, data_reserved, page_start,
 +					     PAGE_SIZE, true);
