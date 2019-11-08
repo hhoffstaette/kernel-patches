@@ -1,0 +1,112 @@
+From:   kaixuxia <xiakaixu1987@gmail.com>
+X-Google-Original-From: kaixuxia <kaixuxia@tencent.com>
+To:     linux-xfs@vger.kernel.org
+Cc:     darrick.wong@oracle.com, bfoster@redhat.com, newtongao@tencent.com,
+        jasperwang@tencent.com
+Subject: [PATCH v3] xfs: Fix deadlock between AGI and AGF when target_ip exists in xfs_rename()
+Date:   Thu,  7 Nov 2019 20:08:11 +0800
+
+When target_ip exists in xfs_rename(), the xfs_dir_replace() call may
+need to hold the AGF lock to allocate more blocks, and then invoking
+the xfs_droplink() call to hold AGI lock to drop target_ip onto the
+unlinked list, so we get the lock order AGF->AGI. This would break the
+ordering constraint on AGI and AGF locking - inode allocation locks
+the AGI, then can allocate a new extent for new inodes, locking the
+AGF after the AGI.
+
+In this patch we check whether the replace operation need more
+blocks firstly. If so, acquire the agi lock firstly to preserve
+locking order(AGI/AGF). Actually, the locking order problem only
+occurs when we are locking the AGI/AGF of the same AG. For multiple
+AGs the AGI lock will be released after the transaction committed.
+
+Signed-off-by: kaixuxia <kaixuxia@tencent.com>
+---
+Changes in v3:
+ -Invoke xfs_dir2_sf_replace_needblock() call in xfs_inode.c
+  directly.
+ -Fix the typo.
+
+ fs/xfs/libxfs/xfs_dir2.h    |  2 ++
+ fs/xfs/libxfs/xfs_dir2_sf.c | 21 +++++++++++++++++++++
+ fs/xfs/xfs_inode.c          | 15 +++++++++++++++
+ 3 files changed, 38 insertions(+)
+
+diff --git a/fs/xfs/libxfs/xfs_dir2.h b/fs/xfs/libxfs/xfs_dir2.h
+index f542447..d4a2b09 100644
+--- a/fs/xfs/libxfs/xfs_dir2.h
++++ b/fs/xfs/libxfs/xfs_dir2.h
+@@ -124,6 +124,8 @@ extern int xfs_dir_lookup(struct xfs_trans *tp, struct xfs_inode *dp,
+ extern int xfs_dir_removename(struct xfs_trans *tp, struct xfs_inode *dp,
+ 				struct xfs_name *name, xfs_ino_t ino,
+ 				xfs_extlen_t tot);
++extern bool xfs_dir2_sf_replace_needblock(struct xfs_inode *dp,
++				struct xfs_inode *src_ip);
+ extern int xfs_dir_replace(struct xfs_trans *tp, struct xfs_inode *dp,
+ 				struct xfs_name *name, xfs_ino_t inum,
+ 				xfs_extlen_t tot);
+diff --git a/fs/xfs/libxfs/xfs_dir2_sf.c b/fs/xfs/libxfs/xfs_dir2_sf.c
+index 85f14fc..7098cdd 100644
+--- a/fs/xfs/libxfs/xfs_dir2_sf.c
++++ b/fs/xfs/libxfs/xfs_dir2_sf.c
+@@ -945,6 +945,27 @@ static int xfs_dir2_sf_addname_pick(xfs_da_args_t *args, int objchange,
+ }
+ 
+ /*
++ * Check whether the sf dir replace operation need more blocks.
++ */
++bool
++xfs_dir2_sf_replace_needblock(
++	struct xfs_inode	*dp,
++	struct xfs_inode	*src_ip)
++{
++	int			newsize;
++	xfs_dir2_sf_hdr_t	*sfp;
++
++	if (dp->i_d.di_format != XFS_DINODE_FMT_LOCAL)
++		return false;
++
++	sfp = (xfs_dir2_sf_hdr_t *)dp->i_df.if_u1.if_data;
++	newsize = dp->i_df.if_bytes + (sfp->count + 1) * XFS_INO64_DIFF;
++
++	return src_ip->i_ino > XFS_DIR2_MAX_SHORT_INUM &&
++	       sfp->i8count == 0 && newsize > XFS_IFORK_DSIZE(dp);
++}
++
++/*
+  * Replace the inode number of an entry in a shortform directory.
+  */
+ int						/* error */
+diff --git a/fs/xfs/xfs_inode.c b/fs/xfs/xfs_inode.c
+index 18f4b26..cb0b93b 100644
+--- a/fs/xfs/xfs_inode.c
++++ b/fs/xfs/xfs_inode.c
+@@ -3196,6 +3196,7 @@ struct xfs_iunlink {
+ 	struct xfs_trans	*tp;
+ 	struct xfs_inode	*wip = NULL;		/* whiteout inode */
+ 	struct xfs_inode	*inodes[__XFS_SORT_INODES];
++	struct xfs_buf		*agibp;
+ 	int			num_inodes = __XFS_SORT_INODES;
+ 	bool			new_parent = (src_dp != target_dp);
+ 	bool			src_is_directory = S_ISDIR(VFS_I(src_ip)->i_mode);
+@@ -3361,6 +3362,20 @@ struct xfs_iunlink {
+ 		 * In case there is already an entry with the same
+ 		 * name at the destination directory, remove it first.
+ 		 */
++
++		/*
++		 * Check whether the replace operation need more blocks.
++		 * If so, acquire the agi lock firstly to preserve locking
++		 * order (AGI/AGF). Only convert the shortform directory to
++		 * block form maybe need more blocks.
++		 */
++		if (xfs_dir2_sf_replace_needblock(target_dp, src_ip)) {
++			error = xfs_read_agi(mp, tp,
++				XFS_INO_TO_AGNO(mp, target_ip->i_ino), &agibp);
++			if (error)
++				goto out_trans_cancel;
++		}
++
+ 		error = xfs_dir_replace(tp, target_dp, target_name,
+ 					src_ip->i_ino, spaceres);
+ 		if (error)
