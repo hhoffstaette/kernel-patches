@@ -23,7 +23,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **Stable Series: 5.3**
 
-- atlantic: fixes from 5.4+ (correctness)
+- atlantic: fixes from 5.4+ (correctness, error handling, PTP, UDP GSO)
 - block: fixes from 5.4+ (BFQ)
 - bmq: [BMQ 5.3-r2](https://cchalpha.blogspot.com/2019/10/bmq-v53-r2-release.html) CPU scheduler
 - btrfs: fixes from 5.4+
