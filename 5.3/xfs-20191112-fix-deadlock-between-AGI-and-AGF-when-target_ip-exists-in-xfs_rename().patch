@@ -1,10 +1,8 @@
-From:   kaixuxia <xiakaixu1987@gmail.com>
-X-Google-Original-From: kaixuxia <kaixuxia@tencent.com>
-To:     linux-xfs@vger.kernel.org
-Cc:     darrick.wong@oracle.com, bfoster@redhat.com, newtongao@tencent.com,
-        jasperwang@tencent.com
-Subject: [PATCH v3] xfs: Fix deadlock between AGI and AGF when target_ip exists in xfs_rename()
-Date:   Thu,  7 Nov 2019 20:08:11 +0800
+From: kaixuxia <xiakaixu1987@gmail.com>
+To: linux-xfs@vger.kernel.org
+Cc: darrick.wong@oracle.com, bfoster@redhat.com, newtongao@tencent.com, jasperwang@tencent.com
+Subject: [PATCH v4] xfs: Fix deadlock between AGI and AGF when target_ip exists in xfs_rename()
+Date: Tue, 12 Nov 2019 19:13:30 +0800
 
 When target_ip exists in xfs_rename(), the xfs_dir_replace() call may
 need to hold the AGF lock to allocate more blocks, and then invoking
@@ -22,18 +20,18 @@ AGs the AGI lock will be released after the transaction committed.
 
 Signed-off-by: kaixuxia <kaixuxia@tencent.com>
 ---
-Changes in v3:
- -Invoke xfs_dir2_sf_replace_needblock() call in xfs_inode.c
-  directly.
- -Fix the typo.
+Changes in v4:
+ -Remove the typedef usages.
+ -Invoke xfs_dir2_sf_replace_needblock() in
+  xfs_dir2_sf_replace() directly.
 
  fs/xfs/libxfs/xfs_dir2.h    |  2 ++
- fs/xfs/libxfs/xfs_dir2_sf.c | 21 +++++++++++++++++++++
+ fs/xfs/libxfs/xfs_dir2_sf.c | 28 +++++++++++++++++++++++-----
  fs/xfs/xfs_inode.c          | 15 +++++++++++++++
- 3 files changed, 38 insertions(+)
+ 3 files changed, 40 insertions(+), 5 deletions(-)
 
 diff --git a/fs/xfs/libxfs/xfs_dir2.h b/fs/xfs/libxfs/xfs_dir2.h
-index f542447..d4a2b09 100644
+index f542447..01b1722 100644
 --- a/fs/xfs/libxfs/xfs_dir2.h
 +++ b/fs/xfs/libxfs/xfs_dir2.h
 @@ -124,6 +124,8 @@ extern int xfs_dir_lookup(struct xfs_trans *tp, struct xfs_inode *dp,
@@ -41,12 +39,12 @@ index f542447..d4a2b09 100644
  				struct xfs_name *name, xfs_ino_t ino,
  				xfs_extlen_t tot);
 +extern bool xfs_dir2_sf_replace_needblock(struct xfs_inode *dp,
-+				struct xfs_inode *src_ip);
++				xfs_ino_t inum);
  extern int xfs_dir_replace(struct xfs_trans *tp, struct xfs_inode *dp,
  				struct xfs_name *name, xfs_ino_t inum,
  				xfs_extlen_t tot);
 diff --git a/fs/xfs/libxfs/xfs_dir2_sf.c b/fs/xfs/libxfs/xfs_dir2_sf.c
-index 85f14fc..7098cdd 100644
+index 85f14fc..0e112e1 100644
 --- a/fs/xfs/libxfs/xfs_dir2_sf.c
 +++ b/fs/xfs/libxfs/xfs_dir2_sf.c
 @@ -945,6 +945,27 @@ static int xfs_dir2_sf_addname_pick(xfs_da_args_t *args, int objchange,
@@ -58,18 +56,18 @@ index 85f14fc..7098cdd 100644
 +bool
 +xfs_dir2_sf_replace_needblock(
 +	struct xfs_inode	*dp,
-+	struct xfs_inode	*src_ip)
++	xfs_ino_t		inum)
 +{
 +	int			newsize;
-+	xfs_dir2_sf_hdr_t	*sfp;
++	struct xfs_dir2_sf_hdr	*sfp;
 +
 +	if (dp->i_d.di_format != XFS_DINODE_FMT_LOCAL)
 +		return false;
 +
-+	sfp = (xfs_dir2_sf_hdr_t *)dp->i_df.if_u1.if_data;
++	sfp = (struct xfs_dir2_sf_hdr *)dp->i_df.if_u1.if_data;
 +	newsize = dp->i_df.if_bytes + (sfp->count + 1) * XFS_INO64_DIFF;
 +
-+	return src_ip->i_ino > XFS_DIR2_MAX_SHORT_INUM &&
++	return inum > XFS_DIR2_MAX_SHORT_INUM &&
 +	       sfp->i8count == 0 && newsize > XFS_IFORK_DSIZE(dp);
 +}
 +
@@ -77,8 +75,28 @@ index 85f14fc..7098cdd 100644
   * Replace the inode number of an entry in a shortform directory.
   */
  int						/* error */
+@@ -980,17 +1001,14 @@ static int xfs_dir2_sf_addname_pick(xfs_da_args_t *args, int objchange,
+ 	 */
+ 	if (args->inumber > XFS_DIR2_MAX_SHORT_INUM && sfp->i8count == 0) {
+ 		int	error;			/* error return value */
+-		int	newsize;		/* new inode size */
+ 
+-		newsize = dp->i_df.if_bytes + (sfp->count + 1) * XFS_INO64_DIFF;
+ 		/*
+ 		 * Won't fit as shortform, convert to block then do replace.
+ 		 */
+-		if (newsize > XFS_IFORK_DSIZE(dp)) {
++		if (xfs_dir2_sf_replace_needblock(dp, args->inumber)) {
+ 			error = xfs_dir2_sf_to_block(args);
+-			if (error) {
++			if (error)
+ 				return error;
+-			}
+ 			return xfs_dir2_block_replace(args);
+ 		}
+ 		/*
 diff --git a/fs/xfs/xfs_inode.c b/fs/xfs/xfs_inode.c
-index 18f4b26..cb0b93b 100644
+index 18f4b26..5dc3796 100644
 --- a/fs/xfs/xfs_inode.c
 +++ b/fs/xfs/xfs_inode.c
 @@ -3196,6 +3196,7 @@ struct xfs_iunlink {
@@ -100,7 +118,7 @@ index 18f4b26..cb0b93b 100644
 +		 * order (AGI/AGF). Only convert the shortform directory to
 +		 * block form maybe need more blocks.
 +		 */
-+		if (xfs_dir2_sf_replace_needblock(target_dp, src_ip)) {
++		if (xfs_dir2_sf_replace_needblock(target_dp, src_ip->i_ino)) {
 +			error = xfs_read_agi(mp, tp,
 +				XFS_INO_TO_AGNO(mp, target_ip->i_ino), &agibp);
 +			if (error)
