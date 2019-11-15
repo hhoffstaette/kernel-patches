@@ -1,0 +1,36 @@
+From: Josef Bacik <josef@toxicpanda.com>
+To: linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Subject: [PATCH] btrfs: do not corrupt the fs with rename exchange on a subvol
+Date: Fri, 15 Nov 2019 15:43:06 -0500
+
+Testing with the new fsstress support for subvolumes uncovered a pretty
+bad problem with rename exchange on subvolumes.  We're modifying two
+different subvolumes, but we only start the transaction on one of them,
+so the other one is not added to the dirty root list.  This is caught by
+btrfs_cow_block() with a warning because the root has not been updated,
+however if we do not modify this root again we'll end up pointing at an
+invalid root because the root item is never updated.
+
+Fix this by making sure we add the destination root to the trans list,
+the same as we do with normal renames.  This fixes the corruption.
+
+Fixes: cdd1fedf8261 ("btrfs: add support for RENAME_EXCHANGE and RENAME_WHITEOUT")
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+---
+ fs/btrfs/inode.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index f6fc47525a52..56032c518b26 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -9575,6 +9575,9 @@ static int btrfs_rename_exchange(struct inode *old_dir,
+ 		goto out_notrans;
+ 	}
+ 
++	if (dest != root)
++		btrfs_record_root_in_trans(trans, dest);
++
+ 	/*
+ 	 * We need to find a free sequence number both in the source and
+ 	 * in the destination directory for the exchange.
