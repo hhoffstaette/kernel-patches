@@ -9,10 +9,10 @@ diff -rup a/net/ipv4/tcp_bbr2.c b/net/ipv4/tcp_bbr2.c
 --- a/net/ipv4/tcp_bbr2.c	2019-10-02 17:15:47.163476792 +0200
 +++ b/net/ipv4/tcp_bbr2.c	2019-10-02 17:16:58.870762226 +0200
 @@ -2424,7 +2424,6 @@ static void bbr_set_state(struct sock *s
- 		bbr_debug(sk, 0, &rs, &dbg);
+ 		bbr_debug(sk, 0, &rs, &ctx);
  	} else if (bbr->prev_ca_state == TCP_CA_Loss &&
  		   new_state != TCP_CA_Loss) {
 -		WARN_ON_ONCE(bbr->prior_cwnd == 0);
  		WARN_ON_ONCE(bbr->prior_cwnd == ~0U);
  		tp->snd_cwnd = max(tp->snd_cwnd, bbr->prior_cwnd);
- 	}
+ 		bbr->try_fast_path = 0; /* bound cwnd using latest model */

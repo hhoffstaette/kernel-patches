@@ -29,7 +29,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - btrfs: fixes from 5.4+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch)) + `-O3`
 - mm: fixes from 5.4+
-- net: BBR v2 ['alpha' release](https://groups.google.com/forum/?hl=en#!topic/bbr-dev/_ydL31oYnoI)
+- net: BBR v2 ['alpha' from 2019-11-17](https://groups.google.com/forum/?hl=en#!topic/bbr-dev/xLs7_Slx3Qc)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: fixes from 5.4+ (performance)
 
