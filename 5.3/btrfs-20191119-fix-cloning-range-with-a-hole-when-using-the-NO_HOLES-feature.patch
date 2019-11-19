@@ -1,0 +1,107 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] Btrfs: fix cloning range with a hole when using the NO_HOLES feature
+Date:   Tue, 19 Nov 2019 12:07:32 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+When using the NO_HOLES feature if we clone a range that contains a hole
+and a temporary ENOSPC happens while dropping extents from the target
+inode's range, we can end up failing and aborting the transaction with
+-EEXIST or with a corrupt file extent item, that has a length greater
+than it should and overlaps with other extents. For example when cloning
+the following range from inode A to inode B:
+
+  Inode A:
+
+    extent A1                                          extent A2
+  [ ----------- ]  [ hole, implicit, 4Mb length ]  [ ------------- ]
+  0            1Mb                                 5Mb            6Mb
+
+  Range to clone: [1Mb, 6Mb[
+
+  Inode B:
+
+    extent B1       extent B2        extent B3         extent B4
+  [ ---------- ]  [ --------- ]    [ ---------- ]    [ ---------- ]
+  0           1Mb 1Mb        2Mb   2Mb        5Mb    5Mb         6Mb
+
+  Target range: [1Mb, 6Mb[ (same as source, to make it easier to explain)
+
+The following can happen:
+
+1) btrfs_punch_hole_range() gets -ENOSPC from __btrfs_drop_extents();
+
+2) At that point, 'cur_offset' is set to 1Mb and __btrfs_drop_extents()
+   set 'drop_end' to 2Mb, meaning it was able to drop only extent B2;
+
+3) We then compute 'clone_len' as 'drop_end' - 'cur_offset' = 2Mb - 1Mb =
+   1Mb;
+
+4) We then attempt to insert a file extent item at inode B with a file
+   offset of 5Mb, which is the value of clone_info->file_offset. This
+   fails with error -EEXIST because there's already an extent at that
+   offset (extent B4);
+
+5) We abort the current transaction with -EEXIST and return that error
+   to user space as well.
+
+Another example, for extent corruption:
+
+  Inode A:
+
+    extent A1                                           extent A2
+  [ ----------- ]   [ hole, implicit, 10Mb length ]  [ ------------- ]
+  0            1Mb                                  11Mb            12Mb
+
+  Inode B:
+
+    extent B1         extent B2
+  [ ----------- ]   [ --------- ]    [ ----------------------------- ]
+  0            1Mb 1Mb         5Mb  5Mb                             12Mb
+
+  Target range: [1Mb, 12Mb[ (same as source, to make it easier to explain)
+
+1) btrfs_punch_hole_range() gets -ENOSPC from __btrfs_drop_extents();
+
+2) At that point, 'cur_offset' is set to 1Mb and __btrfs_drop_extents()
+   set 'drop_end' to 5Mb, meaning it was able to drop only extent B2;
+
+3) We then compute 'clone_len' as 'drop_end' - 'cur_offset' = 5Mb - 1Mb =
+   4Mb;
+
+4) We then insert a file extent item at inode B with a file offset of 11Mb
+   which is the value of clone_info->file_offset, and a length of 4Mb (the
+   value of 'clone_len'). So we get 2 extents items with ranges that
+   overlap and an extent length of 4Mb, larger then the extent A2 from
+   inode A (1Mb length);
+
+5) After that we end the transaction, balance the btree dirty pages and
+   then start another or join the previous transaction. It might happen
+   that the transaction which inserted the incorrect extent was committed
+   by another task so we end up with extent corruption if a power failure
+   happens.
+
+So fix this by making sure we attempt to insert the extent to clone at
+the destination inode only if we are past dropping the sub-range that
+corresponds to a hole.
+
+Fixes: 690a5dbfc51315 ("Btrfs: fix ENOSPC errors, leading to transaction aborts, when cloning extents")
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/file.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index c332968f9056..454aaf0b825c 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2601,7 +2601,7 @@ int btrfs_punch_hole_range(struct inode *inode, struct btrfs_path *path,
+ 			}
+ 		}
+ 
+-		if (clone_info) {
++		if (clone_info && cur_offset >= clone_info->file_offset) {
+ 			u64 clone_len = drop_end - cur_offset;
+ 
+ 			ret = btrfs_insert_clone_extent(trans, inode, path,
