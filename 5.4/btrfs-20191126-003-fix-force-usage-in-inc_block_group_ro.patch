@@ -1,0 +1,60 @@
+From:   Josef Bacik <josef@toxicpanda.com>
+To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com, wqu@suse.com
+Cc:     Nikolay Borisov <nborisov@suse.com>
+Subject: [PATCH 3/4] btrfs: fix force usage in inc_block_group_ro
+Date:   Tue, 26 Nov 2019 11:25:55 -0500
+
+For some reason we've translated the do_chunk_alloc that goes into
+btrfs_inc_block_group_ro to force in inc_block_group_ro, but these are
+two different things.
+
+force for inc_block_group_ro is used when we are forcing the block group
+read only no matter what, for example when the underlying chunk is
+marked read only.  We need to not do the space check here as this block
+group needs to be read only.
+
+btrfs_inc_block_group_ro() has a do_chunk_alloc flag that indicates that
+we need to pre-allocate a chunk before marking the block group read
+only.  This has nothing to do with forcing, and in fact we _always_ want
+to do the space check in this case, so unconditionally pass false for
+force in this case.
+
+Then fixup inc_block_group_ro to honor force as it's expected and
+documented to do.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+---
+ fs/btrfs/block-group.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/block-group.c b/fs/btrfs/block-group.c
+index 66fa39632cde..5961411500ed 100644
+--- a/fs/btrfs/block-group.c
++++ b/fs/btrfs/block-group.c
+@@ -1190,8 +1190,15 @@ static int inc_block_group_ro(struct btrfs_block_group *cache, int force)
+ 	spin_lock(&sinfo->lock);
+ 	spin_lock(&cache->lock);
+ 
+-	if (cache->ro) {
++	if (cache->ro || force) {
+ 		cache->ro++;
++
++		/*
++		 * We should only be empty if we did force here and haven't
++		 * already marked ourselves read only.
++		 */
++		if (force && list_empty(&cache->ro_list))
++			list_add_tail(&cache->ro_list, &sinfo->ro_bgs);
+ 		ret = 0;
+ 		goto out;
+ 	}
+@@ -2063,7 +2070,7 @@ int btrfs_inc_block_group_ro(struct btrfs_block_group *cache,
+ 		}
+ 	}
+ 
+-	ret = inc_block_group_ro(cache, !do_chunk_alloc);
++	ret = inc_block_group_ro(cache, false);
+ 	if (!do_chunk_alloc)
+ 		goto unlock_out;
+ 	if (!ret)
