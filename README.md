@@ -21,15 +21,15 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Stable Series: 5.3**
+**Stable Series: 5.4**
 
-- atlantic: fixes from 5.4+ (correctness, error handling, PTP, UDP GSO)
-- block: fixes from 5.4+ (BFQ)
-- bmq: [BMQ 5.3-r2](https://cchalpha.blogspot.com/2019/10/bmq-v53-r2-release.html) CPU scheduler
-- btrfs: fixes from 5.4+
-- kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch)) + `-O3`
-- mm: fixes from 5.4+
+- atlantic: fixes from 5.5+ (correctness, error handling, PTP, UDP GSO)
+- block: fixes from 5.5+ (performance)
+- bmq: [BMQ 5.4-r0](https://cchalpha.blogspot.com/2019/11/bmq-v54-r0-release.html) CPU scheduler
+- btrfs: fixes from 5.5+
+- kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
+- mm: fixes from 5.5+
 - net: BBR v2 ['alpha' from 2019-11-17](https://groups.google.com/forum/?hl=en#!topic/bbr-dev/xLs7_Slx3Qc)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: fixes from 5.4+ (performance)
+- xfs: fixes from 5.5+ (stability)
 
