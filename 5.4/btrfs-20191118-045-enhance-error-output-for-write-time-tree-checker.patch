@@ -1,0 +1,45 @@
+From c06631b0d8a4236fb45667de60880b037863de56 Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <wqu@suse.com>
+Date: Fri, 4 Oct 2019 17:31:33 +0800
+Subject: [PATCH 045/137] btrfs: Enhance error output for write time tree checker
+
+Unlike read time tree checker errors, write time error can't be
+inspected by "btrfs inspect dump-tree", so we need extra information to
+determine what's going wrong.
+
+The patch will add the following output for write time tree checker
+error:
+
+- The content of the offending tree block
+  To help determining if it's a false alert.
+
+- Kernel WARN_ON() for debug build
+  This is helpful for us to detect unexpected write time tree checker
+  error, especially fstests could catch the dmesg.
+  Since the WARN_ON() is only triggered for write time tree checker,
+  test cases utilizing dm-error won't trigger this WARN_ON(), thus no
+  extra noise.
+
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/disk-io.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 0bc6e3e9f7c3..f54a4782d18c 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -545,9 +545,11 @@ static int csum_dirty_buffer(struct btrfs_fs_info *fs_info, struct page *page)
+ 		ret = btrfs_check_leaf_full(eb);
+ 
+ 	if (ret < 0) {
++		btrfs_print_tree(eb, 0);
+ 		btrfs_err(fs_info,
+ 		"block=%llu write time tree block corruption detected",
+ 			  eb->start);
++		WARN_ON(IS_ENABLED(CONFIG_BTRFS_DEBUG));
+ 		return ret;
+ 	}
+ 	write_extent_buffer(eb, result, 0, csum_size);

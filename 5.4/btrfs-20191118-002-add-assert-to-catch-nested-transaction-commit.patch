@@ -1,0 +1,37 @@
+From 35b814f3c53e0635cbb1de3ea5d58776eafe8e20 Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <nborisov@suse.com>
+Date: Thu, 12 Sep 2019 18:31:44 +0300
+Subject: [PATCH 002/137] btrfs: Add assert to catch nested transaction commit
+
+A recent patch to btrfs showed that there was at least 1 case where a
+nested transaction was committed. Nested transaction in this case means
+a code which has a transaction handle calls some function which in turn
+obtains a copy of the same transaction handle. In such cases the correct
+thing to do is for the lower callee to call btrfs_end_transaction which
+contains appropriate checks so as to not commit the transaction which
+will result in stale trans handler for the caller.
+
+To catch such cases add an assert in btrfs_commit_transaction ensuring
+btrfs_trans_handle::use_count is always 1.
+
+Reviewed-by: Josef Bacik <josef@toxicpanda.com>
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/transaction.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 8624bdee8c5b..8b75426c349e 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -1949,6 +1949,8 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
+ 	struct btrfs_transaction *prev_trans = NULL;
+ 	int ret;
+ 
++	ASSERT(refcount_read(&trans->use_count) == 1);
++
+ 	/* Stop the commit early if ->aborted is set */
+ 	if (unlikely(READ_ONCE(cur_trans->aborted))) {
+ 		ret = cur_trans->aborted;

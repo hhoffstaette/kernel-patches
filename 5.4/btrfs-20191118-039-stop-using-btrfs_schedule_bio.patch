@@ -1,0 +1,232 @@
+From 08635bae0b4ceb08fe4c156a11c83baec397d36d Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Wed, 10 Jul 2019 12:28:14 -0700
+Subject: [PATCH 039/137] Btrfs: stop using btrfs_schedule_bio()
+
+btrfs_schedule_bio() hands IO off to a helper thread to do the actual
+submit_bio() call.  This has been used to make sure async crc and
+compression helpers don't get stuck on IO submission.  To maintain good
+performance, over time the IO submission threads duplicated some IO
+scheduler characteristics such as high and low priority IOs and they
+also made some ugly assumptions about request allocation batch sizes.
+
+All of this cost at least one extra context switch during IO submission,
+and doesn't fit well with the modern blkmq IO stack.  So, this commit stops
+using btrfs_schedule_bio().  We may need to adjust the number of async
+helper threads for crcs and compression, but long term it's a better
+path.
+
+Reviewed-by: Josef Bacik <josef@toxicpanda.com>
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/compression.c |  8 +++---
+ fs/btrfs/disk-io.c     |  7 +++---
+ fs/btrfs/inode.c       |  6 ++---
+ fs/btrfs/volumes.c     | 55 +++---------------------------------------
+ fs/btrfs/volumes.h     |  2 +-
+ 5 files changed, 15 insertions(+), 63 deletions(-)
+
+diff --git a/fs/btrfs/compression.c b/fs/btrfs/compression.c
+index b05b361e2062..ae7d93bfba97 100644
+--- a/fs/btrfs/compression.c
++++ b/fs/btrfs/compression.c
+@@ -378,7 +378,7 @@ blk_status_t btrfs_submit_compressed_write(struct inode *inode, u64 start,
+ 				BUG_ON(ret); /* -ENOMEM */
+ 			}
+ 
+-			ret = btrfs_map_bio(fs_info, bio, 0, 1);
++			ret = btrfs_map_bio(fs_info, bio, 0);
+ 			if (ret) {
+ 				bio->bi_status = ret;
+ 				bio_endio(bio);
+@@ -409,7 +409,7 @@ blk_status_t btrfs_submit_compressed_write(struct inode *inode, u64 start,
+ 		BUG_ON(ret); /* -ENOMEM */
+ 	}
+ 
+-	ret = btrfs_map_bio(fs_info, bio, 0, 1);
++	ret = btrfs_map_bio(fs_info, bio, 0);
+ 	if (ret) {
+ 		bio->bi_status = ret;
+ 		bio_endio(bio);
+@@ -668,7 +668,7 @@ blk_status_t btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
+ 						  fs_info->sectorsize);
+ 			sums += csum_size * nr_sectors;
+ 
+-			ret = btrfs_map_bio(fs_info, comp_bio, mirror_num, 0);
++			ret = btrfs_map_bio(fs_info, comp_bio, mirror_num);
+ 			if (ret) {
+ 				comp_bio->bi_status = ret;
+ 				bio_endio(comp_bio);
+@@ -693,7 +693,7 @@ blk_status_t btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
+ 		BUG_ON(ret); /* -ENOMEM */
+ 	}
+ 
+-	ret = btrfs_map_bio(fs_info, comp_bio, mirror_num, 0);
++	ret = btrfs_map_bio(fs_info, comp_bio, mirror_num);
+ 	if (ret) {
+ 		comp_bio->bi_status = ret;
+ 		bio_endio(comp_bio);
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 307861d0a040..bad83867c519 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -791,8 +791,7 @@ static void run_one_async_done(struct btrfs_work *work)
+ 		return;
+ 	}
+ 
+-	ret = btrfs_map_bio(btrfs_sb(inode->i_sb), async->bio,
+-			async->mirror_num, 1);
++	ret = btrfs_map_bio(btrfs_sb(inode->i_sb), async->bio, async->mirror_num);
+ 	if (ret) {
+ 		async->bio->bi_status = ret;
+ 		bio_endio(async->bio);
+@@ -892,12 +891,12 @@ static blk_status_t btree_submit_bio_hook(struct inode *inode, struct bio *bio,
+ 					  BTRFS_WQ_ENDIO_METADATA);
+ 		if (ret)
+ 			goto out_w_error;
+-		ret = btrfs_map_bio(fs_info, bio, mirror_num, 0);
++		ret = btrfs_map_bio(fs_info, bio, mirror_num);
+ 	} else if (!async) {
+ 		ret = btree_csum_one_bio(bio);
+ 		if (ret)
+ 			goto out_w_error;
+-		ret = btrfs_map_bio(fs_info, bio, mirror_num, 0);
++		ret = btrfs_map_bio(fs_info, bio, mirror_num);
+ 	} else {
+ 		/*
+ 		 * kthread helpers are used to submit writes so that
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 2ef5f542f58a..42d1be32b2d9 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -2108,7 +2108,7 @@ static blk_status_t btrfs_submit_bio_hook(struct inode *inode, struct bio *bio,
+ 	}
+ 
+ mapit:
+-	ret = btrfs_map_bio(fs_info, bio, mirror_num, 0);
++	ret = btrfs_map_bio(fs_info, bio, mirror_num);
+ 
+ out:
+ 	if (ret) {
+@@ -7850,7 +7850,7 @@ static inline blk_status_t submit_dio_repair_bio(struct inode *inode,
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = btrfs_map_bio(fs_info, bio, mirror_num, 0);
++	ret = btrfs_map_bio(fs_info, bio, mirror_num);
+ 
+ 	return ret;
+ }
+@@ -8376,7 +8376,7 @@ static inline blk_status_t btrfs_submit_dio_bio(struct bio *bio,
+ 			goto err;
+ 	}
+ map:
+-	ret = btrfs_map_bio(fs_info, bio, 0, 0);
++	ret = btrfs_map_bio(fs_info, bio, 0);
+ err:
+ 	return ret;
+ }
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index d09371b0cdf9..eb92b4bdbc64 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -6415,52 +6415,8 @@ static void btrfs_end_bio(struct bio *bio)
+ 	}
+ }
+ 
+-/*
+- * see run_scheduled_bios for a description of why bios are collected for
+- * async submit.
+- *
+- * This will add one bio to the pending list for a device and make sure
+- * the work struct is scheduled.
+- */
+-static noinline void btrfs_schedule_bio(struct btrfs_device *device,
+-					struct bio *bio)
+-{
+-	struct btrfs_fs_info *fs_info = device->fs_info;
+-	int should_queue = 1;
+-	struct btrfs_pending_bios *pending_bios;
+-
+-	/* don't bother with additional async steps for reads, right now */
+-	if (bio_op(bio) == REQ_OP_READ) {
+-		btrfsic_submit_bio(bio);
+-		return;
+-	}
+-
+-	WARN_ON(bio->bi_next);
+-	bio->bi_next = NULL;
+-
+-	spin_lock(&device->io_lock);
+-	if (op_is_sync(bio->bi_opf))
+-		pending_bios = &device->pending_sync_bios;
+-	else
+-		pending_bios = &device->pending_bios;
+-
+-	if (pending_bios->tail)
+-		pending_bios->tail->bi_next = bio;
+-
+-	pending_bios->tail = bio;
+-	if (!pending_bios->head)
+-		pending_bios->head = bio;
+-	if (device->running_pending)
+-		should_queue = 0;
+-
+-	spin_unlock(&device->io_lock);
+-
+-	if (should_queue)
+-		btrfs_queue_work(fs_info->submit_workers, &device->work);
+-}
+-
+ static void submit_stripe_bio(struct btrfs_bio *bbio, struct bio *bio,
+-			      u64 physical, int dev_nr, int async)
++			      u64 physical, int dev_nr)
+ {
+ 	struct btrfs_device *dev = bbio->stripes[dev_nr].dev;
+ 	struct btrfs_fs_info *fs_info = bbio->fs_info;
+@@ -6478,10 +6434,7 @@ static void submit_stripe_bio(struct btrfs_bio *bbio, struct bio *bio,
+ 
+ 	btrfs_bio_counter_inc_noblocked(fs_info);
+ 
+-	if (async)
+-		btrfs_schedule_bio(dev, bio);
+-	else
+-		btrfsic_submit_bio(bio);
++	btrfsic_submit_bio(bio);
+ }
+ 
+ static void bbio_error(struct btrfs_bio *bbio, struct bio *bio, u64 logical)
+@@ -6502,7 +6455,7 @@ static void bbio_error(struct btrfs_bio *bbio, struct bio *bio, u64 logical)
+ }
+ 
+ blk_status_t btrfs_map_bio(struct btrfs_fs_info *fs_info, struct bio *bio,
+-			   int mirror_num, int async_submit)
++			   int mirror_num)
+ {
+ 	struct btrfs_device *dev;
+ 	struct bio *first_bio = bio;
+@@ -6571,7 +6524,7 @@ blk_status_t btrfs_map_bio(struct btrfs_fs_info *fs_info, struct bio *bio,
+ 			bio = first_bio;
+ 
+ 		submit_stripe_bio(bbio, bio, bbio->stripes[dev_nr].physical,
+-				  dev_nr, async_submit);
++				  dev_nr);
+ 	}
+ 	btrfs_bio_counter_dec(fs_info);
+ 	return BLK_STS_OK;
+diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
+index 0ae0677a8d86..bc2bbaa485b7 100644
+--- a/fs/btrfs/volumes.h
++++ b/fs/btrfs/volumes.h
+@@ -436,7 +436,7 @@ int btrfs_read_chunk_tree(struct btrfs_fs_info *fs_info);
+ int btrfs_alloc_chunk(struct btrfs_trans_handle *trans, u64 type);
+ void btrfs_mapping_tree_free(struct extent_map_tree *tree);
+ blk_status_t btrfs_map_bio(struct btrfs_fs_info *fs_info, struct bio *bio,
+-			   int mirror_num, int async_submit);
++			   int mirror_num);
+ int btrfs_open_devices(struct btrfs_fs_devices *fs_devices,
+ 		       fmode_t flags, void *holder);
+ struct btrfs_device *btrfs_scan_one_device(const char *path,

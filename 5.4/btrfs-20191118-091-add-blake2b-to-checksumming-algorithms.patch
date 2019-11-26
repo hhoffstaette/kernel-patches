@@ -1,0 +1,62 @@
+From 352ae07b599a03b08a2149d9c2ff9c3479591af2 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Mon, 7 Oct 2019 11:11:02 +0200
+Subject: [PATCH 091/137] btrfs: add blake2b to checksumming algorithms
+
+Add blake2b (with 256 bit digest) to the list of possible checksumming
+algorithms used by BTRFS.
+
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c                | 2 ++
+ fs/btrfs/disk-io.c              | 1 +
+ fs/btrfs/super.c                | 1 +
+ include/uapi/linux/btrfs_tree.h | 1 +
+ 4 files changed, 5 insertions(+)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index c211216b4524..5b6e86aaf2e1 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -37,6 +37,8 @@ static const struct btrfs_csums {
+ 	[BTRFS_CSUM_TYPE_CRC32] = { .size = 4, .name = "crc32c" },
+ 	[BTRFS_CSUM_TYPE_XXHASH] = { .size = 8, .name = "xxhash64" },
+ 	[BTRFS_CSUM_TYPE_SHA256] = { .size = 32, .name = "sha256" },
++	[BTRFS_CSUM_TYPE_BLAKE2] = { .size = 32, .name = "blake2b",
++				     .driver = "blake2b-256" },
+ };
+ 
+ int btrfs_super_csum_size(const struct btrfs_super_block *s)
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 948ed5ac0794..7c345c4bc817 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -354,6 +354,7 @@ static bool btrfs_supported_super_csum(u16 csum_type)
+ 	case BTRFS_CSUM_TYPE_CRC32:
+ 	case BTRFS_CSUM_TYPE_XXHASH:
+ 	case BTRFS_CSUM_TYPE_SHA256:
++	case BTRFS_CSUM_TYPE_BLAKE2:
+ 		return true;
+ 	default:
+ 		return false;
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 36440336c08b..792bb0bc9a0b 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -2464,3 +2464,4 @@ MODULE_LICENSE("GPL");
+ MODULE_SOFTDEP("pre: crc32c");
+ MODULE_SOFTDEP("pre: xxhash64");
+ MODULE_SOFTDEP("pre: sha256");
++MODULE_SOFTDEP("pre: blake2b-256");
+diff --git a/include/uapi/linux/btrfs_tree.h b/include/uapi/linux/btrfs_tree.h
+index e2823c9b2061..5160be1d7332 100644
+--- a/include/uapi/linux/btrfs_tree.h
++++ b/include/uapi/linux/btrfs_tree.h
+@@ -304,6 +304,7 @@ enum btrfs_csum_type {
+ 	BTRFS_CSUM_TYPE_CRC32	= 0,
+ 	BTRFS_CSUM_TYPE_XXHASH	= 1,
+ 	BTRFS_CSUM_TYPE_SHA256	= 2,
++	BTRFS_CSUM_TYPE_BLAKE2	= 3,
+ };
+ 
+ /*

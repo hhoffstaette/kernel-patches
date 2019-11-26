@@ -1,0 +1,54 @@
+From b9b1a53e180e2ab4cea42c95bf344e4bf7f524e7 Mon Sep 17 00:00:00 2001
+From: Chengguang Xu <cgxu519@mykernel.net>
+Date: Thu, 10 Oct 2019 15:59:58 +0800
+Subject: [PATCH 052/137] btrfs: use enum for extent type defines
+
+Use enum to replace macro definitions of extent types.
+
+Signed-off-by: Chengguang Xu <cgxu519@mykernel.net>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/tree-checker.c         |  4 ++--
+ include/uapi/linux/btrfs_tree.h | 10 ++++++----
+ 2 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/tree-checker.c b/fs/btrfs/tree-checker.c
+index 8b6d4ccd010a..9699c91c958e 100644
+--- a/fs/btrfs/tree-checker.c
++++ b/fs/btrfs/tree-checker.c
+@@ -221,11 +221,11 @@ static int check_extent_data_item(struct extent_buffer *leaf,
+ 
+ 	fi = btrfs_item_ptr(leaf, slot, struct btrfs_file_extent_item);
+ 
+-	if (btrfs_file_extent_type(leaf, fi) > BTRFS_FILE_EXTENT_TYPES) {
++	if (btrfs_file_extent_type(leaf, fi) >= BTRFS_NR_FILE_EXTENT_TYPES) {
+ 		file_extent_err(leaf, slot,
+ 		"invalid type for file extent, have %u expect range [0, %u]",
+ 			btrfs_file_extent_type(leaf, fi),
+-			BTRFS_FILE_EXTENT_TYPES);
++			BTRFS_NR_FILE_EXTENT_TYPES - 1);
+ 		return -EUCLEAN;
+ 	}
+ 
+diff --git a/include/uapi/linux/btrfs_tree.h b/include/uapi/linux/btrfs_tree.h
+index b65c7ee75bc7..44136de2f5d7 100644
+--- a/include/uapi/linux/btrfs_tree.h
++++ b/include/uapi/linux/btrfs_tree.h
+@@ -737,10 +737,12 @@ struct btrfs_balance_item {
+ 	__le64 unused[4];
+ } __attribute__ ((__packed__));
+ 
+-#define BTRFS_FILE_EXTENT_INLINE 0
+-#define BTRFS_FILE_EXTENT_REG 1
+-#define BTRFS_FILE_EXTENT_PREALLOC 2
+-#define BTRFS_FILE_EXTENT_TYPES	2
++enum {
++	BTRFS_FILE_EXTENT_INLINE   = 0,
++	BTRFS_FILE_EXTENT_REG      = 1,
++	BTRFS_FILE_EXTENT_PREALLOC = 2,
++	BTRFS_NR_FILE_EXTENT_TYPES = 3,
++};
+ 
+ struct btrfs_file_extent_item {
+ 	/*

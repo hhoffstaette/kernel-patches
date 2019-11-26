@@ -1,0 +1,74 @@
+From 5ae216929069507efce3caff6f5618ec919cad11 Mon Sep 17 00:00:00 2001
+From: Johannes Thumshirn <jthumshirn@suse.de>
+Date: Fri, 18 Oct 2019 11:58:22 +0200
+Subject: [PATCH 082/137] btrfs: reduce indentation in btrfs_may_alloc_data_chunk
+
+In btrfs_may_alloc_data_chunk() we're checking if the chunk type is of
+type BTRFS_BLOCK_GROUP_DATA and if it is we process it.
+
+Instead of checking if the chunk type is a BTRFS_BLOCK_GROUP_DATA chunk
+we can negate the check and bail out early if it isn't.
+
+This makes the code a bit more readable.
+
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: Johannes Thumshirn <jthumshirn@suse.de>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 41 +++++++++++++++++++++--------------------
+ 1 file changed, 21 insertions(+), 20 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index f03ad5375b15..d040b479e053 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -2982,27 +2982,28 @@ static int btrfs_may_alloc_data_chunk(struct btrfs_fs_info *fs_info,
+ 	chunk_type = cache->flags;
+ 	btrfs_put_block_group(cache);
+ 
+-	if (chunk_type & BTRFS_BLOCK_GROUP_DATA) {
+-		spin_lock(&fs_info->data_sinfo->lock);
+-		bytes_used = fs_info->data_sinfo->bytes_used;
+-		spin_unlock(&fs_info->data_sinfo->lock);
+-
+-		if (!bytes_used) {
+-			struct btrfs_trans_handle *trans;
+-			int ret;
+-
+-			trans =	btrfs_join_transaction(fs_info->tree_root);
+-			if (IS_ERR(trans))
+-				return PTR_ERR(trans);
+-
+-			ret = btrfs_force_chunk_alloc(trans,
+-						      BTRFS_BLOCK_GROUP_DATA);
+-			btrfs_end_transaction(trans);
+-			if (ret < 0)
+-				return ret;
+-			return 1;
+-		}
++	if (!(chunk_type & BTRFS_BLOCK_GROUP_DATA))
++		return 0;
++
++	spin_lock(&fs_info->data_sinfo->lock);
++	bytes_used = fs_info->data_sinfo->bytes_used;
++	spin_unlock(&fs_info->data_sinfo->lock);
++
++	if (!bytes_used) {
++		struct btrfs_trans_handle *trans;
++		int ret;
++
++		trans =	btrfs_join_transaction(fs_info->tree_root);
++		if (IS_ERR(trans))
++			return PTR_ERR(trans);
++
++		ret = btrfs_force_chunk_alloc(trans, BTRFS_BLOCK_GROUP_DATA);
++		btrfs_end_transaction(trans);
++		if (ret < 0)
++			return ret;
++		return 1;
+ 	}
++
+ 	return 0;
+ }
+ 

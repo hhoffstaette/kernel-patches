@@ -1,0 +1,111 @@
+From abe9339d69bd096e2020ffc39fedee2ac0a9c03b Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <wqu@suse.com>
+Date: Tue, 10 Sep 2019 15:40:18 +0800
+Subject: [PATCH 007/137] btrfs: ctree: Reduce one indent level for btrfs_search_old_slot()
+
+Similar to btrfs_search_slot() done in previous patch, make a shortcut
+for the level 0 case and allow to reduce indentation for the remaining
+case.
+
+Reviewed-by: Anand Jain <anand.jain@oracle.com>
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+[ update changelog ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c | 68 ++++++++++++++++++++++++------------------------
+ 1 file changed, 34 insertions(+), 34 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index dea29cd1f2e8..42ca326a0e6b 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -3005,6 +3005,8 @@ int btrfs_search_old_slot(struct btrfs_root *root, const struct btrfs_key *key,
+ 	p->locks[level] = BTRFS_READ_LOCK;
+ 
+ 	while (b) {
++		int dec = 0;
++
+ 		level = btrfs_header_level(b);
+ 		p->nodes[level] = b;
+ 
+@@ -3025,47 +3027,45 @@ int btrfs_search_old_slot(struct btrfs_root *root, const struct btrfs_key *key,
+ 		if (ret < 0)
+ 			goto done;
+ 
+-		if (level != 0) {
+-			int dec = 0;
+-			if (ret && slot > 0) {
+-				dec = 1;
+-				slot -= 1;
+-			}
++		if (level == 0) {
+ 			p->slots[level] = slot;
+ 			unlock_up(p, level, lowest_unlock, 0, NULL);
++			goto done;
++		}
+ 
+-			if (level == lowest_level) {
+-				if (dec)
+-					p->slots[level]++;
+-				goto done;
+-			}
++		if (ret && slot > 0) {
++			dec = 1;
++			slot--;
++		}
++		p->slots[level] = slot;
++		unlock_up(p, level, lowest_unlock, 0, NULL);
+ 
+-			err = read_block_for_search(root, p, &b, level,
+-						    slot, key);
+-			if (err == -EAGAIN)
+-				goto again;
+-			if (err) {
+-				ret = err;
+-				goto done;
+-			}
++		if (level == lowest_level) {
++			if (dec)
++				p->slots[level]++;
++			goto done;
++		}
+ 
+-			level = btrfs_header_level(b);
+-			if (!btrfs_tree_read_lock_atomic(b)) {
+-				btrfs_set_path_blocking(p);
+-				btrfs_tree_read_lock(b);
+-			}
+-			b = tree_mod_log_rewind(fs_info, p, b, time_seq);
+-			if (!b) {
+-				ret = -ENOMEM;
+-				goto done;
+-			}
+-			p->locks[level] = BTRFS_READ_LOCK;
+-			p->nodes[level] = b;
+-		} else {
+-			p->slots[level] = slot;
+-			unlock_up(p, level, lowest_unlock, 0, NULL);
++		err = read_block_for_search(root, p, &b, level, slot, key);
++		if (err == -EAGAIN)
++			goto again;
++		if (err) {
++			ret = err;
+ 			goto done;
+ 		}
++
++		level = btrfs_header_level(b);
++		if (!btrfs_tree_read_lock_atomic(b)) {
++			btrfs_set_path_blocking(p);
++			btrfs_tree_read_lock(b);
++		}
++		b = tree_mod_log_rewind(fs_info, p, b, time_seq);
++		if (!b) {
++			ret = -ENOMEM;
++			goto done;
++		}
++		p->locks[level] = BTRFS_READ_LOCK;
++		p->nodes[level] = b;
+ 	}
+ 	ret = 1;
+ done:

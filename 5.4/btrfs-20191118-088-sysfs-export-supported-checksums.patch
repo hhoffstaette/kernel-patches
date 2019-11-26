@@ -1,0 +1,84 @@
+From f7cea56c0fff95bd5a6cd21b9fa299f66193b604 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Mon, 7 Oct 2019 11:11:03 +0200
+Subject: [PATCH 088/137] btrfs: sysfs: export supported checksums
+
+Export supported checksum algorithms via sysfs in the list of static
+features:
+
+  /sys/fs/btrfs/features/supported_checksums
+
+Space spearated list of checksum algorithm names.
+
+Co-developed-by: Johannes Thumshirn <jthumshirn@suse.de>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c |  5 +++++
+ fs/btrfs/ctree.h |  2 ++
+ fs/btrfs/sysfs.c | 22 ++++++++++++++++++++++
+ 3 files changed, 29 insertions(+)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index bd6ea433ed65..c1561097e5a3 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -53,6 +53,11 @@ const char *btrfs_super_csum_name(u16 csum_type)
+ 	return btrfs_csums[csum_type].name;
+ }
+ 
++size_t __const btrfs_get_num_csums(void)
++{
++	return ARRAY_SIZE(btrfs_csums);
++}
++
+ struct btrfs_path *btrfs_alloc_path(void)
+ {
+ 	return kmem_cache_zalloc(btrfs_path_cachep, GFP_NOFS);
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index d5c9fbe32c0c..b17944995e09 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -2163,6 +2163,8 @@ BTRFS_SETGET_STACK_FUNCS(super_uuid_tree_generation, struct btrfs_super_block,
+ 
+ int btrfs_super_csum_size(const struct btrfs_super_block *s);
+ const char *btrfs_super_csum_name(u16 csum_type);
++size_t __const btrfs_get_num_csums(void);
++
+ 
+ /*
+  * The leaf data grows from end-to-front in the node.
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index f6d3c80f2e28..41eb6a313bf8 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -295,8 +295,30 @@ static ssize_t rmdir_subvol_show(struct kobject *kobj,
+ }
+ BTRFS_ATTR(static_feature, rmdir_subvol, rmdir_subvol_show);
+ 
++static ssize_t supported_checksums_show(struct kobject *kobj,
++					struct kobj_attribute *a, char *buf)
++{
++	ssize_t ret = 0;
++	int i;
++
++	for (i = 0; i < btrfs_get_num_csums(); i++) {
++		/*
++		 * This "trick" only works as long as 'enum btrfs_csum_type' has
++		 * no holes in it
++		 */
++		ret += snprintf(buf + ret, PAGE_SIZE - ret, "%s%s",
++				(i == 0 ? "" : " "), btrfs_super_csum_name(i));
++
++	}
++
++	ret += snprintf(buf + ret, PAGE_SIZE - ret, "\n");
++	return ret;
++}
++BTRFS_ATTR(static_feature, supported_checksums, supported_checksums_show);
++
+ static struct attribute *btrfs_supported_static_feature_attrs[] = {
+ 	BTRFS_ATTR_PTR(static_feature, rmdir_subvol),
++	BTRFS_ATTR_PTR(static_feature, supported_checksums),
+ 	NULL
+ };
+ 

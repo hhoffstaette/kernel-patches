@@ -1,0 +1,44 @@
+From 153a6d299956983de890ffaf429e5904503eb94c Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <wqu@suse.com>
+Date: Tue, 3 Sep 2019 07:46:19 +0800
+Subject: [PATCH 111/137] btrfs: tree-checker: Check item size before reading file extent type
+
+In check_extent_data_item(), we read file extent type without verifying
+if the item size is valid.
+
+Add such check to ensure the file extent type we read is correct.
+
+The check is not as accurate as we need to cover both inline and regular
+extents, so it only checks if the item size is larger or equal to inline
+header.
+So the existing size checks on inline/regular extents are still needed.
+
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/tree-checker.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/fs/btrfs/tree-checker.c b/fs/btrfs/tree-checker.c
+index 6638483e8ad8..493d4d9e0f79 100644
+--- a/fs/btrfs/tree-checker.c
++++ b/fs/btrfs/tree-checker.c
+@@ -221,6 +221,17 @@ static int check_extent_data_item(struct extent_buffer *leaf,
+ 
+ 	fi = btrfs_item_ptr(leaf, slot, struct btrfs_file_extent_item);
+ 
++	/*
++	 * Make sure the item contains at least inline header, so the file
++	 * extent type is not some garbage.
++	 */
++	if (item_size < BTRFS_FILE_EXTENT_INLINE_DATA_START) {
++		file_extent_err(leaf, slot,
++				"invalid item size, have %u expect [%lu, %u)",
++				item_size, BTRFS_FILE_EXTENT_INLINE_DATA_START,
++				SZ_4K);
++		return -EUCLEAN;
++	}
+ 	if (btrfs_file_extent_type(leaf, fi) >= BTRFS_NR_FILE_EXTENT_TYPES) {
+ 		file_extent_err(leaf, slot,
+ 		"invalid type for file extent, have %u expect range [0, %u]",

@@ -1,0 +1,76 @@
+From 31f6e769ce4145fdfaba44ad7c5b30ad21f58c11 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Tue, 24 Sep 2019 18:44:24 +0200
+Subject: [PATCH 022/137] btrfs: make btrfs_assert_tree_locked static inline
+
+The function btrfs_assert_tree_locked is used outside of the locking
+code so it is exported, however we can make it static inine as it's
+fairly trivial.
+
+This is the only locking assertion used in release builds, inlining
+improves the text size by 174 bytes and reduces stack consumption in the
+callers.
+
+Reviewed-by: Josef Bacik <josef@toxicpanda.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/locking.c |  6 ------
+ fs/btrfs/locking.h | 10 +++++++++-
+ 2 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/fs/btrfs/locking.c b/fs/btrfs/locking.c
+index 409c5a865079..028513153ac4 100644
+--- a/fs/btrfs/locking.c
++++ b/fs/btrfs/locking.c
+@@ -67,11 +67,6 @@ static inline void btrfs_assert_tree_write_locks_put(struct extent_buffer *eb)
+ 	eb->write_locks--;
+ }
+ 
+-void btrfs_assert_tree_locked(struct extent_buffer *eb)
+-{
+-	BUG_ON(!eb->write_locks);
+-}
+-
+ #else
+ static void btrfs_assert_spinning_writers_get(struct extent_buffer *eb) { }
+ static void btrfs_assert_spinning_writers_put(struct extent_buffer *eb) { }
+@@ -81,7 +76,6 @@ static void btrfs_assert_spinning_readers_get(struct extent_buffer *eb) { }
+ static void btrfs_assert_tree_read_locked(struct extent_buffer *eb) { }
+ static void btrfs_assert_tree_read_locks_get(struct extent_buffer *eb) { }
+ static void btrfs_assert_tree_read_locks_put(struct extent_buffer *eb) { }
+-void btrfs_assert_tree_locked(struct extent_buffer *eb) { }
+ static void btrfs_assert_tree_write_locks_get(struct extent_buffer *eb) { }
+ static void btrfs_assert_tree_write_locks_put(struct extent_buffer *eb) { }
+ #endif
+diff --git a/fs/btrfs/locking.h b/fs/btrfs/locking.h
+index b775a4207ed9..ab4020de25e7 100644
+--- a/fs/btrfs/locking.h
++++ b/fs/btrfs/locking.h
+@@ -6,6 +6,8 @@
+ #ifndef BTRFS_LOCKING_H
+ #define BTRFS_LOCKING_H
+ 
++#include "extent_io.h"
++
+ #define BTRFS_WRITE_LOCK 1
+ #define BTRFS_READ_LOCK 2
+ #define BTRFS_WRITE_LOCK_BLOCKING 3
+@@ -19,11 +21,17 @@ void btrfs_tree_read_unlock(struct extent_buffer *eb);
+ void btrfs_tree_read_unlock_blocking(struct extent_buffer *eb);
+ void btrfs_set_lock_blocking_read(struct extent_buffer *eb);
+ void btrfs_set_lock_blocking_write(struct extent_buffer *eb);
+-void btrfs_assert_tree_locked(struct extent_buffer *eb);
+ int btrfs_try_tree_read_lock(struct extent_buffer *eb);
+ int btrfs_try_tree_write_lock(struct extent_buffer *eb);
+ int btrfs_tree_read_lock_atomic(struct extent_buffer *eb);
+ 
++#ifdef CONFIG_BTRFS_DEBUG
++static inline void btrfs_assert_tree_locked(struct extent_buffer *eb) {
++	BUG_ON(!eb->write_locks);
++}
++#else
++static inline void btrfs_assert_tree_locked(struct extent_buffer *eb) { }
++#endif
+ 
+ static inline void btrfs_tree_unlock_rw(struct extent_buffer *eb, int rw)
+ {

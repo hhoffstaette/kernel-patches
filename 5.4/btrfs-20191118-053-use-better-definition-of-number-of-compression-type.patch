@@ -1,0 +1,86 @@
+From ce96b7ffd11e261ef2ecd6817b7572a77750170d Mon Sep 17 00:00:00 2001
+From: Chengguang Xu <cgxu519@mykernel.net>
+Date: Thu, 10 Oct 2019 15:59:57 +0800
+Subject: [PATCH 053/137] btrfs: use better definition of number of compression type
+
+The compression type upper limit constant is the same as the last value
+and this is confusing.  In order to keep coding style consistent, use
+BTRFS_NR_COMPRESS_TYPES as the total number that follows the idom of
+'NR' being one more than the last value.
+
+Signed-off-by: Chengguang Xu <cgxu519@mykernel.net>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/compression.c  | 2 ++
+ fs/btrfs/compression.h  | 4 ++--
+ fs/btrfs/ioctl.c        | 2 +-
+ fs/btrfs/tree-checker.c | 4 ++--
+ 4 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/fs/btrfs/compression.c b/fs/btrfs/compression.c
+index d70c46407420..93deaf0cc2b8 100644
+--- a/fs/btrfs/compression.c
++++ b/fs/btrfs/compression.c
+@@ -39,6 +39,8 @@ const char* btrfs_compress_type2str(enum btrfs_compression_type type)
+ 	case BTRFS_COMPRESS_ZSTD:
+ 	case BTRFS_COMPRESS_NONE:
+ 		return btrfs_compress_types[type];
++	default:
++		break;
+ 	}
+ 
+ 	return NULL;
+diff --git a/fs/btrfs/compression.h b/fs/btrfs/compression.h
+index dd392278ab3f..52dce1176f89 100644
+--- a/fs/btrfs/compression.h
++++ b/fs/btrfs/compression.h
+@@ -105,7 +105,7 @@ enum btrfs_compression_type {
+ 	BTRFS_COMPRESS_ZLIB  = 1,
+ 	BTRFS_COMPRESS_LZO   = 2,
+ 	BTRFS_COMPRESS_ZSTD  = 3,
+-	BTRFS_COMPRESS_TYPES = 3,
++	BTRFS_NR_COMPRESS_TYPES = 4,
+ };
+ 
+ struct workspace_manager {
+@@ -163,7 +163,7 @@ struct btrfs_compress_op {
+ };
+ 
+ /* The heuristic workspaces are managed via the 0th workspace manager */
+-#define BTRFS_NR_WORKSPACE_MANAGERS	(BTRFS_COMPRESS_TYPES + 1)
++#define BTRFS_NR_WORKSPACE_MANAGERS	BTRFS_NR_COMPRESS_TYPES
+ 
+ extern const struct btrfs_compress_op btrfs_heuristic_compress;
+ extern const struct btrfs_compress_op btrfs_zlib_compress;
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index d7a1bd74bb71..5892fa9398c3 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -1409,7 +1409,7 @@ int btrfs_defrag_file(struct inode *inode, struct file *file,
+ 		return -EINVAL;
+ 
+ 	if (do_compress) {
+-		if (range->compress_type > BTRFS_COMPRESS_TYPES)
++		if (range->compress_type >= BTRFS_NR_COMPRESS_TYPES)
+ 			return -EINVAL;
+ 		if (range->compress_type)
+ 			compress_type = range->compress_type;
+diff --git a/fs/btrfs/tree-checker.c b/fs/btrfs/tree-checker.c
+index 9699c91c958e..f4751615a189 100644
+--- a/fs/btrfs/tree-checker.c
++++ b/fs/btrfs/tree-checker.c
+@@ -233,11 +233,11 @@ static int check_extent_data_item(struct extent_buffer *leaf,
+ 	 * Support for new compression/encryption must introduce incompat flag,
+ 	 * and must be caught in open_ctree().
+ 	 */
+-	if (btrfs_file_extent_compression(leaf, fi) > BTRFS_COMPRESS_TYPES) {
++	if (btrfs_file_extent_compression(leaf, fi) >= BTRFS_NR_COMPRESS_TYPES) {
+ 		file_extent_err(leaf, slot,
+ 	"invalid compression for file extent, have %u expect range [0, %u]",
+ 			btrfs_file_extent_compression(leaf, fi),
+-			BTRFS_COMPRESS_TYPES);
++			BTRFS_NR_COMPRESS_TYPES - 1);
+ 		return -EUCLEAN;
+ 	}
+ 	if (btrfs_file_extent_encryption(leaf, fi)) {

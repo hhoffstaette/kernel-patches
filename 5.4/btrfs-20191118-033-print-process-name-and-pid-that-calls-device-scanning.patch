@@ -1,0 +1,43 @@
+From aa6c0df73e3b3fc771d8d8469eb81537f4b46a45 Mon Sep 17 00:00:00 2001
+From: Anand Jain <anand.jain@oracle.com>
+Date: Wed, 2 Oct 2019 18:30:48 +0800
+Subject: [PATCH 033/137] btrfs: print process name and pid that calls device scanning
+
+Its very helpful if we had logged the device scanner process name to
+debug the race condition between the systemd-udevd scan and the user
+initiated device forget command.
+
+This patch adds process name and pid to the scan message.
+
+Signed-off-by: Anand Jain <anand.jain@oracle.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+[ add pid to the message ]
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index f7b45e4b7de4..139b73dcfbcc 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -1005,11 +1005,15 @@ static noinline struct btrfs_device *device_list_add(const char *path,
+ 		*new_device_added = true;
+ 
+ 		if (disk_super->label[0])
+-			pr_info("BTRFS: device label %s devid %llu transid %llu %s\n",
+-				disk_super->label, devid, found_transid, path);
++			pr_info(
++	"BTRFS: device label %s devid %llu transid %llu %s scanned by %s (%d)\n",
++				disk_super->label, devid, found_transid, path,
++				current->comm, task_pid_nr(current));
+ 		else
+-			pr_info("BTRFS: device fsid %pU devid %llu transid %llu %s\n",
+-				disk_super->fsid, devid, found_transid, path);
++			pr_info(
++	"BTRFS: device fsid %pU devid %llu transid %llu %s scanned by %s (%d)\n",
++				disk_super->fsid, devid, found_transid, path,
++				current->comm, task_pid_nr(current));
+ 
+ 	} else if (!device->name || strcmp(device->name->str, path)) {
+ 		/*

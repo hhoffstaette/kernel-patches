@@ -1,0 +1,65 @@
+From 8530c37a70df71ea8a04fbafabba0b92f4475c6c Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Fri, 30 Aug 2019 15:42:07 +0200
+Subject: [PATCH 085/137] btrfs: get bdev from latest_dev for dio bh_result
+
+To remove use of extent_map::bdev we need to find a replacement, and the
+latest_bdev is the only one we can use here, because inode::i_bdev and
+superblock::s_bdev are NULL.
+
+The DIO code uses bdev in two places:
+
+* to read blocksize to perform alignment checks in
+  do_blockdev_direct_IO, but we do them in btrfs code before any call to
+  DIO
+
+* in the following call chain:
+
+  do_direct_IO
+    get_more_blocks
+     sdio->get_block() <-- this is btrfs_get_blocks_direct
+
+  subsequently the map_bh->b_dev member is used in clean_bdev_aliases
+  and dio_new_bio to set the bio's bdev to that of the buffer_head.
+  However, because we have provided a submit function dio_bio_submit
+  calls our submission function and ignores the bdev.
+
+So it's safe to pass any valid bdev that's used within the filesystem.
+
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/inode.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index b943c9770533..5edc6a27ea4a 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -7662,6 +7662,8 @@ static int btrfs_get_blocks_direct_read(struct extent_map *em,
+ 					struct inode *inode,
+ 					u64 start, u64 len)
+ {
++	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
++
+ 	if (em->block_start == EXTENT_MAP_HOLE ||
+ 			test_bit(EXTENT_FLAG_PREALLOC, &em->flags))
+ 		return -ENOENT;
+@@ -7671,7 +7673,7 @@ static int btrfs_get_blocks_direct_read(struct extent_map *em,
+ 	bh_result->b_blocknr = (em->block_start + (start - em->start)) >>
+ 		inode->i_blkbits;
+ 	bh_result->b_size = len;
+-	bh_result->b_bdev = em->bdev;
++	bh_result->b_bdev = fs_info->fs_devices->latest_bdev;
+ 	set_buffer_mapped(bh_result);
+ 
+ 	return 0;
+@@ -7754,7 +7756,7 @@ static int btrfs_get_blocks_direct_write(struct extent_map **map,
+ 	bh_result->b_blocknr = (em->block_start + (start - em->start)) >>
+ 		inode->i_blkbits;
+ 	bh_result->b_size = len;
+-	bh_result->b_bdev = em->bdev;
++	bh_result->b_bdev = fs_info->fs_devices->latest_bdev;
+ 	set_buffer_mapped(bh_result);
+ 
+ 	if (!test_bit(EXTENT_FLAG_PREALLOC, &em->flags))

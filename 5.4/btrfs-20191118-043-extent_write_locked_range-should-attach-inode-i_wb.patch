@@ -1,0 +1,46 @@
+From dbb70becde5b28940366ee419e0fdd3e09af44fb Mon Sep 17 00:00:00 2001
+From: Chris Mason <clm@fb.com>
+Date: Wed, 10 Jul 2019 12:28:18 -0700
+Subject: [PATCH 043/137] Btrfs: extent_write_locked_range() should attach inode->i_wb
+
+extent_write_locked_range() is used when we're falling back to buffered
+IO from inside of compression.  It allocates its own wbc and should
+associate it with the inode's i_wb to make sure the IO goes down from
+the correct cgroup.
+
+Reviewed-by: Josef Bacik <josef@toxicpanda.com>
+Signed-off-by: Chris Mason <clm@fb.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent_io.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 16b5d8e02e77..e88625beb2c0 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4255,6 +4255,7 @@ int extent_write_locked_range(struct inode *inode, u64 start, u64 end,
+ 		.no_cgroup_owner = 1,
+ 	};
+ 
++	wbc_attach_fdatawrite_inode(&wbc_writepages, inode);
+ 	while (start <= end) {
+ 		page = find_get_page(mapping, start >> PAGE_SHIFT);
+ 		if (clear_page_dirty_for_io(page))
+@@ -4269,11 +4270,12 @@ int extent_write_locked_range(struct inode *inode, u64 start, u64 end,
+ 	}
+ 
+ 	ASSERT(ret <= 0);
+-	if (ret < 0) {
++	if (ret == 0)
++		ret = flush_write_bio(&epd);
++	else
+ 		end_write_bio(&epd, ret);
+-		return ret;
+-	}
+-	ret = flush_write_bio(&epd);
++
++	wbc_detach_inode(&wbc_writepages);
+ 	return ret;
+ }
+ 

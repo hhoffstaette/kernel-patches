@@ -1,0 +1,58 @@
+From 34ffafdba12eee3e387694edd128e954fd355e8e Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <wqu@suse.com>
+Date: Tue, 10 Sep 2019 15:40:19 +0800
+Subject: [PATCH 008/137] btrfs: ctree: Remove stray comment of setting up path lock
+
+The following comment shows up in btrfs_search_slot() with out much
+sense:
+
+	/*
+	 * setup the path here so we can release it under lock
+	 * contention with the cow code
+	 */
+	if (cow) {
+		/* code touching path->lock[] is far away from here */
+	}
+
+This comment hasn't been cleaned up after the relevant code has been
+removed.
+
+The original code is introduced in commit 65b51a009e29
+("btrfs_search_slot: reduce lock contention by cowing in two stages"):
+
+  +
+  +               /*
+  +                * setup the path here so we can release it under lock
+  +                * contention with the cow code
+  +                */
+  +               p->nodes[level] = b;
+  +               if (!p->skip_locking)
+  +                       p->locks[level] = 1;
+  +
+
+But in current code, we have different timing for modifying path lock,
+so just remove the comment.
+
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ctree.c | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 42ca326a0e6b..0231141de289 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -2789,10 +2789,6 @@ int btrfs_search_slot(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+ 
+ 		level = btrfs_header_level(b);
+ 
+-		/*
+-		 * setup the path here so we can release it under lock
+-		 * contention with the cow code
+-		 */
+ 		if (cow) {
+ 			bool last_level = (level == (BTRFS_MAX_LEVEL - 1));
+ 

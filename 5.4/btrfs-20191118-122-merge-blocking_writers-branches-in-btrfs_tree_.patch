@@ -1,0 +1,63 @@
+From f5c2a52590858d18f4a736d8062fe70f11988fa9 Mon Sep 17 00:00:00 2001
+From: David Sterba <dsterba@suse.com>
+Date: Thu, 10 Oct 2019 23:29:21 +0200
+Subject: [PATCH 122/137] btrfs: merge blocking_writers branches in
+ btrfs_tree_read_lock
+
+There are two ifs that use eb::blocking_writers. As this is a variable
+modified inside and outside of locks, we could minimize number of
+accesses to avoid problems with getting different results at different
+times.
+
+The access here is locked so this can only race with btrfs_tree_unlock
+that sets blocking_writers to 0 without lock and unsets the lock owner.
+
+The first branch is taken only if the same thread already holds the
+lock, the second if checks for blocking writers. Here we'd either unlock
+and wait, or proceed. Both are valid states of the locking protocol.
+
+Reviewed-by: Johannes Thumshirn <jthumshirn@suse.de>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/locking.c | 27 ++++++++++++++-------------
+ 1 file changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/fs/btrfs/locking.c b/fs/btrfs/locking.c
+index 93146b495276..c84c650e56c7 100644
+--- a/fs/btrfs/locking.c
++++ b/fs/btrfs/locking.c
+@@ -128,20 +128,21 @@ void btrfs_tree_read_lock(struct extent_buffer *eb)
+ 	read_lock(&eb->lock);
+ 	BUG_ON(eb->blocking_writers == 0 &&
+ 	       current->pid == eb->lock_owner);
+-	if (eb->blocking_writers && current->pid == eb->lock_owner) {
+-		/*
+-		 * This extent is already write-locked by our thread. We allow
+-		 * an additional read lock to be added because it's for the same
+-		 * thread. btrfs_find_all_roots() depends on this as it may be
+-		 * called on a partly (write-)locked tree.
+-		 */
+-		BUG_ON(eb->lock_nested);
+-		eb->lock_nested = true;
+-		read_unlock(&eb->lock);
+-		trace_btrfs_tree_read_lock(eb, start_ns);
+-		return;
+-	}
+ 	if (eb->blocking_writers) {
++		if (current->pid == eb->lock_owner) {
++			/*
++			 * This extent is already write-locked by our thread.
++			 * We allow an additional read lock to be added because
++			 * it's for the same thread. btrfs_find_all_roots()
++			 * depends on this as it may be called on a partly
++			 * (write-)locked tree.
++			 */
++			BUG_ON(eb->lock_nested);
++			eb->lock_nested = true;
++			read_unlock(&eb->lock);
++			trace_btrfs_tree_read_lock(eb, start_ns);
++			return;
++		}
+ 		read_unlock(&eb->lock);
+ 		wait_event(eb->write_lock_wq,
+ 			   eb->blocking_writers == 0);

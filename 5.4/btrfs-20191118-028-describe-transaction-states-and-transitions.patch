@@ -1,0 +1,114 @@
+From 61c047b541b56f4ec78886e9d695e0a3bbcd3834 Mon Sep 17 00:00:00 2001
+From: Qu Wenruo <wqu@suse.com>
+Date: Thu, 22 Aug 2019 15:24:59 +0800
+Subject: [PATCH 028/137] btrfs: transaction: describe transaction states and transitions
+
+Add an overview of the basic btrfs transaction transitions, including
+the following states:
+
+- No transaction states
+- Transaction N [[TRANS_STATE_RUNNING]]
+- Transaction N [[TRANS_STATE_COMMIT_START]]
+- Transaction N [[TRANS_STATE_COMMIT_DOING]]
+- Transaction N [[TRANS_STATE_UNBLOCKED]]
+- Transaction N [[TRANS_STATE_COMPLETED]]
+
+For each state, the comment will include:
+
+- Basic explaination about current state
+- How to go next stage
+- What will happen if we call various start_transaction() functions
+- Relationship to transaction N+1
+
+This doesn't provide tech details, but serves as a cheat sheet for
+reader to get into the code a little easier.
+
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/transaction.c | 71 ++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 71 insertions(+)
+
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index 92ffe1df3fab..b60c9b871b9e 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -24,6 +24,77 @@
+ 
+ #define BTRFS_ROOT_TRANS_TAG 0
+ 
++/*
++ * Transaction states and transitions
++ *
++ * No running transaction (fs tree blocks are not modified)
++ * |
++ * | To next stage:
++ * |  Call start_transaction() variants. Except btrfs_join_transaction_nostart().
++ * V
++ * Transaction N [[TRANS_STATE_RUNNING]]
++ * |
++ * | New trans handles can be attached to transaction N by calling all
++ * | start_transaction() variants.
++ * |
++ * | To next stage:
++ * |  Call btrfs_commit_transaction() on any trans handle attached to
++ * |  transaction N
++ * V
++ * Transaction N [[TRANS_STATE_COMMIT_START]]
++ * |
++ * | Will wait for previous running transaction to completely finish if there
++ * | is one
++ * |
++ * | Then one of the following happes:
++ * | - Wait for all other trans handle holders to release.
++ * |   The btrfs_commit_transaction() caller will do the commit work.
++ * | - Wait for current transaction to be committed by others.
++ * |   Other btrfs_commit_transaction() caller will do the commit work.
++ * |
++ * | At this stage, only btrfs_join_transaction*() variants can attach
++ * | to this running transaction.
++ * | All other variants will wait for current one to finish and attach to
++ * | transaction N+1.
++ * |
++ * | To next stage:
++ * |  Caller is chosen to commit transaction N, and all other trans handle
++ * |  haven been released.
++ * V
++ * Transaction N [[TRANS_STATE_COMMIT_DOING]]
++ * |
++ * | The heavy lifting transaction work is started.
++ * | From running delayed refs (modifying extent tree) to creating pending
++ * | snapshots, running qgroups.
++ * | In short, modify supporting trees to reflect modifications of subvolume
++ * | trees.
++ * |
++ * | At this stage, all start_transaction() calls will wait for this
++ * | transaction to finish and attach to transaction N+1.
++ * |
++ * | To next stage:
++ * |  Until all supporting trees are updated.
++ * V
++ * Transaction N [[TRANS_STATE_UNBLOCKED]]
++ * |						    Transaction N+1
++ * | All needed trees are modified, thus we only    [[TRANS_STATE_RUNNING]]
++ * | need to write them back to disk and update	    |
++ * | super blocks.				    |
++ * |						    |
++ * | At this stage, new transaction is allowed to   |
++ * | start.					    |
++ * | All new start_transaction() calls will be	    |
++ * | attached to transid N+1.			    |
++ * |						    |
++ * | To next stage:				    |
++ * |  Until all tree blocks are super blocks are    |
++ * |  written to block devices			    |
++ * V						    |
++ * Transaction N [[TRANS_STATE_COMPLETED]]	    V
++ *   All tree blocks and super blocks are written.  Transaction N+1
++ *   This transaction is finished and all its	    [[TRANS_STATE_COMMIT_START]]
++ *   data structures will be cleaned up.	    | Life goes on
++ */
+ static const unsigned int btrfs_blocked_trans_types[TRANS_STATE_MAX] = {
+ 	[TRANS_STATE_RUNNING]		= 0U,
+ 	[TRANS_STATE_BLOCKED]		=  __TRANS_START,

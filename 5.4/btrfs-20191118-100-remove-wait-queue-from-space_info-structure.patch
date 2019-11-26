@@ -1,0 +1,40 @@
+From bf2df5aed1c881f79b001ee19642e386bcda6d80 Mon Sep 17 00:00:00 2001
+From: Filipe Manana <fdmanana@suse.com>
+Date: Fri, 25 Oct 2019 10:53:12 +0100
+Subject: [PATCH 100/137] Btrfs: remove wait queue from space_info structure
+
+It is not used anymore since commit 957780eb2788d8 ("Btrfs: introduce
+ticketed enospc infrastructure"), so just remove it.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/space-info.c | 1 -
+ fs/btrfs/space-info.h | 1 -
+ 2 files changed, 2 deletions(-)
+
+diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
+index 3a2b0d1155a8..22b4968699e1 100644
+--- a/fs/btrfs/space-info.c
++++ b/fs/btrfs/space-info.c
+@@ -58,7 +58,6 @@ static int create_space_info(struct btrfs_fs_info *info, u64 flags)
+ 	spin_lock_init(&space_info->lock);
+ 	space_info->flags = flags & BTRFS_BLOCK_GROUP_TYPE_MASK;
+ 	space_info->force_alloc = CHUNK_ALLOC_NO_FORCE;
+-	init_waitqueue_head(&space_info->wait);
+ 	INIT_LIST_HEAD(&space_info->ro_bgs);
+ 	INIT_LIST_HEAD(&space_info->tickets);
+ 	INIT_LIST_HEAD(&space_info->priority_tickets);
+diff --git a/fs/btrfs/space-info.h b/fs/btrfs/space-info.h
+index 2d8c811a9792..1a349e3f9cc1 100644
+--- a/fs/btrfs/space-info.h
++++ b/fs/btrfs/space-info.h
+@@ -63,7 +63,6 @@ struct btrfs_space_info {
+ 	struct rw_semaphore groups_sem;
+ 	/* for block groups in our same type */
+ 	struct list_head block_groups[BTRFS_NR_RAID_TYPES];
+-	wait_queue_head_t wait;
+ 
+ 	struct kobject kobj;
+ 	struct kobject *block_group_kobjs[BTRFS_NR_RAID_TYPES];

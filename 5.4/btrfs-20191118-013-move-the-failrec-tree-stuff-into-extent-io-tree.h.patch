@@ -1,0 +1,115 @@
+From b3f167aa6c7053b87fa53364fc40dd4757f053c9 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <josef@toxicpanda.com>
+Date: Mon, 23 Sep 2019 10:05:21 -0400
+Subject: [PATCH 013/137] btrfs: move the failrec tree stuff into extent-io-tree.h
+
+This needs to be cleaned up in the future, but for now it belongs to the
+extent-io-tree stuff since it uses the internal tree search code.
+Needed to export get_state_failrec and set_state_failrec as well since
+we're not going to move the actual IO part of the failrec stuff out at
+this point.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent-io-tree.h | 18 ++++++++++++++++++
+ fs/btrfs/extent_io.c      |  8 ++++----
+ fs/btrfs/extent_io.h      | 11 -----------
+ 3 files changed, 22 insertions(+), 15 deletions(-)
+
+diff --git a/fs/btrfs/extent-io-tree.h b/fs/btrfs/extent-io-tree.h
+index 3de980c44d5e..a3febe746c79 100644
+--- a/fs/btrfs/extent-io-tree.h
++++ b/fs/btrfs/extent-io-tree.h
+@@ -4,6 +4,7 @@
+ #define BTRFS_EXTENT_IO_TREE_H
+ 
+ struct extent_changeset;
++struct io_failure_record;
+ 
+ /* Bits for the extent state */
+ #define EXTENT_DIRTY		(1U << 0)
+@@ -227,4 +228,21 @@ bool btrfs_find_delalloc_range(struct extent_io_tree *tree, u64 *start,
+ 			       u64 *end, u64 max_bytes,
+ 			       struct extent_state **cached_state);
+ 
++/* This should be reworked in the future and put elsewhere. */
++int get_state_failrec(struct extent_io_tree *tree, u64 start,
++		      struct io_failure_record **failrec);
++int set_state_failrec(struct extent_io_tree *tree, u64 start,
++		      struct io_failure_record *failrec);
++void btrfs_free_io_failure_record(struct btrfs_inode *inode, u64 start,
++		u64 end);
++int btrfs_get_io_failure_record(struct inode *inode, u64 start, u64 end,
++				struct io_failure_record **failrec_ret);
++int free_io_failure(struct extent_io_tree *failure_tree,
++		    struct extent_io_tree *io_tree,
++		    struct io_failure_record *rec);
++int clean_io_failure(struct btrfs_fs_info *fs_info,
++		     struct extent_io_tree *failure_tree,
++		     struct extent_io_tree *io_tree, u64 start,
++		     struct page *page, u64 ino, unsigned int pg_offset);
++
+ #endif /* BTRFS_EXTENT_IO_TREE_H */
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 5aabbd999bd5..0f1d917c8bb3 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -2024,8 +2024,8 @@ u64 count_range_bits(struct extent_io_tree *tree,
+  * set the private field for a given byte offset in the tree.  If there isn't
+  * an extent_state there already, this does nothing.
+  */
+-static noinline int set_state_failrec(struct extent_io_tree *tree, u64 start,
+-		struct io_failure_record *failrec)
++int set_state_failrec(struct extent_io_tree *tree, u64 start,
++		      struct io_failure_record *failrec)
+ {
+ 	struct rb_node *node;
+ 	struct extent_state *state;
+@@ -2052,8 +2052,8 @@ static noinline int set_state_failrec(struct extent_io_tree *tree, u64 start,
+ 	return ret;
+ }
+ 
+-static noinline int get_state_failrec(struct extent_io_tree *tree, u64 start,
+-		struct io_failure_record **failrec)
++int get_state_failrec(struct extent_io_tree *tree, u64 start,
++		      struct io_failure_record **failrec)
+ {
+ 	struct rb_node *node;
+ 	struct extent_state *state;
+diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
+index 8c782d061132..e22045cef89b 100644
+--- a/fs/btrfs/extent_io.h
++++ b/fs/btrfs/extent_io.h
+@@ -296,10 +296,6 @@ struct btrfs_inode;
+ int repair_io_failure(struct btrfs_fs_info *fs_info, u64 ino, u64 start,
+ 		      u64 length, u64 logical, struct page *page,
+ 		      unsigned int pg_offset, int mirror_num);
+-int clean_io_failure(struct btrfs_fs_info *fs_info,
+-		     struct extent_io_tree *failure_tree,
+-		     struct extent_io_tree *io_tree, u64 start,
+-		     struct page *page, u64 ino, unsigned int pg_offset);
+ void end_extent_writepage(struct page *page, int err, u64 start, u64 end);
+ int btrfs_repair_eb_io_failure(struct extent_buffer *eb, int mirror_num);
+ 
+@@ -323,19 +319,12 @@ struct io_failure_record {
+ };
+ 
+ 
+-void btrfs_free_io_failure_record(struct btrfs_inode *inode, u64 start,
+-		u64 end);
+-int btrfs_get_io_failure_record(struct inode *inode, u64 start, u64 end,
+-				struct io_failure_record **failrec_ret);
+ bool btrfs_check_repairable(struct inode *inode, unsigned failed_bio_pages,
+ 			    struct io_failure_record *failrec, int fail_mirror);
+ struct bio *btrfs_create_repair_bio(struct inode *inode, struct bio *failed_bio,
+ 				    struct io_failure_record *failrec,
+ 				    struct page *page, int pg_offset, int icsum,
+ 				    bio_end_io_t *endio_func, void *data);
+-int free_io_failure(struct extent_io_tree *failure_tree,
+-		    struct extent_io_tree *io_tree,
+-		    struct io_failure_record *rec);
+ #ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
+ bool find_lock_delalloc_range(struct inode *inode,
+ 			     struct page *locked_page, u64 *start,

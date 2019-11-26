@@ -1,0 +1,37 @@
+From ce6d3eb6fd5cfede81c7a3d540919f6d92faaac0 Mon Sep 17 00:00:00 2001
+From: Nikolay Borisov <nborisov@suse.com>
+Date: Tue, 8 Oct 2019 16:26:16 +0300
+Subject: [PATCH 049/137] btrfs: User assert to document transaction requirement
+
+Using an ASSERT in btrfs_pin_extent allows to more stringently observe
+whether the function is called under a transaction or not.
+
+Reviewed-by: Johannes Thumshirn <jthumshirn@suse.de>
+Signed-off-by: Nikolay Borisov <nborisov@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/extent-tree.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 9e5845548b76..569fd2adecaa 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -2590,14 +2590,13 @@ static int pin_down_extent(struct btrfs_block_group_cache *cache,
+ 	return 0;
+ }
+ 
+-/*
+- * this function must be called within transaction
+- */
+ int btrfs_pin_extent(struct btrfs_fs_info *fs_info,
+ 		     u64 bytenr, u64 num_bytes, int reserved)
+ {
+ 	struct btrfs_block_group_cache *cache;
+ 
++	ASSERT(fs_info->running_transaction);
++
+ 	cache = btrfs_lookup_block_group(fs_info, bytenr);
+ 	BUG_ON(!cache); /* Logic error */
+ 
