@@ -1,0 +1,21 @@
+
+These timestamps warnings are well-intended but totally unhelpful in reality.
+
+--- linux-5.4.1/fs/namespace.c~	2019-11-25 01:32:01.000000000 +0100
++++ linux-5.4.1/fs/namespace.c	2019-11-28 13:54:53.739351981 +0100
+@@ -2468,6 +2468,7 @@ static void set_mount_attributes(struct
+ 
+ static void mnt_warn_timestamp_expiry(struct path *mountpoint, struct vfsmount *mnt)
+ {
++/*
+ 	struct super_block *sb = mnt->mnt_sb;
+ 
+ 	if (!__mnt_is_readonly(mnt) &&
+@@ -2486,6 +2487,7 @@ static void mnt_warn_timestamp_expiry(st
+ 
+ 		free_page((unsigned long)buf);
+ 	}
++*/
+ }
+ 
+ /*
