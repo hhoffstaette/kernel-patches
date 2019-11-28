@@ -1,0 +1,40 @@
+From:   David Sterba <dsterba@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     David Sterba <dsterba@suse.com>
+Subject: [PATCH] btrfs: fix devs_max constraints for raid1c3 and raid1c4
+Date:   Wed, 27 Nov 2019 16:10:54 +0100
+
+The value 0 for devs_max means to spread the allocated chunks over all
+available devices, eg. stripe for RAID0 or RAID5. This got mistakenly
+copied to the RAID1C3/4 profiles. The intention is to have exactly 3 and
+4 copies respectively.
+
+Fixes: 47e6f7423b91 ("btrfs: add support for 3-copy replication (raid1c3)")
+Fixes: 8d6fac0087e5 ("btrfs: add support for 4-copy replication (raid1c4)")
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/volumes.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index d8e5560db285..a6d3f08bfff3 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -61,7 +61,7 @@ const struct btrfs_raid_attr btrfs_raid_array[BTRFS_NR_RAID_TYPES] = {
+ 	[BTRFS_RAID_RAID1C3] = {
+ 		.sub_stripes	= 1,
+ 		.dev_stripes	= 1,
+-		.devs_max	= 0,
++		.devs_max	= 3,
+ 		.devs_min	= 3,
+ 		.tolerated_failures = 2,
+ 		.devs_increment	= 3,
+@@ -73,7 +73,7 @@ const struct btrfs_raid_attr btrfs_raid_array[BTRFS_NR_RAID_TYPES] = {
+ 	[BTRFS_RAID_RAID1C4] = {
+ 		.sub_stripes	= 1,
+ 		.dev_stripes	= 1,
+-		.devs_max	= 0,
++		.devs_max	= 4,
+ 		.devs_min	= 4,
+ 		.tolerated_failures = 3,
+ 		.devs_increment	= 4,
