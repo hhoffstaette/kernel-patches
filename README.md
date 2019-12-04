@@ -23,9 +23,8 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2019-11-26)**
+**Current status (2019-12-04)**
 
-- 5.4 is available for testing. :)
-- 5.3 is my current production branch.
-- all other branches < 5.3 are EOL.
+- 5.4 is my current production branch.
+- all other branches < 5.4 are EOL.
 
