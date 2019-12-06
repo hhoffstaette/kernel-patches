@@ -1,7 +1,8 @@
-From:   fdmanana@kernel.org
-To:     linux-btrfs@vger.kernel.org
-Subject: [PATCH v2 1/2] Btrfs: fix missing data checksums after replaying a log tree
-Date:   Mon,  2 Dec 2019 11:00:58 +0000
+From fdmanana@kernel.org Thu Dec  5 18:05:19 2019
+Date: Thu,  5 Dec 2019 16:58:30 +0000
+From: fdmanana@kernel.org
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH v3] Btrfs: fix missing data checksums after replaying a log tree
 
 From: Filipe Manana <fdmanana@suse.com>
 
@@ -141,11 +142,18 @@ V2: Fixed changelog because it stated in the first paragraph that the problem
     contradicted the last paragraph. So fix that and state explicitly that it
     happens as well for extents shared between different files.
 
+V3: Drop existing checksums from the log during the fast fsync path as well.
+    This is also needed to make the test case pass on kernels < 5.4 because
+    on 5.4 the full sync bit is set on the inode whenever we clone, while
+    before 5.4 we don't set it. The tree checker patch for detecting overlapping
+    checksum items detected this during a fast fsync on generic/561 while
+    running it in a loop for several hours.
+
  fs/btrfs/ctree.h       |  2 +-
  fs/btrfs/extent-tree.c |  7 ++++---
  fs/btrfs/file-item.c   |  7 +++++--
- fs/btrfs/tree-log.c    | 17 ++++++++++++++++-
- 4 files changed, 26 insertions(+), 7 deletions(-)
+ fs/btrfs/tree-log.c    | 29 ++++++++++++++++++++++++++---
+ 4 files changed, 36 insertions(+), 9 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
 index b2e8fd8a8e59..54efb21c2727 100644
@@ -212,7 +220,7 @@ index 3270a40b0777..b1bfdc5c1387 100644
  	if (!path)
  		return -ENOMEM;
 diff --git a/fs/btrfs/tree-log.c b/fs/btrfs/tree-log.c
-index cbabe400c3ae..4aa64892f321 100644
+index cbabe400c3ae..f674013f4771 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
 @@ -808,7 +808,8 @@ static noinline int replay_one_extent(struct btrfs_trans_handle *trans,
@@ -225,24 +233,53 @@ index cbabe400c3ae..4aa64892f321 100644
  							      sums->bytenr,
  							      sums->len);
  				if (!ret)
-@@ -4030,6 +4031,20 @@ static noinline int copy_items(struct btrfs_trans_handle *trans,
- 		struct btrfs_ordered_sum *sums = list_entry(ordered_sums.next,
+@@ -3909,6 +3910,28 @@ static int log_inode_item(struct btrfs_trans_handle *trans,
+ 	return 0;
+ }
+ 
++static int log_csums(struct btrfs_trans_handle *trans,
++		     struct btrfs_root *log_root,
++		     struct btrfs_ordered_sum *sums)
++{
++	int ret;
++
++	/*
++	 * Due to extent cloning, we might have logged a csum item that covers a
++	 * subrange of a cloned extent, and later we can end up logging a csum
++	 * item for a larger subrange of the same extent or the entire range.
++	 * This would leave csum items in the log tree that cover the same range
++	 * and break the searches for checksums in the log tree, resulting in
++	 * some checksums missing in the fs/subvolume tree. So just delete (or
++	 * trim and adjust) any existing csum items in the log for this range.
++	 */
++	ret = btrfs_del_csums(trans, log_root, sums->bytenr, sums->len);
++	if (ret)
++		return ret;
++
++	return btrfs_csum_file_blocks(trans, log_root, sums);
++}
++
+ static noinline int copy_items(struct btrfs_trans_handle *trans,
+ 			       struct btrfs_inode *inode,
+ 			       struct btrfs_path *dst_path,
+@@ -4031,7 +4054,7 @@ static noinline int copy_items(struct btrfs_trans_handle *trans,
  						   struct btrfs_ordered_sum,
  						   list);
-+
-+		/*
-+		 * Due to extent cloning, we might have logged a csum item that
-+		 * covers a subrange of a cloned extent, and later we can end
-+		 * up logging a csum item for a larger subrange of the same
-+		 * extent or the entire range. This would leave csum items in
-+		 * the log tree that cover the same range and break the searches
-+		 * for checksums in the log tree, resulting in some checksums
-+		 * missing in the fs/subvolume tree. So just delete (or trim and
-+		 * adjust) any existing csum items in the log for this range.
-+		 */
-+		if (!ret)
-+			ret = btrfs_del_csums(trans, log, sums->bytenr,
-+					      sums->len);
  		if (!ret)
- 			ret = btrfs_csum_file_blocks(trans, log, sums);
+-			ret = btrfs_csum_file_blocks(trans, log, sums);
++			ret = log_csums(trans, log, sums);
  		list_del(&sums->list);
+ 		kfree(sums);
+ 	}
+@@ -4090,7 +4113,7 @@ static int log_extent_csums(struct btrfs_trans_handle *trans,
+ 						   struct btrfs_ordered_sum,
+ 						   list);
+ 		if (!ret)
+-			ret = btrfs_csum_file_blocks(trans, log_root, sums);
++			ret = log_csums(trans, log_root, sums);
+ 		list_del(&sums->list);
+ 		kfree(sums);
+ 	}
+-- 
+2.11.0
+
