@@ -1,0 +1,35 @@
+From: Oleksandr Natalenko <oleksandr@redhat.com>
+To: linux-kernel@vger.kernel.org
+Cc: Masahiro Yamada <yamada.masahiro@socionext.com>, Andrew Morton <akpm@linux-foundation.org>,
+    Greg Kroah-Hartman <gregkh@linuxfoundation.org>, Jessica Yu <jeyu@kernel.org>,
+    Tejun Heo <tj@kernel.org>, Mauro Carvalho Chehab <mchehab+samsung@kernel.org>,
+    Joel Fernandes <joel@joelfernandes.org>, David Howells <dhowells@redhat.com>,
+    Patrick Bellasi <patrick.bellasi@arm.com>, Krzysztof Kozlowski <krzk@kernel.org>,
+    Dan Williams <dan.j.williams@intel.com>, Eric W . Biederman <ebiederm@xmission.com>
+Subject: [PATCH 1/1] init/Kconfig: enable -O3 for all arches
+Date: Wed, 11 Dec 2019 11:46:19 +0100
+
+Building a kernel with -O3 may help in hunting bugs like [1] and thus
+using this switch should not be restricted to one specific arch only.
+
+With that, lets expose it for everyone.
+
+[1] https://lore.kernel.org/lkml/673b885183fb64f1cbb3ed2387524077@natalenko.name/
+
+Signed-off-by: Oleksandr Natalenko <oleksandr@redhat.com>
+---
+ init/Kconfig | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/init/Kconfig b/init/Kconfig
+index a34064a031a5..b41b18edb10e 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1228,7 +1228,6 @@ config CC_OPTIMIZE_FOR_PERFORMANCE
+ 
+ config CC_OPTIMIZE_FOR_PERFORMANCE_O3
+ 	bool "Optimize more for performance (-O3)"
+-	depends on ARC
+ 	imply CC_DISABLE_WARN_MAYBE_UNINITIALIZED  # avoid false positives
+ 	help
+ 	  Choosing this option will pass "-O3" to your compiler to optimize
