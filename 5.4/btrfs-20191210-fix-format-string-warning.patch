@@ -1,0 +1,36 @@
+From: Arnd Bergmann <arnd@arndb.de>
+To: Chris Mason <clm@fb.com>, Josef Bacik <josef@toxicpanda.com>, David Sterba <dsterba@suse.com>,
+    Qu Wenruo <wqu@suse.com>
+Cc: Arnd Bergmann <arnd@arndb.de>, Johannes Thumshirn <jthumshirn@suse.de>,
+    linux-btrfs@vger.kernel.org, linux-kernel@vger.kernel.org
+Subject: [PATCH] btrfs: fix format string warning
+Date: Tue, 10 Dec 2019 21:44:16 +0100
+
+To print a size_t, the format string modifier %z should be used instead
+of %l:
+
+fs/btrfs/tree-checker.c: In function 'check_extent_data_item':
+fs/btrfs/tree-checker.c:230:43: error: format '%lu' expects argument of type 'long unsigned int', but argument 5 has type 'unsigned int' [-Werror=format=]
+     "invalid item size, have %u expect [%lu, %u)",
+                                         ~~^
+                                         %u
+
+Fixes: 153a6d299956 ("btrfs: tree-checker: Check item size before reading file extent type")
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+---
+ fs/btrfs/tree-checker.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/tree-checker.c b/fs/btrfs/tree-checker.c
+index 493d4d9e0f79..092b8ece36d7 100644
+--- a/fs/btrfs/tree-checker.c
++++ b/fs/btrfs/tree-checker.c
+@@ -227,7 +227,7 @@ static int check_extent_data_item(struct extent_buffer *leaf,
+ 	 */
+ 	if (item_size < BTRFS_FILE_EXTENT_INLINE_DATA_START) {
+ 		file_extent_err(leaf, slot,
+-				"invalid item size, have %u expect [%lu, %u)",
++				"invalid item size, have %u expect [%zu, %u)",
+ 				item_size, BTRFS_FILE_EXTENT_INLINE_DATA_START,
+ 				SZ_4K);
+ 		return -EUCLEAN;
