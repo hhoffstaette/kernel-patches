@@ -1,8 +1,7 @@
 From 40d38f53d476238594c24c677593913695e6dec7 Mon Sep 17 00:00:00 2001
 From: David Sterba <dsterba@suse.com>
 Date: Thu, 10 Oct 2019 23:31:19 +0200
-Subject: [PATCH 123/137] btrfs: set blocking_writers directly, no increment or
- decrement
+Subject: [PATCH 123/137] btrfs: set blocking_writers directly, no increment or decrement
 
 The increment and decrement was inherited from previous version that
 used atomics, switched in commit 06297d8cefca ("btrfs: switch
