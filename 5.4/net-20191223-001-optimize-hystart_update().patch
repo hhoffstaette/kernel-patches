@@ -1,0 +1,63 @@
+From: Eric Dumazet <edumazet@google.com>
+To: "David S . Miller" <davem@davemloft.net>
+Cc: netdev <netdev@vger.kernel.org>,
+        Eric Dumazet <edumazet@google.com>,
+        Eric Dumazet <eric.dumazet@gmail.com>,
+        Soheil Hassas Yeganeh <soheil@google.com>,
+        Neal Cardwell <ncardwell@google.com>,
+        Yuchung Cheng <ycheng@google.com>,
+        Martin KaFai Lau <kafai@fb.com>
+Subject: [PATCH net-next v2 1/5] tcp_cubic: optimize hystart_update()
+Date: Mon, 23 Dec 2019 12:27:50 -0800
+
+We do not care which bit in ca->found is set.
+
+We avoid accessing hystart and hystart_detect unless really needed,
+possibly avoiding one cache line miss.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/ipv4/tcp_cubic.c | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/net/ipv4/tcp_cubic.c b/net/ipv4/tcp_cubic.c
+index 1b3d032a4df2a23faf8f12a9b426638fb1997fef..297936033c335ee57ba6205de50c5ef06b90da60 100644
+--- a/net/ipv4/tcp_cubic.c
++++ b/net/ipv4/tcp_cubic.c
+@@ -381,9 +381,6 @@ static void hystart_update(struct sock *sk, u32 delay)
+ 	struct tcp_sock *tp = tcp_sk(sk);
+ 	struct bictcp *ca = inet_csk_ca(sk);
+ 
+-	if (ca->found & hystart_detect)
+-		return;
+-
+ 	if (hystart_detect & HYSTART_ACK_TRAIN) {
+ 		u32 now = bictcp_clock();
+ 
+@@ -391,7 +388,7 @@ static void hystart_update(struct sock *sk, u32 delay)
+ 		if ((s32)(now - ca->last_ack) <= hystart_ack_delta) {
+ 			ca->last_ack = now;
+ 			if ((s32)(now - ca->round_start) > ca->delay_min >> 4) {
+-				ca->found |= HYSTART_ACK_TRAIN;
++				ca->found = 1;
+ 				NET_INC_STATS(sock_net(sk),
+ 					      LINUX_MIB_TCPHYSTARTTRAINDETECT);
+ 				NET_ADD_STATS(sock_net(sk),
+@@ -412,7 +409,7 @@ static void hystart_update(struct sock *sk, u32 delay)
+ 		} else {
+ 			if (ca->curr_rtt > ca->delay_min +
+ 			    HYSTART_DELAY_THRESH(ca->delay_min >> 3)) {
+-				ca->found |= HYSTART_DELAY;
++				ca->found = 1;
+ 				NET_INC_STATS(sock_net(sk),
+ 					      LINUX_MIB_TCPHYSTARTDELAYDETECT);
+ 				NET_ADD_STATS(sock_net(sk),
+@@ -450,7 +447,7 @@ static void bictcp_acked(struct sock *sk, const struct ack_sample *sample)
+ 		ca->delay_min = delay;
+ 
+ 	/* hystart triggers when cwnd is larger than some threshold */
+-	if (hystart && tcp_in_slow_start(tp) &&
++	if (!ca->found && hystart && tcp_in_slow_start(tp) &&
+ 	    tp->snd_cwnd >= hystart_low_window)
+ 		hystart_update(sk, delay);
+ }

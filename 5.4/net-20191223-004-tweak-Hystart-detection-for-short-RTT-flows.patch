@@ -1,0 +1,98 @@
+From: Eric Dumazet <edumazet@google.com>
+To: "David S . Miller" <davem@davemloft.net>
+Cc: netdev <netdev@vger.kernel.org>,
+        Eric Dumazet <edumazet@google.com>,
+        Eric Dumazet <eric.dumazet@gmail.com>,
+        Soheil Hassas Yeganeh <soheil@google.com>,
+        Neal Cardwell <ncardwell@google.com>,
+        Yuchung Cheng <ycheng@google.com>,
+        Martin KaFai Lau <kafai@fb.com>
+Subject: [PATCH net-next v2 4/5] tcp_cubic: tweak Hystart detection for short RTT flows
+Date: Mon, 23 Dec 2019 12:27:53 -0800
+
+After switching ca->delay_min to usec resolution, we exit
+slow start prematurely for very low RTT flows, setting
+snd_ssthresh to 20.
+
+The reason is that delay_min is fed with RTT of small packet
+trains. Then as cwnd is increased, TCP sends bigger TSO packets.
+
+LRO/GRO aggregation and/or interrupt mitigation strategies
+on receiver tend to inflate RTT samples.
+
+Fix this by adding to delay_min the expected delay of
+two TSO packets, given current pacing rate.
+
+Tested:
+
+Sender uses pfifo_fast qdisc
+
+Before :
+$ nstat -n;for f in {1..10}; do ./super_netperf 1 -H lpaa24 -l -4000000; done;nstat|egrep "Hystart"
+  11348
+  11707
+  11562
+  11428
+  11773
+  11534
+   9878
+  11693
+  10597
+  10968
+TcpExtTCPHystartTrainDetect     10                 0.0
+TcpExtTCPHystartTrainCwnd       200                0.0
+
+After :
+$ nstat -n;for f in {1..10}; do ./super_netperf 1 -H lpaa24 -l -4000000; done;nstat|egrep "Hystart"
+  14877
+  14517
+  15797
+  18466
+  17376
+  14833
+  17558
+  17933
+  16039
+  18059
+TcpExtTCPHystartTrainDetect     10                 0.0
+TcpExtTCPHystartTrainCwnd       1670               0.0
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/ipv4/tcp_cubic.c | 23 +++++++++++++++++++++--
+ 1 file changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/net/ipv4/tcp_cubic.c b/net/ipv4/tcp_cubic.c
+index 068775b91fb5790e6e60a6490b49e7a266e4ed51..0e5428ed04fe4e50627e21a53c3d17f9f2dade4d 100644
+--- a/net/ipv4/tcp_cubic.c
++++ b/net/ipv4/tcp_cubic.c
+@@ -436,8 +436,27 @@ static void bictcp_acked(struct sock *sk, const struct ack_sample *sample)
+ 		delay = 1;
+ 
+ 	/* first time call or link delay decreases */
+-	if (ca->delay_min == 0 || ca->delay_min > delay)
+-		ca->delay_min = delay;
++	if (ca->delay_min == 0 || ca->delay_min > delay) {
++		unsigned long rate = READ_ONCE(sk->sk_pacing_rate);
++
++		/* Account for TSO/GRO delays.
++		 * Otherwise short RTT flows could get too small ssthresh,
++		 * since during slow start we begin with small TSO packets
++		 * and could lower ca->delay_min too much.
++		 * Ideally even with a very small RTT we would like to have
++		 * at least one TSO packet being sent and received by GRO,
++		 * and another one in qdisc layer.
++		 * We apply another 100% factor because @rate is doubled at
++		 * this point.
++		 * We cap the cushion to 1ms.
++		 */
++		if (rate)
++			delay += min_t(u64, USEC_PER_MSEC,
++				       div64_ul((u64)GSO_MAX_SIZE *
++						4 * USEC_PER_SEC, rate));
++		if (ca->delay_min == 0 || ca->delay_min > delay)
++			ca->delay_min = delay;
++	}
+ 
+ 	/* hystart triggers when cwnd is larger than some threshold */
+ 	if (!ca->found && hystart && tcp_in_slow_start(tp) &&
