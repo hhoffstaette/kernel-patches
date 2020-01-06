@@ -1,0 +1,32 @@
+From: Igor Russkikh <irusskikh@marvell.com>
+To: netdev@vger.kernel.org
+Cc: David S . Miller <davem@davemloft.net>, Igor Russkikh <irusskikh@marvell.com>
+Subject: [PATCH net 1/3] net: atlantic: broken link status on old fw
+Date: Mon, 6 Jan 2020 14:22:28 +0300
+
+Last code/checkpatch cleanup did a copy paste error where code from
+firmware 3 API logic was moved to firmware 1 logic.
+
+This resulted in FW1.x users would never see the link state as active.
+
+Fixes: 7b0c342f1f67 ("net: atlantic: code style cleanup")
+Signed-off-by: Igor Russkikh <irusskikh@marvell.com>
+---
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+index 8910b62e67ed..f547baa6c954 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_utils.c
+@@ -667,9 +667,7 @@ int hw_atl_utils_mpi_get_link_status(struct aq_hw_s *self)
+ 	u32 speed;
+ 
+ 	mpi_state = hw_atl_utils_mpi_get_state(self);
+-	speed = mpi_state & (FW2X_RATE_100M | FW2X_RATE_1G |
+-			     FW2X_RATE_2G5 | FW2X_RATE_5G |
+-			     FW2X_RATE_10G);
++	speed = mpi_state >> HW_ATL_MPI_SPEED_SHIFT;
+ 
+ 	if (!speed) {
+ 		link_status->mbps = 0U;

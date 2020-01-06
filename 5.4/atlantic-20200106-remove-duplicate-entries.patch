@@ -1,0 +1,28 @@
+From: Igor Russkikh <irusskikh@marvell.com>
+To: netdev@vger.kernel.org
+Cc: David S . Miller <davem@davemloft.net>, Igor Russkikh <irusskikh@marvell.com>
+Subject: [PATCH net 3/3] net: atlantic: remove duplicate entries
+Date: Mon, 6 Jan 2020 14:22:30 +0300
+
+Function entries were duplicated accidentally, removing the dups.
+
+Fixes: ea4b4d7fc106 ("net: atlantic: loopback tests via private flags")
+Signed-off-by: Igor Russkikh <irusskikh@marvell.com>
+---
+ drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+index 58e891af6e09..ec041f78d063 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
++++ b/drivers/net/ethernet/aquantia/atlantic/hw_atl/hw_atl_b0.c
+@@ -1525,9 +1525,6 @@ const struct aq_hw_ops hw_atl_ops_b0 = {
+ 	.rx_extract_ts           = hw_atl_b0_rx_extract_ts,
+ 	.extract_hwts            = hw_atl_b0_extract_hwts,
+ 	.hw_set_offload          = hw_atl_b0_hw_offload_set,
+-	.hw_get_hw_stats         = hw_atl_utils_get_hw_stats,
+-	.hw_get_fw_version       = hw_atl_utils_get_fw_version,
+-	.hw_set_offload          = hw_atl_b0_hw_offload_set,
+ 	.hw_set_loopback         = hw_atl_b0_set_loopback,
+ 	.hw_set_fc               = hw_atl_b0_set_fc,
+ };
