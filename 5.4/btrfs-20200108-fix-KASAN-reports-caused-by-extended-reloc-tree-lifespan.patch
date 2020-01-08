@@ -2,8 +2,8 @@ From:   Qu Wenruo <wqu@suse.com>
 To:     linux-btrfs@vger.kernel.org
 Cc:     Zygo Blaxell <ce3g8jdj@umail.furryterror.org>,
         David Sterba <dsterba@suse.com>
-Subject: [PATCH] btrfs: relocation: Fix KASAN reports caused by extended reloc tree lifespan
-Date:   Sat,  4 Jan 2020 21:56:02 +0800
+Subject: [PATCH v2] btrfs: relocation: Fix KASAN reports caused by extended reloc tree lifespan
+Date:   Wed,  8 Jan 2020 13:12:00 +0800
 
 [BUG]
 There are several different KASAN reports for balance + snapshot
@@ -71,29 +71,86 @@ reloc tree.
 The only exception is should_ignore_root(), as merged reloc tree can be
 ignored, while no reloc tree shouldn't.
 
-Also, set_bit()/clear_bit()/test_bit() doesn't imply a memory barrier,
-and BTRFS_ROOT_DEAD_RELOC_TREE is the only indicator, also add extra
-memory barrier for that bit.
+[CRITICAL SECTION ANALYSE]
+Although test_bit()/set_bit()/clear_bit() doesn't imply a barrier, the
+DEAD_RELOC_TREE bit has extra help from transaction as a higher level
+barrier, the lifespan of root::reloc_root and DEAD_RELOC_TREE bit are:
+
+	NULL: reloc_root is NULL	PTR: reloc_root is not NULL
+	0: DEAD_RELOC_ROOT bit not set	DEAD: DEAD_RELOC_ROOT bit set
+
+	(NULL, 0)    Initial state		 __
+	  |					 /\ Section A
+        btrfs_init_reloc_root()			 \/
+	  |				 	 __
+	(PTR, 0)     reloc_root initialized      /\
+          |					 |
+	btrfs_update_reloc_root()		 |  Section B
+          |					 |
+	(PTR, DEAD)  reloc_root has been merged  \/
+          |					 __
+	=== btrfs_commit_transaction() ====================
+	  |					 /\
+	clean_dirty_subvols()			 |
+	  |					 |  Section C
+	(NULL, DEAD) reloc_root cleanup starts   \/
+          |					 __
+	btrfs_drop_snapshot()			 /\
+	  |					 |  Section D
+	(NULL, 0)    Back to initial state	 \/
+
+Very have_reloc_root() or test_bit(DEAD_RELOC_ROOT) caller has hold a
+transaction handler, so none of such caller can cross transaction
+boundary.
+
+In Section A, every caller just found no DEAD bit, and grab reloc_root.
+
+In the cross section A-B, caller may get no DEAD bit, but since
+reloc_root is still completely valid thus accessing reloc_root is
+completely safe.
+
+No test_bit() caller can cross the boundary of Section B and Section C.
+
+In Section C, every caller found the DEAD bit, so no one will access
+reloc_root.
+
+In the cross section C-D, either caller gets the DEAD bit set, avoiding
+access reloc_root no matter if it's safe or not.
+Or caller get the DEAD bit cleared, then access reloc_root, which is
+already NULL, nothing will be wrong.
+
+Here we need extra memory barrier in cross section C-D, to ensure
+proper memory order between reloc_root and clear_bit().
+
+In Section D, since no DEAD bit and no reloc_root, it's back to initial
+state.
+
+With this lifespan, it should be clear only one memory barrier is
+needed, between setting reloc_root to NULL and clearing DEAD_RELOC_ROOT
+bit.
 
 Reported-by: Zygo Blaxell <ce3g8jdj@umail.furryterror.org>
 Fixes: d2311e698578 ("btrfs: relocation: Delay reloc tree deletion after merge_reloc_roots")
-Singed-off-by: David Sterba <dsterba@suse.com>
+Suggested-by: David Sterba <dsterba@suse.com>
 Signed-off-by: Qu Wenruo <wqu@suse.com>
 ---
-Difference between this and David's diff:
-- Use proper smp_mb__after_atomic() for clear_bit()
-- Use test_bit() only check for should_ignore_root()
-  That call site is an except, can't go regular have_reloc_root() check
-- Add extra comment for have_reloc_root()
+Changelog:
+v2:
+- Add the [CRITICAL SECTION ANALYSE] part
+  This gets me into the rabbit hole of memory ordering, but thanks for
+  the help from David (initially mentioning the mb hell) and Nikolay
+  (for the proper doc), finally I could explain clearly why only
+  one mb is needed.
+- Add comment for the only needed memory barrier.
 ---
  fs/btrfs/relocation.c | 32 ++++++++++++++++++++++++++++----
  1 file changed, 28 insertions(+), 4 deletions(-)
 
 diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
-index d897a8e5e430..586f045bb6dc 100644
+index d897a8e5e430..17a2484f76a5 100644
 --- a/fs/btrfs/relocation.c
 +++ b/fs/btrfs/relocation.c
-@@ -517,6 +517,23 @@ static int update_backref_cache(struct btrfs_trans_handle *trans,
+@@ -517,6 +517,22 @@ static int update_backref_cache(struct btrfs_trans_handle *trans,
  	return 1;
  }
  
@@ -107,7 +164,6 @@ index d897a8e5e430..586f045bb6dc 100644
 + */
 +static bool have_reloc_root(struct btrfs_root *root)
 +{
-+	smp_mb__before_atomic();
 +	if (test_bit(BTRFS_ROOT_DEAD_RELOC_TREE, &root->state))
 +		return false;
 +	if (!root->reloc_root)
@@ -117,27 +173,18 @@ index d897a8e5e430..586f045bb6dc 100644
  
  static int should_ignore_root(struct btrfs_root *root)
  {
-@@ -525,6 +542,11 @@ static int should_ignore_root(struct btrfs_root *root)
+@@ -525,6 +541,10 @@ static int should_ignore_root(struct btrfs_root *root)
  	if (!test_bit(BTRFS_ROOT_REF_COWS, &root->state))
  		return 0;
  
 +	/* This root has been merged with its reloc tree, we can ignore it */
-+	smp_mb__before_atomic();
 +	if (test_bit(BTRFS_ROOT_DEAD_RELOC_TREE, &root->state))
 +		return 1;
 +
  	reloc_root = root->reloc_root;
  	if (!reloc_root)
  		return 0;
-@@ -1439,6 +1461,7 @@ int btrfs_init_reloc_root(struct btrfs_trans_handle *trans,
- 	 * The subvolume has reloc tree but the swap is finished, no need to
- 	 * create/update the dead reloc tree
- 	 */
-+	smp_mb__before_atomic();
- 	if (test_bit(BTRFS_ROOT_DEAD_RELOC_TREE, &root->state))
- 		return 0;
- 
-@@ -1478,8 +1501,7 @@ int btrfs_update_reloc_root(struct btrfs_trans_handle *trans,
+@@ -1478,8 +1498,7 @@ int btrfs_update_reloc_root(struct btrfs_trans_handle *trans,
  	struct btrfs_root_item *root_item;
  	int ret;
  
@@ -147,22 +194,18 @@ index d897a8e5e430..586f045bb6dc 100644
  		goto out;
  
  	reloc_root = root->reloc_root;
-@@ -1489,6 +1511,7 @@ int btrfs_update_reloc_root(struct btrfs_trans_handle *trans,
- 	if (fs_info->reloc_ctl->merge_reloc_tree &&
- 	    btrfs_root_refs(root_item) == 0) {
- 		set_bit(BTRFS_ROOT_DEAD_RELOC_TREE, &root->state);
-+		smp_mb__after_atomic();
- 		__del_reloc_root(reloc_root);
- 	}
- 
-@@ -2202,6 +2225,7 @@ static int clean_dirty_subvols(struct reloc_control *rc)
+@@ -2201,6 +2220,11 @@ static int clean_dirty_subvols(struct reloc_control *rc)
+ 				if (ret2 < 0 && !ret)
  					ret = ret2;
  			}
++			/*
++			 * Need barrier to ensure clear_bit() only happens after
++			 * root->reloc_root = NULL.
++			 */
++			smp_mb__before_atomic();
  			clear_bit(BTRFS_ROOT_DEAD_RELOC_TREE, &root->state);
-+			smp_mb__after_atomic();
  			btrfs_put_fs_root(root);
  		} else {
- 			/* Orphan reloc tree, just clean it up */
 @@ -4717,7 +4741,7 @@ void btrfs_reloc_pre_snapshot(struct btrfs_pending_snapshot *pending,
  	struct btrfs_root *root = pending->root;
  	struct reloc_control *rc = root->fs_info->reloc_ctl;
