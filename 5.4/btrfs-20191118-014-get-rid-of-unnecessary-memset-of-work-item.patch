@@ -8,6 +8,7 @@ workqueue with btrfs_workqueue.") converted qgroup_rescan_work to be
 initialized with btrfs_init_work(), but it left behind an unnecessary
 memset(). Get rid of the memset().
 
+[HH: context fix for 5.4.9]
 Reviewed-by: Johannes Thumshirn <jthumshirn@suse.de>
 Signed-off-by: Omar Sandoval <osandov@fb.com>
 Reviewed-by: David Sterba <dsterba@suse.com>
@@ -27,5 +28,5 @@ index 3ad151655eb8..55678837bb84 100644
 -	memset(&fs_info->qgroup_rescan_work, 0,
 -	       sizeof(fs_info->qgroup_rescan_work));
  	btrfs_init_work(&fs_info->qgroup_rescan_work,
- 			btrfs_qgroup_rescan_helper,
  			btrfs_qgroup_rescan_worker, NULL, NULL);
+ 	return 0;
