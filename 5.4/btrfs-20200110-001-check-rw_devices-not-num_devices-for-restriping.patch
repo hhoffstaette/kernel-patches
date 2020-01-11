@@ -1,7 +1,7 @@
 From:   Josef Bacik <josef@toxicpanda.com>
-To:     kernel-team@fb.com, linux-btrfs@vger.kernel.org
-Subject: [PATCH][v2] btrfs: check rw_devices, not num_devices for restriping
-Date:   Thu,  9 Jan 2020 09:15:31 -0500
+To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Subject: [PATCH 1/5] btrfs: check rw_devices, not num_devices for restriping
+Date:   Fri, 10 Jan 2020 11:11:24 -0500
 
 While running xfstests with compression on I noticed I was panicing on
 btrfs/154.  I bisected this down to my inc_block_group_ro patches, which
@@ -36,10 +36,6 @@ this was working before was just sheer dumb luck.
 Fixes: e4d8ec0f65b9 ("Btrfs: implement online profile changing")
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 ---
-v1->v2:
-- replace the dev_replace.rwsem locking with the chunk_mutex locking, which
-  covers both dev replace and rm device.
-
  fs/btrfs/volumes.c | 9 ++++++++-
  1 file changed, 8 insertions(+), 1 deletion(-)
 
