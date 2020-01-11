@@ -7,6 +7,7 @@ The type name is misleading, a single entry is named 'cache' while this
 normally means a collection of objects. Rename that everywhere. Also the
 identifier was quite long, making function prototypes harder to format.
 
+[HH: rebased for 5.4.11]
 Suggested-by: Nikolay Borisov <nborisov@suse.com>
 Reviewed-by: Qu Wenruo <wqu@suse.com>
 Signed-off-by: David Sterba <dsterba@suse.com>
@@ -977,9 +978,9 @@ index f9091bd41e99..153f71a5bba9 100644
  		struct find_free_extent_ctl *ffe_ctl)
  {
 @@ -3801,7 +3800,7 @@ static noinline int find_free_extent(struct btrfs_fs_info *fs_info,
- {
- 	int ret = 0;
- 	struct btrfs_free_cluster *last_ptr = NULL;
+	int ret = 0;
+	int cache_block_group_error = 0;
+	struct btrfs_free_cluster *last_ptr = NULL;
 -	struct btrfs_block_group_cache *block_group = NULL;
 +	struct btrfs_block_group *block_group = NULL;
  	struct find_free_extent_ctl ffe_ctl = {0};
