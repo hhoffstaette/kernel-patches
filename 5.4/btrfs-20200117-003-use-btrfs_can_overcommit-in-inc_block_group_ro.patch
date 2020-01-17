@@ -1,8 +1,8 @@
 From:   Josef Bacik <josef@toxicpanda.com>
 To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com
 Cc:     Qu Wenruo <wqu@suse.com>
-Subject: [PATCH 5/5] btrfs: use btrfs_can_overcommit in inc_block_group_ro
-Date:   Fri, 10 Jan 2020 11:11:28 -0500
+Subject: [PATCH 3/3] btrfs: use btrfs_can_overcommit in inc_block_group_ro
+Date:   Fri, 17 Jan 2020 09:07:39 -0500
 
 inc_block_group_ro does a calculation to see if we have enough room left
 over if we mark this block group as read only in order to see if it's ok
@@ -20,16 +20,16 @@ group as read only.
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 Reviewed-by: Qu Wenruo <wqu@suse.com>
 ---
- fs/btrfs/block-group.c | 35 ++++++++++++++++++++++++-----------
- fs/btrfs/space-info.c  | 19 ++++++++++---------
+ fs/btrfs/block-group.c | 37 ++++++++++++++++++++++++++-----------
+ fs/btrfs/space-info.c  | 18 ++++++++++--------
  fs/btrfs/space-info.h  |  3 +++
- 3 files changed, 37 insertions(+), 20 deletions(-)
+ 3 files changed, 39 insertions(+), 19 deletions(-)
 
 diff --git a/fs/btrfs/block-group.c b/fs/btrfs/block-group.c
-index 2e94e14e30ee..c79eccf188c5 100644
+index 71770d04b7a3..7e71ec9682d0 100644
 --- a/fs/btrfs/block-group.c
 +++ b/fs/btrfs/block-group.c
-@@ -1184,7 +1184,6 @@ static int inc_block_group_ro(struct btrfs_block_group *cache, int force)
+@@ -1191,7 +1191,6 @@ static int inc_block_group_ro(struct btrfs_block_group *cache, int force)
  {
  	struct btrfs_space_info *sinfo = cache->space_info;
  	u64 num_bytes;
@@ -37,7 +37,7 @@ index 2e94e14e30ee..c79eccf188c5 100644
  	int ret = -ENOSPC;
  
  	spin_lock(&sinfo->lock);
-@@ -1205,19 +1204,36 @@ static int inc_block_group_ro(struct btrfs_block_group *cache, int force)
+@@ -1205,19 +1204,38 @@ static int inc_block_group_ro(struct btrfs_block_group *cache, int force)
  
  	num_bytes = cache->length - cache->reserved - cache->pinned -
  		    cache->bytes_super - cache->used;
@@ -51,8 +51,10 @@ index 2e94e14e30ee..c79eccf188c5 100644
 +	 * Data never overcommits, even in mixed mode, so do just the straight
 +	 * check of left over space in how much we have allocated.
  	 */
--	if (sinfo_used + num_bytes <= sinfo->total_bytes) {
-+	if (sinfo->flags & BTRFS_BLOCK_GROUP_DATA) {
+-	if (force || (sinfo_used + num_bytes <= sinfo->total_bytes)) {
++	if (force) {
++		ret = 0;
++	} else if (sinfo->flags & BTRFS_BLOCK_GROUP_DATA) {
 +		u64 sinfo_used = btrfs_space_info_used(sinfo, true);
 +
 +		/*
@@ -81,7 +83,7 @@ index 2e94e14e30ee..c79eccf188c5 100644
  	}
  out:
  	spin_unlock(&cache->lock);
-@@ -1225,9 +1241,6 @@ static int inc_block_group_ro(struct btrfs_block_group *cache, int force)
+@@ -1225,9 +1243,6 @@ static int inc_block_group_ro(struct btrfs_block_group *cache, int force)
  	if (ret == -ENOSPC && btrfs_test_opt(cache->fs_info, ENOSPC_DEBUG)) {
  		btrfs_info(cache->fs_info,
  			"unable to make block group %llu ro", cache->start);
@@ -92,7 +94,7 @@ index 2e94e14e30ee..c79eccf188c5 100644
  	}
  	return ret;
 diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
-index df5fb68df798..01297c5b2666 100644
+index 537bc310a673..01297c5b2666 100644
 --- a/fs/btrfs/space-info.c
 +++ b/fs/btrfs/space-info.c
 @@ -159,9 +159,9 @@ static inline u64 calc_global_rsv_need_space(struct btrfs_block_rsv *global)
@@ -133,11 +135,11 @@ index df5fb68df798..01297c5b2666 100644
 -	if (can_overcommit(fs_info, space_info, SZ_1M,
 -			   BTRFS_RESERVE_FLUSH_ALL))
 +	if (btrfs_can_overcommit(fs_info, space_info, SZ_1M,
-+				 BTRFS_RESERVE_FLUSH_ALL))
++			   BTRFS_RESERVE_FLUSH_ALL))
  		expected = div_factor_fine(space_info->total_bytes, 95);
  	else
  		expected = div_factor_fine(space_info->total_bytes, 90);
-@@ -1005,7 +1006,7 @@ static int __reserve_metadata_bytes(struct btrfs_fs_info *fs_info,
+@@ -1004,7 +1006,7 @@ static int __reserve_metadata_bytes(struct btrfs_fs_info *fs_info,
  	 */
  	if (!pending_tickets &&
  	    ((used + orig_bytes <= space_info->total_bytes) ||
