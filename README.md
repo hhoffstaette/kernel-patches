@@ -25,7 +25,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - atlantic: fixes from 5.5+ (correctness, error handling, PTP, UDP GSO)
 - block: fixes from 5.5+ (performance)
-- bmq: [BMQ 5.4-r1](https://cchalpha.blogspot.com/2019/12/bmq-v54-r1-release.html) CPU scheduler
+- bmq: [BMQ 5.4-r2](https://cchalpha.blogspot.com/2020/01/bmq-v54-r2-release.html) CPU scheduler
 - btrfs: fixes from 5.5+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - mm: fixes from 5.5+
