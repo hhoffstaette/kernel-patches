@@ -1,0 +1,38 @@
+From: Qu Wenruo <wqu@suse.com>
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH v6 5/5] btrfs: volumes: Revert device used bytes when calc_per_profile_avail() failed
+Date: Thu, 16 Jan 2020 14:04:04 +0800
+
+In __btrfs_alloc_chunk(), if calc_per_profile_avail() failed, it will
+not update the per-profile available space array.
+However since device used space is already updated, this would cause a
+mismatch between them.
+
+To fix this problem, this patch will revert device used bytes when
+calc_per_profile_avail() failed, and remove the newly allocated chunk.
+
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+---
+ fs/btrfs/volumes.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 6ba66c7cff2e..749c647818aa 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -5173,6 +5173,15 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
+ 				      &trans->transaction->dev_update_list);
+ 	}
+ 	ret = calc_per_profile_avail(info);
++	if (ret < 0) {
++		for (i = 0; i < map->num_stripes; i++) {
++			struct btrfs_device *dev = map->stripes[i].dev;
++
++			btrfs_device_set_bytes_used(dev,
++					dev->bytes_used - stripe_size);
++		}
++		goto error_del_extent;
++	}
+ 
+ 	atomic64_sub(stripe_size * map->num_stripes, &info->free_chunk_space);
+ 

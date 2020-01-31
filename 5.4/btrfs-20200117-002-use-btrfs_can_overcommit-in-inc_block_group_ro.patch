@@ -17,6 +17,7 @@ enough space to remove the remaining free space in the block group we
 are trying to mark read only.  If we do then we can mark this block
 group as read only.
 
+[HH: context fix for added btrfs_raid_types in can_overcommit()]
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 Reviewed-by: Qu Wenruo <wqu@suse.com>
 ---
@@ -108,8 +109,8 @@ index 537bc310a673..01297c5b2666 100644
 +			 struct btrfs_space_info *space_info, u64 bytes,
 +			 enum btrfs_reserve_flush_enum flush)
  {
+ 	enum btrfs_raid_types index;
  	u64 profile;
- 	u64 avail;
 @@ -226,7 +226,8 @@ void btrfs_try_granting_tickets(struct btrfs_fs_info *fs_info,
  
  		/* Check and see if our ticket can be satisified now. */
