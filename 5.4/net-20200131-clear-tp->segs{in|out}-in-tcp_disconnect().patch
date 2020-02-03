@@ -1,0 +1,33 @@
+From: Eric Dumazet <edumazet@google.com>
+To: David S . Miller <davem@davemloft.net>
+Cc: netdev <netdev@vger.kernel.org>, Neal Cardwell <ncardwell@google.com>, Eric Dumazet <edumazet@google.com>,
+    Eric Dumazet <eric.dumazet@gmail.com>, Marcelo Ricardo Leitner <mleitner@redhat.com>, Yuchung Cheng <ycheng@google.com>
+Subject: [PATCH net] tcp: clear tp->segs_{in|out} in tcp_disconnect()
+Date: Fri, 31 Jan 2020 10:44:50 -0800
+
+tp->segs_in and tp->segs_out need to be cleared in tcp_disconnect().
+
+tcp_disconnect() is rarely used, but it is worth fixing it.
+
+Fixes: 2efd055c53c0 ("tcp: add tcpi_segs_in and tcpi_segs_out to tcp_info")
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Cc: Marcelo Ricardo Leitner <mleitner@redhat.com>
+Cc: Yuchung Cheng <ycheng@google.com>
+Cc: Neal Cardwell <ncardwell@google.com>
+---
+ net/ipv4/tcp.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 3b601823f69a93dd20f9a4876945a87cd2196dc9..eb2d80519f8e5ad165ca3b8acef2b10bdf8b7345 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -2639,6 +2639,8 @@ int tcp_disconnect(struct sock *sk, int flags)
+ 	sk->sk_rx_dst = NULL;
+ 	tcp_saved_syn_free(tp);
+ 	tp->compressed_ack = 0;
++	tp->segs_in = 0;
++	tp->segs_out = 0;
+ 	tp->bytes_sent = 0;
+ 	tp->bytes_acked = 0;
+ 	tp->bytes_received = 0;
