@@ -1,0 +1,93 @@
+From: Linus Torvalds <torvalds@linux-foundation.org>
+Subject: pipe: don't use 'pipe_wait() for basic pipe IO
+Date: Sat, 7 Dec 2019 13:53:09 -0800
+
+pipe_wait() may be simple, but since it relies on the pipe lock, it
+means that we have to do the wakeup while holding the lock.  That's
+unfortunate, because the very first thing the waked entity will want to
+do is to get the pipe lock for itself.
+
+So get rid of the pipe_wait() usage by simply releasing the pipe lock,
+doing the wakeup (if required) and then using wait_event_interruptible()
+to wait on the right condition instead.
+
+wait_event_interruptible() handles races on its own by comparing the
+wakeup condition before and after adding itself to the wait queue, so
+you can use an optimistic unlocked condition for it.
+
+Cc: David Howells <dhowells@redhat.com>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ fs/pipe.c | 30 +++++++++++++++++++++++++++---
+ 1 file changed, 27 insertions(+), 3 deletions(-)
+
+diff --git a/fs/pipe.c b/fs/pipe.c
+index 58f236c65bea..87109e761fa5 100644
+--- a/fs/pipe.c
++++ b/fs/pipe.c
+@@ -270,6 +270,16 @@ static bool pipe_buf_can_merge(struct pipe_buffer *buf)
+ 	return buf->ops == &anon_pipe_buf_ops;
+ }
+ 
++/* Done while waiting without holding the pipe lock - thus the READ_ONCE() */
++static inline bool pipe_readable(const struct pipe_inode_info *pipe)
++{
++	unsigned int head = READ_ONCE(pipe->head);
++	unsigned int tail = READ_ONCE(pipe->tail);
++	unsigned int writers = READ_ONCE(pipe->writers);
++
++	return !pipe_empty(head, tail) || !writers;
++}
++
+ static ssize_t
+ pipe_read(struct kiocb *iocb, struct iov_iter *to)
+ {
+@@ -359,11 +369,13 @@ pipe_read(struct kiocb *iocb, struct iov_iter *to)
+ 				ret = -ERESTARTSYS;
+ 			break;
+ 		}
++		__pipe_unlock(pipe);
+ 		if (was_full) {
+ 			wake_up_interruptible_sync_poll(&pipe->wait, EPOLLOUT | EPOLLWRNORM);
+ 			kill_fasync(&pipe->fasync_writers, SIGIO, POLL_OUT);
+ 		}
+-		pipe_wait(pipe);
++		wait_event_interruptible(pipe->wait, pipe_readable(pipe));
++		__pipe_lock(pipe);
+ 		was_full = pipe_full(pipe->head, pipe->tail, pipe->max_usage);
+ 	}
+ 	__pipe_unlock(pipe);
+@@ -382,6 +394,17 @@ static inline int is_packetized(struct file *file)
+ 	return (file->f_flags & O_DIRECT) != 0;
+ }
+ 
++/* Done while waiting without holding the pipe lock - thus the READ_ONCE() */
++static inline bool pipe_writable(const struct pipe_inode_info *pipe)
++{
++	unsigned int head = READ_ONCE(pipe->head);
++	unsigned int tail = READ_ONCE(pipe->tail);
++	unsigned int max_usage = READ_ONCE(pipe->max_usage);
++
++	return !pipe_full(head, tail, max_usage) ||
++		!READ_ONCE(pipe->readers);
++}
++
+ static ssize_t
+ pipe_write(struct kiocb *iocb, struct iov_iter *from)
+ {
+@@ -529,12 +552,13 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
+ 		 * after waiting we need to re-check whether the pipe
+ 		 * become empty while we dropped the lock.
+ 		 */
++		__pipe_unlock(pipe);
+ 		if (was_empty) {
+ 			wake_up_interruptible_sync_poll(&pipe->wait, EPOLLIN | EPOLLRDNORM);
+ 			kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
+ 		}
+-		pipe_wait(pipe);
+-
++		wait_event_interruptible(pipe->wait, pipe_writable(pipe));
++		__pipe_lock(pipe);
+ 		was_empty = pipe_empty(head, pipe->tail);
+ 	}
+ out:

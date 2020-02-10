@@ -1,0 +1,96 @@
+From: David Howells <dhowells@redhat.com>
+Subject: pipe: Fix missing mask update after pipe_wait()
+Date: Thu, 5 Dec 2019 22:30:37 +0000
+
+Fix pipe_write() to not cache the ring index mask and max_usage as their
+values are invalidated by calling pipe_wait() because the latter
+function drops the pipe lock, thereby allowing F_SETPIPE_SZ change them.
+Without this, pipe_write() may subsequently miscalculate the array
+indices and pipe fullness, leading to an oops like the following:
+
+  BUG: KASAN: slab-out-of-bounds in pipe_write+0xc25/0xe10 fs/pipe.c:481
+  Write of size 8 at addr ffff8880771167a8 by task syz-executor.3/7987
+  ...
+  CPU: 1 PID: 7987 Comm: syz-executor.3 Not tainted 5.4.0-rc2-syzkaller #0
+  ...
+  Call Trace:
+    pipe_write+0xc25/0xe10 fs/pipe.c:481
+    call_write_iter include/linux/fs.h:1895 [inline]
+    new_sync_write+0x3fd/0x7e0 fs/read_write.c:483
+    __vfs_write+0x94/0x110 fs/read_write.c:496
+    vfs_write+0x18a/0x520 fs/read_write.c:558
+    ksys_write+0x105/0x220 fs/read_write.c:611
+    __do_sys_write fs/read_write.c:623 [inline]
+    __se_sys_write fs/read_write.c:620 [inline]
+    __x64_sys_write+0x6e/0xb0 fs/read_write.c:620
+    do_syscall_64+0xca/0x5d0 arch/x86/entry/common.c:290
+    entry_SYSCALL_64_after_hwframe+0x49/0xbe
+
+This is not a problem for pipe_read() as the mask is recalculated on
+each pass of the loop, after pipe_wait() has been called.
+
+Fixes: 8cefc107ca54 ("pipe: Use head and tail pointers for the ring, not cursor and length")
+Reported-by: syzbot+838eb0878ffd51f27c41@syzkaller.appspotmail.com
+Signed-off-by: David Howells <dhowells@redhat.com>
+Cc: Eric Biggers <ebiggers@kernel.org>
+[ Changed it to use a temporary variable 'mask' to avoid long lines -Linus ]
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ fs/pipe.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/fs/pipe.c b/fs/pipe.c
+index 05330fac081f..70313af23b39 100644
+--- a/fs/pipe.c
++++ b/fs/pipe.c
+@@ -389,7 +389,7 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
+ {
+ 	struct file *filp = iocb->ki_filp;
+ 	struct pipe_inode_info *pipe = filp->private_data;
+-	unsigned int head, max_usage, mask;
++	unsigned int head;
+ 	ssize_t ret = 0;
+ 	int do_wakeup = 0;
+ 	size_t total_len = iov_iter_count(from);
+@@ -408,12 +408,11 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
+ 	}
+ 
+ 	head = pipe->head;
+-	max_usage = pipe->max_usage;
+-	mask = pipe->ring_size - 1;
+ 
+ 	/* We try to merge small writes */
+ 	chars = total_len & (PAGE_SIZE-1); /* size of the last buffer */
+ 	if (!pipe_empty(head, pipe->tail) && chars != 0) {
++		unsigned int mask = pipe->ring_size - 1;
+ 		struct pipe_buffer *buf = &pipe->bufs[(head - 1) & mask];
+ 		int offset = buf->offset + buf->len;
+ 
+@@ -443,7 +442,8 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
+ 		}
+ 
+ 		head = pipe->head;
+-		if (!pipe_full(head, pipe->tail, max_usage)) {
++		if (!pipe_full(head, pipe->tail, pipe->max_usage)) {
++			unsigned int mask = pipe->ring_size - 1;
+ 			struct pipe_buffer *buf = &pipe->bufs[head & mask];
+ 			struct page *page = pipe->tmp_page;
+ 			int copied;
+@@ -465,7 +465,7 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
+ 			spin_lock_irq(&pipe->wait.lock);
+ 
+ 			head = pipe->head;
+-			if (pipe_full(head, pipe->tail, max_usage)) {
++			if (pipe_full(head, pipe->tail, pipe->max_usage)) {
+ 				spin_unlock_irq(&pipe->wait.lock);
+ 				continue;
+ 			}
+@@ -510,7 +510,7 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
+ 				break;
+ 		}
+ 
+-		if (!pipe_full(head, pipe->tail, max_usage))
++		if (!pipe_full(head, pipe->tail, pipe->max_usage))
+ 			continue;
+ 
+ 		/* Wait for buffer space to become available. */
