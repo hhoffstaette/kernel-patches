@@ -1,7 +1,7 @@
-From: Qu Wenruo <wqu@suse.com>
-To: linux-btrfs@vger.kernel.org
-Subject: [PATCH v6 5/5] btrfs: volumes: Revert device used bytes when calc_per_profile_avail() failed
-Date: Thu, 16 Jan 2020 14:04:04 +0800
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH v7 5/5] btrfs: volumes: Revert device used bytes when calc_per_profile_avail() failed
+Date:   Tue, 11 Feb 2020 13:11:53 +0800
 
 In __btrfs_alloc_chunk(), if calc_per_profile_avail() failed, it will
 not update the per-profile available space array.
@@ -17,10 +17,10 @@ Signed-off-by: Qu Wenruo <wqu@suse.com>
  1 file changed, 9 insertions(+)
 
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index 6ba66c7cff2e..749c647818aa 100644
+index 4750255d02a8..27bd71d30e6f 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
-@@ -5173,6 +5173,15 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
+@@ -5225,6 +5225,15 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
  				      &trans->transaction->dev_update_list);
  	}
  	ret = calc_per_profile_avail(info);

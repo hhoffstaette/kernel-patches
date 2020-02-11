@@ -1,7 +1,7 @@
-From: Qu Wenruo <wqu@suse.com>
-To: linux-btrfs@vger.kernel.org
-Subject: [PATCH v6 4/5] btrfs: Reset device size when btrfs_update_device() failed in btrfs_grow_device()
-Date: Thu, 16 Jan 2020 14:04:03 +0800
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH v7 4/5] btrfs: Reset device size when btrfs_update_device() failed in btrfs_grow_device()
+Date:   Tue, 11 Feb 2020 13:11:52 +0800
 
 When btrfs_update_device() failed due to ENOMEM, we didn't reset device
 size back to its original size, causing the in-memory device size larger
@@ -20,10 +20,10 @@ Signed-off-by: Qu Wenruo <wqu@suse.com>
  1 file changed, 20 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index b899c8b0d0ee..6ba66c7cff2e 100644
+index 1886fa20530d..4750255d02a8 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
-@@ -2805,6 +2805,7 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
+@@ -2846,6 +2846,7 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
  {
  	struct btrfs_fs_info *fs_info = device->fs_info;
  	struct btrfs_super_block *super_copy = fs_info->super_copy;
@@ -31,7 +31,7 @@ index b899c8b0d0ee..6ba66c7cff2e 100644
  	u64 old_total;
  	u64 diff;
  	int ret;
-@@ -2815,6 +2816,7 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
+@@ -2856,6 +2857,7 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
  	new_size = round_down(new_size, fs_info->sectorsize);
  
  	mutex_lock(&fs_info->chunk_mutex);
@@ -39,7 +39,7 @@ index b899c8b0d0ee..6ba66c7cff2e 100644
  	old_total = btrfs_super_total_bytes(super_copy);
  	diff = round_down(new_size - device->total_bytes, fs_info->sectorsize);
  
-@@ -2837,9 +2839,25 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
+@@ -2878,9 +2880,25 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
  	ret = calc_per_profile_avail(fs_info);
  	mutex_unlock(&fs_info->chunk_mutex);
  	if (ret < 0)

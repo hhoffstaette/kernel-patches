@@ -1,8 +1,8 @@
-From: Qu Wenruo <wqu@suse.com>
-To: linux-btrfs@vger.kernel.org
-Cc: Josef Bacik <josef@toxicpanda.com>
-Subject: [PATCH v6 1/5] btrfs: Introduce per-profile available space facility
-Date: Thu, 16 Jan 2020 14:04:00 +0800
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     Josef Bacik <josef@toxicpanda.com>
+Subject: [PATCH v7 1/5] btrfs: Introduce per-profile available space facility
+Date:   Tue, 11 Feb 2020 13:11:49 +0800
 
 [PROBLEM]
 There are some locations in btrfs requiring accurate estimation on how
@@ -129,19 +129,19 @@ As I don't want to make the core facility bloated by the error handling
 code, especially some situation needs quite some new code to handle
 errors.
 
+[HH: context fixes in volumes.h for 5.4.x]
 Suggested-by: Josef Bacik <josef@toxicpanda.com>
 Signed-off-by: Qu Wenruo <wqu@suse.com>
-Reviewed-by:  Josef Bacik <josef@toxicpanda.com>
 ---
  fs/btrfs/volumes.c | 216 ++++++++++++++++++++++++++++++++++++++++-----
  fs/btrfs/volumes.h |  11 +++
  2 files changed, 207 insertions(+), 20 deletions(-)
 
 diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
-index a6d3f08bfff3..b899c8b0d0ee 100644
+index 9cfc668f91f4..1886fa20530d 100644
 --- a/fs/btrfs/volumes.c
 +++ b/fs/btrfs/volumes.c
-@@ -349,6 +349,7 @@ static struct btrfs_fs_devices *alloc_fs_devices(const u8 *fsid,
+@@ -352,6 +352,7 @@ static struct btrfs_fs_devices *alloc_fs_devices(const u8 *fsid,
  	INIT_LIST_HEAD(&fs_devs->devices);
  	INIT_LIST_HEAD(&fs_devs->alloc_list);
  	INIT_LIST_HEAD(&fs_devs->fs_list);
@@ -149,7 +149,7 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  	if (fsid)
  		memcpy(fs_devs->fsid, fsid, BTRFS_FSID_SIZE);
  
-@@ -2628,6 +2629,177 @@ static noinline int btrfs_update_device(struct btrfs_trans_handle *trans,
+@@ -2669,6 +2670,177 @@ static noinline int btrfs_update_device(struct btrfs_trans_handle *trans,
  	return ret;
  }
  
@@ -327,7 +327,7 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  int btrfs_grow_device(struct btrfs_trans_handle *trans,
  		      struct btrfs_device *device, u64 new_size)
  {
-@@ -2635,6 +2807,7 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
+@@ -2676,6 +2848,7 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
  	struct btrfs_super_block *super_copy = fs_info->super_copy;
  	u64 old_total;
  	u64 diff;
@@ -335,7 +335,7 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  
  	if (!test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state))
  		return -EACCES;
-@@ -2661,7 +2834,10 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
+@@ -2702,7 +2875,10 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
  	if (list_empty(&device->post_commit_list))
  		list_add_tail(&device->post_commit_list,
  			      &trans->transaction->dev_update_list);
@@ -346,7 +346,7 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  
  	return btrfs_update_device(trans, device);
  }
-@@ -2831,7 +3007,13 @@ int btrfs_remove_chunk(struct btrfs_trans_handle *trans, u64 chunk_offset)
+@@ -2872,7 +3048,13 @@ int btrfs_remove_chunk(struct btrfs_trans_handle *trans, u64 chunk_offset)
  					device->bytes_used - dev_extent_len);
  			atomic64_add(dev_extent_len, &fs_info->free_chunk_space);
  			btrfs_clear_space_info_full(fs_info);
@@ -360,7 +360,7 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  		}
  
  		ret = btrfs_update_device(trans, device);
-@@ -4526,6 +4708,11 @@ int btrfs_shrink_device(struct btrfs_device *device, u64 new_size)
+@@ -4578,6 +4760,11 @@ int btrfs_shrink_device(struct btrfs_device *device, u64 new_size)
  		atomic64_sub(diff, &fs_info->free_chunk_space);
  	}
  
@@ -372,7 +372,7 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  	/*
  	 * Once the device's size has been set to the new size, ensure all
  	 * in-memory chunks are synced to disk so that the loop below sees them
-@@ -4690,25 +4877,6 @@ static int btrfs_add_system_chunk(struct btrfs_fs_info *fs_info,
+@@ -4742,25 +4929,6 @@ static int btrfs_add_system_chunk(struct btrfs_fs_info *fs_info,
  	return 0;
  }
  
@@ -398,7 +398,7 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  static void check_raid56_incompat_flag(struct btrfs_fs_info *info, u64 type)
  {
  	if (!(type & BTRFS_BLOCK_GROUP_RAID56_MASK))
-@@ -4986,6 +5154,7 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
+@@ -5038,6 +5206,7 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
  			list_add_tail(&dev->post_commit_list,
  				      &trans->transaction->dev_update_list);
  	}
@@ -406,7 +406,7 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  
  	atomic64_sub(stripe_size * map->num_stripes, &info->free_chunk_space);
  
-@@ -4994,7 +5163,7 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
+@@ -5046,7 +5215,7 @@ static int __btrfs_alloc_chunk(struct btrfs_trans_handle *trans,
  	check_raid1c34_incompat_flag(info, type);
  
  	kfree(devices_info);
@@ -415,7 +415,7 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  
  error_del_extent:
  	write_lock(&em_tree->lock);
-@@ -7629,6 +7798,13 @@ int btrfs_verify_dev_extents(struct btrfs_fs_info *fs_info)
+@@ -7609,6 +7778,13 @@ int btrfs_verify_dev_extents(struct btrfs_fs_info *fs_info)
  
  	/* Ensure all chunks have corresponding dev extents */
  	ret = verify_chunk_dev_extent_mapping(fs_info);
@@ -430,10 +430,10 @@ index a6d3f08bfff3..b899c8b0d0ee 100644
  	btrfs_free_path(path);
  	return ret;
 diff --git a/fs/btrfs/volumes.h b/fs/btrfs/volumes.h
-index fc1b564b9cfe..5cddfe7cfee8 100644
+index 409f4816fb89..c1e4a32393b0 100644
 --- a/fs/btrfs/volumes.h
 +++ b/fs/btrfs/volumes.h
-@@ -138,6 +138,13 @@ struct btrfs_device {
+@@ -140,6 +140,13 @@ struct btrfs_device {
  	atomic_t dev_stat_values[BTRFS_DEV_STAT_VALUES_MAX];
  
  	struct extent_io_tree alloc_state;
@@ -447,7 +447,7 @@ index fc1b564b9cfe..5cddfe7cfee8 100644
  };
  
  /*
-@@ -257,6 +264,10 @@ struct btrfs_fs_devices {
+@@ -259,6 +266,10 @@ struct btrfs_fs_devices {
  	struct kobject fsid_kobj;
  	struct kobject *device_dir_kobj;
  	struct completion kobj_unregister;

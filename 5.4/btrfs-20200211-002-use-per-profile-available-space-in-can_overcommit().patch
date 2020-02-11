@@ -1,8 +1,9 @@
-From: Qu Wenruo <wqu@suse.com>
-To: linux-btrfs@vger.kernel.org
-Cc: Marc Lehmann <schmorp@schmorp.de>, Josef Bacik <josef@toxicpanda.com>
-Subject: [PATCH v6 2/5] btrfs: space-info: Use per-profile available space in can_overcommit()
-Date: Thu, 16 Jan 2020 14:04:01 +0800
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     Marc Lehmann <schmorp@schmorp.de>,
+        Josef Bacik <josef@toxicpanda.com>
+Subject: [PATCH v7 2/5] btrfs: space-info: Use per-profile available space in can_overcommit()
+Date:   Tue, 11 Feb 2020 13:11:50 +0800
 
 For the following disk layout, can_overcommit() can cause false
 confidence in available space:
@@ -25,7 +26,6 @@ all, we need proper chunk-allocator level awareness to do such estimation.
 Thankfully, we have per-profile available space already calculated, just
 use that facility to avoid such false confidence.
 
-[HH: small context fix due to removed system chunk for can_overcommit()]
 Reported-by: Marc Lehmann <schmorp@schmorp.de>
 Signed-off-by: Qu Wenruo <wqu@suse.com>
 Reviewed-by: Josef Bacik <josef@toxicpanda.com>
@@ -34,12 +34,12 @@ Reviewed-by: Josef Bacik <josef@toxicpanda.com>
  1 file changed, 7 insertions(+), 8 deletions(-)
 
 diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
-index f09aa6ee9113..c26aba9e7124 100644
+index 01297c5b2666..2fdc19a39e07 100644
 --- a/fs/btrfs/space-info.c
 +++ b/fs/btrfs/space-info.c
-@@ -164,10 +164,10 @@  static int can_overcommit(struct btrfs_fs_info *fs_info,
- 			  struct btrfs_space_info *space_info, u64 bytes,
- 			  enum btrfs_reserve_flush_enum flush)
+@@ -163,10 +163,10 @@ int btrfs_can_overcommit(struct btrfs_fs_info *fs_info,
+ 			 struct btrfs_space_info *space_info, u64 bytes,
+ 			 enum btrfs_reserve_flush_enum flush)
  {
 +	enum btrfs_raid_types index;
  	u64 profile;
@@ -49,7 +49,7 @@ index f09aa6ee9113..c26aba9e7124 100644
  
  	/* Don't overcommit when in mixed mode. */
  	if (space_info->flags & BTRFS_BLOCK_GROUP_DATA)
-@@ -179,16 +179,15 @@ static int can_overcommit(struct btrfs_fs_info *fs_info,
+@@ -178,16 +178,15 @@ int btrfs_can_overcommit(struct btrfs_fs_info *fs_info,
  		profile = btrfs_metadata_alloc_profile(fs_info);
  
  	used = btrfs_space_info_used(space_info, true);

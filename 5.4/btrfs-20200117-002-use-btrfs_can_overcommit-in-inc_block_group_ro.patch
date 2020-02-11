@@ -1,8 +1,8 @@
-From:   Josef Bacik <josef@toxicpanda.com>
-To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com
-Cc:     Qu Wenruo <wqu@suse.com>
+From: Josef Bacik <josef@toxicpanda.com>
+To: linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Cc: Qu Wenruo <wqu@suse.com>
 Subject: [PATCH 3/3] btrfs: use btrfs_can_overcommit in inc_block_group_ro
-Date:   Fri, 17 Jan 2020 09:07:39 -0500
+Date: Fri, 17 Jan 2020 09:07:39 -0500
 
 inc_block_group_ro does a calculation to see if we have enough room left
 over if we mark this block group as read only in order to see if it's ok
@@ -17,7 +17,6 @@ enough space to remove the remaining free space in the block group we
 are trying to mark read only.  If we do then we can mark this block
 group as read only.
 
-[HH: context fix for added btrfs_raid_types in can_overcommit()]
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 Reviewed-by: Qu Wenruo <wqu@suse.com>
 ---
@@ -109,8 +108,8 @@ index 537bc310a673..01297c5b2666 100644
 +			 struct btrfs_space_info *space_info, u64 bytes,
 +			 enum btrfs_reserve_flush_enum flush)
  {
- 	enum btrfs_raid_types index;
  	u64 profile;
+ 	u64 avail;
 @@ -226,7 +226,8 @@ void btrfs_try_granting_tickets(struct btrfs_fs_info *fs_info,
  
  		/* Check and see if our ticket can be satisified now. */
@@ -136,7 +135,7 @@ index 537bc310a673..01297c5b2666 100644
 -	if (can_overcommit(fs_info, space_info, SZ_1M,
 -			   BTRFS_RESERVE_FLUSH_ALL))
 +	if (btrfs_can_overcommit(fs_info, space_info, SZ_1M,
-+			   BTRFS_RESERVE_FLUSH_ALL))
++				 BTRFS_RESERVE_FLUSH_ALL))
  		expected = div_factor_fine(space_info->total_bytes, 95);
  	else
  		expected = div_factor_fine(space_info->total_bytes, 90);
