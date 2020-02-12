@@ -1,7 +1,7 @@
-From: Qu Wenruo <wqu@suse.com>
-To: linux-btrfs@vger.kernel.org
-Subject: [PATCH v4] btrfs: Don't submit any btree write bio after transaction is aborted
-Date: Sat,  8 Feb 2020 18:07:40 +0800
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH v5] btrfs: Don't submit any btree write bio if the fs has error
+Date:   Wed, 12 Feb 2020 14:12:44 +0800
 
 [BUG]
 There is a fuzzed image which could cause KASAN report at unmount time.
@@ -148,35 +148,18 @@ The detailed sequence looks like this:
   But tree 29421568 is still dirty, thus triggering writeback.
   Since all workqueues are already freed, we cause use-after-free.
 
-This shows us that, log tree blocks + back extent tree can cause wild
+This shows us that, log tree blocks + bad extent tree can cause wild
 dirty pages.
 
 [FIX]
-To fix the problem, don't submit any btree write bio after aborted
-transaction.
-This is the last safe net, just in case there are other cases can
-cause similar problem.
+To fix the problem, don't submit any btree write bio if the fs has any
+error.
+This is the last safe net, just in case other cleanup didn't catch it.
 
 Link: https://github.com/bobfuzzer/CVE/tree/master/CVE-2019-19377
 CVE: CVE-2019-19377
 Signed-off-by: Qu Wenruo <wqu@suse.com>
 ---
-To Josef,
-
-There is another solution, by resetting the eb's generation to 0 in
-btrfs_clean_tree_block(), so that later should_cow_block() will choose
-to COW other than reuse.
-
-But that would cause ASSERT() if CONFIG_BTRFS_FS_CHECK_INTEGRITY is
-enabled.
-As described, the offending tree block is completely empty during log
-tree rebalance, if it's COWed for extent tree, tree-checker won't
-allow empty extent tree at all, thus we will hit ASSERT() in
-btrfs_mark_buffer_dirty().
-
-I'm not sure if we should go that direction. So I only go the
-last-safe-net method.
-
 Changelog:
 v2:
 - More detailed reason on why the dirty pages are not cleaned up
@@ -200,12 +183,18 @@ v4:
   generation.
   It's a good adventure, but I won't want to debug such damn complex
   case any more.
+
+v5:
+- Check BTRFS_FS_STATE_ERROR instead to provide better coverage
+  As there are cases where __btrfs_handle_fs_error() is called without a
+  transaction.
+  Also change commit message, comment and subject accordingly.
 ---
  fs/btrfs/extent_io.c | 35 ++++++++++++++++++++++++++++++++++-
  1 file changed, 34 insertions(+), 1 deletion(-)
 
 diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
-index 2f4802f405a2..59fb3270d3cf 100644
+index 2f4802f405a2..24475c2ea3c0 100644
 --- a/fs/btrfs/extent_io.c
 +++ b/fs/btrfs/extent_io.c
 @@ -3927,6 +3927,7 @@ int btree_write_cache_pages(struct address_space *mapping,
@@ -222,7 +211,7 @@ index 2f4802f405a2..59fb3270d3cf 100644
  	}
 -	ret = flush_write_bio(&epd);
 +	/*
-+	 * If transaction is aborted, don't allow any write bio to be
++	 * If something went wrong, don't allow any metadata write bio to be
 +	 * submitted.
 +	 *
 +	 * This would prevent use-after-free if we had dirty pages not
@@ -246,9 +235,9 @@ index 2f4802f405a2..59fb3270d3cf 100644
 +	 *
 +	 *   Now such dirty tree block will not be cleaned by any dirty
 +	 *   extent io tree. Thus we don't want to submit such wild eb
-+	 *   if transaction is aborted.
++	 *   if the fs already has error.
 +	 */
-+	if (!test_bit(BTRFS_FS_STATE_TRANS_ABORTED, &fs_info->fs_state)) {
++	if (!test_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state)) {
 +		ret = flush_write_bio(&epd);
 +	} else {
 +		ret = -EUCLEAN;
