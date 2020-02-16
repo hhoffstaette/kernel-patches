@@ -1,0 +1,31 @@
+From: Igor Russkikh <irusskikh@marvell.com>
+To: <netdev@vger.kernel.org>
+Subject: [PATCH net 8/8] net: atlantic: fix out of range usage of active_vlans array
+Date: Fri, 14 Feb 2020 18:44:58 +0300
+
+From: Dmitry Bogdanov <dbogdanov@marvell.com>
+
+fix static checker warning:
+ drivers/net/ethernet/aquantia/atlantic/aq_filters.c:166 aq_check_approve_fvlan()
+ error: passing untrusted data to 'test_bit()'
+
+Reported-by: Dan Carpenter <dan.carpenter@oracle.com>
+Fixes: 7975d2aff5af: ("net: aquantia: add support of rx-vlan-filter offload")
+Signed-off-by: Dmitry Bogdanov <dbogdanov@marvell.com>
+---
+ drivers/net/ethernet/aquantia/atlantic/aq_filters.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/aquantia/atlantic/aq_filters.c b/drivers/net/ethernet/aquantia/atlantic/aq_filters.c
+index 6102251bb909..03ff92bc4a7f 100644
+--- a/drivers/net/ethernet/aquantia/atlantic/aq_filters.c
++++ b/drivers/net/ethernet/aquantia/atlantic/aq_filters.c
+@@ -163,7 +163,7 @@ aq_check_approve_fvlan(struct aq_nic_s *aq_nic,
+ 	}
+ 
+ 	if ((aq_nic->ndev->features & NETIF_F_HW_VLAN_CTAG_FILTER) &&
+-	    (!test_bit(be16_to_cpu(fsp->h_ext.vlan_tci),
++	    (!test_bit(be16_to_cpu(fsp->h_ext.vlan_tci) & VLAN_VID_MASK,
+ 		       aq_nic->active_vlans))) {
+ 		netdev_err(aq_nic->ndev,
+ 			   "ethtool: unknown vlan-id specified");
