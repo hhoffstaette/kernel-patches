@@ -1,0 +1,126 @@
+From: Linus Torvalds <torvalds@linux-foundation.org>
+Date: Tue, 18 Feb 2020 10:12:58 -0800
+Subject: [PATCH] pipe: make sure to wake up everybody when the last reader/writer closes
+
+Andrei Vagin reported that commit 0ddad21d3e99 ("pipe: use exclusive
+waits when reading or writing") broke one of the CRIU tests.  He even
+has a trivial reproducer:
+
+    #include <unistd.h>
+    #include <sys/types.h>
+    #include <sys/wait.h>
+
+    int main()
+    {
+            int p[2];
+            pid_t p1, p2;
+            int status;
+
+            if (pipe(p) == -1)
+                    return 1;
+
+            p1 = fork();
+            if (p1 == 0) {
+                    close(p[1]);
+                    read(p[0], &status, sizeof(status));
+                    return 0;
+            }
+            p2 = fork();
+            if (p2 == 0) {
+                    close(p[1]);
+                    read(p[0], &status, sizeof(status));
+                    return 0;
+            }
+            sleep(1);
+            close(p[1]);
+            wait(&status);
+            wait(&status);
+
+            return 0;
+    }
+
+and the problem - once he points it out - is obvious.  We use these nice
+exclusive waits, but when the last writer goes away, it then needs to
+wake up _every_ reader (and conversely, the last reader disappearing
+needs to wake every writer, of course).
+
+In fact, when going through this, we had several small oddities around
+how to wake things.  We did in fact wake every reader when we changed
+the size of the pipe buffers.  But that's entirely pointless, since that
+just acts as a possible source of new space - no new data to read.
+
+And when we change the size of the buffer, we don't need to wake all
+writers even when we add space - that case acts just as if somebody made
+space by reading, and any writer that finds itself not filling it up
+entirely will wake the next one.
+
+On the other hand, on the exit path, we tried to limit the wakeups with
+the proper poll keys etc, which is entirely pointless, because at that
+point we obviously need to wake up everybody.  So don't do that: just
+wake up everybody - but only do that if the counts changed to zero.
+
+So fix those non-IO wakeups to be more proper: space change doesn't add
+any new data, but it might make room for writers, so it wakes up a
+writer.  And the actual changes to reader/writer counts should wake up
+everybody, since everybody is affected (ie readers will all see EOF if
+the writers have gone away, and writers will all get EPIPE if all
+readers have gone away).
+
+Fixes: 0ddad21d3e99 ("pipe: use exclusive waits when reading or writing")
+Reported-by: Andrei Vagin <avagin@gmail.com>
+Cc: Josh Triplett <josh@joshtriplett.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ fs/pipe.c | 18 ++++++++++--------
+ 1 file changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/fs/pipe.c b/fs/pipe.c
+index 5a34d6c22d4c..2144507447c5 100644
+--- a/fs/pipe.c
++++ b/fs/pipe.c
+@@ -722,9 +722,10 @@ pipe_release(struct inode *inode, struct file *file)
+ 	if (file->f_mode & FMODE_WRITE)
+ 		pipe->writers--;
+ 
+-	if (pipe->readers || pipe->writers) {
+-		wake_up_interruptible_sync_poll(&pipe->rd_wait, EPOLLIN | EPOLLRDNORM | EPOLLERR | EPOLLHUP);
+-		wake_up_interruptible_sync_poll(&pipe->wr_wait, EPOLLOUT | EPOLLWRNORM | EPOLLERR | EPOLLHUP);
++	/* Was that the last reader or writer, but not the other side? */
++	if (!pipe->readers != !pipe->writers) {
++		wake_up_interruptible_all(&pipe->rd_wait);
++		wake_up_interruptible_all(&pipe->wr_wait);
+ 		kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
+ 		kill_fasync(&pipe->fasync_writers, SIGIO, POLL_OUT);
+ 	}
+@@ -1026,8 +1027,8 @@ static int wait_for_partner(struct pipe_inode_info *pipe, unsigned int *cnt)
+ 
+ static void wake_up_partner(struct pipe_inode_info *pipe)
+ {
+-	wake_up_interruptible(&pipe->rd_wait);
+-	wake_up_interruptible(&pipe->wr_wait);
++	wake_up_interruptible_all(&pipe->rd_wait);
++	wake_up_interruptible_all(&pipe->wr_wait);
+ }
+ 
+ static int fifo_open(struct inode *inode, struct file *filp)
+@@ -1144,7 +1145,7 @@ static int fifo_open(struct inode *inode, struct file *filp)
+ 
+ err_wr:
+ 	if (!--pipe->writers)
+-		wake_up_interruptible(&pipe->rd_wait);
++		wake_up_interruptible_all(&pipe->rd_wait);
+ 	ret = -ERESTARTSYS;
+ 	goto err;
+ 
+@@ -1271,8 +1272,9 @@ static long pipe_set_size(struct pipe_inode_info *pipe, unsigned long arg)
+ 	pipe->max_usage = nr_slots;
+ 	pipe->tail = tail;
+ 	pipe->head = head;
+-	wake_up_interruptible_all(&pipe->rd_wait);
+-	wake_up_interruptible_all(&pipe->wr_wait);
++
++	/* This might have made more room for writers */
++	wake_up_interruptible(&pipe->wr_wait);
+ 	return pipe->max_usage * PAGE_SIZE;
+ 
+ out_revert_acct:
