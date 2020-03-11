@@ -1,11 +1,18 @@
-From: Nitin Gupta <nigupta@nvidia.com>
-To: Mel Gorman <mgorman@techsingularity.net>, Michal Hocko <mhocko@suse.com>,
-    Vlastimil Babka <vbabka@suse.cz>
-Cc: Nitin Gupta <nigupta@nvidia.com>, Matthew Wilcox <willy@infradead.org>,
-    Andrew Morton <akpm@linux-foundation.org>, Mike Kravetz <mike.kravetz@oracle.com>,
-    linux-kernel <linux-kernel@vger.kernel.org>, linux-mm <linux-mm@kvack.org>
-Subject: [PATCH v2] mm: Proactive compaction
-Date: Mon, 2 Mar 2020 13:33:43 -0800
+From: Nitin Gupta <nigupta-DDmLM1+adcrQT0dZR+AlfA@public.gmane.org>
+To: Mel Gorman <mgorman-3eNAlZScCAx27rWaFMvyedHuzzzSOjJt@public.gmane.org>,
+	Michal Hocko <mhocko-IBi9RG/b67k@public.gmane.org>, Vlastimil Babka
+	<vbabka-AlSwsSmVLrQ@public.gmane.org>
+Cc: Matthew Wilcox <willy-wEGCiKHe2LqWVfeAwA7xHQ@public.gmane.org>,
+	Andrew Morton <akpm-de/tnXTf+JLsfHDXvbKv3WD2FQJk+8+b@public.gmane.org>,
+	Mike Kravetz <mike.kravetz-QHcLZuEGTsvQT0dZR+AlfA@public.gmane.org>,
+	Joonsoo Kim <iamjoonsoo.kim-Hm3cg6mZ9cc@public.gmane.org>, David Rientjes
+	<rientjes-hpIqsD4AKlfQT0dZR+AlfA@public.gmane.org>, Nitin Gupta
+	<nitin-PQsoZtsL2ru1MwkOinUWXQ@public.gmane.org>, linux-kernel
+	<linux-kernel-u79uwXL29TY76Z2rM5mHXA@public.gmane.org>, linux-mm
+	<linux-mm-Bw31MaZKKs3YtjvyW6yDsg@public.gmane.org>, Linux API
+	<linux-api-u79uwXL29TY76Z2rM5mHXA@public.gmane.org>
+Subject: [PATCH v3] mm: Proactive compaction
+Date: Tue, 10 Mar 2020 15:25:39 -0700
 
 For some applications we need to allocate almost all memory as
 hugepages. However, on a running system, higher order allocations can
@@ -19,40 +26,39 @@ proactive compaction can help us allocate a large fraction of memory as
 hugepages keeping allocation latencies low.
 
 For a more proactive compaction, the approach taken here is to define
-per page-node tunable called 'proactiveness' which dictates
-bounds for external fragmentation for HUGETLB_PAGE_ORDER pages which
-kcompactd should try to maintain.
+a new tunable called 'proactiveness' which dictates bounds for external
+fragmentation wrt HUGETLB_PAGE_ORDER order which kcompactd tries to
+maintain.
 
 The tunable is exposed through sysfs:
-  /sys/kernel/mm/compaction/node-n/proactiveness
+  /sys/kernel/mm/compaction/proactiveness
 
-The value of this tunable is used to determine low and high thresholds
-for external fragmentation wrt HUGETLB_PAGE_ORDER order.
+It takes value in range [0, 100], with a default of 20.
 
-Note that previous version of this patch [1] was found to introduce too
+Note that a previous version of this patch [1] was found to introduce too
 many tunables (per-order extfrag{low, high}) but this one reduces them
-to just (per-node proactiveness). Also, the new tunable is an
-opaque value instead of asking for specific bounds of "external
-fragmentation" which would have been difficult to estimate. The internal
-interpretation of this opaque value allows for future fine-tuning.
+to just one (proactiveness). Also, the new tunable is an opaque value
+instead of asking for specific bounds of "external fragmentation" which
+would have been difficult to estimate. The internal interpretation of
+this opaque value allows for future fine-tuning.
 
 Currently, we use a simple translation from this tunable to [low, high]
 "proactive compaction score" thresholds (low=100-proactiveness,
 high=low+10%). The score for a node is defined as weighed mean of per-zone
-external fragmentation wrt HUGETLB_PAGE_ORDER. A zone's present_pages
+external fragmentation wrt HUGETLB_PAGE_ORDER order. A zone's present_pages
 determines its weight. Proactive compaction is triggered when a node's
 score exceeds its high threshold value and continues till it reaches its
-low value.
+the low value.
 
 To periodically check per-node score, we reuse per-node kcompactd
-threads which are woken up every few milliseconds to check the same. If
+threads which are woken up every 500 milliseconds to check the same. If
 a node's score exceeds its high threshold (as derived from user provided
 proactiveness value), proactive compaction is started till its score
-reaches its low threshold value. By default, proactiveness is set to 0
-(=> low=100%, high=100%) for all nodes.
+reaches its low threshold value. By default, proactiveness is set to 20,
+which implies threshold values of low=80 and high=90.
 
 This patch is largely based on ideas from Michal Hocko posted here:
-https://lore.kernel.org/linux-mm/20161230131412.GI13301@dhcp22.suse.cz/
+https://lore.kernel.org/linux-mm/20161230131412.GI13301-2MMpYkNvuYDjFM9bn6wA6Q@public.gmane.org/
 
 Performance data
 ================
@@ -95,8 +101,8 @@ echo 0 | sudo tee /sys/kernel/mm/compaction/node-*/proactiveness
 	  90   32859
 	  95   33799
 
-Total 2M hugepages allocated = 383859 (749G worth of hugepages out of 762G
-total free => 98% of free memory could be allocated as hugepages)
+Total 2M hugepages allocated = 383859 (749G worth of hugepages out of
+762G total free => 98% of free memory could be allocated as hugepages)
 
 - With 5.6.0-rc3 + this patch, with proactiveness=20
 
@@ -116,19 +122,21 @@ echo 20 | sudo tee /sys/kernel/mm/compaction/node-*/proactiveness
 	  90       5
 	  95     429
 
-Total 2M hugepages allocated = 11120 (21.7G worth of hugepages out of
-25G total free => 98% of free memory could be allocated as hugepages)
+Total 2M hugepages allocated = 384105 (750G worth of hugepages out of
+762G total free => 98% of free memory could be allocated as hugepages)
 
 2. JAVA heap allocation
 
-First fragment memory using the same method as for (1).
+In this test, we first fragment memory using the same method as for (1).
 
-With memory in a fragmented state, run:
+Then, we start a Java process with a heap size set to 700G and request
+the heap to be allocated with THP hugepages. We also set THP to madvise
+to allow hugepage backing of this heap.
 
 /usr/bin/time
  java -Xms700G -Xmx700G -XX:+UseTransparentHugePages -XX:+AlwaysPreTouch
 
-To allocate 700G of java heap using hugepages.
+The above command allocates 700G of Java heap using hugepages.
 
 - With vanilla 5.6.0-rc3
 
@@ -140,6 +148,23 @@ To allocate 700G of java heap using hugepages.
 
 Elapsed time remains around 3:15 as proactiveness is further increased.
 
+Note that proactive compaction happens throughout the runtime of these
+benchmarks. The situation of one-time compaction, sufficient to supply
+hugepages for following allocation stream, can probably happen for more
+extreme proactiveness values, like 80 or 90.
+
+In the above Java benchmark, proactiveness=20. The test starts with a
+node's score of 80 or higher, depending on the delay between the
+fragmentation step and actually starting the benchmark, which gives
+more-or-less time for the initial round of compaction. As the benchmark
+consumes hugepages, node's score quickly rises above the high threshold
+(90) and proactive compaction starts again which (hopefully) brings down
+extfrag levels to the low threshold level (80).  Repeat.
+
+bpftrace also confirms proactive compaction running 20+ times during the
+runtime of this Java benchmark. kcompactd threads consume 100% of one of
+the CPUs while it tries to bring a node's score within thresholds.
+
 Backoff behavior
 ================
 
@@ -149,24 +174,36 @@ should essentially back off. To test this aspect:
 
 - Created a kernel driver that allocates almost all memory as hugepages
   followed by freeing first 3/4 of each hugepage.
-- Set proactiveness=40 (for all nodes)
+- Set proactiveness=40
 - Note that proactive_compact_node() is deferred maximum number of times
   with HPAGE_FRAG_CHECK_INTERVAL_MSEC of wait between each check
   (=> ~30 seconds between retries).
 
 [1] https://patchwork.kernel.org/patch/11098289/
 
-Signed-off-by: Nitin Gupta <nigupta@nvidia.com>
-To: Mel Gorman <mgorman@techsingularity.net>
-To: Michal Hocko <mhocko@suse.com>
-To: Vlastimil Babka <vbabka@suse.cz>
-CC: Matthew Wilcox <willy@infradead.org>
-CC: Andrew Morton <akpm@linux-foundation.org>
-CC: Mike Kravetz <mike.kravetz@oracle.com>
-CC: linux-kernel <linux-kernel@vger.kernel.org>
-CC: linux-mm <linux-mm@kvack.org>
+Signed-off-by: Nitin Gupta <nigupta-DDmLM1+adcrQT0dZR+AlfA@public.gmane.org>
+To: Mel Gorman <mgorman-3eNAlZScCAx27rWaFMvyedHuzzzSOjJt@public.gmane.org>
+To: Michal Hocko <mhocko-IBi9RG/b67k@public.gmane.org>
+To: Vlastimil Babka <vbabka-AlSwsSmVLrQ@public.gmane.org>
+CC: Matthew Wilcox <willy-wEGCiKHe2LqWVfeAwA7xHQ@public.gmane.org>
+CC: Andrew Morton <akpm-de/tnXTf+JLsfHDXvbKv3WD2FQJk+8+b@public.gmane.org>
+CC: Mike Kravetz <mike.kravetz-QHcLZuEGTsvQT0dZR+AlfA@public.gmane.org>
+CC: Joonsoo Kim <iamjoonsoo.kim-Hm3cg6mZ9cc@public.gmane.org>
+CC: David Rientjes <rientjes-hpIqsD4AKlfQT0dZR+AlfA@public.gmane.org>
+CC: Nitin Gupta <nitin-PQsoZtsL2ru1MwkOinUWXQ@public.gmane.org>
+CC: linux-kernel <linux-kernel-u79uwXL29TY76Z2rM5mHXA@public.gmane.org>
+CC: linux-mm <linux-mm-Bw31MaZKKs3YtjvyW6yDsg@public.gmane.org>
+CC: Linux API <linux-api-u79uwXL29TY76Z2rM5mHXA@public.gmane.org>
 
 ---
+Changelog v3 vs v2:
+ - Make proactiveness a global tunable and not per-node. Also upadated the
+   patch description to reflect the same (Vlastimil Babka).
+ - Don't start proactive compaction if kswapd is running (Vlastimil Babka).
+ - Clarified in the description that compaction runs in parallel with
+   the workload, instead of a one-time compaction followed by a stream of
+   hugepage allocations.
+
 Changelog v2 vs v1:
  - Introduce per-node and per-zone "proactive compaction score". This
    score is compared against watermarks which are set according to
@@ -177,34 +214,18 @@ Changelog v2 vs v1:
    use more than extfrag wrt hugepage size to determine proactive
    compaction score.
 ---
- include/linux/compaction.h |  10 ++
- mm/compaction.c            | 242 ++++++++++++++++++++++++++++++++++++-
+ include/linux/compaction.h |   1 +
+ mm/compaction.c            | 195 +++++++++++++++++++++++++++++++++++--
  mm/internal.h              |   1 +
  mm/page_alloc.c            |   1 +
- mm/vmstat.c                |  12 ++
- 5 files changed, 260 insertions(+), 6 deletions(-)
+ mm/vmstat.c                |  12 +++
+ 5 files changed, 204 insertions(+), 6 deletions(-)
 
 diff --git a/include/linux/compaction.h b/include/linux/compaction.h
-index 4b898cdbdf05..c98f45107164 100644
+index 4b898cdbdf05..47c5df1fa59c 100644
 --- a/include/linux/compaction.h
 +++ b/include/linux/compaction.h
-@@ -60,6 +60,15 @@ enum compact_result {
- 
- struct alloc_context; /* in mm/internal.h */
- 
-+// "node-%d"
-+#define COMPACTION_STATE_NAME_LEN 16
-+// Per-node compaction state
-+struct compaction_state {
-+	int node_id;
-+	unsigned int proactiveness;
-+	char name[COMPACTION_STATE_NAME_LEN];
-+};
-+
- /*
-  * Number of free order-0 pages that should be available above given watermark
-  * to make sure compaction has reasonable chance of not running out of free
-@@ -90,6 +99,7 @@ extern int sysctl_compaction_handler(struct ctl_table *table, int write,
+@@ -90,6 +90,7 @@ extern int sysctl_compaction_handler(struct ctl_table *table, int write,
  extern int sysctl_extfrag_threshold;
  extern int sysctl_compact_unevictable_allowed;
  
@@ -213,21 +234,19 @@ index 4b898cdbdf05..c98f45107164 100644
  extern enum compact_result try_to_compact_pages(gfp_t gfp_mask,
  		unsigned int order, unsigned int alloc_flags,
 diff --git a/mm/compaction.c b/mm/compaction.c
-index 672d3c78c6ab..d906ccfedce0 100644
+index 672d3c78c6ab..0344315ae044 100644
 --- a/mm/compaction.c
 +++ b/mm/compaction.c
-@@ -25,6 +25,10 @@
- #include <linux/psi.h>
+@@ -26,6 +26,8 @@
  #include "internal.h"
  
-+#ifdef CONFIG_COMPACTION
-+static struct compaction_state compaction_states[MAX_NUMNODES];
-+#endif
-+
  #ifdef CONFIG_COMPACTION
++static unsigned int compaction_proactiveness = 20;
++
  static inline void count_compact_event(enum vm_event_item item)
  {
-@@ -50,6 +54,8 @@ static inline void count_compact_events(enum vm_event_item item, long delta)
+ 	count_vm_event(item);
+@@ -50,6 +52,8 @@ static inline void count_compact_events(enum vm_event_item item, long delta)
  #define pageblock_start_pfn(pfn)	block_start_pfn(pfn, pageblock_order)
  #define pageblock_end_pfn(pfn)		block_end_pfn(pfn, pageblock_order)
  
@@ -236,10 +255,15 @@ index 672d3c78c6ab..d906ccfedce0 100644
  static unsigned long release_freepages(struct list_head *freelist)
  {
  	struct page *page, *next;
-@@ -1846,6 +1852,51 @@ static inline bool is_via_compact_memory(int order)
+@@ -1846,6 +1850,56 @@ static inline bool is_via_compact_memory(int order)
  	return order == -1;
  }
  
++static bool kswapd_is_running(pg_data_t *pgdat)
++{
++	return pgdat->kswapd && (pgdat->kswapd->state == TASK_RUNNING);
++}
++
 +static int proactive_compaction_score_zone(struct zone *zone)
 +{
 +	unsigned long score;
@@ -270,7 +294,7 @@ index 672d3c78c6ab..d906ccfedce0 100644
 +{
 +	int wmark_low;
 +
-+	wmark_low = 100 - compaction_states[pgdat->node_id].proactiveness;
++	wmark_low = 100 - compaction_proactiveness;
 +	return low ? wmark_low : min(wmark_low + 10, 100);
 +}
 +
@@ -278,7 +302,7 @@ index 672d3c78c6ab..d906ccfedce0 100644
 +{
 +	int wmark_high;
 +
-+	if (!compaction_states[pgdat->node_id].proactiveness)
++	if (!compaction_proactiveness || kswapd_is_running(pgdat))
 +		return false;
 +
 +	wmark_high = proactive_compaction_score_wmark(pgdat, false);
@@ -288,27 +312,33 @@ index 672d3c78c6ab..d906ccfedce0 100644
  static enum compact_result __compact_finished(struct compact_control *cc)
  {
  	unsigned int order;
-@@ -1872,6 +1923,19 @@ static enum compact_result __compact_finished(struct compact_control *cc)
+@@ -1872,6 +1926,25 @@ static enum compact_result __compact_finished(struct compact_control *cc)
  			return COMPACT_PARTIAL_SKIPPED;
  	}
  
 +	if (cc->proactive_compaction) {
 +		int score, wmark_low;
++		pg_data_t *pgdat;
++
++		pgdat = cc->zone->zone_pgdat;
++		if (kswapd_is_running(pgdat))
++			return COMPACT_PARTIAL_SKIPPED;
 +
 +		score = proactive_compaction_score_zone(cc->zone);
-+		wmark_low = proactive_compaction_score_wmark(
-+					cc->zone->zone_pgdat, true);
++		wmark_low = proactive_compaction_score_wmark(pgdat, true);
++
 +		if (score > wmark_low)
 +			ret = COMPACT_CONTINUE;
 +		else
 +			ret = COMPACT_SUCCESS;
++
 +		goto out;
 +	}
 +
  	if (is_via_compact_memory(cc->order))
  		return COMPACT_CONTINUE;
  
-@@ -1930,6 +1994,7 @@ static enum compact_result __compact_finished(struct compact_control *cc)
+@@ -1930,6 +2003,7 @@ static enum compact_result __compact_finished(struct compact_control *cc)
  		}
  	}
  
@@ -316,7 +346,7 @@ index 672d3c78c6ab..d906ccfedce0 100644
  	if (cc->contended || fatal_signal_pending(current))
  		ret = COMPACT_CONTENDED;
  
-@@ -2301,6 +2366,7 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
+@@ -2301,6 +2375,7 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
  		.alloc_flags = alloc_flags,
  		.classzone_idx = classzone_idx,
  		.direct_compaction = true,
@@ -324,7 +354,7 @@ index 672d3c78c6ab..d906ccfedce0 100644
  		.whole_zone = (prio == MIN_COMPACT_PRIORITY),
  		.ignore_skip_hint = (prio == MIN_COMPACT_PRIORITY),
  		.ignore_block_suitable = (prio == MIN_COMPACT_PRIORITY)
-@@ -2404,6 +2470,34 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
+@@ -2404,6 +2479,34 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
  	return rc;
  }
  
@@ -359,7 +389,7 @@ index 672d3c78c6ab..d906ccfedce0 100644
  
  /* Compact all zones within a node */
  static void compact_node(int nid)
-@@ -2417,9 +2511,10 @@ static void compact_node(int nid)
+@@ -2417,9 +2520,10 @@ static void compact_node(int nid)
  		.ignore_skip_hint = true,
  		.whole_zone = true,
  		.gfp_mask = GFP_KERNEL,
@@ -371,7 +401,7 @@ index 672d3c78c6ab..d906ccfedce0 100644
  	for (zoneid = 0; zoneid < MAX_NR_ZONES; zoneid++) {
  
  		zone = &pgdat->node_zones[zoneid];
-@@ -2492,6 +2587,118 @@ void compaction_unregister_node(struct node *node)
+@@ -2492,6 +2596,63 @@ void compaction_unregister_node(struct node *node)
  }
  #endif /* CONFIG_SYSFS && CONFIG_NUMA */
  
@@ -385,26 +415,12 @@ index 672d3c78c6ab..d906ccfedce0 100644
 +		__ATTR(_name, 0644, _name##_show, _name##_store)
 +
 +static struct kobject *compaction_kobj;
-+static struct kobject *compaction_kobjs[MAX_NUMNODES];
-+
-+static struct compaction_state *kobj_to_compaction_state(struct kobject *kobj)
-+{
-+	int node;
-+
-+	for_each_online_node(node) {
-+		if (compaction_kobjs[node] == kobj)
-+			return &compaction_states[node];
-+	}
-+
-+	return NULL;
-+}
 +
 +static ssize_t proactiveness_store(struct kobject *kobj,
 +		struct kobj_attribute *attr, const char *buf, size_t count)
 +{
 +	int err;
 +	unsigned long input;
-+	struct compaction_state *c = kobj_to_compaction_state(kobj);
 +
 +	err = kstrtoul(buf, 10, &input);
 +	if (err)
@@ -412,16 +428,14 @@ index 672d3c78c6ab..d906ccfedce0 100644
 +	if (input > 100)
 +		return -EINVAL;
 +
-+	c->proactiveness = input;
++	compaction_proactiveness = input;
 +	return count;
 +}
 +
 +static ssize_t proactiveness_show(struct kobject *kobj,
 +		struct kobj_attribute *attr, char *buf)
 +{
-+	struct compaction_state *c = kobj_to_compaction_state(kobj);
-+
-+	return sprintf(buf, "%u\n", c->proactiveness);
++	return sprintf(buf, "%u\n", compaction_proactiveness);
 +}
 +
 +COMPACTION_ATTR(proactiveness);
@@ -435,54 +449,15 @@ index 672d3c78c6ab..d906ccfedce0 100644
 +	.attrs = compaction_attrs,
 +};
 +
-+static int compaction_sysfs_add_node(struct compaction_state *c,
-+	struct kobject *parent, struct kobject **compaction_kobjs,
-+	const struct attribute_group *compaction_attr_group)
-+{
-+	int retval;
-+
-+	compaction_kobjs[c->node_id] =
-+			kobject_create_and_add(c->name, parent);
-+	if (!compaction_kobjs[c->node_id])
-+		return -ENOMEM;
-+
-+	retval = sysfs_create_group(compaction_kobjs[c->node_id],
-+				compaction_attr_group);
-+	if (retval)
-+		kobject_put(compaction_kobjs[c->node_id]);
-+
-+	return retval;
-+}
-+
 +static void __init compaction_sysfs_init(void)
 +{
-+	struct compaction_state *c;
-+	int err, node;
-+
 +	compaction_kobj = kobject_create_and_add("compaction", mm_kobj);
 +	if (!compaction_kobj)
 +		return;
 +
-+	for_each_online_node(node) {
-+		c = &compaction_states[node];
-+		err = compaction_sysfs_add_node(c, compaction_kobj,
-+					compaction_kobjs,
-+					&compaction_attr_group);
-+		if (err)
-+			pr_err("compaction: Unable to add state %s", c->name);
-+	}
-+}
-+
-+static void __init compaction_init(void)
-+{
-+	int node;
-+
-+	for_each_online_node(node) {
-+		struct compaction_state *c = &compaction_states[node];
-+
-+		c->node_id = node;
-+		c->proactiveness = 0;
-+		snprintf(c->name, COMPACTION_STATE_NAME_LEN, "node-%d", node);
++	if (sysfs_create_group(compaction_kobj, &compaction_attr_group)) {
++		kobject_put(compaction_kobj);
++		compaction_kobj = NULL;
 +	}
 +}
 +#endif
@@ -490,7 +465,7 @@ index 672d3c78c6ab..d906ccfedce0 100644
  static inline bool kcompactd_work_requested(pg_data_t *pgdat)
  {
  	return pgdat->kcompactd_max_order > 0 || kthread_should_stop();
-@@ -2532,6 +2739,8 @@ static void kcompactd_do_work(pg_data_t *pgdat)
+@@ -2532,6 +2693,8 @@ static void kcompactd_do_work(pg_data_t *pgdat)
  		.mode = MIGRATE_SYNC_LIGHT,
  		.ignore_skip_hint = false,
  		.gfp_mask = GFP_KERNEL,
@@ -499,7 +474,7 @@ index 672d3c78c6ab..d906ccfedce0 100644
  	};
  	trace_mm_compaction_kcompactd_wake(pgdat->node_id, cc.order,
  							cc.classzone_idx);
-@@ -2629,6 +2838,7 @@ static int kcompactd(void *p)
+@@ -2629,6 +2792,7 @@ static int kcompactd(void *p)
  {
  	pg_data_t *pgdat = (pg_data_t*)p;
  	struct task_struct *tsk = current;
@@ -507,7 +482,7 @@ index 672d3c78c6ab..d906ccfedce0 100644
  
  	const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id);
  
-@@ -2644,12 +2854,29 @@ static int kcompactd(void *p)
+@@ -2644,12 +2808,29 @@ static int kcompactd(void *p)
  		unsigned long pflags;
  
  		trace_mm_compaction_kcompactd_sleep(pgdat->node_id);
@@ -542,11 +517,10 @@ index 672d3c78c6ab..d906ccfedce0 100644
  	}
  
  	return 0;
-@@ -2726,6 +2953,9 @@ static int __init kcompactd_init(void)
+@@ -2726,6 +2907,8 @@ static int __init kcompactd_init(void)
  		return ret;
  	}
  
-+	compaction_init();
 +	compaction_sysfs_init();
 +
  	for_each_node_state(nid, N_MEMORY)
