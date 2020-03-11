@@ -10,6 +10,7 @@ is on a service tree or is in service. Yet the name of the field,
 confusingly, does not mention the second, very important case. Extend
 the name to mention the second case too.
 
+[HH: small context fix for 5.4.25]
 Signed-off-by: Paolo Valente <paolo.valente@linaro.org>
 ---
  block/bfq-cgroup.c  |  2 +-
@@ -68,8 +69,8 @@ index ffe9ce9faa89..26776bdbdf36 100644
 -	entity->on_st = false;
 +	entity->on_st_or_in_serv = false;
  	st->wsum -= entity->weight;
- 	if (bfqq && !is_in_service)
- 		bfq_put_queue(bfqq);
+ 	if (is_in_service)
+ 		return;
 @@ -999,7 +999,7 @@ static void __bfq_activate_entity(struct bfq_entity *entity,
  		 */
  		bfq_get_entity(entity);

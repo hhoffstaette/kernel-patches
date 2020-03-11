@@ -12,6 +12,7 @@ allow accessing this area.
 
 Lateron this will be used to configure various behaviours
 
+[HH: small context fix for 5.4.25]
 Signed-off-by: Nikita Danilov <ndanilov@marvell.com>
 Signed-off-by: Igor Russkikh <irusskikh@marvell.com>
 Signed-off-by: David S. Miller <davem@davemloft.net>
@@ -48,8 +49,8 @@ index fc82ede18b20..db8c09c5a768 100644
 +};
 +
  static int hw_atl_utils_ver_match(u32 ver_expected, u32 ver_actual);
- 
  static int hw_atl_utils_mpi_set_state(struct aq_hw_s *self,
+ 				      enum hal_atl_utils_fw_state_e state);
 @@ -327,10 +332,75 @@ err_exit:
  	return err;
  }
