@@ -1,0 +1,67 @@
+From: Josef Bacik <josef@toxicpanda.com>
+To: linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Subject: [PATCH 4/4] btrfs: do not resolve backrefs for roots that are being deleted
+Date: Fri, 13 Mar 2020 17:17:09 -0400
+
+Zygo reported a deadlock where a task was stuck in the inode logical
+resolve code.  The deadlock looks like this
+
+Task 1
+btrfs_ioctl_logical_to_ino
+->iterate_inodes_from_logical
+ ->iterate_extent_inodes
+  ->path->search_commit_root isn't set, so a transaction is started
+    ->resolve_indirect_ref for a root that's being deleted
+      ->search for our key, attempt to lock a node, DEADLOCK
+
+Task 2
+btrfs_drop_snapshot
+->walk down to a leaf, lock it, walk up, lock node
+ ->end transaction
+  ->start transaction
+    -> wait_cur_trans
+
+Task 3
+btrfs_commit_transaction
+->wait_event(cur_trans->write_wait, num_writers == 1) DEADLOCK
+
+We are holding a transaction open in btrfs_ioctl_logical_to_ino while we
+try to resolve our references.  btrfs_drop_snapshot() holds onto its
+locks while it stops and starts transaction handles, because it assumes
+nobody is going to touch the root now.  Commit just does what commit
+does, waiting for the writers to finish, blocking any new trans handles
+from starting.
+
+Fix this by making the backref code not try to resolve backrefs of roots
+that are currently being deleted.  This will keep us from walking into a
+snapshot that's currently being deleted.
+
+This problem was harder to hit before because we rarely broke out of the
+snapshot delete halfway through, but with my delayed ref throttling code
+it happened much more often.  However we've always been able to do this,
+so it's not a new problem.
+
+[HH: context fixes for 5.4.x]
+Fixes: 8da6d5815c59 ("Btrfs: added btrfs_find_all_roots()")
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+---
+ fs/btrfs/backref.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/fs/btrfs/backref.c b/fs/btrfs/backref.c
+index 9d0f87df2c35..0dcc11644be4 100644
+--- a/fs/btrfs/backref.c
++++ b/fs/btrfs/backref.c
+@@ -523,6 +523,12 @@ static int resolve_indirect_ref(struct btrfs_fs_info *fs_info,
+ 		goto out;
+ 	}
+ 
++	if (!path->search_commit_root &&
++	    test_bit(BTRFS_ROOT_DELETING, &root->state)) {
++		ret = -ENOENT;
++		goto out;
++	}
++
+ 	if (btrfs_is_testing(fs_info)) {
+ 		srcu_read_unlock(&fs_info->subvol_srcu, index);
+ 		ret = -ENOENT;
