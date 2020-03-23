@@ -1,0 +1,36 @@
+From: Filipe Manana <fdmanana@suse.com>
+Subject: btrfs: fix removal of raid[56|1c34} incompat flags after removing block group
+Date: Fri, 20 Mar 2020 18:43:48 +0000
+
+We are incorrectly dropping the raid56 and raid1c34 incompat flags when
+there are still raid56 and raid1c34 block groups, not when we do not any
+of those anymore. The logic just got unintentionally broken after adding
+the support for the raid1c34 modes.
+
+Fix this by clear the flags only if we do not have block groups with the
+respective profiles.
+
+Fixes: 9c907446dce3 ("btrfs: drop incompat bit for raid1c34 after last block group is gone")
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/block-group.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/block-group.c b/fs/btrfs/block-group.c
+index 404e050ce8ee..7f09147872dc 100644
+--- a/fs/btrfs/block-group.c
++++ b/fs/btrfs/block-group.c
+@@ -856,9 +856,9 @@ static void clear_incompat_bg_bits(struct btrfs_fs_info *fs_info, u64 flags)
+ 				found_raid1c34 = true;
+ 			up_read(&sinfo->groups_sem);
+ 		}
+-		if (found_raid56)
++		if (!found_raid56)
+ 			btrfs_clear_fs_incompat(fs_info, RAID56);
+-		if (found_raid1c34)
++		if (!found_raid1c34)
+ 			btrfs_clear_fs_incompat(fs_info, RAID1C34);
+ 	}
+ }
