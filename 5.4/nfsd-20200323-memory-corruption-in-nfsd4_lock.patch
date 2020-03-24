@@ -1,0 +1,75 @@
+From: Vasily Averin <vvs@virtuozzo.com>
+To: "J. Bruce Fields" <bfields@redhat.com>, Chuck Lever <chuck.lever@oracle.com>, Jeff Layton <jlayton@kernel.org>
+Cc: linux-nfs@vger.kernel.org
+Subject: [PATCH] nfsd: memory corruption in nfsd4_lock()
+Date: Mon, 23 Mar 2020 10:55:11 +0300
+
+New struct nfsd4_blocked_lock allocated in find_or_allocate_block()
+does not initialised nbl_list and nbl_lru.
+If conflock allocation fails rollback can call list_del_init()
+access uninitialized fields and corrupt memory.
+
+[HH: context fix for 5.4.x, removed dprintk()]
+Fixes: 76d348fadff5 ("nfsd: have nfsd4_lock use blocking locks for v4.1+ lock")
+Signed-off-by: Vasily Averin <vvs@virtuozzo.com>
+---
+ fs/nfsd/nfs4state.c | 32 +++++++++++++++-----------------
+ 1 file changed, 15 insertions(+), 17 deletions(-)
+
+diff --git a/fs/nfsd/nfs4state.c b/fs/nfsd/nfs4state.c
+index 369e574c5092..176ef8d24fae 100644
+--- a/fs/nfsd/nfs4state.c
++++ b/fs/nfsd/nfs4state.c
+@@ -6524,6 +6524,12 @@ nfsd4_lock(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
+ 		goto out;
+ 	}
+ 
++	conflock = locks_alloc_lock();
++	if (!conflock) {
++		status = nfserr_jukebox;
++		goto out;
++	}
++
+ 	nbl = find_or_allocate_block(lock_sop, &fp->fi_fhandle, nn);
+ 	if (!nbl) {
+ 		dprintk("NFSD: %s: unable to allocate block!\n", __func__);
+@@ -6542,13 +6549,6 @@ nfsd4_lock(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
+ 	file_lock->fl_end = last_byte_offset(lock->lk_offset, lock->lk_length);
+ 	nfs4_transform_lock_offset(file_lock);
+ 
+-	conflock = locks_alloc_lock();
+-	if (!conflock) {
+-		dprintk("NFSD: %s: unable to allocate lock!\n", __func__);
+-		status = nfserr_jukebox;
+-		goto out;
+-	}
+-
+ 	if (fl_flags & FL_SLEEP) {
+ 		nbl->nbl_time = get_seconds();
+ 		spin_lock(&nn->blocked_locks_lock);
+@@ -6581,17 +6581,15 @@ nfsd4_lock(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
+ 		status = nfserrno(err);
+ 		break;
+ 	}
+-out:
+-	if (nbl) {
+-		/* dequeue it if we queued it before */
+-		if (fl_flags & FL_SLEEP) {
+-			spin_lock(&nn->blocked_locks_lock);
+-			list_del_init(&nbl->nbl_list);
+-			list_del_init(&nbl->nbl_lru);
+-			spin_unlock(&nn->blocked_locks_lock);
+-		}
+-		free_blocked_lock(nbl);
++	/* dequeue it if we queued it before */
++	if (fl_flags & FL_SLEEP) {
++		spin_lock(&nn->blocked_locks_lock);
++		list_del_init(&nbl->nbl_list);
++		list_del_init(&nbl->nbl_lru);
++		spin_unlock(&nn->blocked_locks_lock);
+ 	}
++	free_blocked_lock(nbl);
++out:
+ 	if (nf)
+ 		nfsd_file_put(nf);
+ 	if (lock_stp) {
