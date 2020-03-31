@@ -23,9 +23,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2020-01-31)**
+**Current status (2020-03-31)**
 
-- I've decided to skip 5.5.
+- 5.6.1 is ready for initial testing.
 - 5.4 is my current production branch.
 - all other branches < 5.4 are EOL.
 
