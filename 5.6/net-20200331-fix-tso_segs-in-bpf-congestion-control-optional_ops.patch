@@ -1,0 +1,17 @@
+
+Fix up the BPF congestion control hook "tso_segs" renamed by
+"net-20191117-014-re-generalize-TSO-sizing-in-TCP-CC-module-API.patch".
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+--- a/net/ipv4/bpf_tcp_ca.c	2020-03-31 00:06:52.000000000 +0200
++++ b/net/ipv4/bpf_tcp_ca.c	2020-03-31 00:07:06.253323686 +0200
+@@ -15,7 +15,7 @@ static u32 optional_ops[] = {
+ 	offsetof(struct tcp_congestion_ops, cwnd_event),
+ 	offsetof(struct tcp_congestion_ops, in_ack_event),
+ 	offsetof(struct tcp_congestion_ops, pkts_acked),
+-	offsetof(struct tcp_congestion_ops, min_tso_segs),
++	offsetof(struct tcp_congestion_ops, tso_segs),
+ 	offsetof(struct tcp_congestion_ops, sndbuf_expand),
+ 	offsetof(struct tcp_congestion_ops, cong_control),
+ };
