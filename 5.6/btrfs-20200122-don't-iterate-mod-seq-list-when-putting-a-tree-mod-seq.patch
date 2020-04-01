@@ -1,0 +1,66 @@
+From:   fdmanana@kernel.org
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH 2/2] Btrfs: don't iterate mod seq list when putting a tree mod seq
+Date:   Wed, 22 Jan 2020 12:23:54 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+Each new element added to the mod seq list is always appended to the list,
+and each one gets a sequence number coming from a counter which gets
+incremented everytime a new element is added to the list (or a new node
+is added to the tree mod log rbtree). Therefore the element with the
+lowest sequence number is always the first element in the list.
+
+So just remove the list iteration at btrfs_put_tree_mod_seq() that
+computes the minimum sequence number in the list and replace it with
+a check for the first element's sequence number.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/ctree.c | 25 +++++++++++++------------
+ 1 file changed, 13 insertions(+), 12 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index f2ec1a9bae28..968faaec0e39 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -341,7 +341,6 @@ void btrfs_put_tree_mod_seq(struct btrfs_fs_info *fs_info,
+ 	struct rb_root *tm_root;
+ 	struct rb_node *node;
+ 	struct rb_node *next;
+-	struct seq_list *cur_elem;
+ 	struct tree_mod_elem *tm;
+ 	u64 min_seq = (u64)-1;
+ 	u64 seq_putting = elem->seq;
+@@ -353,18 +352,20 @@ void btrfs_put_tree_mod_seq(struct btrfs_fs_info *fs_info,
+ 	list_del(&elem->list);
+ 	elem->seq = 0;
+ 
+-	list_for_each_entry(cur_elem, &fs_info->tree_mod_seq_list, list) {
+-		if (cur_elem->seq < min_seq) {
+-			if (seq_putting > cur_elem->seq) {
+-				/*
+-				 * blocker with lower sequence number exists, we
+-				 * cannot remove anything from the log
+-				 */
+-				write_unlock(&fs_info->tree_mod_log_lock);
+-				return;
+-			}
+-			min_seq = cur_elem->seq;
++	if (!list_empty(&fs_info->tree_mod_seq_list)) {
++		struct seq_list *first;
++
++		first = list_first_entry(&fs_info->tree_mod_seq_list,
++					 struct seq_list, list);
++		if (seq_putting > first->seq) {
++			/*
++			 * Blocker with lower sequence number exists, we
++			 * cannot remove anything from the log.
++			 */
++			write_unlock(&fs_info->tree_mod_log_lock);
++			return;
+ 		}
++		min_seq = first->seq;
+ 	}
+ 
+ 	/*

@@ -1,0 +1,49 @@
+From: Josef Bacik <josef@toxicpanda.com>
+To: linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Subject: [PATCH 1/4] btrfs: move reserve_metadata_bytes up in relocate_tree_block
+Date: Fri, 13 Mar 2020 17:17:06 -0400
+
+Since we're using this to also throttle delayed refs move it before the
+select_reloc_root().  The reason we want this is because
+select_reloc_root() will mess with the backref cache, and if we're going
+to bail we want to be able to cleanly remove this node from the backref
+cache and come back along to regenerate it.  Move it up so this is the
+first thing we do to make restarting cleaner.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+---
+ fs/btrfs/relocation.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 3ccc126d0df3..df33649c592c 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -3134,6 +3134,14 @@ static int relocate_tree_block(struct btrfs_trans_handle *trans,
+ 	if (!node)
+ 		return 0;
+ 
++	/*
++	 * If we fail here we want to drop our backref_node because we are going
++	 * to start over and regenerate the tree for it.
++	 */
++	ret = reserve_metadata_space(trans, rc, node);
++	if (ret)
++		goto out;
++
+ 	BUG_ON(node->processed);
+ 	root = select_one_root(node);
+ 	if (root == ERR_PTR(-ENOENT)) {
+@@ -3141,12 +3149,6 @@ static int relocate_tree_block(struct btrfs_trans_handle *trans,
+ 		goto out;
+ 	}
+ 
+-	if (!root || test_bit(BTRFS_ROOT_REF_COWS, &root->state)) {
+-		ret = reserve_metadata_space(trans, rc, node);
+-		if (ret)
+-			goto out;
+-	}
+-
+ 	if (root) {
+ 		if (test_bit(BTRFS_ROOT_REF_COWS, &root->state)) {
+ 			BUG_ON(node->new_bytenr);

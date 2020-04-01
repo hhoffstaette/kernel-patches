@@ -1,0 +1,91 @@
+From: Roman Gushchin <guro@fb.com>
+Subject: btrfs: implement migratepage callback for data pages
+Date: Wed, 4 Mar 2020 16:57:35 -0800
+
+Currently btrfs doesn't provide a migratepage callback for data pages.
+It means that fallback_migrate_page() is used to migrate btrfs pages.
+
+fallback_migrate_page() cannot move dirty pages, instead it tries to
+flush them (in sync mode) or just fails (in async mode).
+
+In the sync mode pages which are scheduled to be processed by
+btrfs_writepage_fixup_worker() can't be effectively flushed by the
+migration code, because there is no established way to wait for the
+completion of the delayed work.
+
+It all leads to page migration failures.
+
+To fix it the patch implements a btrs-specific migratepage callback,
+which is similar to iomap_migrate_page() used by some other fs, except
+it does take care of the PagePrivate2 flag which is used for data
+ordering purposes.
+
+Reviewed-by: Chris Mason <clm@fb.com>
+Signed-off-by: Roman Gushchin <guro@fb.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/inode.c | 37 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 37 insertions(+)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index f7c6645ab75b..f85051d0390f 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -28,6 +28,7 @@
+ #include <linux/magic.h>
+ #include <linux/iversion.h>
+ #include <linux/swap.h>
++#include <linux/migrate.h>
+ #include <linux/sched/mm.h>
+ #include <asm/unaligned.h>
+ #include "misc.h"
+@@ -8327,6 +8328,39 @@ static int btrfs_releasepage(struct page *page, gfp_t gfp_flags)
+ 	return __btrfs_releasepage(page, gfp_flags);
+ }
+ 
++#ifdef CONFIG_MIGRATION
++static int btrfs_migratepage(struct address_space *mapping,
++			     struct page *newpage, struct page *page,
++			     enum migrate_mode mode)
++{
++	int ret;
++
++	ret = migrate_page_move_mapping(mapping, newpage, page, 0);
++	if (ret != MIGRATEPAGE_SUCCESS)
++		return ret;
++
++	if (page_has_private(page)) {
++		ClearPagePrivate(page);
++		get_page(newpage);
++		set_page_private(newpage, page_private(page));
++		set_page_private(page, 0);
++		put_page(page);
++		SetPagePrivate(newpage);
++	}
++
++	if (PagePrivate2(page)) {
++		ClearPagePrivate2(page);
++		SetPagePrivate2(newpage);
++	}
++
++	if (mode != MIGRATE_SYNC_NO_COPY)
++		migrate_page_copy(newpage, page);
++	else
++		migrate_page_states(newpage, page);
++	return MIGRATEPAGE_SUCCESS;
++}
++#endif
++
+ static void btrfs_invalidatepage(struct page *page, unsigned int offset,
+ 				 unsigned int length)
+ {
+@@ -10532,6 +10566,9 @@ static const struct address_space_operations btrfs_aops = {
+ 	.direct_IO	= btrfs_direct_IO,
+ 	.invalidatepage = btrfs_invalidatepage,
+ 	.releasepage	= btrfs_releasepage,
++#ifdef CONFIG_MIGRATION
++	.migratepage	= btrfs_migratepage,
++#endif
+ 	.set_page_dirty	= btrfs_set_page_dirty,
+ 	.error_remove_page = generic_error_remove_page,
+ 	.swap_activate	= btrfs_swap_activate,

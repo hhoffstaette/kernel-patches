@@ -1,0 +1,38 @@
+From: Josef Bacik <josef@toxicpanda.com>
+Subject: btrfs: use btrfs_ordered_update_i_size in clone_finish_inode_update
+Date: Fri, 17 Jan 2020 09:02:19 -0500
+
+We were using btrfs_i_size_write(), which unconditionally jacks up
+inode->disk_i_size.  However since clone can operate on ranges we could
+have pending ordered extents for a range prior to the start of our clone
+operation and thus increase disk_i_size too far and have a hole with no
+file extent.
+
+Fix this by using the btrfs_ordered_update_i_size helper which will do
+the right thing in the face of pending ordered extents outside of our
+clone range.
+
+Reviewed-by: Filipe Manana <fdmanana@suse.com>
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/ioctl.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/ioctl.c b/fs/btrfs/ioctl.c
+index 4f4b13830b25..1bff1b6cd628 100644
+--- a/fs/btrfs/ioctl.c
++++ b/fs/btrfs/ioctl.c
+@@ -3321,8 +3321,10 @@ static int clone_finish_inode_update(struct btrfs_trans_handle *trans,
+ 	 */
+ 	if (endoff > destoff + olen)
+ 		endoff = destoff + olen;
+-	if (endoff > inode->i_size)
+-		btrfs_i_size_write(BTRFS_I(inode), endoff);
++	if (endoff > inode->i_size) {
++		i_size_write(inode, endoff);
++		btrfs_ordered_update_i_size(inode, endoff, NULL);
++	}
+ 
+ 	ret = btrfs_update_inode(trans, root, inode);
+ 	if (ret) {
