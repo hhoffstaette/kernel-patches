@@ -21,6 +21,9 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
+**NOTE:** This branch will no longer receive updates!
+-----------------------------------------------------
+
 **Stable Series: 5.4**
 
 - atlantic: fixes from 5.5+ (correctness, error handling, PTP, UDP GSO)
