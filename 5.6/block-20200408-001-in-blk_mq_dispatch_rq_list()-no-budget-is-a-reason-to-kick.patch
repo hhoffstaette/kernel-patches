@@ -1,10 +1,10 @@
 From: Douglas Anderson <dianders@chromium.org>
 To: axboe@kernel.dk, jejb@linux.ibm.com, martin.petersen@oracle.com
-Cc: linux-block@vger.kernel.org, groeck@chromium.org, paolo.valente@linaro.org,
-    linux-scsi@vger.kernel.org, sqazi@google.com, Douglas Anderson <dianders@chromium.org>,
-    linux-kernel@vger.kernel.org
-Subject: [PATCH 1/2] blk-mq: In blk_mq_dispatch_rq_list() "no budget" is a reason to kick
-Date: Mon, 30 Mar 2020 07:49:05 -0700
+Cc: paolo.valente@linaro.org, groeck@chromium.org, Gwendal Grignou <gwendal@chromium.org>,
+    linux-scsi@vger.kernel.org, linux-block@vger.kernel.org, Ming Lei <ming.lei@redhat.com>,
+    sqazi@google.com, Douglas Anderson <dianders@chromium.org>, linux-kernel@vger.kernel.org
+Subject: [PATCH v4 1/4] blk-mq: In blk_mq_dispatch_rq_list() "no budget" is a reason to kick
+Date: Wed,  8 Apr 2020 08:03:59 -0700
 
 In blk_mq_dispatch_rq_list(), if blk_mq_sched_needs_restart() returns
 true and the driver returns BLK_STS_RESOURCE then we'll kick the
@@ -13,8 +13,22 @@ If we were unable to get budget we can be in much the same state as
 when the driver returns BLK_STS_RESOURCE, so we should treat it the
 same.
 
+It should be noted that even if we add a whole bunch of extra kicking
+to the queue in other patches this patch is still important.
+Specifically any kicking that happened before we re-spliced leftover
+requests into 'hctx->dispatch' wouldn't have found any work, so we
+really need to make sure we kick ourselves after we've done the
+splicing.
+
 Signed-off-by: Douglas Anderson <dianders@chromium.org>
+Reviewed-by: Ming Lei <ming.lei@redhat.com>
 ---
+
+Changes in v4: None
+Changes in v3:
+- Note why blk_mq_dispatch_rq_list() change is needed.
+
+Changes in v2: None
 
  block/blk-mq.c | 11 ++++++++---
  1 file changed, 8 insertions(+), 3 deletions(-)
