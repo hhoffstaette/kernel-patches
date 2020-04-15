@@ -1,9 +1,9 @@
 From:   "Darrick J. Wong" <darrick.wong@oracle.com>
-To:     xfs <linux-xfs@vger.kernel.org>
+To:     linux-xfs@vger.kernel.org
 Cc:     Dave Chinner <david@fromorbit.com>,
-        Allison Collins <allison.henderson@oracle.com>
-Subject: [PATCH] xfs: move inode flush to a workqueue
-Date:   Thu, 9 Apr 2020 12:15:04 -0700
+        Brian Foster <bfoster@redhat.com>
+Subject: [PATCH v2] xfs: move inode flush to the sync workqueue
+Date:   Tue, 14 Apr 2020 21:15:29 -0700
 
 From: Darrick J. Wong <darrick.wong@oracle.com>
 
@@ -17,10 +17,12 @@ behavior and sporadic fstest regressions.
 Therfore, make all the writer threads wait on a single inode flush,
 which eliminates both the stampeding hoards of flushers and the small
 window in which a write could fail with ENOSPC because it lost the
-ratelimit race even after another thread freed space.
+ratelimit race after even another thread freed space.
 
 Fixes: bdd4ee4f8407 ("xfs: ratelimit inode flush on buffered write ENOSPC")
 Signed-off-by: Darrick J. Wong <darrick.wong@oracle.com>
+---
+v2: run it on the sync workqueue
 ---
  fs/xfs/xfs_mount.h |    6 +++++-
  fs/xfs/xfs_super.c |   40 ++++++++++++++++++++++------------------
@@ -45,7 +47,7 @@ index 50c43422fa17..b2e4598fdf7d 100644
  	struct workqueue_struct	*m_unwritten_workqueue;
  	struct workqueue_struct	*m_cil_workqueue;
 diff --git a/fs/xfs/xfs_super.c b/fs/xfs/xfs_super.c
-index abf06bf9c3f3..dced03a4571d 100644
+index abf06bf9c3f3..424bb9a2d532 100644
 --- a/fs/xfs/xfs_super.c
 +++ b/fs/xfs/xfs_super.c
 @@ -516,6 +516,20 @@ xfs_destroy_mount_workqueues(
@@ -87,7 +89,7 @@ index abf06bf9c3f3..dced03a4571d 100644
 -		sync_inodes_sb(sb);
 -		up_read(&sb->s_umount);
 -	}
-+	schedule_work(&mp->m_flush_inodes_work);
++	queue_work(mp->m_sync_workqueue, &mp->m_flush_inodes_work);
 +	flush_work(&mp->m_flush_inodes_work);
  }
  
