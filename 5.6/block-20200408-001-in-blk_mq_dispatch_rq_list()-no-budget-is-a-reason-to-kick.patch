@@ -20,6 +20,7 @@ requests into 'hctx->dispatch' wouldn't have found any work, so we
 really need to make sure we kick ourselves after we've done the
 splicing.
 
+[HH: updated hunk#2 for 'blk-mq: Put driver tag in blk_mq_dispatch_rq_list() when no budget' in 5.6.9]
 Signed-off-by: Douglas Anderson <dianders@chromium.org>
 Reviewed-by: Ming Lei <ming.lei@redhat.com>
 ---
@@ -45,18 +46,14 @@ index d92088dec6c3..2cd8d2b49ff4 100644
  
  	if (list_empty(list))
  		return false;
-@@ -1205,8 +1206,10 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
- 		rq = list_first_entry(list, struct request, queuelist);
- 
+@@ -1205,6 +1206,7 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
  		hctx = rq->mq_hctx;
--		if (!got_budget && !blk_mq_get_dispatch_budget(hctx))
-+		if (!got_budget && !blk_mq_get_dispatch_budget(hctx)) {
+		if (!got_budget && !blk_mq_get_dispatch_budget(hctx)) {
+ 			blk_mq_put_driver_tag(rq);
 +			no_budget_avail = true;
  			break;
-+		}
+ 		}
  
- 		if (!blk_mq_get_driver_tag(rq)) {
- 			/*
 @@ -1311,13 +1314,15 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
  		 *
  		 * If driver returns BLK_STS_RESOURCE and SCHED_RESTART
