@@ -1,0 +1,49 @@
+From: Borislav Petkov <bp@suse.de>
+Subject: x86/build: Check whether the compiler is sane
+Date: Thu, 23 Apr 2020 19:28:28 +0200
+
+Add a check script to verify whether the compiler is sane. This is
+x86-only for now and checks one thing only but should be useful for more
+checks in the future.
+
+Suggested-by: Martin Liška <mliska@suse.cz>
+Signed-off-by: Borislav Petkov <bp@suse.de>
+Reviewed-by: Nick Desaulniers <ndesaulniers@google.com>
+Tested-by: Nick Desaulniers <ndesaulniers@google.com>
+Link: https://lkml.kernel.org/r/20200423173058.GE26021@zn.tnic
+---
+ arch/x86/Makefile             | 4 ++++
+ scripts/x86-check-compiler.sh | 9 +++++++++
+ 2 files changed, 13 insertions(+)
+ create mode 100755 scripts/x86-check-compiler.sh
+
+diff --git a/arch/x86/Makefile b/arch/x86/Makefile
+index 00e378de8bc0..38d3eec5062e 100644
+--- a/arch/x86/Makefile
++++ b/arch/x86/Makefile
+@@ -1,6 +1,10 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Unified Makefile for i386 and x86_64
+ 
++#  Check the compiler
++sane_compiler := $(shell $(srctree)/scripts/x86-check-compiler.sh $(CC))
++$(if $(sane_compiler),$(error $(CC) check failed. Aborting),)
++
+ # select defconfig based on actual architecture
+ ifeq ($(ARCH),x86)
+   ifeq ($(shell uname -m),x86_64)
+diff --git a/scripts/x86-check-compiler.sh b/scripts/x86-check-compiler.sh
+new file mode 100755
+index 000000000000..b2b5b54b6939
+--- /dev/null
++++ b/scripts/x86-check-compiler.sh
+@@ -0,0 +1,9 @@
++#!/bin/sh
++# SPDX-License-Identifier: GPL-2.0
++
++# Check whether the compiler tail-call optimizes across an asm() statement.
++# Fail the build if it does.
++
++echo "int foo(int a); int bar(int a) { int r = foo(a); asm(\"\"); return r; }" |\
++	     $* -O2 -x c -c -S - -o - 2>/dev/null |\
++	     grep -E "^[[:blank:]]+jmp[[:blank:]]+.*"
