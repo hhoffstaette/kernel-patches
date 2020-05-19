@@ -30,6 +30,6 @@ index a34064a031a5..b41b18edb10e 100644
  config CC_OPTIMIZE_FOR_PERFORMANCE_O3
  	bool "Optimize more for performance (-O3)"
 -	depends on ARC
- 	imply CC_DISABLE_WARN_MAYBE_UNINITIALIZED  # avoid false positives
  	help
  	  Choosing this option will pass "-O3" to your compiler to optimize
+ 	  the kernel yet more for performance.
