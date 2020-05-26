@@ -1,0 +1,30 @@
+From: Hugh Dickins <hughd@google.com>
+To: Andrew Morton <akpm@linux-foundation.org>
+Cc: Song Liu <songliubraving@fb.com>, Kirill A. Shutemov <kirill.shutemov@linux.intel.com>,
+    linux-kernel@vger.kernel.org, linux-mm@kvack.org
+Subject: [PATCH] mm,thp: stop leaking unreleased file pages
+Date: Sat, 23 May 2020 18:50:15 -0700 (PDT)
+
+When collapse_file() calls try_to_release_page(), it has already
+isolated the page: so if releasing buffers happens to fail (as it
+sometimes does), remember to putback_lru_page(): otherwise that page is
+left unreclaimable and unfreeable, and the file extent uncollapsible.
+
+Signed-off-by: Hugh Dickins <hughd@google.com>
+Fixes: 99cb0dbd47a1 ("mm,thp: add read-only THP support for (non-shmem) FS")
+Cc: stable@vger.kernel.org # v5.4+
+---
+
+ mm/khugepaged.c |    1 +
+ 1 file changed, 1 insertion(+)
+
+--- 5.7-rc6/mm/khugepaged.c	2020-04-12 16:24:37.710999073 -0700
++++ linux/mm/khugepaged.c	2020-05-10 17:06:21.788398646 -0700
+@@ -1692,6 +1692,7 @@ static void collapse_file(struct mm_stru
+ 		if (page_has_private(page) &&
+ 		    !try_to_release_page(page, GFP_KERNEL)) {
+ 			result = SCAN_PAGE_HAS_PRIVATE;
++			putback_lru_page(page);
+ 			goto out_unlock;
+ 		}
+ 
