@@ -1,0 +1,40 @@
+From: fdmanana@kernel.org
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH 3/4] Btrfs: do not ignore error from btrfs_next_leaf() when inserting checksums
+Date: Mon, 18 May 2020 12:15:09 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+We are currently treating any non-zero return value from btrfs_next_leaf()
+the same way, by going to the code that inserts a new checksum item in the
+tree. However if btrfs_next_leaf() returns an error (a value < 0), we
+should just stop and return the error, and not behave as if nothing has
+happened, since in that case we do not have a way to know if there is a
+next leaf or we are currently at the last leaf already.
+
+So fix that by returning the error from btrfs_next_leaf().
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/file-item.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/file-item.c b/fs/btrfs/file-item.c
+index 104858e2a836..4f563469c97a 100644
+--- a/fs/btrfs/file-item.c
++++ b/fs/btrfs/file-item.c
+@@ -887,10 +887,12 @@ int btrfs_csum_file_blocks(struct btrfs_trans_handle *trans,
+ 		nritems = btrfs_header_nritems(path->nodes[0]);
+ 		if (!nritems || (path->slots[0] >= nritems - 1)) {
+ 			ret = btrfs_next_leaf(root, path);
+-			if (ret == 1)
++			if (ret < 0) {
++				goto out;
++			} else if (ret > 0) {
+ 				found_next = 1;
+-			if (ret != 0)
+ 				goto insert;
++			}
+ 			slot = path->slots[0];
+ 		}
+ 		btrfs_item_key_to_cpu(path->nodes[0], &found_key, slot);
