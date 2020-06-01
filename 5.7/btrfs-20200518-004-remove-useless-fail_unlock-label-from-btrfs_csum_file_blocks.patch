@@ -1,0 +1,59 @@
+From: fdmanana@kernel.org
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH 4/4] Btrfs: remove useless 'fail_unlock' label from btrfs_csum_file_blocks()
+Date: Mon, 18 May 2020 12:15:18 +0100
+
+From: Filipe Manana <fdmanana@suse.com>
+
+The label 'fail_unlock' is pointless, all it does is to jump to the label
+'out', so just remove it.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/file-item.c | 11 ++++-------
+ 1 file changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/fs/btrfs/file-item.c b/fs/btrfs/file-item.c
+index 4f563469c97a..80a4651b72f5 100644
+--- a/fs/btrfs/file-item.c
++++ b/fs/btrfs/file-item.c
+@@ -869,7 +869,7 @@ int btrfs_csum_file_blocks(struct btrfs_trans_handle *trans,
+ 	}
+ 	ret = PTR_ERR(item);
+ 	if (ret != -EFBIG && ret != -ENOENT)
+-		goto fail_unlock;
++		goto out;
+ 
+ 	if (ret == -EFBIG) {
+ 		u32 item_size;
+@@ -927,7 +927,7 @@ int btrfs_csum_file_blocks(struct btrfs_trans_handle *trans,
+ 	ret = btrfs_search_slot(trans, root, &file_key, path,
+ 				csum_size, 1);
+ 	if (ret < 0)
+-		goto fail_unlock;
++		goto out;
+ 
+ 	if (ret > 0) {
+ 		if (path->slots[0] == 0)
+@@ -994,9 +994,9 @@ int btrfs_csum_file_blocks(struct btrfs_trans_handle *trans,
+ 				      ins_size);
+ 	path->leave_spinning = 0;
+ 	if (ret < 0)
+-		goto fail_unlock;
++		goto out;
+ 	if (WARN_ON(ret != 0))
+-		goto fail_unlock;
++		goto out;
+ 	leaf = path->nodes[0];
+ csum:
+ 	item = btrfs_item_ptr(leaf, path->slots[0], struct btrfs_csum_item);
+@@ -1026,9 +1026,6 @@ int btrfs_csum_file_blocks(struct btrfs_trans_handle *trans,
+ out:
+ 	btrfs_free_path(path);
+ 	return ret;
+-
+-fail_unlock:
+-	goto out;
+ }
+ 
+ void btrfs_extent_item_to_extent_map(struct btrfs_inode *inode,
