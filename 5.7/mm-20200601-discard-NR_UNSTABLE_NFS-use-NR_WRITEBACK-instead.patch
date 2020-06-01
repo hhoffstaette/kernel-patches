@@ -1,12 +1,11 @@
 From: NeilBrown <neilb@suse.de>
-To: Christoph Hellwig <hch@infradead.org>
-Cc: Trond Myklebust <trondmy@hammerspace.com>,
-        "Anna.Schumaker\@Netapp.com" <Anna.Schumaker@netapp.com>,
-        Andrew Morton <akpm@linux-foundation.org>,
-        Jan Kara <jack@suse.cz>, linux-mm@kvack.org,
-        linux-nfs@vger.kernel.org, LKML <linux-kernel@vger.kernel.org>
-Subject: [PATCH 2/2 - v2] MM: Discard NR_UNSTABLE_NFS, use NR_WRITEBACK instead.
-Date: Fri, 03 Apr 2020 09:35:21 +1100
+To: Andrew Morton <akpm@linux-foundation.org>
+Cc: Jan Kara <jack@suse.cz>, Michal Hocko <mhocko@kernel.org>,
+        linux-mm@kvack.org, linux-nfs@vger.kernel.org,
+        LKML <linux-kernel@vger.kernel.org>,
+        Christoph Hellwig <hch@lst.de>
+Subject: [PATCH 2/2] MM: Discard NR_UNSTABLE_NFS, use NR_WRITEBACK instead.
+Date: Mon, 01 Jun 2020 10:49:17 +1000
 
 After an NFS page has been written it is considered "unstable" until a
 COMMIT request succeeds.  If the COMMIT fails, the page will be
@@ -27,7 +26,7 @@ NR_WRITEBACK and WB_WRITEBACK.
 A particular effect of this change is that when
 wb_check_background_flush() calls wb_over_bg_threshold(), the latter
 will report 'true' a lot less often as the 'unstable' pages are no
-longer considered 'dirty' (and there is nothing that writeback can do
+longer considered 'dirty' (as there is nothing that writeback can do
 about them anyway).
 
 Currently wb_check_background_flush() will trigger writeback to NFS even
@@ -36,65 +35,56 @@ pages), this can result in small writes going to the server (10s of
 Kilobytes rather than a Megabyte) which hurts throughput.
 With this patch, there are fewer writes which are each larger on average.
 
+Where the NR_UNSTABLE_NFS count was included in statistics
+virtual-files, the entry is retained, but the value is hard-coded as
+zero.  static trace points and warning printks which mentioned this
+counter no longer report it.
+
+Reviewed-by: Jan Kara <jack@suse.cz>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Acked-by: Trond Myklebust <trond.myklebust@hammerspace.com>
+Acked-by: Michal Hocko <mhocko@suse.com> # for MM parts
 Signed-off-by: NeilBrown <neilb@suse.de>
 ---
-
-NR_UNSTABLE_NFS completely removed as recommended by Christoph, removal
-of an unnecessary comment, and improvements to commit message.
-Thanks.
-
- Documentation/filesystems/proc.txt |  3 ---
- drivers/base/node.c                |  2 --
+ Documentation/filesystems/proc.rst |  4 ++--
+ drivers/base/node.c                |  2 +-
  fs/fs-writeback.c                  |  1 -
  fs/nfs/internal.h                  | 10 +++++++---
  fs/nfs/write.c                     |  4 ++--
- fs/proc/meminfo.c                  |  2 --
+ fs/proc/meminfo.c                  |  3 +--
  include/linux/mmzone.h             |  1 -
  include/trace/events/writeback.h   |  5 +----
  mm/memcontrol.c                    |  1 -
  mm/page-writeback.c                | 17 ++++-------------
  mm/page_alloc.c                    |  5 +----
- mm/vmstat.c                        |  1 -
- 12 files changed, 15 insertions(+), 37 deletions(-)
+ mm/vmstat.c                        | 11 +++++++++--
+ 12 files changed, 28 insertions(+), 36 deletions(-)
 
-diff --git a/Documentation/filesystems/proc.txt b/Documentation/filesystems/proc.txt
-index 99ca040e3f90..690c712f5f79 100644
---- a/Documentation/filesystems/proc.txt
-+++ b/Documentation/filesystems/proc.txt
-@@ -904,7 +904,6 @@ Slab:           284364 kB
- SReclaimable:   159856 kB
- SUnreclaim:     124508 kB
- PageTables:      24448 kB
--NFS_Unstable:        0 kB
- Bounce:              0 kB
- WritebackTmp:        0 kB
- CommitLimit:   7669796 kB
-@@ -975,8 +974,6 @@ SReclaimable: Part of Slab, that might be reclaimed, such as caches
-   SUnreclaim: Part of Slab, that cannot be reclaimed on memory pressure
-   PageTables: amount of memory dedicated to the lowest level of page
+diff --git a/Documentation/filesystems/proc.rst b/Documentation/filesystems/proc.rst
+index 38b606991065..092b7b44d158 100644
+--- a/Documentation/filesystems/proc.rst
++++ b/Documentation/filesystems/proc.rst
+@@ -1042,8 +1042,8 @@ PageTables
+               amount of memory dedicated to the lowest level of page
                tables.
--NFS_Unstable: NFS pages sent to the server, but not yet committed to stable
+ NFS_Unstable
+-              NFS pages sent to the server, but not yet committed to stable
 -	      storage
-       Bounce: Memory used for block device "bounce buffers"
- WritebackTmp: Memory used by FUSE for temporary writeback buffers
-  CommitLimit: Based on the overcommit ratio ('vm.overcommit_ratio'),
++              Always zero. Previous counted pages which had been written to
++              the server, but has not been committed to stable storage.
+ Bounce
+               Memory used for block device "bounce buffers"
+ WritebackTmp
 diff --git a/drivers/base/node.c b/drivers/base/node.c
-index 98a31bafc8a2..7059021ce2af 100644
+index 10d7e818e118..15f5ed6a8830 100644
 --- a/drivers/base/node.c
 +++ b/drivers/base/node.c
-@@ -416,7 +416,6 @@ static ssize_t node_read_meminfo(struct device *dev,
- 		       "Node %d Shmem:          %8lu kB\n"
- 		       "Node %d KernelStack:    %8lu kB\n"
- 		       "Node %d PageTables:     %8lu kB\n"
--		       "Node %d NFS_Unstable:   %8lu kB\n"
- 		       "Node %d Bounce:         %8lu kB\n"
- 		       "Node %d WritebackTmp:   %8lu kB\n"
- 		       "Node %d KReclaimable:   %8lu kB\n"
-@@ -439,7 +438,6 @@ static ssize_t node_read_meminfo(struct device *dev,
+@@ -439,7 +439,7 @@ static ssize_t node_read_meminfo(struct device *dev,
  		       nid, K(i.sharedram),
  		       nid, sum_zone_node_page_state(nid, NR_KERNEL_STACK_KB),
  		       nid, K(sum_zone_node_page_state(nid, NR_PAGETABLE)),
 -		       nid, K(node_page_state(pgdat, NR_UNSTABLE_NFS)),
++		       nid, 0,
  		       nid, K(sum_zone_node_page_state(nid, NR_BOUNCE)),
  		       nid, K(node_page_state(pgdat, NR_WRITEBACK_TEMP)),
  		       nid, K(sreclaimable +
@@ -111,10 +101,10 @@ index 76ac9c7d32ec..c5bdf46e3b4b 100644
  }
  
 diff --git a/fs/nfs/internal.h b/fs/nfs/internal.h
-index f80c47d5ff27..749da02b547a 100644
+index 1f32a9fbfdaf..6673a77884d9 100644
 --- a/fs/nfs/internal.h
 +++ b/fs/nfs/internal.h
-@@ -652,7 +652,8 @@ void nfs_super_set_maxbytes(struct super_block *sb, __u64 maxfilesize)
+@@ -668,7 +668,8 @@ void nfs_super_set_maxbytes(struct super_block *sb, __u64 maxfilesize)
  }
  
  /*
@@ -124,7 +114,7 @@ index f80c47d5ff27..749da02b547a 100644
   */
  static inline
  void nfs_mark_page_unstable(struct page *page, struct nfs_commit_info *cinfo)
-@@ -660,8 +661,11 @@ void nfs_mark_page_unstable(struct page *page, struct nfs_commit_info *cinfo)
+@@ -676,8 +677,11 @@ void nfs_mark_page_unstable(struct page *page, struct nfs_commit_info *cinfo)
  	if (!cinfo->dreq) {
  		struct inode *inode = page_file_mapping(page)->host;
  
@@ -139,10 +129,10 @@ index f80c47d5ff27..749da02b547a 100644
  	}
  }
 diff --git a/fs/nfs/write.c b/fs/nfs/write.c
-index c478b772cc49..2e15a56620b3 100644
+index 1e767f779c49..639c34fec04a 100644
 --- a/fs/nfs/write.c
 +++ b/fs/nfs/write.c
-@@ -958,9 +958,9 @@ nfs_mark_request_commit(struct nfs_page *req, struct pnfs_layout_segment *lseg,
+@@ -946,9 +946,9 @@ nfs_mark_request_commit(struct nfs_page *req, struct pnfs_layout_segment *lseg,
  static void
  nfs_clear_page_commit(struct page *page)
  {
@@ -155,23 +145,24 @@ index c478b772cc49..2e15a56620b3 100644
  
  /* Called holding the request lock on @req */
 diff --git a/fs/proc/meminfo.c b/fs/proc/meminfo.c
-index 8c1f1bb1a5ce..1378a132ff7e 100644
+index 8c1f1bb1a5ce..9bd94b5a9658 100644
 --- a/fs/proc/meminfo.c
 +++ b/fs/proc/meminfo.c
-@@ -106,8 +106,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
+@@ -106,8 +106,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
  	show_val_kb(m, "PageTables:     ",
  		    global_zone_page_state(NR_PAGETABLE));
  
 -	show_val_kb(m, "NFS_Unstable:   ",
 -		    global_node_page_state(NR_UNSTABLE_NFS));
++	show_val_kb(m, "NFS_Unstable:   ", 0);
  	show_val_kb(m, "Bounce:         ",
  		    global_zone_page_state(NR_BOUNCE));
  	show_val_kb(m, "WritebackTmp:   ",
 diff --git a/include/linux/mmzone.h b/include/linux/mmzone.h
-index 462f6873905a..a18611197bea 100644
+index 1b9de7d220fb..a89f47515eb1 100644
 --- a/include/linux/mmzone.h
 +++ b/include/linux/mmzone.h
-@@ -237,7 +237,6 @@ enum node_stat_item {
+@@ -193,7 +193,6 @@ enum node_stat_item {
  	NR_FILE_THPS,
  	NR_FILE_PMDMAPPED,
  	NR_ANON_THPS,
@@ -180,10 +171,10 @@ index 462f6873905a..a18611197bea 100644
  	NR_VMSCAN_IMMEDIATE,	/* Prioritise for reclaim when writeback ends */
  	NR_DIRTIED,		/* page dirtyings since bootup */
 diff --git a/include/trace/events/writeback.h b/include/trace/events/writeback.h
-index d94def25e4dc..45b5fbdb1f62 100644
+index 85a33bea76f1..10f5d1fa7347 100644
 --- a/include/trace/events/writeback.h
 +++ b/include/trace/events/writeback.h
-@@ -542,7 +542,6 @@ TRACE_EVENT(global_dirty_state,
+@@ -541,7 +541,6 @@ TRACE_EVENT(global_dirty_state,
  	TP_STRUCT__entry(
  		__field(unsigned long,	nr_dirty)
  		__field(unsigned long,	nr_writeback)
@@ -191,7 +182,7 @@ index d94def25e4dc..45b5fbdb1f62 100644
  		__field(unsigned long,	background_thresh)
  		__field(unsigned long,	dirty_thresh)
  		__field(unsigned long,	dirty_limit)
-@@ -553,7 +552,6 @@ TRACE_EVENT(global_dirty_state,
+@@ -552,7 +551,6 @@ TRACE_EVENT(global_dirty_state,
  	TP_fast_assign(
  		__entry->nr_dirty	= global_node_page_state(NR_FILE_DIRTY);
  		__entry->nr_writeback	= global_node_page_state(NR_WRITEBACK);
@@ -199,7 +190,7 @@ index d94def25e4dc..45b5fbdb1f62 100644
  		__entry->nr_dirtied	= global_node_page_state(NR_DIRTIED);
  		__entry->nr_written	= global_node_page_state(NR_WRITTEN);
  		__entry->background_thresh = background_thresh;
-@@ -561,12 +559,11 @@ TRACE_EVENT(global_dirty_state,
+@@ -560,12 +558,11 @@ TRACE_EVENT(global_dirty_state,
  		__entry->dirty_limit	= global_wb_domain.dirty_limit;
  	),
  
@@ -214,10 +205,10 @@ index d94def25e4dc..45b5fbdb1f62 100644
  		  __entry->dirty_thresh,
  		  __entry->dirty_limit,
 diff --git a/mm/memcontrol.c b/mm/memcontrol.c
-index 7ddf91c4295f..fad8e8a23235 100644
+index a3b97f103966..1db4b285c407 100644
 --- a/mm/memcontrol.c
 +++ b/mm/memcontrol.c
-@@ -4317,7 +4317,6 @@ void mem_cgroup_wb_stats(struct bdi_writeback *wb, unsigned long *pfilepages,
+@@ -4330,7 +4330,6 @@ void mem_cgroup_wb_stats(struct bdi_writeback *wb, unsigned long *pfilepages,
  
  	*pdirty = memcg_exact_page_state(memcg, NR_FILE_DIRTY);
  
@@ -226,7 +217,7 @@ index 7ddf91c4295f..fad8e8a23235 100644
  	*pfilepages = memcg_exact_page_state(memcg, NR_INACTIVE_FILE) +
  			memcg_exact_page_state(memcg, NR_ACTIVE_FILE);
 diff --git a/mm/page-writeback.c b/mm/page-writeback.c
-index 2afb09fa2fe0..dbc73522609e 100644
+index f02a71797781..d11b097c8002 100644
 --- a/mm/page-writeback.c
 +++ b/mm/page-writeback.c
 @@ -504,7 +504,6 @@ bool node_dirty_ok(struct pglist_data *pgdat)
@@ -255,7 +246,7 @@ index 2afb09fa2fe0..dbc73522609e 100644
  	long period;
  	long pause;
  	long max_pause;
-@@ -1589,14 +1588,7 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+@@ -1586,14 +1585,7 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
  		unsigned long m_thresh = 0;
  		unsigned long m_bg_thresh = 0;
  
@@ -271,7 +262,7 @@ index 2afb09fa2fe0..dbc73522609e 100644
  		gdtc->avail = global_dirtyable_memory();
  		gdtc->dirty = nr_reclaimable + global_node_page_state(NR_WRITEBACK);
  
-@@ -1940,8 +1932,7 @@ bool wb_over_bg_thresh(struct bdi_writeback *wb)
+@@ -1963,8 +1955,7 @@ bool wb_over_bg_thresh(struct bdi_writeback *wb)
  	 * as we're trying to decide whether to put more under writeback.
  	 */
  	gdtc->avail = global_dirtyable_memory();
@@ -282,10 +273,10 @@ index 2afb09fa2fe0..dbc73522609e 100644
  
  	if (gdtc->dirty > gdtc->bg_thresh)
 diff --git a/mm/page_alloc.c b/mm/page_alloc.c
-index 3c4eb750a199..6bd1112d590d 100644
+index 13cc653122b7..cc406ee17ad9 100644
 --- a/mm/page_alloc.c
 +++ b/mm/page_alloc.c
-@@ -5239,7 +5239,7 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
+@@ -5319,7 +5319,7 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
  
  	printk("active_anon:%lu inactive_anon:%lu isolated_anon:%lu\n"
  		" active_file:%lu inactive_file:%lu isolated_file:%lu\n"
@@ -294,7 +285,7 @@ index 3c4eb750a199..6bd1112d590d 100644
  		" slab_reclaimable:%lu slab_unreclaimable:%lu\n"
  		" mapped:%lu shmem:%lu pagetables:%lu bounce:%lu\n"
  		" free:%lu free_pcp:%lu free_cma:%lu\n",
-@@ -5252,7 +5252,6 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
+@@ -5332,7 +5332,6 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
  		global_node_page_state(NR_UNEVICTABLE),
  		global_node_page_state(NR_FILE_DIRTY),
  		global_node_page_state(NR_WRITEBACK),
@@ -302,7 +293,7 @@ index 3c4eb750a199..6bd1112d590d 100644
  		global_node_page_state(NR_SLAB_RECLAIMABLE),
  		global_node_page_state(NR_SLAB_UNRECLAIMABLE),
  		global_node_page_state(NR_FILE_MAPPED),
-@@ -5285,7 +5284,6 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
+@@ -5365,7 +5364,6 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
  			" anon_thp: %lukB"
  #endif
  			" writeback_tmp:%lukB"
@@ -310,7 +301,7 @@ index 3c4eb750a199..6bd1112d590d 100644
  			" all_unreclaimable? %s"
  			"\n",
  			pgdat->node_id,
-@@ -5307,7 +5305,6 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
+@@ -5387,7 +5385,6 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
  			K(node_page_state(pgdat, NR_ANON_THPS) * HPAGE_PMD_NR),
  #endif
  			K(node_page_state(pgdat, NR_WRITEBACK_TEMP)),
@@ -319,9 +310,18 @@ index 3c4eb750a199..6bd1112d590d 100644
  				"yes" : "no");
  	}
 diff --git a/mm/vmstat.c b/mm/vmstat.c
-index 78d53378db99..d1291537bbb9 100644
+index 96d21a792b57..6c719f184843 100644
 --- a/mm/vmstat.c
 +++ b/mm/vmstat.c
+@@ -1108,7 +1108,7 @@ int fragmentation_index(struct zone *zone, unsigned int order)
+ 					TEXT_FOR_HIGHMEM(xx) xx "_movable",
+ 
+ const char * const vmstat_text[] = {
+-	/* enum zone_stat_item countes */
++	/* enum zone_stat_item counters */
+ 	"nr_free_pages",
+ 	"nr_zone_inactive_anon",
+ 	"nr_zone_active_anon",
 @@ -1162,7 +1162,6 @@ const char * const vmstat_text[] = {
  	"nr_file_hugepages",
  	"nr_file_pmdmapped",
@@ -330,3 +330,18 @@ index 78d53378db99..d1291537bbb9 100644
  	"nr_vmscan_write",
  	"nr_vmscan_immediate_reclaim",
  	"nr_dirtied",
+@@ -1723,6 +1722,14 @@ static int vmstat_show(struct seq_file *m, void *arg)
+ 	seq_puts(m, vmstat_text[off]);
+ 	seq_put_decimal_ull(m, " ", *l);
+ 	seq_putc(m, '\n');
++
++	if (off == NR_VMSTAT_ITEMS - 1) {
++		/* We've come to the end - add any deprecated counters
++		 * to avoid breaking userspace which might depend on
++		 * them being present.
++		 */
++		seq_puts(m, "nr_unstable 0\n");
++	}
+ 	return 0;
+ }
+ 

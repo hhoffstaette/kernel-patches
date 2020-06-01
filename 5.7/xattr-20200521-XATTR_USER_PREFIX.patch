@@ -27,11 +27,9 @@ index 1590c49..5eab462 100644
 +#define XATTR_NAME_PAX_FLAGS XATTR_PAX_PREFIX XATTR_PAX_FLAGS_SUFFIX
  
  #endif /* _UAPI_LINUX_XATTR_H */
-diff --git a/mm/shmem.c b/mm/shmem.c
-index 440e2a7..c377172 100644
---- a/mm/shmem.c
-+++ b/mm/shmem.c
-@@ -2667,6 +2667,14 @@ static int shmem_xattr_handler_set(const struct xattr_handler *handler,
+--- a/mm/shmem.c	2020-05-04 15:30:27.042035334 -0400
++++ b/mm/shmem.c	2020-05-04 15:34:57.013881725 -0400
+@@ -3238,6 +3238,14 @@ static int shmem_xattr_handler_set(const
  	struct shmem_inode_info *info = SHMEM_I(inode);
  
  	name = xattr_full_name(handler, name);
@@ -43,10 +41,10 @@ index 440e2a7..c377172 100644
 +			return -EINVAL;
 +	}
 +
- 	return simple_xattr_set(&info->xattrs, name, value, size, flags);
+ 	return simple_xattr_set(&info->xattrs, name, value, size, flags, NULL);
  }
  
-@@ -2682,6 +2690,12 @@ static const struct xattr_handler shmem_trusted_xattr_handler = {
+@@ -3253,6 +3261,12 @@ static const struct xattr_handler shmem_
  	.set = shmem_xattr_handler_set,
  };
  
@@ -59,7 +57,7 @@ index 440e2a7..c377172 100644
  static const struct xattr_handler *shmem_xattr_handlers[] = {
  #ifdef CONFIG_TMPFS_POSIX_ACL
  	&posix_acl_access_xattr_handler,
-@@ -2689,6 +2703,7 @@ static const struct xattr_handler *shmem_xattr_handlers[] = {
+@@ -3260,6 +3274,7 @@ static const struct xattr_handler *shmem
  #endif
  	&shmem_security_xattr_handler,
  	&shmem_trusted_xattr_handler,

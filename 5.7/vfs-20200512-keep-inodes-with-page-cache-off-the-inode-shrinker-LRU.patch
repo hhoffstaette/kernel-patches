@@ -110,7 +110,6 @@ Footnotes
   people drop cache and metadata cache together, the inode shrinker
   would have taken care of them before - no more, so do it VM-side.
 
-[HH: forward-ported to 5.6.x]
 Signed-off-by: Johannes Weiner <hannes@cmpxchg.org>
 ---
  fs/block_dev.c                |   2 +-
@@ -730,7 +729,7 @@ index cc555903a332..2ae2df605006 100644
  		freepage = mapping->a_ops->freepage;
  		/*
 @@ -922,9 +923,12 @@ static int __remove_mapping(struct address_space *mapping, struct page *page,
- 		if (reclaimed && page_is_file_cache(page) &&
+ 		if (reclaimed && page_is_file_lru(page) &&
  		    !mapping_exiting(mapping) && !dax_mapping(mapping))
  			shadow = workingset_eviction(page, target_memcg);
 -		__delete_from_page_cache(page, shadow);

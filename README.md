@@ -21,14 +21,13 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Stable Series: 5.6**
+**Stable Series: 5.7**
 
-- block: fixes from 5.7+ (performance, BFQ)
-- bmq: [BMQ 5.6-r4](https://cchalpha.blogspot.com/2020/05/bmq-v56-r4-release.html) CPU scheduler
-- btrfs: fixes from 5.7+
+- block: fixes from 5.8+ (performance, BFQ)
+- btrfs: fixes from 5.8+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
-- mm: fixes from 5.7+
+- mm: fixes from 5.8+
 - net: BBR v2 ['alpha' from 2019-11-17](https://groups.google.com/forum/?hl=en#!topic/bbr-dev/xLs7_Slx3Qc) + fixes
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
-- xfs: fixes from 5.7+
+- xfs: fixes from 5.8+
 

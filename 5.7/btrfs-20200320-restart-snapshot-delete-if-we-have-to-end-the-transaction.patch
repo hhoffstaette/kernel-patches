@@ -63,9 +63,9 @@ index 2925b3ad77a1..bfb413747283 100644
  			if (!for_reloc && btrfs_need_cleaner_sleep(fs_info)) {
  				btrfs_debug(fs_info,
 @@ -5377,6 +5392,7 @@ int btrfs_drop_snapshot(struct btrfs_root *root,
+ 				err = PTR_ERR(trans);
+ 				goto out_free;
  			}
- 			if (block_rsv)
- 				trans->block_rsv = block_rsv;
 +			goto again;
  		}
  	}
