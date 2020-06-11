@@ -178,9 +178,9 @@ index 11b16729b86f..89d1245a96ce 100644
  out_unlock:
  	xas_unlock_irq(xas);
 +	if (populated == -1)
-+		inode_pages_clear(mapping->inode);
++		inode_pages_clear(mapping->host);
 +	else if (populated == 1)
-+		inode_pages_set(mapping->inode);
++		inode_pages_set(mapping->host);
  	if (xas_nomem(xas, mapping_gfp_mask(mapping) & ~__GFP_HIGHMEM))
  		goto retry;
  	if (xas->xa_node == XA_ERROR(-ENOMEM))
