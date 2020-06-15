@@ -1,14 +1,15 @@
 From: Nitin Gupta <nigupta@nvidia.com>
-To: Mel Gorman <mgorman@techsingularity.net>, Michal Hocko <mhocko@suse.com>,
-	Vlastimil Babka <vbabka@suse.cz>
-CC: Nitin Gupta <nigupta@nvidia.com>, Matthew Wilcox <willy@infradead.org>,
-	Andrew Morton <akpm@linux-foundation.org>, Mike Kravetz
-	<mike.kravetz@oracle.com>, Joonsoo Kim <iamjoonsoo.kim@lge.com>,
+To: Andrew Morton <akpm@linux-foundation.org>
+CC: Nitin Gupta <nigupta@nvidia.com>, Vlastimil Babka <vbabka@suse.cz>, Khalid
+ Aziz <khalid.aziz@oracle.com>, Michal Hocko <mhocko@suse.com>, Mel Gorman
+	<mgorman@techsingularity.net>, Matthew Wilcox <willy@infradead.org>, Mike
+ Kravetz <mike.kravetz@oracle.com>, Joonsoo Kim <iamjoonsoo.kim@lge.com>,
 	David Rientjes <rientjes@google.com>, Nitin Gupta <ngupta@nitingupta.dev>,
-	linux-kernel <linux-kernel@vger.kernel.org>, linux-mm <linux-mm@kvack.org>,
-	Linux API <linux-api@vger.kernel.org>
-Subject: [PATCH v6] mm: Proactive compaction
-Date: Mon, 1 Jun 2020 12:48:22 -0700
+	Oleksandr Natalenko <oleksandr@redhat.com>, linux-kernel
+	<linux-kernel@vger.kernel.org>, linux-mm <linux-mm@kvack.org>, Linux API
+	<linux-api@vger.kernel.org>
+Subject: [PATCH v7] mm: Proactive compaction
+Date: Mon, 15 Jun 2020 07:36:14 -0700
 
 For some applications, we need to allocate almost all memory as
 hugepages. However, on a running system, higher-order allocations can
@@ -173,19 +174,25 @@ should essentially back off. To test this aspect:
 
 Signed-off-by: Nitin Gupta <nigupta@nvidia.com>
 Reviewed-by: Vlastimil Babka <vbabka@suse.cz>
-To: Mel Gorman <mgorman@techsingularity.net>
-To: Michal Hocko <mhocko@suse.com>
-To: Vlastimil Babka <vbabka@suse.cz>
+Reviewed-by: Khalid Aziz <khalid.aziz@oracle.com>
+To: Andrew Morton <akpm@linux-foundation.org>
+CC: Vlastimil Babka <vbabka@suse.cz>
+CC: Khalid Aziz <khalid.aziz@oracle.com>
+CC: Michal Hocko <mhocko@suse.com>
+CC: Mel Gorman <mgorman@techsingularity.net>
 CC: Matthew Wilcox <willy@infradead.org>
-CC: Andrew Morton <akpm@linux-foundation.org>
 CC: Mike Kravetz <mike.kravetz@oracle.com>
 CC: Joonsoo Kim <iamjoonsoo.kim@lge.com>
 CC: David Rientjes <rientjes@google.com>
 CC: Nitin Gupta <ngupta@nitingupta.dev>
+CC: Oleksandr Natalenko <oleksandr@redhat.com>
 CC: linux-kernel <linux-kernel@vger.kernel.org>
 CC: linux-mm <linux-mm@kvack.org>
 CC: Linux API <linux-api@vger.kernel.org>
 ---
+Changelog v7 vs v6:
+ - Fix compile error while THP is disabled (Oleksandr)
+
 Changelog v6 vs v5:
  - Fallback to HUGETLB_PAGE_ORDER if HPAGE_PMD_ORDER is not defined, and
    some cleanups (Vlastimil)
@@ -298,7 +305,7 @@ index 8a176d8727a3..51c90906efbc 100644
  		.procname	= "extfrag_threshold",
  		.data		= &sysctl_extfrag_threshold,
 diff --git a/mm/compaction.c b/mm/compaction.c
-index 46f0fcc93081..822ff72817d5 100644
+index 46f0fcc93081..99579a1fa582 100644
 --- a/mm/compaction.c
 +++ b/mm/compaction.c
 @@ -50,6 +50,24 @@ static inline void count_compact_events(enum vm_event_item item, long delta)
@@ -315,7 +322,7 @@ index 46f0fcc93081..822ff72817d5 100644
 + * calculates external fragmentation, which is used as
 + * the "fragmentation score" of a node/zone.
 + */
-+#if defined HPAGE_PMD_ORDER
++#if defined CONFIG_TRANSPARENT_HUGEPAGE
 +#define COMPACTION_HPAGE_ORDER	HPAGE_PMD_ORDER
 +#elif defined HUGETLB_PAGE_ORDER
 +#define COMPACTION_HPAGE_ORDER	HUGETLB_PAGE_ORDER
