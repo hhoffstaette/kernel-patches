@@ -1,0 +1,79 @@
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH v2 2/2] btrfs: relocation: review the call sites which can be interruped by signal
+Date:   Thu,  9 Jul 2020 16:33:33 +0800
+
+Since most metadata reservation calls can return -EINTR when get
+interruped by fatal signal, we need to review the all the metadata
+reservation call sites.
+
+In relocation code, the metadata reservation happens in the following
+sites:
+- btrfs_block_rsv_refill() in merge_reloc_root()
+  merge_reloc_root() is a pretty critial section, we don't want get
+  interrupted by signal, so change the flush status to
+  BTRFS_RESERVE_FLUSH_LIMIT, so it won't get interrupted by signal.
+  Since such change can be ENPSPC-prone, also shrink the amount of
+  metadata to reserve a little to avoid deadly ENOSPC there.
+
+- btrfs_block_rsv_refill() in reserve_metadata_space()
+  It calls with BTRFS_RESERVE_FLUSH_LIMIT, which won't get interrupred
+  by signal.
+
+- btrfs_block_rsv_refill() in prepare_to_relocate()
+- btrfs_block_rsv_add() in prepare_to_relocate()
+- btrfs_block_rsv_refill() in relocate_block_group()
+- btrfs_delalloc_reserve_metadata() in relocate_file_extent_cluster()
+- btrfs_start_transaction() in relocate_block_group()
+- btrfs_start_transaction() in create_reloc_inode()
+  Can be interruped by fatal signal and we can handle it easily.
+  For these call sites, just catch the -EINTR value in btrfs_balance()
+  and count them as canceled.
+
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+---
+ fs/btrfs/relocation.c | 13 +++++++++++--
+ fs/btrfs/volumes.c    |  2 +-
+ 2 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 2b869fb2e62c..23914edd4710 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -1686,12 +1686,21 @@ static noinline_for_stack int merge_reloc_root(struct reloc_control *rc,
+ 		btrfs_unlock_up_safe(path, 0);
+ 	}
+ 
+-	min_reserved = fs_info->nodesize * (BTRFS_MAX_LEVEL - 1) * 2;
++	/*
++	 * In merge_reloc_root(), we modify the upper level pointer to swap
++	 * the tree blocks between reloc tree and subvolume tree.
++	 * Thus for tree block COW, we COW at most from level 1 to root level
++	 * for each tree.
++	 *
++	 * Thus the needed metadata space is at most root_level * nodesize,
++	 * and * 2 since we have two trees to COW.
++	 */
++	min_reserved = fs_info->nodesize * btrfs_root_level(root_item) * 2;
+ 	memset(&next_key, 0, sizeof(next_key));
+ 
+ 	while (1) {
+ 		ret = btrfs_block_rsv_refill(root, rc->block_rsv, min_reserved,
+-					     BTRFS_RESERVE_FLUSH_ALL);
++					     BTRFS_RESERVE_FLUSH_LIMIT);
+ 		if (ret) {
+ 			err = ret;
+ 			goto out;
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index aabc6c922e04..d60df30bdc47 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -4135,7 +4135,7 @@ int btrfs_balance(struct btrfs_fs_info *fs_info,
+ 	mutex_lock(&fs_info->balance_mutex);
+ 	if (ret == -ECANCELED && atomic_read(&fs_info->balance_pause_req))
+ 		btrfs_info(fs_info, "balance: paused");
+-	else if (ret == -ECANCELED && atomic_read(&fs_info->balance_cancel_req))
++	else if (ret == -ECANCELED  || ret == -EINTR)
+ 		btrfs_info(fs_info, "balance: canceled");
+ 	else
+ 		btrfs_info(fs_info, "balance: ended with status: %d", ret);
