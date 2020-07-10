@@ -1,0 +1,36 @@
+From:   Josef Bacik <josef@toxicpanda.com>
+To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Cc:     Eric Sandeen <esandeen@redhat.com>
+Subject: [PATCH] btrfs: return -EIO on error in btree_write_cache_pages
+Date:   Fri, 10 Jul 2020 10:06:19 -0400
+
+Eric reported seeing this message while running generic/475
+
+BTRFS: error (device dm-3) in btrfs_sync_log:3084: errno=-117 Filesystem corrupted
+
+This ret came from btrfs_write_marked_extents().  If we get an aborted
+transaction via an -EIO somewhere, we'll see it in
+btree_write_cache_pages() and return -EUCLEAN, which we spit out as
+"Filesystem corrupted".  Except we shouldn't be returning -EUCLEAN here,
+we need to be returning -EIO.  -EUCLEAN is reserved for actual
+corruption, not IO errors.
+
+Reported-by: Eric Sandeen <esandeen@redhat.com>
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+---
+ fs/btrfs/extent_io.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index a76b7da91aa6..6f0dd15729cc 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4122,7 +4122,7 @@ int btree_write_cache_pages(struct address_space *mapping,
+ 	if (!test_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state)) {
+ 		ret = flush_write_bio(&epd);
+ 	} else {
+-		ret = -EUCLEAN;
++		ret = -EIO;
+ 		end_write_bio(&epd, ret);
+ 	}
+ 	return ret;
