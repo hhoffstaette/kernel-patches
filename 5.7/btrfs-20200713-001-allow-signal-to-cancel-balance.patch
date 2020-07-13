@@ -1,0 +1,32 @@
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     Josef Bacik <josef@toxicpanda.com>
+Subject: [PATCH v3 1/4] btrfs: relocation: allow signal to cancel balance
+Date:   Mon, 13 Jul 2020 09:03:19 +0800
+
+Although btrfs balance can be canceled with "btrfs balance cancel"
+command, it's still almost muscle memory to press Ctrl-C to cancel a
+long running btrfs balance.
+
+So allow btrfs balance to check signal to determine if it should exit.
+
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+Reviewed-by: Josef Bacik <josef@toxicpanda.com>
+---
+ fs/btrfs/relocation.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/relocation.c b/fs/btrfs/relocation.c
+index 523d2e5fab8f..2b869fb2e62c 100644
+--- a/fs/btrfs/relocation.c
++++ b/fs/btrfs/relocation.c
+@@ -2656,7 +2656,8 @@ int setup_extent_mapping(struct inode *inode, u64 start, u64 end,
+  */
+ int btrfs_should_cancel_balance(struct btrfs_fs_info *fs_info)
+ {
+-	return atomic_read(&fs_info->balance_cancel_req);
++	return atomic_read(&fs_info->balance_cancel_req) ||
++		fatal_signal_pending(current);
+ }
+ ALLOW_ERROR_INJECTION(btrfs_should_cancel_balance, TRUE);
+ 
