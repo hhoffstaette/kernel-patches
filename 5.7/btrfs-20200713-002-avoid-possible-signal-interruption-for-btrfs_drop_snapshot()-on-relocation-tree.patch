@@ -1,8 +1,8 @@
 From:   Qu Wenruo <wqu@suse.com>
 To:     linux-btrfs@vger.kernel.org
 Cc:     Josef Bacik <josef@toxicpanda.com>
-Subject: [PATCH v2 1/2] btrfs: avoid possible signal interruption for btrfs_drop_snapshot() on relocation tree
-Date:   Thu,  9 Jul 2020 16:33:32 +0800
+Subject: [PATCH v3 2/4] btrfs: avoid possible signal interruption for btrfs_drop_snapshot() on relocation tree
+Date:   Mon, 13 Jul 2020 09:03:20 +0800
 
 [BUG]
 There is a bug report about bad signal timing could lead to read-only
@@ -48,8 +48,8 @@ dropped reloc trees.
 Fix this problem by using btrfs_join_transaction() if
 btrfs_drop_snapshot() is called from relocation context.
 
-As btrfs_join_transaction() won't wait full tickets, it won't get
-interrupted from signal.
+Since btrfs_join_transaction() won't get interrupted by signal, we can
+continue the cleanup.
 
 Signed-off-by: Qu Wenruo <wqu@suse.com>
 Reviewed-by: Josef Bacik <josef@toxicpanda.com>
