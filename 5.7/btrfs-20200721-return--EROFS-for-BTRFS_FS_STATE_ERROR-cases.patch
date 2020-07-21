@@ -1,0 +1,77 @@
+From: Josef Bacik <josef@toxicpanda.com>
+To: linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Cc: Eric Sandeen <esandeen@redhat.com>
+Subject: [PATCH][v2] btrfs: return -EROFS for BTRFS_FS_STATE_ERROR cases
+Date: Tue, 21 Jul 2020 10:38:37 -0400
+
+Eric reported seeing this message while running generic/475
+
+BTRFS: error (device dm-3) in btrfs_sync_log:3084: errno=-117 Filesystem corrupted
+
+This ret came from btrfs_write_marked_extents().  If we get an aborted
+transaction via an -EIO somewhere, we'll see it in
+btree_write_cache_pages() and return -EUCLEAN, which we spit out as
+"Filesystem corrupted".  Except we shouldn't be returning -EUCLEAN here,
+we need to be returning -EROFS.  -EUCLEAN is reserved for actual
+corruption, not IO errors.
+
+We are inconsistent about our handling of BTRFS_FS_STATE_ERROR
+elsewhere, but we want to use -EROFS for this particular case.  The
+original transaction abort has the real error code for why we ended up
+with an aborted transaction, all subsequent actions just need to return
+-EROFS because they may not have a trans handle and have no idea about
+the original cause of the abort.
+
+Reported-by: Eric Sandeen <esandeen@redhat.com>
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+---
+v1->v2:
+- Fixed this to be -EROFS, fixed other handlers of BTRFS_FS_STATE_ERROR.
+
+ fs/btrfs/extent_io.c   | 2 +-
+ fs/btrfs/scrub.c       | 2 +-
+ fs/btrfs/transaction.c | 5 ++++-
+ 3 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 73c9c59cd535..3fbc37692592 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -4119,7 +4119,7 @@ int btree_write_cache_pages(struct address_space *mapping,
+ 	if (!test_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state)) {
+ 		ret = flush_write_bio(&epd);
+ 	} else {
+-		ret = -EUCLEAN;
++		ret = -EROFS;
+ 		end_write_bio(&epd, ret);
+ 	}
+ 	return ret;
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index d935ac06323f..5a6cb9db512e 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -3691,7 +3691,7 @@ static noinline_for_stack int scrub_supers(struct scrub_ctx *sctx,
+ 	struct btrfs_fs_info *fs_info = sctx->fs_info;
+ 
+ 	if (test_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state))
+-		return -EIO;
++		return -EROFS;
+ 
+ 	/* Seed devices of a new filesystem has their own generation. */
+ 	if (scrub_dev->fs_devices != fs_info->fs_devices)
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index efafc286323c..20c6ac1a5de7 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -937,7 +937,10 @@ static int __btrfs_end_transaction(struct btrfs_trans_handle *trans,
+ 	if (TRANS_ABORTED(trans) ||
+ 	    test_bit(BTRFS_FS_STATE_ERROR, &info->fs_state)) {
+ 		wake_up_process(info->transaction_kthread);
+-		err = -EIO;
++		if (TRANS_ABORTED(trans))
++			err = trans->aborted;
++		else
++			err = -EROFS;
+ 	}
+ 
+ 	kmem_cache_free(btrfs_trans_handle_cachep, trans);
