@@ -9,6 +9,7 @@ before sending an ack in __tcp_ack_snd_check(). If this behavior is
 enabled, the data receiver sends an ACK if the amount of data is >
 RCV.MSS.
 
+[HH: update for mainline commit 76be93fc07 "tcp: allow at most one TLP probe per flight"]
 Change-Id: Iaa0a0fd7108221f883137a79d5bfa724f1b096d4
 ---
  include/linux/tcp.h  | 2 ++
@@ -21,12 +22,15 @@ diff --git a/include/linux/tcp.h b/include/linux/tcp.h
 index ca6f01531..145b15f5d 100644
 --- a/include/linux/tcp.h
 +++ b/include/linux/tcp.h
-@@ -216,6 +216,8 @@ struct tcp_sock {
+@@ -216,8 +216,9 @@ struct tcp_sock {
  	} rack;
  	u16	advmss;		/* Advertised MSS			*/
  	u8	compressed_ack;
+-	u8	tlp_retrans:1,	/* TLP is a retransmission */
+-		unused:7;
++	u8	tlp_retrans:1;	/* TLP is a retransmission */
 +	u8	fast_ack_mode:2, /* which fast ack mode ? */
-+		unused:6;
++		unused:5;
  	u32	chrono_start;	/* Start time in jiffies of a TCP chrono */
  	u32	chrono_stat[3];	/* Time in jiffies for chrono_stat stats */
  	u8	chrono_type:2,	/* current chronograph type */
