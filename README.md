@@ -27,7 +27,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - bmq: [BMQ 5.7-r3](https://cchalpha.blogspot.com/2020/07/project-c-v575-r3-release.html) CPU scheduler
 - btrfs: fixes from 5.8+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
-- mm: fixes from 5.8+
+- mm: fixes from 5.8+ & [proactive compaction](https://nitingupta.dev/post/proactive-compaction/)
 - net: BBR v2 ['alpha' from 2019-11-17](https://groups.google.com/forum/?hl=en#!topic/bbr-dev/xLs7_Slx3Qc) + fixes
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: fixes from 5.8+
