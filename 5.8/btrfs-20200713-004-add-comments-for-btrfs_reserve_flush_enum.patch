@@ -15,22 +15,21 @@ not explained at all.
 
 So add some simple comments for these enums as a quick reference.
 
-[HH: trivial context fix for 5.7.x]
 Signed-off-by: Qu Wenruo <wqu@suse.com>
 ---
  fs/btrfs/ctree.h | 34 ++++++++++++++++++++++++++++++++--
  1 file changed, 32 insertions(+), 2 deletions(-)
 
 diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
-index c96c27f66999..9e5cb19aaf54 100644
+index 050760dfc56d..b70c2024296f 100644
 --- a/fs/btrfs/ctree.h
 +++ b/fs/btrfs/ctree.h
-@@ -2563,16 +2563,46 @@ int btrfs_inc_extent_ref(struct btrfs_trans_handle *trans,
- void btrfs_put_block_group_trimming(struct btrfs_block_group *cache);
+@@ -2560,16 +2560,46 @@ int btrfs_inc_extent_ref(struct btrfs_trans_handle *trans,
+ int btrfs_extent_readonly(struct btrfs_fs_info *fs_info, u64 bytenr);
  void btrfs_clear_space_info_full(struct btrfs_fs_info *info);
  
 +/*
-+ * Different levels for to flush space when doing reserve.
++ * Different levels for to flush space when doing space reservations.
 + *
 + * The higher the level, the more methods we try to reclaim space.
 + */
@@ -48,16 +47,16 @@ index c96c27f66999..9e5cb19aaf54 100644
  	BTRFS_RESERVE_FLUSH_LIMIT,
 +
 +	/*
-+	 * Flushing space by:
++	 * Flush space by:
 +	 * - Running delayed inode items
 +	 * - Running delayed refs
-+	 * - Running delalloc and wait for ordered extents
++	 * - Running delalloc and waiting for ordered extents
 +	 * - Allocating a new chunk
 +	 */
  	BTRFS_RESERVE_FLUSH_EVICT,
 +
 +	/*
-+	 * Flush space by above mentioned methods and:
++	 * Flush space by above mentioned methods and by:
 +	 * - Running delayed iputs
 +	 * - Commiting transaction
 +	 *
@@ -66,8 +65,8 @@ index c96c27f66999..9e5cb19aaf54 100644
  	BTRFS_RESERVE_FLUSH_ALL,
 +
 +	/*
-+	 * Pretty much the same as FLUSH_ALL, but can also steal space
-+	 * from global rsv.
++	 * Pretty much the same as FLUSH_ALL, but can also steal space from
++	 * global rsv.
 +	 *
 +	 * Can be interruped by fatal signal.
 +	 */

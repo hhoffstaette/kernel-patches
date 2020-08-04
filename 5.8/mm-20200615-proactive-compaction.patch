@@ -172,6 +172,7 @@ should essentially back off. To test this aspect:
 [2] https://lore.kernel.org/linux-mm/20161230131412.GI13301@dhcp22.suse.cz/
 [3] https://lwn.net/Articles/817905/
 
+[HH: context fix in compaction.h for 5.8.0]
 Signed-off-by: Nitin Gupta <nigupta@nvidia.com>
 Reviewed-by: Vlastimil Babka <vbabka@suse.cz>
 Reviewed-by: Khalid Aziz <khalid.aziz@oracle.com>
@@ -276,7 +277,7 @@ index 4b898cdbdf05..ccd28978b296 100644
  extern int sysctl_compact_memory;
 +extern int sysctl_compaction_proactiveness;
  extern int sysctl_compaction_handler(struct ctl_table *table, int write,
- 			void __user *buffer, size_t *length, loff_t *ppos);
+ 			void *buffer, size_t *length, loff_t *ppos);
  extern int sysctl_extfrag_threshold;
  extern int sysctl_compact_unevictable_allowed;
  
