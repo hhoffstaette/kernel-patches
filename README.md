@@ -23,6 +23,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 **Stable Series: 5.8**
 
+- bmq: [BMQ 5.8-r0](https://cchalpha.blogspot.com/2020/08/project-c-v58-r0-release.html) CPU scheduler
 - btrfs: fixes from 5.9+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
 - mm: [proactive compaction](https://nitingupta.dev/post/proactive-compaction/)
