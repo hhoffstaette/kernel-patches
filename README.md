@@ -21,7 +21,8 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Stable Series: 5.7**
+**NOTE:** This branch will no longer receive updates!
+-----------------------------------------------------
 
 - block: fixes from 5.8+ (performance, BFQ)
 - bmq: [BMQ 5.7-r3](https://cchalpha.blogspot.com/2020/07/project-c-v575-r3-release.html) CPU scheduler
