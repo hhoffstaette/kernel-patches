@@ -23,9 +23,8 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2020-08-10)**
+**Current status (2020-08-17)**
 
-- 5.8.1 is ready for testing.
-- 5.7.x is my current production branch.
-- all other branches < 5.7 are EOL.
+- 5.8.x is my current production branch.
+- all other branches < 5.8 are EOL for me.
 
