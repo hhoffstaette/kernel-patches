@@ -1,0 +1,49 @@
+From: Marcos Paulo de Souza <mpdesouza@suse.com>
+Subject: [PATCH] btrfs: make read_block_group_item return void
+Date: Mon, 17 Aug 2020 10:56:10 -0300
+
+Since it's inclusion on 9afc66498a0b ("btrfs: block-group: refactor how
+we read one block group item") this function always returned 0, so there
+is no need to check for the returned value.
+
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+Signed-off-by: Marcos Paulo de Souza <mpdesouza@suse.com>
+Reviewed-by: David Sterba <dsterba@suse.com>
+Signed-off-by: David Sterba <dsterba@suse.com>
+---
+ fs/btrfs/block-group.c | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/block-group.c b/fs/btrfs/block-group.c
+index 57bd3651858d2..44fdfa2eeb2e4 100644
+--- a/fs/btrfs/block-group.c
++++ b/fs/btrfs/block-group.c
+@@ -1874,7 +1874,7 @@ static int check_chunk_block_group_mappings(struct btrfs_fs_info *fs_info)
+ 	return ret;
+ }
+ 
+-static int read_block_group_item(struct btrfs_block_group *cache,
++static void read_block_group_item(struct btrfs_block_group *cache,
+ 				 struct btrfs_path *path,
+ 				 const struct btrfs_key *key)
+ {
+@@ -1888,8 +1888,6 @@ static int read_block_group_item(struct btrfs_block_group *cache,
+ 			   sizeof(bgi));
+ 	cache->used = btrfs_stack_block_group_used(&bgi);
+ 	cache->flags = btrfs_stack_block_group_flags(&bgi);
+-
+-	return 0;
+ }
+ 
+ static int read_one_block_group(struct btrfs_fs_info *info,
+@@ -1908,9 +1906,7 @@ static int read_one_block_group(struct btrfs_fs_info *info,
+ 	if (!cache)
+ 		return -ENOMEM;
+ 
+-	ret = read_block_group_item(cache, path, key);
+-	if (ret < 0)
+-		goto error;
++	read_block_group_item(cache, path, key);
+ 
+ 	if (need_clear) {
+ 		/*
