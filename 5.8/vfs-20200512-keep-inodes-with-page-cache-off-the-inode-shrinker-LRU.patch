@@ -110,7 +110,7 @@ Footnotes
   people drop cache and metadata cache together, the inode shrinker
   would have taken care of them before - no more, so do it VM-side.
 
-[HH: forward-ported to 5.8.0]
+[HH: forward-ported to 5.8.6]
 Signed-off-by: Johannes Weiner <hannes@cmpxchg.org>
 ---
  fs/block_dev.c                |   2 +-
@@ -406,8 +406,8 @@ index e4a1f28435fe..c3137ee87cb2 100644
   * Use sequence counter to get consistent i_size on 32-bit processors.
   */
 @@ -2165,6 +2170,9 @@ static inline void kiocb_clone(struct kiocb *kiocb, struct kiocb *kiocb_src,
-  *
-  * I_DONTCACHE		Evict inode as soon as it is not used anymore.
+  *			Used to detect that mark_inode_dirty() should not move
+  * 			inode between dirty lists.
   *
 + * I_PAGES		Inode is holding page cache that needs to get reclaimed
 + *			first before the inode can go onto the shrinker LRU.
@@ -416,10 +416,10 @@ index e4a1f28435fe..c3137ee87cb2 100644
   */
  #define I_DIRTY_SYNC		(1 << 0)
 @@ -2187,6 +2195,7 @@ static inline void kiocb_clone(struct kiocb *kiocb, struct kiocb *kiocb_src,
- #define I_OVL_INUSE		(1 << 14)
  #define I_CREATING		(1 << 15)
  #define I_DONTCACHE		(1 << 16)
-+#define I_PAGES			(1 << 17)
+ #define I_SYNC_QUEUED		(1 << 17)
++#define I_PAGES			(1 << 18)
  
  #define I_DIRTY_INODE (I_DIRTY_SYNC | I_DIRTY_DATASYNC)
  #define I_DIRTY (I_DIRTY_INODE | I_DIRTY_PAGES)
