@@ -69,6 +69,7 @@ BTRFS warning (device loop0): loop0 checksum verify failed on 1052672 wanted fc3
 BTRFS error (device loop0): failed to read chunk root
 BTRFS error (device loop0): open_ctree failed
 
+[HH: fixed csum array initializer]
 Fixes: d5178578bcd4 ("btrfs: directly call into crypto framework for checksumming")
 Reported-by: syzbot+e864a35d361e1d4e29a5@syzkaller.appspotmail.com
 Signed-off-by: Johannes Thumshirn <johannes.thumshirn@wdc.com>
@@ -85,7 +86,7 @@ index 160b485d2cc0..28b962840972 100644
  	if (memcmp_extent_buffer(eb, result, 0, csum_size)) {
  		u32 val;
 -		u32 found = 0;
-+		u8 found[BTRFS_CSUM_SIZE] = { };
++		u8 found[BTRFS_CSUM_SIZE] = {0};
  
  		memcpy(&found, result, csum_size);
  
