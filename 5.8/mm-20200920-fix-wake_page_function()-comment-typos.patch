@@ -1,0 +1,35 @@
+From 5868ec267de5eade3ef80bd8716d6b7621a0c4c0 Mon Sep 17 00:00:00 2001
+From: Linus Torvalds <torvalds@linux-foundation.org>
+Date: Sun, 20 Sep 2020 10:38:47 -0700
+Subject: mm: fix wake_page_function() comment typos
+
+Sedat Dilek pointed out some silly comment typo issues.
+
+Reported-by: Sedat Dilek <sedat.dilek@gmail.com>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/filemap.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mm/filemap.c b/mm/filemap.c
+index 6aa08e7714ce6..5202e38ab79e8 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -990,7 +990,7 @@ void __init pagecache_init(void)
+ 
+ /*
+  * The page wait code treats the "wait->flags" somewhat unusually, because
+- * we have multiple different kinds of waits, not just he usual "exclusive"
++ * we have multiple different kinds of waits, not just the usual "exclusive"
+  * one.
+  *
+  * We have:
+@@ -1011,7 +1011,7 @@ void __init pagecache_init(void)
+  *
+  *	This is the traditional exclusive wait.
+  *
+- *  (b) WQ_FLAG_EXCLUSIVE | WQ_FLAG_CUSTOM:
++ *  (c) WQ_FLAG_EXCLUSIVE | WQ_FLAG_CUSTOM:
+  *
+  *	The waiter is waiting to get the bit, and additionally wants the
+  *	lock to be transferred to it for fair lock behavior. If the lock
