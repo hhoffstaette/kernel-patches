@@ -110,7 +110,7 @@ Footnotes
   people drop cache and metadata cache together, the inode shrinker
   would have taken care of them before - no more, so do it VM-side.
 
-[HH: forward-ported to 5.8.6]
+[HH: forward-ported to 5.9.0]
 Signed-off-by: Johannes Weiner <hannes@cmpxchg.org>
 ---
  fs/block_dev.c                |   2 +-
@@ -437,7 +437,7 @@ index e4a1f28435fe..c3137ee87cb2 100644
 +
  extern void inode_sb_list_add(struct inode *inode);
  
- #ifdef CONFIG_BLOCK
+ extern int sb_set_blocksize(struct super_block *, int);
 diff --git a/include/linux/pagemap.h b/include/linux/pagemap.h
 index c6348c50136f..c3646b79489e 100644
 --- a/include/linux/pagemap.h
@@ -722,9 +722,9 @@ index cc555903a332..2ae2df605006 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
 @@ -901,6 +901,7 @@ static int __remove_mapping(struct address_space *mapping, struct page *page,
+ 		put_swap_page(page, swap);
  	} else {
  		void (*freepage)(struct page *);
- 		void *shadow = NULL;
 +		int empty;
  
  		freepage = mapping->a_ops->freepage;

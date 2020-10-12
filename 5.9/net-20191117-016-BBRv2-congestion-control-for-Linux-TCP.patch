@@ -125,7 +125,7 @@ o Internal notes:
   then removed dev instrumentation (dynamic get/set for parameters)
   and code that was only used by BBRv1
 
-[HH: trivial context fix for 5.6.0 in Kconfig#1]
+[HH: forward-ported to 5.9.0]
 Effort: net-tcp_bbr
 Origin-9xx-SHA1: 2c84098e60bed6d67dde23cd7538c51dee273102
 Change-Id: I125cf26ba2a7a686f2fa5e87f4c2afceb65f7a05
@@ -206,26 +206,26 @@ index 03381f3e1..a638dee76 100644
 --- a/net/ipv4/Kconfig
 +++ b/net/ipv4/Kconfig
 @@ -654,6 +654,24 @@ config TCP_CONG_BBR
- 	  bufferbloat, policers, or AQM schemes that do not provide a delay
- 	  signal. It requires the fq ("Fair Queue") pacing packet scheduler.
- 
+ 	  AQM schemes that do not provide a delay signal. It requires the fq
+ 	  ("Fair Queue") pacing packet scheduler.
+
 +config TCP_CONG_BBR2
 +	tristate "BBR2 TCP"
 +	default n
-+	---help---
++	help
 +
-+	BBR2 TCP congestion control is a model-based congestion control
-+	algorithm that aims to maximize network utilization, keep queues and
-+	retransmit rates low, and to be able to coexist with Reno/CUBIC in
-+	common scenarios. It builds an explicit model of the network path.  It
-+	tolerates a targeted degree of random packet loss and delay that are
-+	unrelated to congestion. It can operate over LAN, WAN, cellular, wifi,
-+	or cable modem links, and can use DCTCP-L4S-style ECN signals.  It can
-+	coexist with flows that use loss-based congestion control, and can
-+	operate with shallow buffers, deep buffers, bufferbloat, policers, or
-+	AQM schemes that do not provide a delay signal. It requires pacing,
-+	using either TCP internal pacing or the fq ("Fair Queue") pacing packet
-+	scheduler.
++	  BBR2 TCP congestion control is a model-based congestion control
++	  algorithm that aims to maximize network utilization, keep queues and
++	  retransmit rates low, and to be able to coexist with Reno/CUBIC in
++	  common scenarios. It builds an explicit model of the network path.  It
++	  tolerates a targeted degree of random packet loss and delay that are
++	  unrelated to congestion. It can operate over LAN, WAN, cellular, wifi,
++	  or cable modem links, and can use DCTCP-L4S-style ECN signals.  It can
++	  coexist with flows that use loss-based congestion control, and can
++	  operate with shallow buffers, deep buffers, bufferbloat, policers, or
++	  AQM schemes that do not provide a delay signal. It requires pacing,
++	  using either TCP internal pacing or the fq ("Fair Queue") pacing packet
++	  scheduler.
 +
  choice
  	prompt "Default TCP congestion control"

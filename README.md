@@ -21,12 +21,10 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Stable Series: 5.8**
+**Stable Series: 5.9**
 
-- btrfs: fixes from 5.9+
+- btrfs: fixes from 5.10+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
-- mm: [proactive compaction](https://nitingupta.dev/post/proactive-compaction/)
 - net: BBR v2 ['alpha' from 2019-11-17](https://groups.google.com/forum/?hl=en#!topic/bbr-dev/xLs7_Slx3Qc) + fixes
-- projc: [ProjectC 5.8-r3](https://cchalpha.blogspot.com/2020/09/project-c-v58-r3-release.html) CPU scheduler(s)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 
