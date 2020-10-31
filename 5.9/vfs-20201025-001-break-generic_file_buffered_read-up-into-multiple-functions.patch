@@ -1,10 +1,8 @@
-From:   Kent Overstreet <kent.overstreet@gmail.com>
-To:     linux-kernel@vger.kernel.org, linux-fsdevel@vger.kernel.org,
-        akpm@linux-foundation.org
-Cc:     Kent Overstreet <kent.overstreet@gmail.com>, willy@infradead.org,
-        Jens Axboe <axboe@kernel.dk>
-Subject: [PATCH 1/2] fs: Break generic_file_buffered_read up into multiple functions
-Date:   Sat, 17 Oct 2020 16:10:54 -0400
+From: Kent Overstreet <kent.overstreet@gmail.com>
+To: linux-kernel@vger.kernel.org, akpm@linux-foundation.org
+Cc: Kent Overstreet <kent.overstreet@gmail.com>, axboe@kernel.dk, willy@infradead.org, linux-fsdevel@vger.kernel.org
+Subject: [PATCH v2 1/2] fs: Break generic_file_buffered_read up into multiple functions
+Date: Sun, 25 Oct 2020 17:29:48 -0400
 
 This is prep work for changing generic_file_buffered_read() to use
 find_get_pages_contig() to batch up all the pagecache lookups.
@@ -21,10 +19,10 @@ Cc: Jens Axboe <axboe@kernel.dk>
  1 file changed, 261 insertions(+), 212 deletions(-)
 
 diff --git a/mm/filemap.c b/mm/filemap.c
-index 99c49eeae7..482fd75d66 100644
+index d5e7c2029d..cc0f58a249 100644
 --- a/mm/filemap.c
 +++ b/mm/filemap.c
-@@ -2138,6 +2138,234 @@ static void shrink_readahead_size_eio(struct file_ra_state *ra)
+@@ -2158,6 +2158,234 @@ static void shrink_readahead_size_eio(struct file_ra_state *ra)
  	ra->ra_pages /= 4;
  }
  
@@ -259,7 +257,7 @@ index 99c49eeae7..482fd75d66 100644
  /**
   * generic_file_buffered_read - generic file read routine
   * @iocb:	the iocb to read
-@@ -2161,29 +2389,19 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
+@@ -2181,23 +2409,15 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
  	struct address_space *mapping = filp->f_mapping;
  	struct inode *inode = mapping->host;
  	struct file_ra_state *ra = &filp->f_ra;
@@ -284,6 +282,11 @@ index 99c49eeae7..482fd75d66 100644
 -	offset = *ppos & ~PAGE_MASK;
 +	last_index = (iocb->ki_pos + iter->count + PAGE_SIZE-1) >> PAGE_SHIFT;
  
+ 	/*
+ 	 * If we've already successfully copied some data, then we
+@@ -2208,10 +2428,8 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
+ 		iocb->ki_flags |= IOCB_NOWAIT;
+ 
  	for (;;) {
 +		pgoff_t index = iocb->ki_pos >> PAGE_SHIFT;
  		struct page *page;
@@ -293,7 +296,7 @@ index 99c49eeae7..482fd75d66 100644
  
  		cond_resched();
  find_page:
-@@ -2192,6 +2410,14 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
+@@ -2220,6 +2438,14 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
  			goto out;
  		}
  
@@ -308,7 +311,7 @@ index 99c49eeae7..482fd75d66 100644
  		page = find_get_page(mapping, index);
  		if (!page) {
  			if (iocb->ki_flags & IOCB_NOIO)
-@@ -2200,8 +2426,15 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
+@@ -2228,8 +2454,15 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
  					ra, filp,
  					index, last_index - index);
  			page = find_get_page(mapping, index);
@@ -326,7 +329,7 @@ index 99c49eeae7..482fd75d66 100644
  		}
  		if (PageReadahead(page)) {
  			if (iocb->ki_flags & IOCB_NOIO) {
-@@ -2213,221 +2446,37 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
+@@ -2241,221 +2474,37 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
  					index, last_index - index);
  		}
  		if (!PageUptodate(page)) {

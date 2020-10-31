@@ -1,9 +1,8 @@
-From:   Kent Overstreet <kent.overstreet@gmail.com>
-To:     linux-kernel@vger.kernel.org, linux-fsdevel@vger.kernel.org,
-        akpm@linux-foundation.org
-Cc:     Kent Overstreet <kent.overstreet@gmail.com>, willy@infradead.org
-Subject: [PATCH 2/2] fs: generic_file_buffered_read() now uses find_get_pages_contig
-Date:   Sat, 17 Oct 2020 16:10:55 -0400
+From: Kent Overstreet <kent.overstreet@gmail.com>
+To: linux-kernel@vger.kernel.org, akpm@linux-foundation.org
+Cc: Kent Overstreet <kent.overstreet@gmail.com>, axboe@kernel.dk, willy@infradead.org, linux-fsdevel@vger.kernel.org
+Subject: [PATCH v2 2/2] fs: generic_file_buffered_read() now uses find_get_pages_contig
+Date: Sun, 25 Oct 2020 17:29:49 -0400
 
 Convert generic_file_buffered_read() to get pages to read from in
 batches, and then copy data to userspace from many pages at once - in
@@ -19,14 +18,14 @@ improvement (1%, within the margin of error).
 
 Signed-off-by: Kent Overstreet <kent.overstreet@gmail.com>
 ---
- mm/filemap.c | 300 +++++++++++++++++++++++++++++----------------------
- 1 file changed, 172 insertions(+), 128 deletions(-)
+ mm/filemap.c | 313 ++++++++++++++++++++++++++++-----------------------
+ 1 file changed, 175 insertions(+), 138 deletions(-)
 
 diff --git a/mm/filemap.c b/mm/filemap.c
-index 482fd75d66..8cf5b5d9e6 100644
+index cc0f58a249..1bf1f424cb 100644
 --- a/mm/filemap.c
 +++ b/mm/filemap.c
-@@ -2148,67 +2148,6 @@ static int lock_page_for_iocb(struct kiocb *iocb, struct page *page)
+@@ -2168,67 +2168,6 @@ static int lock_page_for_iocb(struct kiocb *iocb, struct page *page)
  		return lock_page_killable(page);
  }
  
@@ -94,7 +93,7 @@ index 482fd75d66..8cf5b5d9e6 100644
  static struct page *
  generic_file_buffered_read_readpage(struct kiocb *iocb,
  				    struct file *filp,
-@@ -2366,6 +2305,92 @@ generic_file_buffered_read_no_cached_page(struct kiocb *iocb,
+@@ -2386,6 +2325,92 @@ generic_file_buffered_read_no_cached_page(struct kiocb *iocb,
  	return generic_file_buffered_read_readpage(iocb, filp, mapping, page);
  }
  
@@ -187,7 +186,7 @@ index 482fd75d66..8cf5b5d9e6 100644
  /**
   * generic_file_buffered_read - generic file read routine
   * @iocb:	the iocb to read
-@@ -2386,96 +2411,115 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
+@@ -2406,104 +2431,116 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
  		struct iov_iter *iter, ssize_t written)
  {
  	struct file *filp = iocb->ki_filp;
@@ -214,6 +213,14 @@ index 482fd75d66..8cf5b5d9e6 100644
 +	if (nr_pages > ARRAY_SIZE(pages_onstack))
 +		pages = kmalloc_array(nr_pages, sizeof(void *), GFP_KERNEL);
  
+-	/*
+-	 * If we've already successfully copied some data, then we
+-	 * can no longer safely return -EIOCBQUEUED. Hence mark
+-	 * an async read NOWAIT at that point.
+-	 */
+-	if (written && (iocb->ki_flags & IOCB_WAITQ))
+-		iocb->ki_flags |= IOCB_NOWAIT;
+-
 -	for (;;) {
 -		pgoff_t index = iocb->ki_pos >> PAGE_SHIFT;
 -		struct page *page;
@@ -231,8 +238,11 @@ index 482fd75d66..8cf5b5d9e6 100644
 -		}
  
  		/*
- 		 * We can't return -EIOCBQUEUED once we've done some work, so
- 		 * ensure we don't block:
+-		 * We can't return -EIOCBQUEUED once we've done some work, so
+-		 * ensure we don't block:
++		 * If we've already successfully copied some data, then we
++		 * can no longer safely return -EIOCBQUEUED. Hence mark
++		 * an async read NOWAIT at that point.
  		 */
 -		if ((iocb->ki_flags & IOCB_WAITQ) &&
 -		    (written + orig_count - iov_iter_count(iter)))
