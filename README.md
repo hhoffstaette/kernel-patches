@@ -12,6 +12,7 @@ To apply over a release:
 
 - check out the branch for the kernel you want (see `git branch -l`)
 - run the `kernel-patches/apply.sh` script when in the kernel directory
+  (do *not* use `git am`, it will very likely mess up the output!)
 - build as usual
 
 All patches of a series must be applied, as some have interdependencies
