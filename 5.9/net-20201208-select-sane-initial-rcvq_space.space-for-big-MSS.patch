@@ -1,0 +1,68 @@
+From: Eric Dumazet <eric.dumazet@gmail.com>
+To: "David S . Miller" <davem@davemloft.net>, Jakub Kicinski <kuba@kernel.org>
+Cc: netdev <netdev@vger.kernel.org>, Eric Dumazet <edumazet@google.com>,
+ Eric Dumazet <eric.dumazet@gmail.com>, Soheil Hassas Yeganeh <soheil@google.com>,
+ Neal Cardwell <ncardwell@google.com>, Yuchung Cheng <ycheng@google.com>,
+ Hazem Mohamed Abuelfotoh <abuehaze@amazon.com>
+Subject: [PATCH net] tcp: select sane initial rcvq_space.space for big MSS
+Date: Tue,  8 Dec 2020 08:21:31 -0800
+
+From: Eric Dumazet <edumazet@google.com>
+
+Before commit a337531b942b ("tcp: up initial rmem to 128KB and SYN rwin to around 64KB")
+small tcp_rmem[1] values were overridden by tcp_fixup_rcvbuf() to accommodate various MSS.
+
+This is no longer the case, and Hazem Mohamed Abuelfotoh reported
+that DRS would not work for MTU 9000 endpoints receiving regular (1500 bytes) frames.
+
+Root cause is that tcp_init_buffer_space() uses tp->rcv_wnd for upper limit
+of rcvq_space.space computation, while it can select later a smaller
+value for tp->rcv_ssthresh and tp->window_clamp.
+
+ss -temoi on receiver would show :
+
+skmem:(r0,rb131072,t0,tb46080,f0,w0,o0,bl0,d0) rcv_space:62496 rcv_ssthresh:56596
+
+This means that TCP can not increase its window in tcp_grow_window(),
+and that DRS can never kick.
+
+Fix this by making sure that rcvq_space.space is not bigger than number of bytes
+that can be held in TCP receive queue.
+
+People unable/unwilling to change their kernel can work around this issue by
+selecting a bigger tcp_rmem[1] value as in :
+
+echo "4096 196608 6291456" >/proc/sys/net/ipv4/tcp_rmem
+
+Based on an initial report and patch from Hazem Mohamed Abuelfotoh
+ https://lore.kernel.org/netdev/20201204180622.14285-1-abuehaze@amazon.com/
+
+Fixes: a337531b942b ("tcp: up initial rmem to 128KB and SYN rwin to around 64KB")
+Fixes: 041a14d26715 ("tcp: start receiver buffer autotuning sooner")
+Reported-by: Hazem Mohamed Abuelfotoh <abuehaze@amazon.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/ipv4/tcp_input.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 389d1b34024854a9bdcbe861d4820d1bfb495e24..ef4bdb038a4bbbd949868a01dc855bba0e90b9ca 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -510,7 +510,6 @@ static void tcp_init_buffer_space(struct sock *sk)
+ 	if (!(sk->sk_userlocks & SOCK_SNDBUF_LOCK))
+ 		tcp_sndbuf_expand(sk);
+ 
+-	tp->rcvq_space.space = min_t(u32, tp->rcv_wnd, TCP_INIT_CWND * tp->advmss);
+ 	tcp_mstamp_refresh(tp);
+ 	tp->rcvq_space.time = tp->tcp_mstamp;
+ 	tp->rcvq_space.seq = tp->copied_seq;
+@@ -534,6 +533,8 @@ static void tcp_init_buffer_space(struct sock *sk)
+ 
+ 	tp->rcv_ssthresh = min(tp->rcv_ssthresh, tp->window_clamp);
+ 	tp->snd_cwnd_stamp = tcp_jiffies32;
++	tp->rcvq_space.space = min3(tp->rcv_ssthresh, tp->rcv_wnd,
++				    (u32)TCP_INIT_CWND * tp->advmss);
+ }
+ 
+ /* 4. Recalculate window clamp after socket hit its memory bounds. */
