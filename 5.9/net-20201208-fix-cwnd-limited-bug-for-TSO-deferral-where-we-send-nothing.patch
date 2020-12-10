@@ -1,0 +1,87 @@
+From: Neal Cardwell <ncardwell.kernel@gmail.com>
+To: David Miller <davem@davemloft.net>
+Cc: netdev@vger.kernel.org, Neal Cardwell <ncardwell@google.com>,
+ Ingemar Johansson <ingemar.s.johansson@ericsson.com>,
+ Yuchung Cheng <ycheng@google.com>,Soheil Hassas Yeganeh <soheil@google.com>,
+ Eric Dumazet <edumazet@google.com>
+Subject: [PATCH net] tcp: fix cwnd-limited bug for TSO deferral where we send nothing
+Date: Tue,  8 Dec 2020 22:57:59 -0500
+
+From: Neal Cardwell <ncardwell@google.com>
+
+When cwnd is not a multiple of the TSO skb size of N*MSS, we can get
+into persistent scenarios where we have the following sequence:
+
+(1) ACK for full-sized skb of N*MSS arrives
+  -> tcp_write_xmit() transmit full-sized skb with N*MSS
+  -> move pacing release time forward
+  -> exit tcp_write_xmit() because pacing time is in the future
+
+(2) TSQ callback or TCP internal pacing timer fires
+  -> try to transmit next skb, but TSO deferral finds remainder of
+     available cwnd is not big enough to trigger an immediate send
+     now, so we defer sending until the next ACK.
+
+(3) repeat...
+
+So we can get into a case where we never mark ourselves as
+cwnd-limited for many seconds at a time, even with
+bulk/infinite-backlog senders, because:
+
+o In case (1) above, every time in tcp_write_xmit() we have enough
+cwnd to send a full-sized skb, we are not fully using the cwnd
+(because cwnd is not a multiple of the TSO skb size). So every time we
+send data, we are not cwnd limited, and so in the cwnd-limited
+tracking code in tcp_cwnd_validate() we mark ourselves as not
+cwnd-limited.
+
+o In case (2) above, every time in tcp_write_xmit() that we try to
+transmit the "remainder" of the cwnd but defer, we set the local
+variable is_cwnd_limited to true, but we do not send any packets, so
+sent_pkts is zero, so we don't call the cwnd-limited logic to update
+tp->is_cwnd_limited.
+
+Fixes: ca8a22634381 ("tcp: make cwnd-limited checks measurement-based, and gentler")
+Reported-by: Ingemar Johansson <ingemar.s.johansson@ericsson.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: Yuchung Cheng <ycheng@google.com>
+Acked-by: Soheil Hassas Yeganeh <soheil@google.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/ipv4/tcp_output.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index bf48cd73e967..99011768c264 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -1880,7 +1880,8 @@ static void tcp_cwnd_validate(struct sock *sk, bool is_cwnd_limited)
+ 	 * window, and remember whether we were cwnd-limited then.
+ 	 */
+ 	if (!before(tp->snd_una, tp->max_packets_seq) ||
+-	    tp->packets_out > tp->max_packets_out) {
++	    tp->packets_out > tp->max_packets_out ||
++	    is_cwnd_limited) {
+ 		tp->max_packets_out = tp->packets_out;
+ 		tp->max_packets_seq = tp->snd_nxt;
+ 		tp->is_cwnd_limited = is_cwnd_limited;
+@@ -2702,6 +2703,10 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
+ 	else
+ 		tcp_chrono_stop(sk, TCP_CHRONO_RWND_LIMITED);
+ 
++	is_cwnd_limited |= (tcp_packets_in_flight(tp) >= tp->snd_cwnd);
++	if (likely(sent_pkts || is_cwnd_limited))
++		tcp_cwnd_validate(sk, is_cwnd_limited);
++
+ 	if (likely(sent_pkts)) {
+ 		if (tcp_in_cwnd_reduction(sk))
+ 			tp->prr_out += sent_pkts;
+@@ -2709,8 +2714,6 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
+ 		/* Send one loss probe per tail loss episode. */
+ 		if (push_one != 2)
+ 			tcp_schedule_loss_probe(sk, false);
+-		is_cwnd_limited |= (tcp_packets_in_flight(tp) >= tp->snd_cwnd);
+-		tcp_cwnd_validate(sk, is_cwnd_limited);
+ 		return false;
+ 	}
+ 	return !tp->packets_out && !tcp_write_queue_empty(sk);
