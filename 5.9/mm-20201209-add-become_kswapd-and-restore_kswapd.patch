@@ -1,10 +1,13 @@
 From:   Yafang Shao <laoar.shao@gmail.com>
-To:     david@fromorbit.com, hch@infradead.org, darrick.wong@oracle.com,
-        willy@infradead.org, mhocko@kernel.org, akpm@linux-foundation.org
-Cc:     linux-xfs@vger.kernel.org, linux-fsdevel@vger.kernel.org,
-        linux-mm@kvack.org, Yafang Shao <laoar.shao@gmail.com>
-Subject: [PATCH v8 1/2] mm: Add become_kswapd and restore_kswapd
-Date:   Fri,  9 Oct 2020 20:51:26 +0800
+To:     darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
+        hch@infradead.org, mhocko@kernel.org, akpm@linux-foundation.org,
+        dhowells@redhat.com, jlayton@redhat.com
+Cc:     linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
+        linux-xfs@vger.kernel.org, linux-mm@kvack.org,
+        Michal Hocko <mhocko@suse.com>, Christoph Hellwig <hch@lst.de>,
+        Yafang Shao <laoar.shao@gmail.com>
+Subject: [PATCH v12 1/4] mm: Add become_kswapd and restore_kswapd
+Date:   Wed,  9 Dec 2020 21:11:43 +0800
 
 From: "Matthew Wilcox (Oracle)" <willy@infradead.org>
 
@@ -13,11 +16,11 @@ create methods to save & restore kswapd state.  Don't bother restoring
 kswapd state in kswapd -- the only time we reach this code is when we're
 exiting and the task_struct is about to be destroyed anyway.
 
+[HH: minimal context fix for  5.9 in sched/mm.h]
 Cc: Dave Chinner <david@fromorbit.com>
-Cc: Christoph Hellwig <hch@infradead.org>
-Cc: Darrick J. Wong <darrick.wong@oracle.com>
-Cc: Matthew Wilcox <willy@infradead.org>
 Acked-by: Michal Hocko <mhocko@suse.com>
+Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
 Signed-off-by: Matthew Wilcox (Oracle) <willy@infradead.org>
 Signed-off-by: Yafang Shao <laoar.shao@gmail.com>
 ---
@@ -65,10 +68,10 @@ index 2d25bab68764..a04a44238aab 100644
  
  /*
 diff --git a/include/linux/sched/mm.h b/include/linux/sched/mm.h
-index f889e332912f..b38fdcb977a4 100644
+index d5ece7a9a403..2faf03e79a1e 100644
 --- a/include/linux/sched/mm.h
 +++ b/include/linux/sched/mm.h
-@@ -303,6 +303,29 @@ static inline void memalloc_nocma_restore(unsigned int flags)
+@@ -278,6 +278,29 @@ static inline void memalloc_nocma_restore(unsigned int flags)
  }
  #endif
  
@@ -99,10 +102,10 @@ index f889e332912f..b38fdcb977a4 100644
  /**
   * memalloc_use_memcg - Starts the remote memcg charging scope.
 diff --git a/mm/vmscan.c b/mm/vmscan.c
-index 466fc3144fff..eb6f6e8103c1 100644
+index 1b8f0e059767..77bc1dda75bf 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
-@@ -3867,19 +3867,7 @@ static int kswapd(void *p)
+@@ -3869,19 +3869,7 @@ static int kswapd(void *p)
  	if (!cpumask_empty(cpumask))
  		set_cpus_allowed_ptr(tsk, cpumask);
  
@@ -123,7 +126,7 @@ index 466fc3144fff..eb6f6e8103c1 100644
  	set_freezable();
  
  	WRITE_ONCE(pgdat->kswapd_order, 0);
-@@ -3929,8 +3917,6 @@ static int kswapd(void *p)
+@@ -3931,8 +3919,6 @@ static int kswapd(void *p)
  			goto kswapd_try_sleep;
  	}
  
