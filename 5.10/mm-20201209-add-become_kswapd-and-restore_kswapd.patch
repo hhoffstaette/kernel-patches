@@ -1,13 +1,13 @@
-From:   Yafang Shao <laoar.shao@gmail.com>
-To:     darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
+From: Yafang Shao <laoar.shao@gmail.com>
+To: darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
         hch@infradead.org, mhocko@kernel.org, akpm@linux-foundation.org,
         dhowells@redhat.com, jlayton@redhat.com
-Cc:     linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
+Cc: linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
         linux-xfs@vger.kernel.org, linux-mm@kvack.org,
         Michal Hocko <mhocko@suse.com>, Christoph Hellwig <hch@lst.de>,
         Yafang Shao <laoar.shao@gmail.com>
 Subject: [PATCH v12 1/4] mm: Add become_kswapd and restore_kswapd
-Date:   Wed,  9 Dec 2020 21:11:43 +0800
+Date: Wed,  9 Dec 2020 21:11:43 +0800
 
 From: "Matthew Wilcox (Oracle)" <willy@infradead.org>
 
@@ -16,7 +16,6 @@ create methods to save & restore kswapd state.  Don't bother restoring
 kswapd state in kswapd -- the only time we reach this code is when we're
 exiting and the task_struct is about to be destroyed anyway.
 
-[HH: minimal context fix for  5.9 in sched/mm.h]
 Cc: Dave Chinner <david@fromorbit.com>
 Acked-by: Michal Hocko <mhocko@suse.com>
 Reviewed-by: Darrick J. Wong <darrick.wong@oracle.com>
@@ -99,8 +98,8 @@ index d5ece7a9a403..2faf03e79a1e 100644
 +}
 +
  #ifdef CONFIG_MEMCG
+ DECLARE_PER_CPU(struct mem_cgroup *, int_active_memcg);
  /**
-  * memalloc_use_memcg - Starts the remote memcg charging scope.
 diff --git a/mm/vmscan.c b/mm/vmscan.c
 index 1b8f0e059767..77bc1dda75bf 100644
 --- a/mm/vmscan.c

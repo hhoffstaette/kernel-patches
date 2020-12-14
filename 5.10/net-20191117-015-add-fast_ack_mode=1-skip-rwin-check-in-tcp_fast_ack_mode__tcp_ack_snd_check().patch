@@ -9,7 +9,7 @@ before sending an ack in __tcp_ack_snd_check(). If this behavior is
 enabled, the data receiver sends an ACK if the amount of data is >
 RCV.MSS.
 
-[HH: updated for 5.8.0]
+[HH: updated for 5.10.0]
 Change-Id: Iaa0a0fd7108221f883137a79d5bfa724f1b096d4
 ---
  include/linux/tcp.h  | 2 ++
@@ -49,7 +49,7 @@ index c445a81d1..4a9a6b20d 100644
 --- a/net/ipv4/tcp_cong.c
 +++ b/net/ipv4/tcp_cong.c
 @@ -179,6 +179,7 @@ void tcp_init_congestion_control(struct sock *sk)
- 	const struct inet_connection_sock *icsk = inet_csk(sk);
+ 	struct inet_connection_sock *icsk = inet_csk(sk);
  
  	tcp_sk(sk)->prior_ssthresh = 0;
 +	tcp_sk(sk)->fast_ack_mode = 0;

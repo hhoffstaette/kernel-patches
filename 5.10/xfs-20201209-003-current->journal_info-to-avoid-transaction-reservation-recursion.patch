@@ -1,13 +1,13 @@
-From:   Yafang Shao <laoar.shao@gmail.com>
-To:     darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
+From: Yafang Shao <laoar.shao@gmail.com>
+To: darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
         hch@infradead.org, mhocko@kernel.org, akpm@linux-foundation.org,
         dhowells@redhat.com, jlayton@redhat.com
-Cc:     linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
+Cc: linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
         linux-xfs@vger.kernel.org, linux-mm@kvack.org,
         Yafang Shao <laoar.shao@gmail.com>,
         Christoph Hellwig <hch@lst.de>
 Subject: [PATCH v12 4/4] xfs: use current->journal_info to avoid transaction reservation recursion
-Date:   Wed,  9 Dec 2020 21:11:46 +0800
+Date: Wed,  9 Dec 2020 21:11:46 +0800
 
 PF_FSTRANS which is used to avoid transaction reservation recursion, is
 dropped since commit 9070733b4efa ("xfs: abstract PF_FSTRANS to
@@ -30,7 +30,6 @@ follows,
 
 These two new helpers are instroduced in xfs_trans.h.
 
-[HH: minimal context fix for 5.9 in xfs_trans.h]
 Cc: Darrick J. Wong <darrick.wong@oracle.com>
 Cc: Matthew Wilcox (Oracle) <willy@infradead.org>
 Cc: Christoph Hellwig <hch@lst.de>
@@ -119,8 +118,8 @@ index 44b11c64a15e..e994b01eeb57 100644
 --- a/fs/xfs/xfs_trans.h
 +++ b/fs/xfs/xfs_trans.h
 @@ -268,16 +268,39 @@ xfs_trans_item_relog(
- 
- extern kmem_zone_t	*xfs_trans_zone;
+ 	return lip->li_ops->iop_relog(lip, tp);
+ }
  
 +static inline bool
 +xfs_trans_context_active(void)

@@ -88,7 +88,6 @@ Throughput 1011.77 MB/sec  40 clients  40 procs  max_latency=331.045 ms
 
 +10.8% throughput, -8.2% max latency
 
-[HH: trivial context fix in hunk #1 for 5.9.x]
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
  fs/btrfs/btrfs_inode.h | 7 +++++++
@@ -101,7 +100,7 @@ index 34f5fc318fc1..e135a71ec179 100644
 --- a/fs/btrfs/btrfs_inode.h
 +++ b/fs/btrfs/btrfs_inode.h
 @@ -35,6 +35,13 @@ enum {
- 	BTRFS_INODE_READDIO_NEED_LOCK,
+ 	BTRFS_INODE_IN_DELALLOC_LIST,
  	BTRFS_INODE_HAS_PROPS,
  	BTRFS_INODE_SNAPSHOT_FLUSH,
 +	/*

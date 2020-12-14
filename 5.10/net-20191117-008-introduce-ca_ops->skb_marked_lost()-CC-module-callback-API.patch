@@ -18,6 +18,7 @@ This also provides a consistent callback that is invoked whether
 packets are marked lost upon ACK processing, using the RACK reordering
 timer, or at RTO time.
 
+[HH: context fix in hunk #2 for 5.10.0]
 Effort: net-tcp_bbr
 Origin-9xx-SHA1: afcbebe3374e4632ac6714d39e4dc8a8455956f4
 Change-Id: I54826ab53df636be537e5d3c618a46145d12d51a
@@ -43,15 +44,16 @@ diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
 index 230e058cb..18a9a70d8 100644
 --- a/net/ipv4/tcp_input.c
 +++ b/net/ipv4/tcp_input.c
-@@ -954,8 +954,14 @@ void tcp_skb_mark_lost_uncond_verify(struct tcp_sock *tp, struct sk_buff *skb)
- 
- 	tcp_sum_lost(tp, skb);
- 	if (!(TCP_SKB_CB(skb)->sacked & (TCPCB_LOST|TCPCB_SACKED_ACKED))) {
+@@ -954,9 +954,15 @@ void tcp_mark_skb_lost(struct sock *sk, struct sk_buff *skb)
+ 			tcp_notify_skb_loss_event(tp, skb);
+ 		}
+ 	} else {
 +		struct sock *sk = (struct sock *)tp;
 +		const struct tcp_congestion_ops *ca_ops;
 +
  		tp->lost_out += tcp_skb_pcount(skb);
  		TCP_SKB_CB(skb)->sacked |= TCPCB_LOST;
+		tcp_notify_skb_loss_event(tp, skb);
 +		ca_ops = inet_csk(sk)->icsk_ca_ops;
 +		if (ca_ops->skb_marked_lost)
 +			ca_ops->skb_marked_lost(sk, skb);

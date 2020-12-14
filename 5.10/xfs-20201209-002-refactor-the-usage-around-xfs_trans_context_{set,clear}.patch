@@ -1,13 +1,13 @@
-From:   Yafang Shao <laoar.shao@gmail.com>
-To:     darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
+From: Yafang Shao <laoar.shao@gmail.com>
+To: darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
         hch@infradead.org, mhocko@kernel.org, akpm@linux-foundation.org,
         dhowells@redhat.com, jlayton@redhat.com
-Cc:     linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
+Cc: linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
         linux-xfs@vger.kernel.org, linux-mm@kvack.org,
         Yafang Shao <laoar.shao@gmail.com>,
         Christoph Hellwig <hch@lst.de>
 Subject: [PATCH v12 3/4] xfs: refactor the usage around xfs_trans_context_{set,clear}
-Date:   Wed,  9 Dec 2020 21:11:45 +0800
+Date: Wed,  9 Dec 2020 21:11:45 +0800
 
 The xfs_trans context should be active after it is allocated, and
 deactive when it is freed.

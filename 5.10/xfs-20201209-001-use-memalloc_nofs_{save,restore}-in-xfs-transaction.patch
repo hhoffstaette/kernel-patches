@@ -1,13 +1,13 @@
-From:   Yafang Shao <laoar.shao@gmail.com>
-To:     darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
+From: Yafang Shao <laoar.shao@gmail.com>
+To: darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
         hch@infradead.org, mhocko@kernel.org, akpm@linux-foundation.org,
         dhowells@redhat.com, jlayton@redhat.com
-Cc:     linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
+Cc: linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
         linux-xfs@vger.kernel.org, linux-mm@kvack.org,
         Yafang Shao <laoar.shao@gmail.com>,
         Christoph Hellwig <hch@lst.de>
 Subject: [PATCH v12 2/4] xfs: use memalloc_nofs_{save,restore} in xfs transaction
-Date:   Wed,  9 Dec 2020 21:11:44 +0800
+Date: Wed,  9 Dec 2020 21:11:44 +0800
 
 Introduce a new API to mark the start and end of XFS transactions.
 For now, just save and restore the memalloc_nofs flags.
@@ -18,7 +18,6 @@ The new helpers as follows,
 - xfs_trans_context_clear
   Mark the end of XFS transactions
 
-[HH: minimal context fix for 5.9 in xfs_trans.h]
 Cc: Matthew Wilcox (Oracle) <willy@infradead.org>
 Cc: Christoph Hellwig <hch@lst.de>
 Cc: Dave Chinner <david@fromorbit.com>
@@ -133,8 +132,8 @@ index 084658946cc8..44b11c64a15e 100644
 --- a/fs/xfs/xfs_trans.h
 +++ b/fs/xfs/xfs_trans.h
 @@ -268,4 +268,16 @@ xfs_trans_item_relog(
- 
- extern kmem_zone_t	*xfs_trans_zone;
+ 	return lip->li_ops->iop_relog(lip, tp);
+ }
  
 +static inline void
 +xfs_trans_context_set(struct xfs_trans *tp)
