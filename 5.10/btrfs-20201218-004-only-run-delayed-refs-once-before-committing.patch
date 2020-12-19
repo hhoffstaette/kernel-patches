@@ -1,0 +1,41 @@
+From:   Josef Bacik <josef@toxicpanda.com>
+To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Cc:     Nikolay Borisov <nborisov@suse.com>
+Subject: [PATCH v5 4/8] btrfs: only run delayed refs once before committing
+Date:   Fri, 18 Dec 2020 14:24:22 -0500
+
+We try to pre-flush the delayed refs when committing, because we want to
+do as little work as possible in the critical section of the transaction
+commit.
+
+However doing this twice can lead to very long transaction commit delays
+as other threads are allowed to continue to generate more delayed refs,
+which potentially delays the commit by multiple minutes in very extreme
+cases.
+
+So simply stick to one pre-flush, and then continue the rest of the
+transaction commit.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Reviewed-by: Nikolay Borisov <nborisov@suse.com>
+---
+ fs/btrfs/transaction.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/fs/btrfs/transaction.c b/fs/btrfs/transaction.c
+index ccd37fbe5db1..4776e055f7f9 100644
+--- a/fs/btrfs/transaction.c
++++ b/fs/btrfs/transaction.c
+@@ -2062,12 +2062,6 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
+ 
+ 	btrfs_create_pending_block_groups(trans);
+ 
+-	ret = btrfs_run_delayed_refs(trans, 0);
+-	if (ret) {
+-		btrfs_end_transaction(trans);
+-		return ret;
+-	}
+-
+ 	if (!test_bit(BTRFS_TRANS_DIRTY_BG_RUN, &cur_trans->flags)) {
+ 		int run_it = 0;
+ 
