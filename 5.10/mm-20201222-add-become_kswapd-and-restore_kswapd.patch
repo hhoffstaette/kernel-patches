@@ -1,13 +1,13 @@
-From: Yafang Shao <laoar.shao@gmail.com>
-To: darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
+From:   Yafang Shao <laoar.shao@gmail.com>
+To:     darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
         hch@infradead.org, mhocko@kernel.org, akpm@linux-foundation.org,
         dhowells@redhat.com, jlayton@redhat.com
-Cc: linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
+Cc:     linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
         linux-xfs@vger.kernel.org, linux-mm@kvack.org,
         Michal Hocko <mhocko@suse.com>, Christoph Hellwig <hch@lst.de>,
         Yafang Shao <laoar.shao@gmail.com>
-Subject: [PATCH v12 1/4] mm: Add become_kswapd and restore_kswapd
-Date: Wed,  9 Dec 2020 21:11:43 +0800
+Subject: [PATCH v14 1/4] mm: Add become_kswapd and restore_kswapd
+Date:   Tue, 22 Dec 2020 09:21:28 +0800
 
 From: "Matthew Wilcox (Oracle)" <willy@infradead.org>
 
@@ -24,12 +24,12 @@ Signed-off-by: Matthew Wilcox (Oracle) <willy@infradead.org>
 Signed-off-by: Yafang Shao <laoar.shao@gmail.com>
 ---
  fs/xfs/libxfs/xfs_btree.c | 14 ++++++++------
- include/linux/sched/mm.h  | 23 +++++++++++++++++++++++
+ include/linux/sched/mm.h  | 22 ++++++++++++++++++++++
  mm/vmscan.c               | 16 +---------------
- 3 files changed, 32 insertions(+), 21 deletions(-)
+ 3 files changed, 31 insertions(+), 21 deletions(-)
 
 diff --git a/fs/xfs/libxfs/xfs_btree.c b/fs/xfs/libxfs/xfs_btree.c
-index 2d25bab68764..a04a44238aab 100644
+index 51dbff9b0908..0f35b7a38e76 100644
 --- a/fs/xfs/libxfs/xfs_btree.c
 +++ b/fs/xfs/libxfs/xfs_btree.c
 @@ -2813,8 +2813,9 @@ xfs_btree_split_worker(
@@ -67,10 +67,10 @@ index 2d25bab68764..a04a44238aab 100644
  
  /*
 diff --git a/include/linux/sched/mm.h b/include/linux/sched/mm.h
-index d5ece7a9a403..2faf03e79a1e 100644
+index d5ece7a9a403..7195e542a54d 100644
 --- a/include/linux/sched/mm.h
 +++ b/include/linux/sched/mm.h
-@@ -278,6 +278,29 @@ static inline void memalloc_nocma_restore(unsigned int flags)
+@@ -278,6 +278,28 @@ static inline void memalloc_nocma_restore(unsigned int flags)
  }
  #endif
  
@@ -88,23 +88,22 @@ index d5ece7a9a403..2faf03e79a1e 100644
 +	unsigned long flags = current->flags & KSWAPD_PF_FLAGS;
 +
 +	current->flags |= KSWAPD_PF_FLAGS;
-+
 +	return flags;
 +}
 +
 +static inline void restore_kswapd(unsigned long flags)
 +{
-+	current->flags &= ~(flags ^ KSWAPD_PF_FLAGS);
++	current->flags = (current->flags & ~KSWAPD_PF_FLAGS) | flags;
 +}
 +
  #ifdef CONFIG_MEMCG
  DECLARE_PER_CPU(struct mem_cgroup *, int_active_memcg);
  /**
 diff --git a/mm/vmscan.c b/mm/vmscan.c
-index 1b8f0e059767..77bc1dda75bf 100644
+index 7b4e31eac2cf..15af99d1f3f7 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
-@@ -3869,19 +3869,7 @@ static int kswapd(void *p)
+@@ -3870,19 +3870,7 @@ static int kswapd(void *p)
  	if (!cpumask_empty(cpumask))
  		set_cpus_allowed_ptr(tsk, cpumask);
  
@@ -125,7 +124,7 @@ index 1b8f0e059767..77bc1dda75bf 100644
  	set_freezable();
  
  	WRITE_ONCE(pgdat->kswapd_order, 0);
-@@ -3931,8 +3919,6 @@ static int kswapd(void *p)
+@@ -3932,8 +3920,6 @@ static int kswapd(void *p)
  			goto kswapd_try_sleep;
  	}
  
