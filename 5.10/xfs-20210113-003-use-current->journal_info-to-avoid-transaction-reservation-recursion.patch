@@ -4,10 +4,10 @@ To:     darrick.wong@oracle.com, willy@infradead.org, david@fromorbit.com,
         dhowells@redhat.com, jlayton@redhat.com
 Cc:     linux-fsdevel@vger.kernel.org, linux-cachefs@redhat.com,
         linux-xfs@vger.kernel.org, linux-mm@kvack.org,
-        Yafang Shao <laoar.shao@gmail.com>,
+        oliver.sang@intel.com, Yafang Shao <laoar.shao@gmail.com>,
         Christoph Hellwig <hch@lst.de>
-Subject: [PATCH v14 4/4] xfs: use current->journal_info to avoid transaction reservation recursion
-Date:   Tue, 22 Dec 2020 09:21:31 +0800
+Subject: [PATCH v15 4/4] xfs: use current->journal_info to avoid transaction reservation recursion
+Date:   Wed, 13 Jan 2021 18:22:24 +0800
 
 PF_FSTRANS which is used to avoid transaction reservation recursion, is
 dropped since commit 9070733b4efa ("xfs: abstract PF_FSTRANS to
@@ -15,10 +15,13 @@ PF_MEMALLOC_NOFS") and replaced by PF_MEMALLOC_NOFS which means to avoid
 filesystem reclaim recursion.
 
 As these two flags have different meanings, we'd better reintroduce
-PF_FSTRANS back. To avoid wasting the space of PF_* flags in task_struct,
+PF_FSTRANS back. To avoid wasting the space of PF_* flags in
+task_struct,
 we can reuse the current->journal_info to do that, per Willy. As the
 check of transaction reservation recursion is used by XFS only, we can
 move the check into xfs_vm_writepage(s), per Dave.
+
+[oliver.sang@intel.com: reported a Assertion_failed in the prev version]
 
 Cc: Darrick J. Wong <darrick.wong@oracle.com>
 Cc: Matthew Wilcox (Oracle) <willy@infradead.org>
@@ -27,6 +30,7 @@ Cc: Dave Chinner <david@fromorbit.com>
 Cc: Michal Hocko <mhocko@kernel.org>
 Cc: David Howells <dhowells@redhat.com>
 Cc: Jeff Layton <jlayton@redhat.com>
+Cc: kernel test robot <oliver.sang@intel.com>
 Signed-off-by: Yafang Shao <laoar.shao@gmail.com>
 ---
  fs/iomap/buffered-io.c |  7 -------
@@ -81,7 +85,7 @@ index 2371187b7615..eed4881d4461 100644
  }
  
 diff --git a/fs/xfs/xfs_trans.h b/fs/xfs/xfs_trans.h
-index b428704eeb20..e2f3251d6cce 100644
+index 3645fd0d74b8..e2f3251d6cce 100644
 --- a/fs/xfs/xfs_trans.h
 +++ b/fs/xfs/xfs_trans.h
 @@ -268,24 +268,40 @@ xfs_trans_item_relog(
@@ -105,7 +109,7 @@ index b428704eeb20..e2f3251d6cce 100644
  static inline void
  xfs_trans_context_clear(struct xfs_trans *tp)
  {
--	if (!tp->t_flags)
+-	if (!tp->t_pflags)
 -		memalloc_nofs_restore(tp->t_pflags);
 +	/*
 +	 * If we handed over the context via xfs_trans_context_swap() then
@@ -124,7 +128,7 @@ index b428704eeb20..e2f3251d6cce 100644
 +	ASSERT(current->journal_info == tp);
 +	current->journal_info = ntp;
  	ntp->t_pflags = tp->t_pflags;
--	tp->t_flags = -1;
+-	tp->t_pflags = -1;
  }
  
  #endif	/* __XFS_TRANS_H__ */
