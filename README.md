@@ -27,7 +27,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - btrfs: fixes from 5.11+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch)) & `-O3`
 - net: BBR v2 ['alpha' from 2019-11-17](https://groups.google.com/forum/?hl=en#!topic/bbr-dev/xLs7_Slx3Qc) + fixes
-- projc: [ProjectC 5.10-r2](https://cchalpha.blogspot.com/2020/12/project-c-v510-r2-release.html) CPU scheduler(s)
+- projc: [ProjectC 5.10-r2](https://gitlab.com/alfredchen/linux-prjc/-/releases/v5.10-prjc-r2) CPU scheduler(s)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 - xfs: fixes from 5.11+
 
