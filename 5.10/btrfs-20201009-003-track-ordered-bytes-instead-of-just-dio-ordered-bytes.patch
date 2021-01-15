@@ -15,6 +15,7 @@ do a FLUSH_DELALLOC_WAIT loop, but I want to use the ordered counter in
 the preemptive flushing code as well, so change this to count all
 ordered bytes instead of just DIO ordered bytes.
 
+[HH: updated for 5.10.8]
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 ---
  fs/btrfs/ctree.h        |  2 +-
@@ -142,9 +143,9 @@ index ac7269cf1904..540960365787 100644
  	loops = 0;
 -	while ((delalloc_bytes || dio_bytes) && loops < 3) {
 +	while ((delalloc_bytes || ordered_bytes) && loops < 3) {
- 		btrfs_start_delalloc_roots(fs_info, items);
- 
- 		loops++;
+ 		u64 nr_pages = min(delalloc_bytes, to_reclaim) >> PAGE_SHIFT;
+
+ 		btrfs_start_delalloc_roots(fs_info, nr_pages, true);
 @@ -553,7 +548,8 @@ static void shrink_delalloc(struct btrfs_fs_info *fs_info,
  
  		delalloc_bytes = percpu_counter_sum_positive(
