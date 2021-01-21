@@ -1,0 +1,34 @@
+From:   Jeffrey Mitchell <jeffrey.mitchell@starlab.io>
+To:     "Darrick J . Wong" <djwong@kernel.org>
+Cc:     linux-xfs@vger.kernel.org, linux-kernel@vger.kernel.org,
+        Jeffrey Mitchell <jeffrey.mitchell@starlab.io>
+Subject: [PATCH] xfs: set inode size after creating symlink
+Date:   Thu, 21 Jan 2021 09:19:12 -0600
+
+When XFS creates a new symlink, it writes its size to disk but not to the
+VFS inode. This causes i_size_read() to return 0 for that symlink until
+it is re-read from disk, for example when the system is rebooted.
+
+I found this inconsistency while protecting directories with eCryptFS.
+The command "stat path/to/symlink/in/ecryptfs" will report "Size: 0" if
+the symlink was created after the last reboot on an XFS root.
+
+Call i_size_write() in xfs_symlink()
+
+Signed-off-by: Jeffrey Mitchell <jeffrey.mitchell@starlab.io>
+---
+ fs/xfs/xfs_symlink.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/xfs/xfs_symlink.c b/fs/xfs/xfs_symlink.c
+index 1f43fd7f3209..c835827ae389 100644
+--- a/fs/xfs/xfs_symlink.c
++++ b/fs/xfs/xfs_symlink.c
+@@ -300,6 +300,7 @@ xfs_symlink(
+ 		}
+ 		ASSERT(pathlen == 0);
+ 	}
++	i_size_write(VFS_I(ip), ip->i_d.di_size);
+ 
+ 	/*
+ 	 * Create the directory entry for the symlink.
