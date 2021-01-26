@@ -125,7 +125,7 @@ o Internal notes:
   then removed dev instrumentation (dynamic get/set for parameters)
   and code that was only used by BBRv1
 
-[HH: forward-ported to 5.9.0]
+[HH: updated for 5.10.11]
 Effort: net-tcp_bbr
 Origin-9xx-SHA1: 2c84098e60bed6d67dde23cd7538c51dee273102
 Change-Id: I125cf26ba2a7a686f2fa5e87f4c2afceb65f7a05
@@ -143,7 +143,7 @@ index 895546058..1038f192c 100644
 --- a/include/net/inet_connection_sock.h
 +++ b/include/net/inet_connection_sock.h
 @@ -135,8 +135,9 @@ struct inet_connection_sock {
- 	} icsk_mtup;
+	u32			  icsk_probes_tstamp;
  	u32			  icsk_user_timeout;
  
 -	u64			  icsk_ca_priv[104 / sizeof(u64)];
