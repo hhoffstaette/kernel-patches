@@ -27,5 +27,7 @@ Enjoy!
 **Current status (2020-12-20)**
 
 - 5.10.x is my current production branch.
+  I'm skipping 5.11.
+
 - all other branches < 5.10 are EOL for me.
 
