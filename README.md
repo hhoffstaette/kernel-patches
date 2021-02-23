@@ -22,7 +22,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Stable Series: 5.10**
+**LTS Series: 5.10**
 
 - btrfs: fixes from 5.11+
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch)) & `-O3`
