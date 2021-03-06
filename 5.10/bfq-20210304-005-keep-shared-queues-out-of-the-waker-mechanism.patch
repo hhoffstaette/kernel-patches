@@ -3,8 +3,8 @@ To: Jens Axboe <axboe@kernel.dk>
 Cc: linux-block@vger.kernel.org, linux-kernel@vger.kernel.org,
         Paolo Valente <paolo.valente@linaro.org>,
         Jan Kara <jack@suse.cz>
-Subject: [PATCH BUGFIX/IMPROVEMENT 5/6] block, bfq: keep shared queues out of the waker mechanism
-Date: Tue, 26 Jan 2021 11:51:01 +0100
+Subject: [PATCH BUGFIX/IMPROVEMENT V2 5/6] block, bfq: keep shared queues out of the waker mechanism
+Date: Thu,  4 Mar 2021 18:46:26 +0100
 
 Shared queues are likely to receive I/O at a high rate. This may
 deceptively let them be considered as wakers of other queues. But a
@@ -20,10 +20,10 @@ Signed-off-by: Paolo Valente <paolo.valente@linaro.org>
  1 file changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/block/bfq-iosched.c b/block/bfq-iosched.c
-index 0c7e203085f1..23d0dd7bd90f 100644
+index 8497d0803d74..c62dbbe9cc33 100644
 --- a/block/bfq-iosched.c
 +++ b/block/bfq-iosched.c
-@@ -5825,7 +5825,17 @@ static void bfq_completed_request(struct bfq_queue *bfqq, struct bfq_data *bfqd)
+@@ -5852,7 +5852,17 @@ static void bfq_completed_request(struct bfq_queue *bfqq, struct bfq_data *bfqd)
  			1UL<<(BFQ_RATE_SHIFT - 10))
  		bfq_update_rate_reset(bfqd, NULL);
  	bfqd->last_completion = now_ns;

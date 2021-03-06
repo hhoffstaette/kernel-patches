@@ -3,8 +3,8 @@ To: Jens Axboe <axboe@kernel.dk>
 Cc: linux-block@vger.kernel.org, linux-kernel@vger.kernel.org,
         Paolo Valente <paolo.valente@linaro.org>,
         Jan Kara <jack@suse.cz>
-Subject: [PATCH BUGFIX/IMPROVEMENT 1/6] block, bfq: always inject I/O of queues blocked by wakers
-Date: Tue, 26 Jan 2021 11:50:57 +0100
+Subject: [PATCH BUGFIX/IMPROVEMENT V2 1/6] block, bfq: always inject I/O of queues blocked by wakers
+Date: Thu,  4 Mar 2021 18:46:22 +0100
 
 Suppose that I/O dispatch is plugged, to wait for new I/O for the
 in-service bfq-queue, say bfqq.  Suppose then that there is a further
