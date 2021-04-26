@@ -1,0 +1,70 @@
+From: Eric Dumazet <edumazet@google.com>
+Date: Thu, 11 Mar 2021 12:35:04 -0800
+Subject: tcp: plug skb_still_in_host_queue() to TSQ
+
+Jakub and Neil reported an increase of RTO timers whenever
+TX completions are delayed a bit more (by increasing
+NIC TX coalescing parameters)
+
+Main issue is that TCP stack has a logic preventing a packet
+being retransmit if the prior clone has not yet been
+orphaned or freed.
+
+This logic came with commit 1f3279ae0c13 ("tcp: avoid
+retransmits of TCP packets hanging in host queues")
+
+Thankfully, in the case skb_still_in_host_queue() detects
+the initial clone is still in flight, it can use TSQ logic
+that will eventually retry later, at the moment the clone
+is freed or orphaned.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Reported-by: Neil Spring <ntspring@fb.com>
+Reported-by: Jakub Kicinski <kuba@kernel.org>
+Cc: Neal Cardwell <ncardwell@google.com>
+Cc: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ include/linux/skbuff.h |  2 +-
+ net/ipv4/tcp_output.c  | 12 ++++++++----
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
+index 0503c917d7730..483e89348f78b 100644
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -1140,7 +1140,7 @@ static inline bool skb_fclone_busy(const struct sock *sk,
+ 
+ 	return skb->fclone == SKB_FCLONE_ORIG &&
+ 	       refcount_read(&fclones->fclone_ref) > 1 &&
+-	       fclones->skb2.sk == sk;
++	       READ_ONCE(fclones->skb2.sk) == sk;
+ }
+ 
+ /**
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index fbf140a770d8e..0dbf208a4f2f1 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -2775,13 +2775,17 @@ bool tcp_schedule_loss_probe(struct sock *sk, bool advancing_rto)
+  * a packet is still in a qdisc or driver queue.
+  * In this case, there is very little point doing a retransmit !
+  */
+-static bool skb_still_in_host_queue(const struct sock *sk,
++static bool skb_still_in_host_queue(struct sock *sk,
+ 				    const struct sk_buff *skb)
+ {
+ 	if (unlikely(skb_fclone_busy(sk, skb))) {
+-		NET_INC_STATS(sock_net(sk),
+-			      LINUX_MIB_TCPSPURIOUS_RTX_HOSTQUEUES);
+-		return true;
++		set_bit(TSQ_THROTTLED, &sk->sk_tsq_flags);
++		smp_mb__after_atomic();
++		if (skb_fclone_busy(sk, skb)) {
++			NET_INC_STATS(sock_net(sk),
++				      LINUX_MIB_TCPSPURIOUS_RTX_HOSTQUEUES);
++			return true;
++		}
+ 	}
+ 	return false;
+ }
