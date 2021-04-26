@@ -1,0 +1,48 @@
+From: Eric Dumazet <edumazet@google.com>
+Date: Thu, 11 Mar 2021 12:35:06 -0800
+Subject: tcp: remove obsolete check in __tcp_retransmit_skb()
+
+TSQ provides a nice way to avoid bufferbloat on individual socket,
+including retransmit packets. We can get rid of the old
+heuristic:
+
+	/* Do not sent more than we queued. 1/4 is reserved for possible
+	 * copying overhead: fragmentation, tunneling, mangling etc.
+	 */
+	if (refcount_read(&sk->sk_wmem_alloc) >
+	    min_t(u32, sk->sk_wmem_queued + (sk->sk_wmem_queued >> 2),
+		  sk->sk_sndbuf))
+		return -EAGAIN;
+
+This heuristic was giving false positives according to Jakub,
+whenever TX completions are delayed above RTT. (Ack packets
+are processed by TCP stack before clones are orphaned/freed)
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Reported-by: Jakub Kicinski <kuba@kernel.org>
+Cc: Neal Cardwell <ncardwell@google.com>
+Cc: Yuchung Cheng <ycheng@google.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ net/ipv4/tcp_output.c | 8 --------
+ 1 file changed, 8 deletions(-)
+
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 0dbf208a4f2f1..bde781f46b41a 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -3151,14 +3151,6 @@ int __tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb, int segs)
+ 	if (icsk->icsk_mtup.probe_size)
+ 		icsk->icsk_mtup.probe_size = 0;
+ 
+-	/* Do not sent more than we queued. 1/4 is reserved for possible
+-	 * copying overhead: fragmentation, tunneling, mangling etc.
+-	 */
+-	if (refcount_read(&sk->sk_wmem_alloc) >
+-	    min_t(u32, sk->sk_wmem_queued + (sk->sk_wmem_queued >> 2),
+-		  sk->sk_sndbuf))
+-		return -EAGAIN;
+-
+ 	if (skb_still_in_host_queue(sk, skb))
+ 		return -EBUSY;
+ 
