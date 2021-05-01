@@ -25,7 +25,7 @@ index 0f84bee57c29..f37ead28bd05 100644
 -static inline int need_do_async_reclaim(struct btrfs_fs_info *fs_info,
 -					struct btrfs_space_info *space_info,
 -					u64 used)
-+static inline bool need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
++static int need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
 +					   struct btrfs_space_info *space_info,
 +					   u64 used)
  {

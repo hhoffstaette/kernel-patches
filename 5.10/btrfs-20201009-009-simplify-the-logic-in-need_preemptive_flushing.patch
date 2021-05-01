@@ -19,7 +19,7 @@ index 03141251d44e..c56a4827956f 100644
 @@ -777,11 +777,11 @@ btrfs_calc_reclaim_metadata_size(struct btrfs_fs_info *fs_info,
  }
  
- static inline bool need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
+ static int need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
 -					   struct btrfs_space_info *space_info,
 -					   u64 used)
 +					   struct btrfs_space_info *space_info)
