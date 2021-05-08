@@ -24,10 +24,10 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2020-12-20)**
+**Current status (2021-05-08)**
 
 - 5.10.x is my current production branch.
-  I'm skipping 5.11.
+  I'm skipping 5.11 and 5.12.
 
 - all other branches < 5.10 are EOL for me.
 
