@@ -1,0 +1,50 @@
+From: Josef Bacik <josef@toxicpanda.com>
+To: linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Subject: [PATCH] btrfs: mark ordered extent and inode with error if we fail to finish
+Date: Mon, 17 May 2021 11:26:39 -0400
+
+While doing error injection testing I saw that sometimes we'd get an
+abort that wouldn't stop the current transaction commit from completing.
+This abort was coming from finish ordered IO, but at this point in the
+transaction commit we should have gotten an error and stopped.
+
+It turns out the abort came from finish ordered io while trying to write
+out the free space cache.  It occurred to me that any failure inside of
+finish_ordered_io isn't actually raised to the person doing the writing,
+so we could have any number of failures in this path and think the
+ordered extent completed successfully and the inode was fine.
+
+Fix this by marking the ordered extent with BTRFS_ORDERED_IOERR, and
+marking the mapping of the inode with mapping_set_error, so any callers
+that simply call fdatawait will also get the error.
+
+With this we're seeing the IO error on the free space inode when we fail
+to do the finish_ordered_io.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+---
+ fs/btrfs/inode.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 955d0f5849e3..b5459239ae81 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -3000,6 +3000,17 @@ static int btrfs_finish_ordered_io(struct btrfs_ordered_extent *ordered_extent)
+ 	if (ret || truncated) {
+ 		u64 unwritten_start = start;
+ 
++		/*
++		 * If we failed to finish this ordered extent for any reason we
++		 * need to make sure BTRFS_ORDERED_IOERR is set on the ordered
++		 * extent, and mark the inode with the error.
++		 */
++		if (ret) {
++			set_bit(BTRFS_ORDERED_IOERR, &ordered_extent->flags);
++			mapping_set_error(ordered_extent->inode->i_mapping,
++					  -EIO);
++		}
++
+ 		if (truncated)
+ 			unwritten_start += logical_len;
+ 		clear_extent_uptodate(io_tree, unwritten_start, end, NULL);
