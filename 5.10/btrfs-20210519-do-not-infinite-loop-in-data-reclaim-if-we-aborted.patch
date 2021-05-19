@@ -1,7 +1,7 @@
-From: Josef Bacik <josef@toxicpanda.com>
-To: linux-btrfs@vger.kernel.org, kernel-team@fb.com
-Subject: [PATCH v2] btrfs: do not infinite loop in data reclaim if we aborted
-Date: Wed, 19 May 2021 11:45:16 -0400
+From:   Josef Bacik <josef@toxicpanda.com>
+To:     linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Subject: [PATCH v3] btrfs: do not infinite loop in data reclaim if we aborted
+Date:   Wed, 19 May 2021 13:11:06 -0400
 
 Error injection stressing uncovered a busy loop in our data reclaim
 loop.  There are two cases here, one where we loop creating block groups
@@ -41,6 +41,10 @@ tickets if we've aborted, simply fail everything.
 
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 ---
+v2->v3:
+- const bool aborted as per Johannes' comments.
+- consolidate the error handling into a label as per Johannes' comments.
+
 v1->v2:
 - The original fix would bail, but we'd hang because tickets wouldn't be worken
   up properly, fix the error case to fail all pending tickets.
@@ -51,19 +55,19 @@ v1->v2:
   likely that we'll allow tickets to be granted if there was a little bit of
   available space.
 
- fs/btrfs/space-info.c | 35 ++++++++++++++++++++++++++++++-----
- 1 file changed, 30 insertions(+), 5 deletions(-)
+ fs/btrfs/space-info.c | 32 +++++++++++++++++++++++++++-----
+ 1 file changed, 27 insertions(+), 5 deletions(-)
 
 diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
-index 42d0fa2092d4..0d36d684d552 100644
+index 42d0fa2092d4..12faee050639 100644
 --- a/fs/btrfs/space-info.c
 +++ b/fs/btrfs/space-info.c
 @@ -941,6 +941,8 @@ static bool maybe_fail_all_tickets(struct btrfs_fs_info *fs_info,
  	struct reserve_ticket *ticket;
  	u64 tickets_id = space_info->tickets_id;
  	u64 first_ticket_bytes = 0;
-+	bool aborted = test_bit(BTRFS_FS_STATE_TRANS_ABORTED,
-+				&fs_info->fs_state);
++	const bool aborted = test_bit(BTRFS_FS_STATE_TRANS_ABORTED,
++				      &fs_info->fs_state);
  
  	if (btrfs_test_opt(fs_info, ENOSPC_DEBUG)) {
  		btrfs_info(fs_info, "cannot satisfy tickets, dumping space info");
@@ -108,36 +112,36 @@ index 42d0fa2092d4..0d36d684d552 100644
  	}
  	return (tickets_id != space_info->tickets_id);
  }
-@@ -1253,6 +1259,15 @@ static void btrfs_async_reclaim_data_space(struct work_struct *work)
+@@ -1253,6 +1259,11 @@ static void btrfs_async_reclaim_data_space(struct work_struct *work)
  			spin_unlock(&space_info->lock);
  			return;
  		}
 +
 +		/* Something happened, fail everything and bail. */
 +		if (test_bit(BTRFS_FS_STATE_TRANS_ABORTED,
-+			     &fs_info->fs_state)) {
-+			maybe_fail_all_tickets(fs_info, space_info);
-+			space_info->flush = 0;
-+			spin_unlock(&space_info->lock);
-+			return;
-+		}
++			     &fs_info->fs_state))
++			goto aborted_fs;
  		last_tickets_id = space_info->tickets_id;
  		spin_unlock(&space_info->lock);
  	}
-@@ -1283,6 +1298,16 @@ static void btrfs_async_reclaim_data_space(struct work_struct *work)
+@@ -1283,9 +1294,20 @@ static void btrfs_async_reclaim_data_space(struct work_struct *work)
  			} else {
  				flush_state = 0;
  			}
 +
 +			/* Something happened, fail everything and bail. */
 +			if (test_bit(BTRFS_FS_STATE_TRANS_ABORTED,
-+				     &fs_info->fs_state)) {
-+				maybe_fail_all_tickets(fs_info, space_info);
-+				space_info->flush = 0;
-+				spin_unlock(&space_info->lock);
-+				return;
-+			}
++				     &fs_info->fs_state))
++				goto aborted_fs;
 +
  		}
  		spin_unlock(&space_info->lock);
  	}
++	return;
++aborted_fs:
++	maybe_fail_all_tickets(fs_info, space_info);
++	space_info->flush = 0;
++	spin_unlock(&space_info->lock);
+ }
+ 
+ void btrfs_init_async_reclaim_work(struct btrfs_fs_info *fs_info)
