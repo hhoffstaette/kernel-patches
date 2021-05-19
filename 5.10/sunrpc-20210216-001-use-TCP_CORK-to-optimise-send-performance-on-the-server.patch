@@ -10,6 +10,7 @@ From: Trond Myklebust <trond.myklebust@hammerspace.com>
 Use a counter to keep track of how many requests are queued behind the
 xprt->xpt_mutex, and keep TCP_CORK set until the queue is empty.
 
+[HH: context update for 5.10.38]
 Signed-off-by: Trond Myklebust <trond.myklebust@hammerspace.com>
 ---
  include/linux/sunrpc/svcsock.h | 2 ++
@@ -44,7 +45,7 @@ index 5a809c64dc7b..231f510a4830 100644
 +	tcp_sock_set_cork(svsk->sk_sk, true);
  	err = svc_tcp_sendmsg(svsk->sk_sock, &msg, xdr, marker, &sent);
  	xdr_free_bvec(xdr);
- 	trace_svcsock_tcp_send(xprt, err < 0 ? err : sent);
+ 	trace_svcsock_tcp_send(xprt, err < 0 ? (long)err : sent);
  	if (err < 0 || sent != (xdr->len + sizeof(marker)))
  		goto out_close;
 +	if (atomic_dec_and_test(&svsk->sk_sendqlen))
