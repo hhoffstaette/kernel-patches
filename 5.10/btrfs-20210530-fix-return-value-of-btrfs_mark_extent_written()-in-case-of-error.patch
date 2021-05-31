@@ -1,0 +1,40 @@
+From:   Ritesh Harjani <riteshh@linux.ibm.com>
+To:     linux-btrfs@vger.kernel.org
+Cc:     Qu Wenruo <wqu@suse.com>,
+        Anju T Sudhakar <anju@linux.vnet.ibm.com>,
+        Ritesh Harjani <riteshh@linux.ibm.com>
+Subject: [PATCH] btrfs: Fix return value of btrfs_mark_extent_written() in case of error
+Date:   Sun, 30 May 2021 20:24:05 +0530
+
+We always return 0 even in case of an error in btrfs_mark_extent_written().
+Fix it to return proper error value in case of a failure.
+
+Signed-off-by: Ritesh Harjani <riteshh@linux.ibm.com>
+---
+Tested fstests with "-g quick" group. No new failure seen.
+
+ fs/btrfs/file.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 3b10d98b4ebb..55f68422061d 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1094,7 +1094,7 @@ int btrfs_mark_extent_written(struct btrfs_trans_handle *trans,
+ 	int del_nr = 0;
+ 	int del_slot = 0;
+ 	int recow;
+-	int ret;
++	int ret = 0;
+ 	u64 ino = btrfs_ino(inode);
+
+ 	path = btrfs_alloc_path();
+@@ -1315,7 +1315,7 @@ int btrfs_mark_extent_written(struct btrfs_trans_handle *trans,
+ 	}
+ out:
+ 	btrfs_free_path(path);
+-	return 0;
++	return ret;
+ }
+
+ /*
