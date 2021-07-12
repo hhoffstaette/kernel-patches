@@ -7,6 +7,7 @@ Date: Thu, 3 Jun 2021 09:48:00 +0800
 As MISSED and DRAINING state are used to indicate a non-empty
 qdisc, qdisc->empty is not longer needed, so remove it.
 
+[HH: context fix for 5.10.50]
 Signed-off-by: Yunsheng Lin <linyunsheng@huawei.com>
 ---
  include/net/sch_generic.h | 13 +++----------
@@ -42,8 +43,8 @@ index 177f240..c99ffe9 100644
 -			goto nolock_empty;
 +			return true;
  
- 		/* If the MISSED flag is set, it means other thread has
- 		 * set the MISSED flag before second spin_trylock(), so
+ 		/* Paired with smp_mb__after_atomic() to make sure
+ 		 * STATE_MISSED checking is synchronized with clearing
 @@ -195,12 +193,7 @@ static inline bool qdisc_run_begin(struct Qdisc *qdisc)
  		/* Retry again in case other CPU may not see the new flag
  		 * after it releases the lock at the end of qdisc_run_end().
