@@ -242,6 +242,7 @@ therefore causing the old dentry do be deleted when replaying the log.
 
 A test case for fstests will follow up soon.
 
+[HH: updated for 5.10.57]
 Fixes: 64d6b281ba4db0 ("btrfs: remove unnecessary check_parent_dirs_for_sync()")
 CC: stable@vger.kernel.org # 5.12+
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
@@ -254,7 +255,7 @@ index a0fc3a1390ab..fd6b1f13112e 100644
 --- a/fs/btrfs/tree-log.c
 +++ b/fs/btrfs/tree-log.c
 @@ -6462,6 +6462,24 @@ void btrfs_log_new_name(struct btrfs_trans_handle *trans,
- 	    (!old_dir || old_dir->logged_trans < trans->transid))
+ 	    (!old_dir || !inode_logged(trans, old_dir)))
  		return;
  
 +	/*
