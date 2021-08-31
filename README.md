@@ -26,5 +26,6 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - btrfs: patch to enable forced chunk allocation
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_gcc_patch))
+- mm: [Multigenerational LRU](https://lore.kernel.org/linux-mm/20210818063107.2696454-1-yuzhao@google.com/)
 - net: BBR v2 [2021-08-21](https://groups.google.com/g/bbr-dev/c/gOoFq9FyZQI)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
