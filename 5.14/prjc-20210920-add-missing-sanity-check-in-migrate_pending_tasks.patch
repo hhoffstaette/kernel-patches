@@ -1,0 +1,15 @@
+
+See: https://gitlab.com/alfredchen/linux-prjc/-/issues/36
+
+diff --git a/kernel/sched/alt_core.c b/kernel/sched/alt_core.c
+index 7c998e606114..3d334abeadce 100644
+--- a/kernel/sched/alt_core.c
++++ b/kernel/sched/alt_core.c
+@@ -4030,6 +4030,7 @@ migrate_pending_tasks(struct rq *rq, struct rq *dest_rq, const int dest_cpu)
+ 		if (cpumask_test_cpu(dest_cpu, p->cpus_ptr)) {
+			__SCHED_DEQUEUE_TASK(p, rq, 0, );
+			set_task_cpu(p, dest_cpu);
++			sched_task_sanity_check(p, dest_rq);
+			__SCHED_ENQUEUE_TASK(p, dest_rq, 0);
+			nr_migrated++;
+ 		}
