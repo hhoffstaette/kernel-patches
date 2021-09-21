@@ -1,0 +1,16 @@
+
+
+See: https://gitlab.com/alfredchen/linux-prjc/-/issues/40
+
+diff --git a/kernel/sched/alt_core.c b/kernel/sched/alt_core.c
+index 3d334abeadce..c1643fa8243c 100644
+--- a/kernel/sched/alt_core.c
++++ b/kernel/sched/alt_core.c
+@@ -3468,6 +3468,7 @@ static inline void update_curr(struct rq *rq, struct task_struct *p)
+ 	s64 ns = rq->clock_task - p->last_ran;
+ 
+ 	p->sched_time += ns;
++	cgroup_account_cputime(p, ns);
+ 	account_group_exec_runtime(p, ns);
+ 
+ 	p->time_slice -= ns;
