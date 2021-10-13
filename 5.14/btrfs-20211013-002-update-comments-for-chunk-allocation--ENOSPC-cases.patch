@@ -1,7 +1,7 @@
 From:   fdmanana@kernel.org
 To:     linux-btrfs@vger.kernel.org
-Subject: [PATCH v2 2/2] btrfs: update comments for chunk allocation -ENOSPC cases
-Date:   Fri,  8 Oct 2021 16:10:35 +0100
+Subject: [PATCH v3 2/2] btrfs: update comments for chunk allocation -ENOSPC cases
+Date:   Wed, 13 Oct 2021 10:12:50 +0100
 
 From: Filipe Manana <fdmanana@suse.com>
 
@@ -16,10 +16,10 @@ Signed-off-by: Filipe Manana <fdmanana@suse.com>
  1 file changed, 18 insertions(+), 3 deletions(-)
 
 diff --git a/fs/btrfs/block-group.c b/fs/btrfs/block-group.c
-index 8ed36d57da31..282046ef1a81 100644
+index e790ea0798c7..05962e1821cd 100644
 --- a/fs/btrfs/block-group.c
 +++ b/fs/btrfs/block-group.c
-@@ -3409,7 +3409,7 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans, u64 flags)
+@@ -3407,7 +3407,7 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans, u64 flags)
  	/*
  	 * Normally we are not expected to fail with -ENOSPC here, since we have
  	 * previously reserved space in the system space_info and allocated one
@@ -28,7 +28,7 @@ index 8ed36d57da31..282046ef1a81 100644
  	 *
  	 * 1) We may have enough free space in the system space_info but all the
  	 *    existing system block groups have a profile which can not be used
-@@ -3435,7 +3435,14 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans, u64 flags)
+@@ -3433,7 +3433,14 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans, u64 flags)
  	 *    with enough free space got turned into RO mode by a running scrub,
  	 *    and in this case we have to allocate a new one and retry. We only
  	 *    need do this allocate and retry once, since we have a transaction
@@ -44,7 +44,7 @@ index 8ed36d57da31..282046ef1a81 100644
  	 */
  	if (ret == -ENOSPC) {
  		const u64 sys_flags = btrfs_system_alloc_profile(trans->fs_info);
-@@ -3519,7 +3526,15 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans, u64 flags)
+@@ -3517,7 +3524,15 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans, u64 flags)
   *    properly, either intentionally or as a bug. One example where this is
   *    done intentionally is fsync, as it does not reserve any transaction units
   *    and ends up allocating a variable number of metadata extents for log
