@@ -25,6 +25,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 **LTS Series: 5.15**
 
 - btrfs: fixes from 5.16, enable forced chunk allocation via sysfs
+- kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
 - net: BBR v2 [2021-08-21](https://groups.google.com/g/bbr-dev/c/gOoFq9FyZQI)
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 
