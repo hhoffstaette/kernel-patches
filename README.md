@@ -28,5 +28,6 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
 - mm: [Multigenerational LRU](https://lore.kernel.org/linux-mm/20210818063107.2696454-1-yuzhao@google.com/)
 - net: BBR v2 [2021-08-21](https://groups.google.com/g/bbr-dev/c/gOoFq9FyZQI)
+- prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 
