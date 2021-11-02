@@ -1,7 +1,8 @@
---- a/init/do_mounts.c	2015-08-19 10:27:16.753852576 -0400
-+++ b/init/do_mounts.c	2015-08-19 10:34:25.473850353 -0400
+
+--- a/init/do_mounts.c	2021-11-02 13:59:09.236495921 -0400
++++ b/init/do_mounts.c	2021-11-02 13:59:57.529246732 -0400
 @@ -534,11 +538,17 @@ void __init mount_root(void)
- #endif
+ 	}
  #ifdef CONFIG_BLOCK
  	{
 -		int err = create_dev("/dev/root", ROOT_DEV);
