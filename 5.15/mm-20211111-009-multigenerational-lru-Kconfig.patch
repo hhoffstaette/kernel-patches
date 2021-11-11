@@ -1,14 +1,14 @@
 From: Yu Zhao <yuzhao@google.com>
 To: linux-mm@kvack.org
-Cc: linux-kernel@vger.kernel.org, Hillf Danton <hdanton@sina.com>,
- page-reclaim@google.com,
-	Yu Zhao <yuzhao@google.com>, Konstantin Kharlamov <Hi-Angel@yandex.ru>
-Subject: [PATCH v4 10/11] mm: multigenerational lru: Kconfig
-Date: Wed, 18 Aug 2021 00:31:06 -0600
+Cc: linux-kernel@vger.kernel.org, linux-arm-kernel@lists.infradead.org, 
+	x86@kernel.org, page-reclaim@google.com, holger@applied-asynchrony.com, 
+	iam@valdikss.org.ru, Yu Zhao <yuzhao@google.com>, 
+	Konstantin Kharlamov <Hi-Angel@yandex.ru>
+Subject: [PATCH v5 09/10] mm: multigenerational lru: Kconfig
+Date: Wed, 10 Nov 2021 21:15:09 -0700
 
 Add configuration options for the multigenerational lru.
 
-[HH: updated for 5.15]
 Signed-off-by: Yu Zhao <yuzhao@google.com>
 Tested-by: Konstantin Kharlamov <Hi-Angel@yandex.ru>
 ---
@@ -16,12 +16,12 @@ Tested-by: Konstantin Kharlamov <Hi-Angel@yandex.ru>
  1 file changed, 59 insertions(+)
 
 diff --git a/mm/Kconfig b/mm/Kconfig
-index 40a9bfcd5062..4cd257cfdf84 100644
+index d16ba9249bc5..48e7babb22e5 100644
 --- a/mm/Kconfig
 +++ b/mm/Kconfig
-@@ -889,6 +889,65 @@ config IO_MAPPING
- config SECRETMEM
- 	def_bool ARCH_HAS_SET_DIRECT_MAP && !EMBEDDED
+@@ -896,4 +896,63 @@ config SECRETMEM
+ 
+ source "mm/damon/Kconfig"
  
 +# the multigenerational lru {
 +config LRU_GEN
@@ -82,6 +82,4 @@ index 40a9bfcd5062..4cd257cfdf84 100644
 +	  heavy buffered I/O workloads.
 +# }
 +
- source "mm/damon/Kconfig"
- 
  endmenu

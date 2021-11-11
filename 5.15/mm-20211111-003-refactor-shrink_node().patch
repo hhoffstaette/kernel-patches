@@ -1,10 +1,11 @@
 From: Yu Zhao <yuzhao@google.com>
 To: linux-mm@kvack.org
-Cc: linux-kernel@vger.kernel.org, Hillf Danton <hdanton@sina.com>,
- page-reclaim@google.com,
-	Yu Zhao <yuzhao@google.com>, Konstantin Kharlamov <Hi-Angel@yandex.ru>
-Subject: [PATCH v4 03/11] mm/vmscan.c: refactor shrink_node()
-Date: Wed, 18 Aug 2021 00:30:59 -0600
+Cc: linux-kernel@vger.kernel.org, linux-arm-kernel@lists.infradead.org, 
+	x86@kernel.org, page-reclaim@google.com, holger@applied-asynchrony.com, 
+	iam@valdikss.org.ru, Yu Zhao <yuzhao@google.com>, 
+	Konstantin Kharlamov <Hi-Angel@yandex.ru>
+Subject: [PATCH v5 03/10] mm/vmscan.c: refactor shrink_node()
+Date: Wed, 10 Nov 2021 21:15:03 -0700
 
 This patch refactors shrink_node(). This will make the upcoming
 changes to mm/vmscan.c more readable.
@@ -16,10 +17,10 @@ Tested-by: Konstantin Kharlamov <Hi-Angel@yandex.ru>
  1 file changed, 98 insertions(+), 88 deletions(-)
 
 diff --git a/mm/vmscan.c b/mm/vmscan.c
-index 4620df62f0ff..b6d14880bd76 100644
+index 74296c2d1fed..802b6c7ce5b5 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
-@@ -2437,6 +2437,103 @@ enum scan_balance {
+@@ -2562,6 +2562,103 @@ enum scan_balance {
  	SCAN_FILE,
  };
  
@@ -123,7 +124,7 @@ index 4620df62f0ff..b6d14880bd76 100644
  /*
   * Determine how aggressively the anon and file LRU lists should be
   * scanned.  The relative value of each set of LRU lists is determined
-@@ -2882,7 +2979,6 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
+@@ -3032,7 +3129,6 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
  	unsigned long nr_reclaimed, nr_scanned;
  	struct lruvec *target_lruvec;
  	bool reclaimable = false;
@@ -131,7 +132,7 @@ index 4620df62f0ff..b6d14880bd76 100644
  
  	target_lruvec = mem_cgroup_lruvec(sc->target_mem_cgroup, pgdat);
  
-@@ -2892,93 +2988,7 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
+@@ -3048,93 +3144,7 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
  	nr_reclaimed = sc->nr_reclaimed;
  	nr_scanned = sc->nr_scanned;
  
