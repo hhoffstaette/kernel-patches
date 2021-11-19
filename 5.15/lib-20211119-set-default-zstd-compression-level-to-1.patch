@@ -1,0 +1,17 @@
+
+Set the default zstd level to 1 for vastly faster compression performance with only
+negligible loss of compression ratio.
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+--- a/include/linux/zstd_lib.h	2021-11-19 17:54:52.009344591 +0100
++++ b/include/linux/zstd_lib.h	2021-11-19 18:16:03.256973262 +0100
+@@ -77,7 +77,7 @@ ZSTDLIB_API const char* ZSTD_versionStri
+  *  Default constant
+  ***************************************/
+ #ifndef ZSTD_CLEVEL_DEFAULT
+-#  define ZSTD_CLEVEL_DEFAULT 3
++#  define ZSTD_CLEVEL_DEFAULT 1
+ #endif
+ 
+ /* *************************************
