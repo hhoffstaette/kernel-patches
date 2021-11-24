@@ -1,0 +1,82 @@
+From: Eric Dumazet <eric.dumazet@gmail.com>
+To: David S . Miller <davem@davemloft.net>, Jakub Kicinski <kuba@kernel.org>
+Cc: netdev <netdev@vger.kernel.org>, Eric Dumazet <edumazet@google.com>, Eric Dumazet <eric.dumazet@gmail.com>,
+    Neal Cardwell <ncardwell@google.com>, Stephen Hemminger <stephen@networkplumber.org>,
+    Yuchung Cheng <ycheng@google.com>, Soheil Hassas Yeganeh <soheil@google.com>
+Subject: [PATCH net] tcp_cubic: fix spurious Hystart ACK train detections for not-cwnd-limited flows
+Date: Tue, 23 Nov 2021 12:25:35 -0800
+
+From: Eric Dumazet <edumazet@google.com>
+
+While testing BIG TCP patch series, I was expecting that TCP_RR workloads
+with 80KB requests/answers would send one 80KB TSO packet,
+then being received as a single GRO packet.
+
+It turns out this was not happening, and the root cause was that
+cubic Hystart ACK train was triggering after a few (2 or 3) rounds of RPC.
+
+Hystart was wrongly setting CWND/SSTHRESH to 30, while my RPC
+needed a budget of ~20 segments.
+
+Ideally these TCP_RR flows should not exit slow start.
+
+Cubic Hystart should reset itself at each round, instead of assuming
+every TCP flow is a bulk one.
+
+Note that even after this patch, Hystart can still trigger, depending
+on scheduling artifacts, but at a higher CWND/SSTHRESH treshold,
+keeping optimal TSO packet sizes.
+
+Tested:
+
+ip link set dev eth0 gro_ipv6_max_size 131072 gso_ipv6_max_size 131072
+nstat -n; netperf -H ... -t TCP_RR  -l 5  -- -r 80000,80000 -K cubic; nstat|egrep "Ip6InReceives|Hystart|Ip6OutRequests"
+
+Before:
+
+   8605
+Ip6InReceives                   87541              0.0
+Ip6OutRequests                  129496             0.0
+TcpExtTCPHystartTrainDetect     1                  0.0
+TcpExtTCPHystartTrainCwnd       30                 0.0
+
+After:
+
+  8760
+Ip6InReceives                   88514              0.0
+Ip6OutRequests                  87975              0.0
+
+Fixes: ae27e98a5152 ("[TCP] CUBIC v2.3")
+Co-developed-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: Neal Cardwell <ncardwell@google.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Cc: Stephen Hemminger <stephen@networkplumber.org>
+Cc: Yuchung Cheng <ycheng@google.com>
+Cc: Soheil Hassas Yeganeh <soheil@google.com>
+---
+ net/ipv4/tcp_cubic.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/net/ipv4/tcp_cubic.c b/net/ipv4/tcp_cubic.c
+index 5e9d9c51164c4d23a90ebd2be0d7bf85098b47dc..e07837e23b3fd2435c87320945528abdee9817cc 100644
+--- a/net/ipv4/tcp_cubic.c
++++ b/net/ipv4/tcp_cubic.c
+@@ -330,8 +330,6 @@ static void cubictcp_cong_avoid(struct sock *sk, u32 ack, u32 acked)
+ 		return;
+ 
+ 	if (tcp_in_slow_start(tp)) {
+-		if (hystart && after(ack, ca->end_seq))
+-			bictcp_hystart_reset(sk);
+ 		acked = tcp_slow_start(tp, acked);
+ 		if (!acked)
+ 			return;
+@@ -391,6 +389,9 @@ static void hystart_update(struct sock *sk, u32 delay)
+ 	struct bictcp *ca = inet_csk_ca(sk);
+ 	u32 threshold;
+ 
++	if (after(tp->snd_una, ca->end_seq))
++		bictcp_hystart_reset(sk);
++
+ 	if (hystart_detect & HYSTART_ACK_TRAIN) {
+ 		u32 now = bictcp_clock_us(sk);
+ 
