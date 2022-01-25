@@ -1,0 +1,27 @@
+From: gaoyahu19@gmail.com
+To: paolo.valente@linaro.org, axboe@kernel.dk
+Cc: linux-block@vger.kernel.org, Yahu Gao <gaoyahu19@gmail.com>
+Subject: [PATCH] block/bfq_wf2q: correct weight to ioprio
+Date: Fri,  7 Jan 2022 14:58:59 +0800
+
+From: Yahu Gao <gaoyahu19@gmail.com>
+
+The return value is ioprio * BFQ_WEIGHT_CONVERSION_COEFF or 0.
+What we want is ioprio or 0.
+Correct this by changing the calculation.
+
+Signed-off-by: Yahu Gao <gaoyahu19@gmail.com>
+
+diff --git a/block/bfq-wf2q.c b/block/bfq-wf2q.c
+index b74cc0da118e..709b901de3ca 100644
+--- a/block/bfq-wf2q.c
++++ b/block/bfq-wf2q.c
+@@ -519,7 +519,7 @@ unsigned short bfq_ioprio_to_weight(int ioprio)
+ static unsigned short bfq_weight_to_ioprio(int weight)
+ {
+ 	return max_t(int, 0,
+-		     IOPRIO_NR_LEVELS * BFQ_WEIGHT_CONVERSION_COEFF - weight);
++		     IOPRIO_NR_LEVELS - weight / BFQ_WEIGHT_CONVERSION_COEFF);
+ }
+ 
+ static void bfq_get_entity(struct bfq_entity *entity)
