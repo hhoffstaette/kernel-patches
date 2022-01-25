@@ -1,0 +1,25 @@
+From: gaoyahu19@gmail.com
+To: paolo.valente@linaro.org, axboe@kernel.dk
+Cc: linux-block@vger.kernel.org, Yahu Gao <gaoyahu19@gmail.com>
+Subject: [PATCH] block/bfq-wf2q: Fix some typos in comments
+Date: Mon, 10 Jan 2022 11:12:36 +0800
+
+From: Yahu Gao <gaoyahu19@gmail.com>
+
+Fix some typos in comments
+
+Signed-off-by: Yahu Gao <gaoyahu19@gmail.com>
+
+diff --git a/block/bfq-wf2q.c b/block/bfq-wf2q.c
+index 709b901de3ca..2c85d28b6aeb 100644
+--- a/block/bfq-wf2q.c
++++ b/block/bfq-wf2q.c
+@@ -565,7 +565,7 @@ static struct rb_node *bfq_find_deepest(struct rb_node *node)
+ 
+ /**
+  * bfq_active_extract - remove an entity from the active tree.
+- * @st: the service_tree containing the tree.
++ * @st: the service_tree containing the entity.
+  * @entity: the entity being removed.
+  */
+ static void bfq_active_extract(struct bfq_service_tree *st,
