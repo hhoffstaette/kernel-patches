@@ -23,7 +23,7 @@ index 09ff0bb1042c..5e65b0407e85 100644
  		   struct bfq_group *bfqg)
  {
  	struct bfq_entity *entity = &bfqq->entity;
-+	struct bfq_group *old_parent = bfq_group(bfqq);
++	struct bfq_group *old_parent = bfqq_group(bfqq);
 +
 +	/*
 +	 * No point to move bfqq to the same group, which can happen when
