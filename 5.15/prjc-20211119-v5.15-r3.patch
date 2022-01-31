@@ -9486,7 +9486,7 @@ index e06071bf3472..adf567df34d4 100644
  
  static inline u64 thermal_load_avg(struct rq *rq)
 @@ -42,6 +44,7 @@ static inline u32 get_pelt_divider(struct sched_avg *avg)
- 	return LOAD_AVG_MAX - 1024 + avg->period_contrib;
+ 	return PELT_MIN_DIVIDER + avg->period_contrib;
  }
  
 +#ifndef CONFIG_SCHED_ALT
