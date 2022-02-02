@@ -50,7 +50,7 @@ index 6f9829188948..8f7163fe3ebe 100644
 -	if (ret < 0) {
 -		err = ret;
 +	if (ret < 0)
- 		goto out;
+ 		goto out_unlock;
 -	}
  	ctx->logged_before = (ret == 1);
 +	ret = 0;

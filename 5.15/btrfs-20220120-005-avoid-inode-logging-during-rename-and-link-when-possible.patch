@@ -488,7 +488,7 @@ index bf529c6cb3ff..6f9829188948 100644
 +	ret = inode_logged(trans, inode, path);
 +	if (ret < 0) {
 +		err = ret;
-+		goto out;
++		goto out_unlock;
 +	}
 +	ctx->logged_before = (ret == 1);
 +
