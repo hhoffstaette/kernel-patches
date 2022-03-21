@@ -42,9 +42,9 @@ index 2fb177f1de317..1401268985774 100644
 +#define BTRFS_FS_ERROR(fs_info)	(unlikely(test_bit(BTRFS_FS_STATE_ERROR, \
 +						   &(fs_info)->fs_state)))
 +
- __printf(5, 6)
- __cold
- void __btrfs_panic(struct btrfs_fs_info *fs_info, const char *function,
+ #define BTRFS_FS_LOG_CLEANUP_ERROR(fs_info)				\
+ 	(unlikely(test_bit(BTRFS_FS_STATE_LOG_CLEANUP_ERROR,		\
+ 			   &(fs_info)->fs_state)))
 diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
 index 37637539c5ab1..1ae30b29f2b5d 100644
 --- a/fs/btrfs/disk-io.c
