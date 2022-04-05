@@ -1,0 +1,22 @@
+
+Sync for commit d37aee9018e68b0d356195caefbb651910e0bbfa
+("sched/uclamp: Fix iowait boost escaping uclamp restriction")
+
+Just add a dummy to match the behaviour of mainline when sched_uclamp_used is false.
+
+diff -rup linux-5.15.33/kernel/sched/alt_sched.h linux-5.15.33-prjc/kernel/sched/alt_sched.h
+--- linux-5.15.33/kernel/sched/alt_sched.h	2022-04-05 12:11:09.277357408 +0200
++++ linux-5.15.33-prjc/kernel/sched/alt_sched.h	2022-04-05 11:57:17.482477687 +0200
+@@ -663,4 +663,12 @@ extern void sched_dynamic_update(int mod
+ #endif
+ 
+ static inline void nohz_run_idle_balance(int cpu) { }
++
++static __always_inline
++unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
++                  struct task_struct *p)
++{
++	return util;
++}
++
+ #endif /* ALT_SCHED_H */
