@@ -1,0 +1,59 @@
+From:   "Darrick J. Wong" <djwong@kernel.org>
+To:     djwong@kernel.org
+Cc:     linux-xfs@vger.kernel.org, linux-fsdevel@vger.kernel.org,
+        jack@suse.com
+Subject: [PATCH 2/4] vfs: make sync_filesystem return errors from ->sync_fs
+Date:   Tue, 25 Jan 2022 18:18:20 -0800
+
+From: Darrick J. Wong <djwong@kernel.org>
+
+Strangely, sync_filesystem ignores the return code from the ->sync_fs
+call, which means that syscalls like syncfs(2) never see the error.
+This doesn't seem right, so fix that.
+
+Signed-off-by: Darrick J. Wong <djwong@kernel.org>
+---
+ fs/sync.c |   18 ++++++++++++------
+ 1 file changed, 12 insertions(+), 6 deletions(-)
+
+
+diff --git a/fs/sync.c b/fs/sync.c
+index 3ce8e2137f31..c7690016453e 100644
+--- a/fs/sync.c
++++ b/fs/sync.c
+@@ -29,7 +29,7 @@
+  */
+ int sync_filesystem(struct super_block *sb)
+ {
+-	int ret;
++	int ret = 0;
+ 
+ 	/*
+ 	 * We need to be protected against the filesystem going from
+@@ -52,15 +52,21 @@ int sync_filesystem(struct super_block *sb)
+ 	 * at a time.
+ 	 */
+ 	writeback_inodes_sb(sb, WB_REASON_SYNC);
+-	if (sb->s_op->sync_fs)
+-		sb->s_op->sync_fs(sb, 0);
++	if (sb->s_op->sync_fs) {
++		ret = sb->s_op->sync_fs(sb, 0);
++		if (ret)
++			return ret;
++	}
+ 	ret = sync_blockdev_nowait(sb->s_bdev);
+-	if (ret < 0)
++	if (ret)
+ 		return ret;
+ 
+ 	sync_inodes_sb(sb);
+-	if (sb->s_op->sync_fs)
+-		sb->s_op->sync_fs(sb, 1);
++	if (sb->s_op->sync_fs) {
++		ret = sb->s_op->sync_fs(sb, 1);
++		if (ret)
++			return ret;
++	}
+ 	return sync_blockdev(sb->s_bdev);
+ }
+ EXPORT_SYMBOL(sync_filesystem);
