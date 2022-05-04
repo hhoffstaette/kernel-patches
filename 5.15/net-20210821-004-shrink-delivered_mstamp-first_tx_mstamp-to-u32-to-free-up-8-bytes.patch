@@ -13,6 +13,7 @@ microsecond implementation approach and resulting deployment
 limitations. So this is not introducing a new limit. And these should
 not be a limitation for the foreseeable future.
 
+[HH: context fix in tcp_rate.c#1 for 5.15.38]
 Effort: net-tcp_bbr
 Origin-9xx-SHA1: 238a7e6b5d51625fef1ce7769826a7b21b02ae55
 Change-Id: I3b779603797263b52a61ad57c565eb91fe42680c
@@ -55,7 +56,7 @@ index fbab921670cc..b64d82481ae9 100644
 +++ b/net/ipv4/tcp_rate.c
 @@ -96,8 +96,9 @@ void tcp_rate_skb_delivered(struct sock *sk, struct sk_buff *skb,
  		/* Record send time of most recently ACKed packet: */
- 		tp->first_tx_mstamp  = tcp_skb_timestamp_us(skb);
+ 		tp->first_tx_mstamp  = tx_tstamp;
  		/* Find the duration of the "send phase" of this window: */
 -		rs->interval_us = tcp_stamp_us_delta(tp->first_tx_mstamp,
 -						     scb->tx.first_tx_mstamp);
