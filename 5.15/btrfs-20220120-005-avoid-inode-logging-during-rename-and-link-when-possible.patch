@@ -216,6 +216,7 @@ Throughput 1093.11 MB/sec  12 clients  12 procs  max_latency=115.544 ms
 
 +11.5% throughput    -25.8% max latency   rename max latency -77.8%
 
+[HH: context fix for 5.15.39]
 Link: https://bugzilla.opensuse.org/show_bug.cgi?id=1193549
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
@@ -477,8 +478,8 @@ index bf529c6cb3ff..6f9829188948 100644
  	path = btrfs_alloc_path();
  	if (!path)
 @@ -5643,6 +5723,18 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
- 		mutex_lock(&inode->log_mutex);
- 	}
+ 	if (S_ISLNK(inode->vfs_inode.i_mode))
+ 		inode_only = LOG_INODE_ALL;
  
 +	/*
 +	 * Before logging the inode item, cache the value returned by

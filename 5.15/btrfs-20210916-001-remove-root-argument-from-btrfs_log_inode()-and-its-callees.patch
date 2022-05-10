@@ -21,6 +21,7 @@ This patch is part of a patchset comprised of the following 5 patches:
 This is patch 1/5. The change log of the last patch (5/5) has performance
 results.
 
+[HH: context fix for 5.15.39]
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 Reviewed-by: David Sterba <dsterba@suse.com>
 Signed-off-by: David Sterba <dsterba@suse.com>
@@ -218,7 +219,7 @@ index db5ead891e244..50f6b8480f708 100644
  			goto out_unlock;
 @@ -5803,7 +5799,7 @@ process_leaf:
  			ctx->log_new_dentries = false;
- 			if (type == BTRFS_FT_DIR || type == BTRFS_FT_SYMLINK)
+ 			if (type == BTRFS_FT_DIR)
  				log_mode = LOG_INODE_ALL;
 -			ret = btrfs_log_inode(trans, root, BTRFS_I(di_inode),
 +			ret = btrfs_log_inode(trans, BTRFS_I(di_inode),
