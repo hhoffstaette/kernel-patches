@@ -24,7 +24,11 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2021-11-04)**
+**Current status (2022-05-23)**
+
+- 5.18.0 is availabe for testing.
+  Note that BBR2 is gone (for now) since development seems to have stalled and
+  the retransmission rate is (IMHO) still too high by default.
 
 - 5.15.x is my current production branch.
 
