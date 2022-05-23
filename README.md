@@ -22,13 +22,13 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**LTS Series: 5.15**
+**Series: 5.18**
 
-- btrfs: fixes from 5.16, enable forced chunk allocation via sysfs
+- bfq: fixes from 5.19
+- btrfs: fixes from 5.19, enable forced chunk allocation via sysfs
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
-- lib: [zstd upgrade](https://lore.kernel.org/all/20211109013058.22224-1-nickrterrell@gmail.com/) from 5.16
-- mm: [Multigenerational LRU v5](https://lore.kernel.org/linux-mm/20211111041510.402534-1-yuzhao@google.com/)
-- net: BBR v2 [2021-08-21](https://groups.google.com/g/bbr-dev/c/gOoFq9FyZQI)
+- mm: [Multigenerational LRU v11](https://lore.kernel.org/linux-mm/20220518014632.922072-1-yuzhao@google.com/)
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
+- xfs: fixes from 5.19
 

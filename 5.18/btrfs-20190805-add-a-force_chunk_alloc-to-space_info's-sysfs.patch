@@ -10,7 +10,7 @@ file to enable forcing of chunk allocation for the owning space info in
 order to enable us to add testcases in the future to test these various
 features easier.
 
-[HH: rebased for 5.14]
+[HH: rebased for 5.18]
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 ---
 v2->v3:
@@ -79,7 +79,7 @@ index e6493b068294..12cff81aa8ea 100644
 +	if (val == 0)
 +		return -EINVAL;
 +
-+	trans = btrfs_start_transaction(fs_info->extent_root, 0);
++	trans = btrfs_start_transaction(fs_info->tree_root, 0);
 +	if (!trans)
 +		return PTR_ERR(trans);
 +	ret = btrfs_force_chunk_alloc(trans, space_info->flags);
