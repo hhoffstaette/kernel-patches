@@ -10,7 +10,7 @@ file to enable forcing of chunk allocation for the owning space info in
 order to enable us to add testcases in the future to test these various
 features easier.
 
-[HH: rebased for 5.18]
+[HH: rebased for 5.19]
 Signed-off-by: Josef Bacik <josef@toxicpanda.com>
 ---
 v2->v3:
@@ -96,9 +96,9 @@ index e6493b068294..12cff81aa8ea 100644
  static ssize_t btrfs_space_info_show_##field(struct kobject *kobj,	\
  					     struct kobj_attribute *a,	\
 @@ -363,6 +416,7 @@ static struct attribute *space_info_attrs[] = {
- 	BTRFS_ATTR_PTR(space_info, bytes_zone_unusable),
- 	BTRFS_ATTR_PTR(space_info, disk_used),
- 	BTRFS_ATTR_PTR(space_info, disk_total),
+	BTRFS_ATTR_PTR(space_info, disk_used),
+	BTRFS_ATTR_PTR(space_info, disk_total),
+	BTRFS_ATTR_PTR(space_info, bg_reclaim_threshold),
 +	BTRFS_ATTR_PTR(space_info, force_chunk_alloc),
  	NULL,
  };
