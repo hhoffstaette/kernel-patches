@@ -24,11 +24,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2022-08-01)**
+**Current status (2022-08-09)**
 
-- 5.19 is available for testing.
+- 5.19.x is my current production branch.
 
-- 5.18.x is my current production branch.
-
-- all other branches < 5.18 are EOL for me.
+- all other branches < 5.19 are EOL for me.
 
