@@ -635,7 +635,7 @@ new file mode 100644
 index 000000000000..d0ab41c4d9ad
 --- /dev/null
 +++ b/kernel/sched/alt_core.c
-@@ -0,0 +1,7807 @@
+@@ -0,0 +1,7804 @@
 +/*
 + *  kernel/sched/alt_core.c
 + *
@@ -681,7 +681,7 @@ index 000000000000..d0ab41c4d9ad
 +
 +#include "pelt.h"
 +
-+#include "../../fs/io-wq.h"
++#include "../../io_uring/io-wq.h"
 +#include "../smpboot.h"
 +
 +/*
@@ -705,7 +705,7 @@ index 000000000000..d0ab41c4d9ad
 +#define sched_feat(x)	(0)
 +#endif /* CONFIG_SCHED_DEBUG */
 +
-+#define ALT_SCHED_VERSION "v5.19-r0"
++#define ALT_SCHED_VERSION "v5.19-r1"
 +
 +/* rt_prio(prio) defined in include/linux/sched/rt.h */
 +#define rt_task(p)		rt_prio((p)->prio)
@@ -5308,9 +5308,6 @@ index 000000000000..d0ab41c4d9ad
 +		else
 +			io_wq_worker_sleeping(tsk);
 +	}
-+
-+	if (tsk_is_pi_blocked(tsk))
-+		return;
 +
 +	/*
 +	 * If we are going to sleep and we have plugged IO queued,
