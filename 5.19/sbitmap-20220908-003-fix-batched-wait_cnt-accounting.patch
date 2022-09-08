@@ -1,10 +1,8 @@
-From kbusch@fb.com Thu Aug 25 21:48:07 2022
-Date: Thu, 25 Aug 2022 07:53:12 -0700
 From: Keith Busch <kbusch@fb.com>
 To: axboe@kernel.dk, linux-block@vger.kernel.org
-Cc: hare@suse.de, pankydev8@gmail.com, Keith Busch <kbusch@kernel.org>
-Newsgroups: gmane.linux.block
-Subject: [PATCHv3] sbitmap: fix batched wait_cnt accounting
+Cc: Keith Busch <kbusch@kernel.org>
+Subject: [PATCHv2 2/2] sbitmap: fix batched wait_cnt accounting
+Date: Tue, 6 Sep 2022 16:00:29 -0700
 
 From: Keith Busch <kbusch@kernel.org>
 
@@ -12,22 +10,14 @@ Batched completions can clear multiple bits, but we're only decrementing
 the wait_cnt by one each time. This can cause waiters to never be woken,
 stalling IO. Use the batched count instead.
 
+[HH: rebased for previous patches]
 Link: https://bugzilla.kernel.org/show_bug.cgi?id=215679
 Signed-off-by: Keith Busch <kbusch@kernel.org>
 ---
-v2->v3:
-
-  Simplify try_cmpxchg loop by using the updated 'old' value instead of
-  re-reading it (Pankaj)
-
-  Don't cap the wakeup count to "wait_batch" if more bits were cleared.
-  This simplifies handling batched wakeups since it doesn't need to
-  repeatedly wake the smaller number in a loop.
-
  block/blk-mq-tag.c      |  2 +-
  include/linux/sbitmap.h |  3 ++-
- lib/sbitmap.c           | 31 +++++++++++++++++--------------
- 3 files changed, 20 insertions(+), 16 deletions(-)
+ lib/sbitmap.c           | 36 ++++++++++++++++++------------------
+ 3 files changed, 21 insertions(+), 20 deletions(-)
 
 diff --git a/block/blk-mq-tag.c b/block/blk-mq-tag.c
 index 8e3b36d1cb57..9eb968e14d31 100644
@@ -58,10 +48,10 @@ index 8f5a86e210b9..4d2d5205ab58 100644
  /**
   * sbitmap_queue_show() - Dump &struct sbitmap_queue information to a &struct
 diff --git a/lib/sbitmap.c b/lib/sbitmap.c
-index 1f31147872e6..a8aae1fc5206 100644
+index ad0670b580d3..0a9a5d5049d9 100644
 --- a/lib/sbitmap.c
 +++ b/lib/sbitmap.c
-@@ -600,34 +600,38 @@ static struct sbq_wait_state *sbq_wake_ptr(struct sbitmap_queue *sbq)
+@@ -599,28 +599,29 @@ static struct sbq_wait_state *sbq_wake_ptr(struct sbitmap_queue *sbq)
  	return NULL;
  }
  
@@ -72,45 +62,48 @@ index 1f31147872e6..a8aae1fc5206 100644
 -	unsigned int wake_batch;
 -	int wait_cnt;
 +	int wake_batch, wait_cnt, cur;
+	bool ret;
  
  	ws = sbq_wake_ptr(sbq);
 -	if (!ws)
 +	if (!ws || !nr)
  		return false;
  
+ 	if (!waitqueue_active(&ws->wait))
+ 		return true;
+ 
 -	wait_cnt = atomic_dec_return(&ws->wait_cnt);
-+	wake_batch = READ_ONCE(sbq->wake_batch);
+-
+-	/*
+-	 * For concurrent callers of this, callers should call this function
+-	 * again to wakeup a new batch on a different 'ws'.
+-	 */
+-	if (wait_cnt < 0)
+-		return true;
 +	cur = atomic_read(&ws->wait_cnt);
 +	do {
++		/*
++		 * For concurrent callers of this, callers should call this
++		 * function again to wakeup a new batch on a different 'ws'.
++		 */
 +		if (cur <= 0)
 +			return true;
 +		wait_cnt = cur - nr;
 +	} while (!atomic_try_cmpxchg(&ws->wait_cnt, &cur, wait_cnt));
-+
- 	/*
- 	 * For concurrent callers of this, callers should call this function
- 	 * again to wakeup a new batch on a different 'ws'.
- 	 */
--	if (wait_cnt < 0 || !waitqueue_active(&ws->wait))
-+	if (!waitqueue_active(&ws->wait))
- 		return true;
  
- 	if (wait_cnt > 0)
- 		return false;
- 
--	wake_batch = READ_ONCE(sbq->wake_batch);
--
- 	/*
+	/*
+	 * If we decremented queue without waiters, retry to avoid lost
+@@ -630,7 +631,7 @@ static bool __sbq_wake_up(struct sbitmap_queue *sbq)
  	 * Wake up first in case that concurrent callers decrease wait_cnt
  	 * while waitqueue is empty.
  	 */
 -	wake_up_nr(&ws->wait, wake_batch);
-+	wake_up_nr(&ws->wait, max(wake_batch, nr));
++	wake_up_nr(&ws->wait, wake_batch - wait_cnt);
  
  	/*
  	 * Pairs with the memory barrier in sbitmap_queue_resize() to
-@@ -652,12 +656,11 @@ static bool __sbq_wake_up(struct sbitmap_queue *sbq)
- 	return false;
+@@ -655,12 +656,11 @@ static bool __sbq_wake_up(struct sbitmap_queue *sbq)
+ 	return ret;
  }
  
 -void sbitmap_queue_wake_up(struct sbitmap_queue *sbq)
@@ -124,7 +117,7 @@ index 1f31147872e6..a8aae1fc5206 100644
  
  static inline void sbitmap_update_cpu_hint(struct sbitmap *sb, int cpu, int tag)
  {
-@@ -694,7 +697,7 @@ void sbitmap_queue_clear_batch(struct sbitmap_queue *sbq, int offset,
+@@ -697,7 +697,7 @@ void sbitmap_queue_clear_batch(struct sbitmap_queue *sbq, int offset,
  		atomic_long_andnot(mask, (atomic_long_t *) addr);
  
  	smp_mb__after_atomic();
@@ -133,7 +126,7 @@ index 1f31147872e6..a8aae1fc5206 100644
  	sbitmap_update_cpu_hint(&sbq->sb, raw_smp_processor_id(),
  					tags[nr_tags - 1] - offset);
  }
-@@ -722,7 +725,7 @@ void sbitmap_queue_clear(struct sbitmap_queue *sbq, unsigned int nr,
+@@ -725,7 +725,7 @@ void sbitmap_queue_clear(struct sbitmap_queue *sbq, unsigned int nr,
  	 * waiter. See the comment on waitqueue_active().
  	 */
  	smp_mb__after_atomic();
