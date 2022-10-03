@@ -1,0 +1,192 @@
+From:   Mikulas Patocka <mpatocka@redhat.com>
+To:     Greg KH <gregkh@linuxfoundation.org>
+cc:     stable@vger.kernel.org
+Subject: [PATCH] wait_on_bit: add an acquire memory barrier
+Date:   Mon, 3 Oct 2022 08:28:42 -0400 (EDT)
+
+This is backport of the upstream patch 8238b4579866b7c1bb99883cfe102a43db5506ff
+for the stable branches 5.10, 5.15, 5.19
+
+wait_on_bit: add an acquire memory barrier
+
+There are several places in the kernel where wait_on_bit is not followed
+by a memory barrier (for example, in drivers/md/dm-bufio.c:new_read).
+
+On architectures with weak memory ordering, it may happen that memory
+accesses that follow wait_on_bit are reordered before wait_on_bit and
+they may return invalid data.
+
+Fix this class of bugs by introducing a new function "test_bit_acquire"
+that works like test_bit, but has acquire memory ordering semantics.
+
+Signed-off-by: Mikulas Patocka <mpatocka@redhat.com>
+Acked-by: Will Deacon <will@kernel.org>
+Cc: stable@vger.kernel.org
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+---
+ arch/x86/include/asm/bitops.h                        |   21 +++++++++++++++++++
+ include/asm-generic/bitops/instrumented-non-atomic.h |   12 ++++++++++
+ include/asm-generic/bitops/non-atomic.h              |   14 ++++++++++++
+ include/linux/buffer_head.h                          |    2 -
+ include/linux/wait_bit.h                             |    8 +++----
+ kernel/sched/wait_bit.c                              |    2 -
+ 6 files changed, 53 insertions(+), 6 deletions(-)
+
+Index: linux-stable/arch/x86/include/asm/bitops.h
+===================================================================
+--- linux-stable.orig/arch/x86/include/asm/bitops.h	2022-09-30 13:07:11.000000000 +0200
++++ linux-stable/arch/x86/include/asm/bitops.h	2022-09-30 13:07:11.000000000 +0200
+@@ -207,6 +207,20 @@ static __always_inline bool constant_tes
+ 		(addr[nr >> _BITOPS_LONG_SHIFT])) != 0;
+ }
+ 
++static __always_inline bool constant_test_bit_acquire(long nr, const volatile unsigned long *addr)
++{
++	bool oldbit;
++
++	asm volatile("testb %2,%1"
++		     CC_SET(nz)
++		     : CC_OUT(nz) (oldbit)
++		     : "m" (((unsigned char *)addr)[nr >> 3]),
++		       "i" (1 << (nr & 7))
++		     :"memory");
++
++	return oldbit;
++}
++
+ static __always_inline bool variable_test_bit(long nr, volatile const unsigned long *addr)
+ {
+ 	bool oldbit;
+@@ -224,6 +238,13 @@ static __always_inline bool variable_tes
+ 	 ? constant_test_bit((nr), (addr))	\
+ 	 : variable_test_bit((nr), (addr)))
+ 
++static __always_inline bool
++arch_test_bit_acquire(unsigned long nr, const volatile unsigned long *addr)
++{
++	return __builtin_constant_p(nr) ? constant_test_bit_acquire(nr, addr) :
++					  variable_test_bit(nr, addr);
++}
++
+ /**
+  * __ffs - find first set bit in word
+  * @word: The word to search
+Index: linux-stable/include/asm-generic/bitops/instrumented-non-atomic.h
+===================================================================
+--- linux-stable.orig/include/asm-generic/bitops/instrumented-non-atomic.h	2022-09-30 13:07:11.000000000 +0200
++++ linux-stable/include/asm-generic/bitops/instrumented-non-atomic.h	2022-09-30 13:07:11.000000000 +0200
+@@ -135,4 +135,16 @@ static __always_inline bool test_bit(lon
+ 	return arch_test_bit(nr, addr);
+ }
+ 
++/**
++ * _test_bit_acquire - Determine, with acquire semantics, whether a bit is set
++ * @nr: bit number to test
++ * @addr: Address to start counting from
++ */
++static __always_inline bool
++test_bit_acquire(unsigned long nr, const volatile unsigned long *addr)
++{
++	instrument_atomic_read(addr + BIT_WORD(nr), sizeof(long));
++	return arch_test_bit_acquire(nr, addr);
++}
++
+ #endif /* _ASM_GENERIC_BITOPS_INSTRUMENTED_NON_ATOMIC_H */
+Index: linux-stable/include/asm-generic/bitops/non-atomic.h
+===================================================================
+--- linux-stable.orig/include/asm-generic/bitops/non-atomic.h	2022-09-30 13:07:11.000000000 +0200
++++ linux-stable/include/asm-generic/bitops/non-atomic.h	2022-09-30 13:07:11.000000000 +0200
+@@ -3,6 +3,7 @@
+ #define _ASM_GENERIC_BITOPS_NON_ATOMIC_H_
+ 
+ #include <asm/types.h>
++#include <asm/barrier.h>
+ 
+ /**
+  * arch___set_bit - Set a bit in memory
+@@ -119,4 +120,17 @@ arch_test_bit(unsigned int nr, const vol
+ }
+ #define test_bit arch_test_bit
+ 
++/**
++ * arch_test_bit_acquire - Determine, with acquire semantics, whether a bit is set
++ * @nr: bit number to test
++ * @addr: Address to start counting from
++ */
++static __always_inline bool
++arch_test_bit_acquire(unsigned long nr, const volatile unsigned long *addr)
++{
++	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
++	return 1UL & (smp_load_acquire(p) >> (nr & (BITS_PER_LONG-1)));
++}
++#define test_bit_acquire arch_test_bit_acquire
++
+ #endif /* _ASM_GENERIC_BITOPS_NON_ATOMIC_H_ */
+Index: linux-stable/include/linux/buffer_head.h
+===================================================================
+--- linux-stable.orig/include/linux/buffer_head.h	2022-09-30 13:07:11.000000000 +0200
++++ linux-stable/include/linux/buffer_head.h	2022-09-30 13:07:11.000000000 +0200
+@@ -166,7 +166,7 @@ static __always_inline int buffer_uptoda
+ 	 * make it consistent with folio_test_uptodate
+ 	 * pairs with smp_mb__before_atomic in set_buffer_uptodate
+ 	 */
+-	return (smp_load_acquire(&bh->b_state) & (1UL << BH_Uptodate)) != 0;
++	return test_bit_acquire(BH_Uptodate, &bh->b_state);
+ }
+ 
+ #define bh_offset(bh)		((unsigned long)(bh)->b_data & ~PAGE_MASK)
+Index: linux-stable/include/linux/wait_bit.h
+===================================================================
+--- linux-stable.orig/include/linux/wait_bit.h	2022-09-30 13:07:11.000000000 +0200
++++ linux-stable/include/linux/wait_bit.h	2022-09-30 13:07:11.000000000 +0200
+@@ -71,7 +71,7 @@ static inline int
+ wait_on_bit(unsigned long *word, int bit, unsigned mode)
+ {
+ 	might_sleep();
+-	if (!test_bit(bit, word))
++	if (!test_bit_acquire(bit, word))
+ 		return 0;
+ 	return out_of_line_wait_on_bit(word, bit,
+ 				       bit_wait,
+@@ -96,7 +96,7 @@ static inline int
+ wait_on_bit_io(unsigned long *word, int bit, unsigned mode)
+ {
+ 	might_sleep();
+-	if (!test_bit(bit, word))
++	if (!test_bit_acquire(bit, word))
+ 		return 0;
+ 	return out_of_line_wait_on_bit(word, bit,
+ 				       bit_wait_io,
+@@ -123,7 +123,7 @@ wait_on_bit_timeout(unsigned long *word,
+ 		    unsigned long timeout)
+ {
+ 	might_sleep();
+-	if (!test_bit(bit, word))
++	if (!test_bit_acquire(bit, word))
+ 		return 0;
+ 	return out_of_line_wait_on_bit_timeout(word, bit,
+ 					       bit_wait_timeout,
+@@ -151,7 +151,7 @@ wait_on_bit_action(unsigned long *word,
+ 		   unsigned mode)
+ {
+ 	might_sleep();
+-	if (!test_bit(bit, word))
++	if (!test_bit_acquire(bit, word))
+ 		return 0;
+ 	return out_of_line_wait_on_bit(word, bit, action, mode);
+ }
+Index: linux-stable/kernel/sched/wait_bit.c
+===================================================================
+--- linux-stable.orig/kernel/sched/wait_bit.c	2022-09-30 13:07:11.000000000 +0200
++++ linux-stable/kernel/sched/wait_bit.c	2022-09-30 13:07:11.000000000 +0200
+@@ -47,7 +47,7 @@ __wait_on_bit(struct wait_queue_head *wq
+ 		prepare_to_wait(wq_head, &wbq_entry->wq_entry, mode);
+ 		if (test_bit(wbq_entry->key.bit_nr, wbq_entry->key.flags))
+ 			ret = (*action)(&wbq_entry->key, mode);
+-	} while (test_bit(wbq_entry->key.bit_nr, wbq_entry->key.flags) && !ret);
++	} while (test_bit_acquire(wbq_entry->key.bit_nr, wbq_entry->key.flags) && !ret);
+ 
+ 	finish_wait(wq_head, &wbq_entry->wq_entry);
+ 
+
