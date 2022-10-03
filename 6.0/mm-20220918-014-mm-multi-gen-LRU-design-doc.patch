@@ -1,7 +1,32 @@
 From: Yu Zhao <yuzhao@google.com>
 To: Andrew Morton <akpm@linux-foundation.org>
-Subject: [PATCH v13 14/14] mm: multi-gen LRU: design doc
-Date: Wed,  6 Jul 2022 16:00:23 -0600
+Cc: Andi Kleen <ak@linux.intel.com>,
+ Aneesh Kumar <aneesh.kumar@linux.ibm.com>,
+  Catalin Marinas <catalin.marinas@arm.com>,
+ Dave Hansen <dave.hansen@linux.intel.com>,  Hillf Danton <hdanton@sina.com>,
+ Jens Axboe <axboe@kernel.dk>, Johannes Weiner <hannes@cmpxchg.org>,
+  Jonathan Corbet <corbet@lwn.net>,
+ Linus Torvalds <torvalds@linux-foundation.org>,
+  Matthew Wilcox <willy@infradead.org>, Mel Gorman <mgorman@suse.de>,
+  Michael Larabel <Michael@michaellarabel.com>,
+ Michal Hocko <mhocko@kernel.org>,  Mike Rapoport <rppt@kernel.org>,
+ Peter Zijlstra <peterz@infradead.org>, Tejun Heo <tj@kernel.org>,
+  Vlastimil Babka <vbabka@suse.cz>, Will Deacon <will@kernel.org>,
+ linux-arm-kernel@lists.infradead.org,  linux-doc@vger.kernel.org,
+ linux-kernel@vger.kernel.org, linux-mm@kvack.org,  x86@kernel.org,
+ page-reclaim@google.com, Yu Zhao <yuzhao@google.com>,
+  Brian Geffon <bgeffon@google.com>,
+ Jan Alexander Steffens <heftig@archlinux.org>,
+  Oleksandr Natalenko <oleksandr@natalenko.name>,
+ Steven Barrett <steven@liquorix.net>,
+  Suleiman Souhlal <suleiman@google.com>, Daniel Byrne <djbyrne@mtu.edu>,
+ Donald Carr <d@chaos-reins.com>,
+  " =?utf-8?q?Holger_Hoffst=C3=A4tte?= " <holger@applied-asynchrony.com>,
+ Konstantin Kharlamov <Hi-Angel@yandex.ru>,
+  Shuang Zhai <szhai2@cs.rochester.edu>, Sofia Trinh <sofia.trinh@edi.works>,
+  Vaibhav Jain <vaibhav@linux.ibm.com>
+Subject: [PATCH mm-unstable v15 14/14] mm: multi-gen LRU: design doc
+Date: Sun, 18 Sep 2022 02:00:11 -0600
 
 Add a design doc.
 
@@ -18,17 +43,16 @@ Tested-by: Konstantin Kharlamov <Hi-Angel@yandex.ru>
 Tested-by: Shuang Zhai <szhai2@cs.rochester.edu>
 Tested-by: Sofia Trinh <sofia.trinh@edi.works>
 Tested-by: Vaibhav Jain <vaibhav@linux.ibm.com>
-Reviewed-by: Bagas Sanjaya <bagasdotme@gmail.com>
 ---
- Documentation/vm/index.rst        |   1 +
- Documentation/vm/multigen_lru.rst | 159 ++++++++++++++++++++++++++++++
+ Documentation/mm/index.rst        |   1 +
+ Documentation/mm/multigen_lru.rst | 159 ++++++++++++++++++++++++++++++
  2 files changed, 160 insertions(+)
- create mode 100644 Documentation/vm/multigen_lru.rst
+ create mode 100644 Documentation/mm/multigen_lru.rst
 
-diff --git a/Documentation/vm/index.rst b/Documentation/vm/index.rst
+diff --git a/Documentation/mm/index.rst b/Documentation/mm/index.rst
 index 575ccd40e30c..4aa12b8be278 100644
---- a/Documentation/vm/index.rst
-+++ b/Documentation/vm/index.rst
+--- a/Documentation/mm/index.rst
++++ b/Documentation/mm/index.rst
 @@ -51,6 +51,7 @@ above structured documentation, or deleted if it has served its purpose.
     ksm
     memory-model
@@ -37,11 +61,11 @@ index 575ccd40e30c..4aa12b8be278 100644
     numa
     overcommit-accounting
     page_migration
-diff --git a/Documentation/vm/multigen_lru.rst b/Documentation/vm/multigen_lru.rst
+diff --git a/Documentation/mm/multigen_lru.rst b/Documentation/mm/multigen_lru.rst
 new file mode 100644
 index 000000000000..d7062c6a8946
 --- /dev/null
-+++ b/Documentation/vm/multigen_lru.rst
++++ b/Documentation/mm/multigen_lru.rst
 @@ -0,0 +1,159 @@
 +.. SPDX-License-Identifier: GPL-2.0
 +

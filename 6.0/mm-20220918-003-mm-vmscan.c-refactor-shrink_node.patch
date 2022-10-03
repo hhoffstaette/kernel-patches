@@ -1,7 +1,33 @@
 From: Yu Zhao <yuzhao@google.com>
 To: Andrew Morton <akpm@linux-foundation.org>
-Subject: [PATCH v13 03/14] mm/vmscan.c: refactor shrink_node()
-Date: Wed,  6 Jul 2022 16:00:12 -0600
+Cc: Andi Kleen <ak@linux.intel.com>,
+ Aneesh Kumar <aneesh.kumar@linux.ibm.com>,
+  Catalin Marinas <catalin.marinas@arm.com>,
+ Dave Hansen <dave.hansen@linux.intel.com>,  Hillf Danton <hdanton@sina.com>,
+ Jens Axboe <axboe@kernel.dk>, Johannes Weiner <hannes@cmpxchg.org>,
+  Jonathan Corbet <corbet@lwn.net>,
+ Linus Torvalds <torvalds@linux-foundation.org>,
+  Matthew Wilcox <willy@infradead.org>, Mel Gorman <mgorman@suse.de>,
+  Michael Larabel <Michael@michaellarabel.com>,
+ Michal Hocko <mhocko@kernel.org>,  Mike Rapoport <rppt@kernel.org>,
+ Peter Zijlstra <peterz@infradead.org>, Tejun Heo <tj@kernel.org>,
+  Vlastimil Babka <vbabka@suse.cz>, Will Deacon <will@kernel.org>,
+ linux-arm-kernel@lists.infradead.org,  linux-doc@vger.kernel.org,
+ linux-kernel@vger.kernel.org, linux-mm@kvack.org,  x86@kernel.org,
+ page-reclaim@google.com, Yu Zhao <yuzhao@google.com>,
+  Barry Song <baohua@kernel.org>, Miaohe Lin <linmiaohe@huawei.com>,
+  Brian Geffon <bgeffon@google.com>,
+ Jan Alexander Steffens <heftig@archlinux.org>,
+  Oleksandr Natalenko <oleksandr@natalenko.name>,
+ Steven Barrett <steven@liquorix.net>,
+  Suleiman Souhlal <suleiman@google.com>, Daniel Byrne <djbyrne@mtu.edu>,
+ Donald Carr <d@chaos-reins.com>,
+  " =?utf-8?q?Holger_Hoffst=C3=A4tte?= " <holger@applied-asynchrony.com>,
+ Konstantin Kharlamov <Hi-Angel@yandex.ru>,
+  Shuang Zhai <szhai2@cs.rochester.edu>, Sofia Trinh <sofia.trinh@edi.works>,
+  Vaibhav Jain <vaibhav@linux.ibm.com>
+Subject: [PATCH mm-unstable v15 03/14] mm/vmscan.c: refactor shrink_node()
+Date: Sun, 18 Sep 2022 02:00:00 -0600
 
 This patch refactors shrink_node() to improve readability for the
 upcoming changes to mm/vmscan.c.
@@ -26,10 +52,10 @@ Tested-by: Vaibhav Jain <vaibhav@linux.ibm.com>
  1 file changed, 104 insertions(+), 94 deletions(-)
 
 diff --git a/mm/vmscan.c b/mm/vmscan.c
-index f7d9a683e3a7..fddb9bd3c6c2 100644
+index 992ba6a0bf10..0869cee13a90 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
-@@ -2670,6 +2670,109 @@ enum scan_balance {
+@@ -2728,6 +2728,109 @@ enum scan_balance {
  	SCAN_FILE,
  };
  
@@ -61,22 +87,22 @@ index f7d9a683e3a7..fddb9bd3c6c2 100644
 +	if (!sc->force_deactivate) {
 +		unsigned long refaults;
 +
-+		refaults = lruvec_page_state(target_lruvec,
-+				WORKINGSET_ACTIVATE_ANON);
-+		if (refaults != target_lruvec->refaults[0] ||
-+			inactive_is_low(target_lruvec, LRU_INACTIVE_ANON))
-+			sc->may_deactivate |= DEACTIVATE_ANON;
-+		else
-+			sc->may_deactivate &= ~DEACTIVATE_ANON;
-+
 +		/*
 +		 * When refaults are being observed, it means a new
 +		 * workingset is being established. Deactivate to get
 +		 * rid of any stale active pages quickly.
 +		 */
 +		refaults = lruvec_page_state(target_lruvec,
++				WORKINGSET_ACTIVATE_ANON);
++		if (refaults != target_lruvec->refaults[WORKINGSET_ANON] ||
++			inactive_is_low(target_lruvec, LRU_INACTIVE_ANON))
++			sc->may_deactivate |= DEACTIVATE_ANON;
++		else
++			sc->may_deactivate &= ~DEACTIVATE_ANON;
++
++		refaults = lruvec_page_state(target_lruvec,
 +				WORKINGSET_ACTIVATE_FILE);
-+		if (refaults != target_lruvec->refaults[1] ||
++		if (refaults != target_lruvec->refaults[WORKINGSET_FILE] ||
 +		    inactive_is_low(target_lruvec, LRU_INACTIVE_FILE))
 +			sc->may_deactivate |= DEACTIVATE_FILE;
 +		else
@@ -139,7 +165,7 @@ index f7d9a683e3a7..fddb9bd3c6c2 100644
  /*
   * Determine how aggressively the anon and file LRU lists should be
   * scanned.
-@@ -3138,109 +3241,16 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
+@@ -3195,109 +3298,16 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
  	unsigned long nr_reclaimed, nr_scanned;
  	struct lruvec *target_lruvec;
  	bool reclaimable = false;
@@ -174,22 +200,22 @@ index f7d9a683e3a7..fddb9bd3c6c2 100644
 -	if (!sc->force_deactivate) {
 -		unsigned long refaults;
 -
--		refaults = lruvec_page_state(target_lruvec,
--				WORKINGSET_ACTIVATE_ANON);
--		if (refaults != target_lruvec->refaults[0] ||
--			inactive_is_low(target_lruvec, LRU_INACTIVE_ANON))
--			sc->may_deactivate |= DEACTIVATE_ANON;
--		else
--			sc->may_deactivate &= ~DEACTIVATE_ANON;
--
 -		/*
 -		 * When refaults are being observed, it means a new
 -		 * workingset is being established. Deactivate to get
 -		 * rid of any stale active pages quickly.
 -		 */
 -		refaults = lruvec_page_state(target_lruvec,
+-				WORKINGSET_ACTIVATE_ANON);
+-		if (refaults != target_lruvec->refaults[WORKINGSET_ANON] ||
+-			inactive_is_low(target_lruvec, LRU_INACTIVE_ANON))
+-			sc->may_deactivate |= DEACTIVATE_ANON;
+-		else
+-			sc->may_deactivate &= ~DEACTIVATE_ANON;
+-
+-		refaults = lruvec_page_state(target_lruvec,
 -				WORKINGSET_ACTIVATE_FILE);
--		if (refaults != target_lruvec->refaults[1] ||
+-		if (refaults != target_lruvec->refaults[WORKINGSET_FILE] ||
 -		    inactive_is_low(target_lruvec, LRU_INACTIVE_FILE))
 -			sc->may_deactivate |= DEACTIVATE_FILE;
 -		else

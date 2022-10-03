@@ -1,7 +1,32 @@
 From: Yu Zhao <yuzhao@google.com>
 To: Andrew Morton <akpm@linux-foundation.org>
-Subject: [PATCH v13 12/14] mm: multi-gen LRU: debugfs interface
-Date: Wed,  6 Jul 2022 16:00:21 -0600
+Cc: Andi Kleen <ak@linux.intel.com>,
+ Aneesh Kumar <aneesh.kumar@linux.ibm.com>,
+  Catalin Marinas <catalin.marinas@arm.com>,
+ Dave Hansen <dave.hansen@linux.intel.com>,  Hillf Danton <hdanton@sina.com>,
+ Jens Axboe <axboe@kernel.dk>, Johannes Weiner <hannes@cmpxchg.org>,
+  Jonathan Corbet <corbet@lwn.net>,
+ Linus Torvalds <torvalds@linux-foundation.org>,
+  Matthew Wilcox <willy@infradead.org>, Mel Gorman <mgorman@suse.de>,
+  Michael Larabel <Michael@michaellarabel.com>,
+ Michal Hocko <mhocko@kernel.org>,  Mike Rapoport <rppt@kernel.org>,
+ Peter Zijlstra <peterz@infradead.org>, Tejun Heo <tj@kernel.org>,
+  Vlastimil Babka <vbabka@suse.cz>, Will Deacon <will@kernel.org>,
+ linux-arm-kernel@lists.infradead.org,  linux-doc@vger.kernel.org,
+ linux-kernel@vger.kernel.org, linux-mm@kvack.org,  x86@kernel.org,
+ page-reclaim@google.com, Yu Zhao <yuzhao@google.com>,
+  Qi Zheng <zhengqi.arch@bytedance.com>, Brian Geffon <bgeffon@google.com>,
+  Jan Alexander Steffens <heftig@archlinux.org>,
+ Oleksandr Natalenko <oleksandr@natalenko.name>,
+  Steven Barrett <steven@liquorix.net>,
+ Suleiman Souhlal <suleiman@google.com>,  Daniel Byrne <djbyrne@mtu.edu>,
+ Donald Carr <d@chaos-reins.com>,
+  " =?utf-8?q?Holger_Hoffst=C3=A4tte?= " <holger@applied-asynchrony.com>,
+ Konstantin Kharlamov <Hi-Angel@yandex.ru>,
+  Shuang Zhai <szhai2@cs.rochester.edu>, Sofia Trinh <sofia.trinh@edi.works>,
+  Vaibhav Jain <vaibhav@linux.ibm.com>
+Subject: [PATCH mm-unstable v15 12/14] mm: multi-gen LRU: debugfs interface
+Date: Sun, 18 Sep 2022 02:00:09 -0600
 
 Add /sys/kernel/debug/lru_gen for working set estimation and proactive
 reclaim. These techniques are commonly used to optimize job scheduling
@@ -39,10 +64,10 @@ Tested-by: Vaibhav Jain <vaibhav@linux.ibm.com>
  2 files changed, 402 insertions(+), 10 deletions(-)
 
 diff --git a/include/linux/nodemask.h b/include/linux/nodemask.h
-index 0f233b76c9ce..292ec0ce0d63 100644
+index 4b71a96190a8..3a0eec9f2faa 100644
 --- a/include/linux/nodemask.h
 +++ b/include/linux/nodemask.h
-@@ -485,6 +485,7 @@ static inline int num_node_state(enum node_states state)
+@@ -493,6 +493,7 @@ static inline int num_node_state(enum node_states state)
  #define first_online_node	0
  #define first_memory_node	0
  #define next_online_node(nid)	(MAX_NUMNODES)
@@ -51,10 +76,10 @@ index 0f233b76c9ce..292ec0ce0d63 100644
  #define nr_online_nodes		1U
  
 diff --git a/mm/vmscan.c b/mm/vmscan.c
-index 1f2892a0dc41..fbcd298adca7 100644
+index 9ef2ec3d3c0c..7657d54c9c42 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
-@@ -53,6 +53,7 @@
+@@ -52,6 +52,7 @@
  #include <linux/pagewalk.h>
  #include <linux/shmem_fs.h>
  #include <linux/ctype.h>
@@ -62,7 +87,7 @@ index 1f2892a0dc41..fbcd298adca7 100644
  
  #include <asm/tlbflush.h>
  #include <asm/div64.h>
-@@ -4137,12 +4138,40 @@ static void clear_mm_walk(void)
+@@ -4197,12 +4198,40 @@ static void clear_mm_walk(void)
  		kfree(walk);
  }
  
@@ -104,7 +129,7 @@ index 1f2892a0dc41..fbcd298adca7 100644
  }
  
  static bool try_to_inc_min_seq(struct lruvec *lruvec, bool can_swap)
-@@ -4188,7 +4217,7 @@ static bool try_to_inc_min_seq(struct lruvec *lruvec, bool can_swap)
+@@ -4248,7 +4277,7 @@ static bool try_to_inc_min_seq(struct lruvec *lruvec, bool can_swap)
  	return success;
  }
  
@@ -113,7 +138,7 @@ index 1f2892a0dc41..fbcd298adca7 100644
  {
  	int prev, next;
  	int type, zone;
-@@ -4202,9 +4231,13 @@ static void inc_max_seq(struct lruvec *lruvec, bool can_swap)
+@@ -4262,9 +4291,13 @@ static void inc_max_seq(struct lruvec *lruvec, bool can_swap)
  		if (get_nr_gens(lruvec, type) != MAX_NR_GENS)
  			continue;
  
@@ -129,7 +154,7 @@ index 1f2892a0dc41..fbcd298adca7 100644
  	}
  
  	/*
-@@ -4241,7 +4274,7 @@ static void inc_max_seq(struct lruvec *lruvec, bool can_swap)
+@@ -4301,7 +4334,7 @@ static void inc_max_seq(struct lruvec *lruvec, bool can_swap)
  }
  
  static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
@@ -138,7 +163,7 @@ index 1f2892a0dc41..fbcd298adca7 100644
  {
  	bool success;
  	struct lru_gen_mm_walk *walk;
-@@ -4262,7 +4295,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
+@@ -4322,7 +4355,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
  	 * handful of PTEs. Spreading the work out over a period of time usually
  	 * is less efficient, but it avoids bursty page faults.
  	 */
@@ -147,7 +172,7 @@ index 1f2892a0dc41..fbcd298adca7 100644
  		success = iterate_mm_list_nowalk(lruvec, max_seq);
  		goto done;
  	}
-@@ -4276,7 +4309,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
+@@ -4336,7 +4369,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
  	walk->lruvec = lruvec;
  	walk->max_seq = max_seq;
  	walk->can_swap = can_swap;
@@ -156,7 +181,7 @@ index 1f2892a0dc41..fbcd298adca7 100644
  
  	do {
  		success = iterate_mm_list(lruvec, walk, &mm);
-@@ -4296,7 +4329,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
+@@ -4356,7 +4389,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
  
  	VM_WARN_ON_ONCE(max_seq != READ_ONCE(lrugen->max_seq));
  
@@ -165,16 +190,16 @@ index 1f2892a0dc41..fbcd298adca7 100644
  	/* either this sees any waiters or they will see updated max_seq */
  	if (wq_has_sleeper(&lruvec->mm_state.wait))
  		wake_up_all(&lruvec->mm_state.wait);
-@@ -4395,7 +4428,7 @@ static bool age_lruvec(struct lruvec *lruvec, struct scan_control *sc, unsigned
+@@ -4454,7 +4487,7 @@ static bool age_lruvec(struct lruvec *lruvec, struct scan_control *sc, unsigned
  	}
  
- 	if (nr_to_scan && need_aging)
+ 	if (need_aging)
 -		try_to_inc_max_seq(lruvec, max_seq, sc, swappiness);
 +		try_to_inc_max_seq(lruvec, max_seq, sc, swappiness, false);
  
  	return true;
  }
-@@ -4962,7 +4995,7 @@ static unsigned long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *
+@@ -5013,7 +5046,7 @@ static unsigned long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *
  	if (current_is_kswapd())
  		return 0;
  
@@ -183,7 +208,7 @@ index 1f2892a0dc41..fbcd298adca7 100644
  		return nr_to_scan;
  done:
  	return min_seq[!can_swap] + MIN_NR_GENS <= max_seq ? nr_to_scan : 0;
-@@ -5251,6 +5284,361 @@ static struct attribute_group lru_gen_attr_group = {
+@@ -5352,6 +5385,361 @@ static struct attribute_group lru_gen_attr_group = {
  	.attrs = lru_gen_attrs,
  };
  
@@ -545,7 +570,7 @@ index 1f2892a0dc41..fbcd298adca7 100644
  /******************************************************************************
   *                          initialization
   ******************************************************************************/
-@@ -5308,6 +5696,9 @@ static int __init init_lru_gen(void)
+@@ -5409,6 +5797,9 @@ static int __init init_lru_gen(void)
  	if (sysfs_create_group(mm_kobj, &lru_gen_attr_group))
  		pr_err("lru_gen: failed to create sysfs group\n");
  

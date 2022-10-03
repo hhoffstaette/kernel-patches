@@ -1,7 +1,32 @@
 From: Yu Zhao <yuzhao@google.com>
 To: Andrew Morton <akpm@linux-foundation.org>
-Subject: [PATCH v13 01/14] mm: x86, arm64: add arch_has_hw_pte_young()
-Date: Wed,  6 Jul 2022 16:00:10 -0600
+Cc: Andi Kleen <ak@linux.intel.com>,
+ Aneesh Kumar <aneesh.kumar@linux.ibm.com>,
+  Catalin Marinas <catalin.marinas@arm.com>,
+ Dave Hansen <dave.hansen@linux.intel.com>,  Hillf Danton <hdanton@sina.com>,
+ Jens Axboe <axboe@kernel.dk>, Johannes Weiner <hannes@cmpxchg.org>,
+  Jonathan Corbet <corbet@lwn.net>,
+ Linus Torvalds <torvalds@linux-foundation.org>,
+  Matthew Wilcox <willy@infradead.org>, Mel Gorman <mgorman@suse.de>,
+  Michael Larabel <Michael@michaellarabel.com>,
+ Michal Hocko <mhocko@kernel.org>,  Mike Rapoport <rppt@kernel.org>,
+ Peter Zijlstra <peterz@infradead.org>, Tejun Heo <tj@kernel.org>,
+  Vlastimil Babka <vbabka@suse.cz>, Will Deacon <will@kernel.org>,
+ linux-arm-kernel@lists.infradead.org,  linux-doc@vger.kernel.org,
+ linux-kernel@vger.kernel.org, linux-mm@kvack.org,  x86@kernel.org,
+ page-reclaim@google.com, Yu Zhao <yuzhao@google.com>,
+  Barry Song <baohua@kernel.org>, Brian Geffon <bgeffon@google.com>,
+  Jan Alexander Steffens <heftig@archlinux.org>,
+ Oleksandr Natalenko <oleksandr@natalenko.name>,
+  Steven Barrett <steven@liquorix.net>,
+ Suleiman Souhlal <suleiman@google.com>,  Daniel Byrne <djbyrne@mtu.edu>,
+ Donald Carr <d@chaos-reins.com>,
+  " =?utf-8?q?Holger_Hoffst=C3=A4tte?= " <holger@applied-asynchrony.com>,
+ Konstantin Kharlamov <Hi-Angel@yandex.ru>,
+  Shuang Zhai <szhai2@cs.rochester.edu>, Sofia Trinh <sofia.trinh@edi.works>,
+  Vaibhav Jain <vaibhav@linux.ibm.com>
+Subject: [PATCH mm-unstable v15 01/14] mm: x86, arm64: add arch_has_hw_pte_young()
+Date: Sun, 18 Sep 2022 01:59:58 -0600
 
 Some architectures automatically set the accessed bit in PTEs, e.g.,
 x86 and arm64 v8.2. On architectures that do not have this capability,
@@ -41,10 +66,10 @@ Tested-by: Vaibhav Jain <vaibhav@linux.ibm.com>
  4 files changed, 19 insertions(+), 29 deletions(-)
 
 diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
-index 0b6632f18364..c46399c0500c 100644
+index b5df82aa99e6..71a1af42f0e8 100644
 --- a/arch/arm64/include/asm/pgtable.h
 +++ b/arch/arm64/include/asm/pgtable.h
-@@ -1066,24 +1066,13 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
+@@ -1082,24 +1082,13 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
   * page after fork() + CoW for pfn mappings. We don't always have a
   * hardware-managed access flag on arm64.
   */
@@ -90,7 +115,7 @@ index 44e2d6f1dbaa..dc5f7d8ef68a 100644
  
  #ifdef CONFIG_PAGE_TABLE_CHECK
 diff --git a/include/linux/pgtable.h b/include/linux/pgtable.h
-index 3cdc16cfd867..8eee31bc9bde 100644
+index d13b4f7cc5be..375e8e7e64f4 100644
 --- a/include/linux/pgtable.h
 +++ b/include/linux/pgtable.h
 @@ -260,6 +260,19 @@ static inline int pmdp_clear_flush_young(struct vm_area_struct *vma,
@@ -114,10 +139,10 @@ index 3cdc16cfd867..8eee31bc9bde 100644
  static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
  				       unsigned long address,
 diff --git a/mm/memory.c b/mm/memory.c
-index 7a089145cad4..49500390b91b 100644
+index e38f9245470c..3a9b00c765c2 100644
 --- a/mm/memory.c
 +++ b/mm/memory.c
-@@ -125,18 +125,6 @@ int randomize_va_space __read_mostly =
+@@ -126,18 +126,6 @@ int randomize_va_space __read_mostly =
  					2;
  #endif
  
@@ -136,7 +161,7 @@ index 7a089145cad4..49500390b91b 100644
  #ifndef arch_wants_old_prefaulted_pte
  static inline bool arch_wants_old_prefaulted_pte(void)
  {
-@@ -2862,7 +2850,7 @@ static inline bool __wp_page_copy_user(struct page *dst, struct page *src,
+@@ -2871,7 +2859,7 @@ static inline bool __wp_page_copy_user(struct page *dst, struct page *src,
  	 * On architectures with software "accessed" bits, we would
  	 * take a double page fault, so mark it accessed here.
  	 */

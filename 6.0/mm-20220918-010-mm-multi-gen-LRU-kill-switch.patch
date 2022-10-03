@@ -1,7 +1,32 @@
 From: Yu Zhao <yuzhao@google.com>
 To: Andrew Morton <akpm@linux-foundation.org>
-Subject: [PATCH v13 10/14] mm: multi-gen LRU: kill switch
-Date: Wed,  6 Jul 2022 16:00:19 -0600
+Cc: Andi Kleen <ak@linux.intel.com>,
+ Aneesh Kumar <aneesh.kumar@linux.ibm.com>,
+  Catalin Marinas <catalin.marinas@arm.com>,
+ Dave Hansen <dave.hansen@linux.intel.com>,  Hillf Danton <hdanton@sina.com>,
+ Jens Axboe <axboe@kernel.dk>, Johannes Weiner <hannes@cmpxchg.org>,
+  Jonathan Corbet <corbet@lwn.net>,
+ Linus Torvalds <torvalds@linux-foundation.org>,
+  Matthew Wilcox <willy@infradead.org>, Mel Gorman <mgorman@suse.de>,
+  Michael Larabel <Michael@michaellarabel.com>,
+ Michal Hocko <mhocko@kernel.org>,  Mike Rapoport <rppt@kernel.org>,
+ Peter Zijlstra <peterz@infradead.org>, Tejun Heo <tj@kernel.org>,
+  Vlastimil Babka <vbabka@suse.cz>, Will Deacon <will@kernel.org>,
+ linux-arm-kernel@lists.infradead.org,  linux-doc@vger.kernel.org,
+ linux-kernel@vger.kernel.org, linux-mm@kvack.org,  x86@kernel.org,
+ page-reclaim@google.com, Yu Zhao <yuzhao@google.com>,
+  Brian Geffon <bgeffon@google.com>,
+ Jan Alexander Steffens <heftig@archlinux.org>,
+  Oleksandr Natalenko <oleksandr@natalenko.name>,
+ Steven Barrett <steven@liquorix.net>,
+  Suleiman Souhlal <suleiman@google.com>, Daniel Byrne <djbyrne@mtu.edu>,
+ Donald Carr <d@chaos-reins.com>,
+  " =?utf-8?q?Holger_Hoffst=C3=A4tte?= " <holger@applied-asynchrony.com>,
+ Konstantin Kharlamov <Hi-Angel@yandex.ru>,
+  Shuang Zhai <szhai2@cs.rochester.edu>, Sofia Trinh <sofia.trinh@edi.works>,
+  Vaibhav Jain <vaibhav@linux.ibm.com>
+Subject: [PATCH mm-unstable v15 10/14] mm: multi-gen LRU: kill switch
+Date: Sun, 18 Sep 2022 02:00:07 -0600
 
 Add /sys/kernel/mm/lru_gen/enabled as a kill switch. Components that
 can be disabled include:
@@ -57,11 +82,11 @@ Tested-by: Vaibhav Jain <vaibhav@linux.ibm.com>
  include/linux/mmzone.h          |   9 ++
  kernel/cgroup/cgroup-internal.h |   1 -
  mm/Kconfig                      |   6 +
- mm/vmscan.c                     | 231 +++++++++++++++++++++++++++++++-
- 6 files changed, 268 insertions(+), 9 deletions(-)
+ mm/vmscan.c                     | 228 +++++++++++++++++++++++++++++++-
+ 6 files changed, 265 insertions(+), 9 deletions(-)
 
 diff --git a/include/linux/cgroup.h b/include/linux/cgroup.h
-index 0d1ada8968d7..1bc0cabf993f 100644
+index ac5d0515680e..9179463c3c9f 100644
 --- a/include/linux/cgroup.h
 +++ b/include/linux/cgroup.h
 @@ -432,6 +432,18 @@ static inline void cgroup_put(struct cgroup *cgrp)
@@ -137,10 +162,10 @@ index f2b2296a42f9..4949eda9a9a2 100644
  	/*
  	 * There are three common cases for this page:
 diff --git a/include/linux/mmzone.h b/include/linux/mmzone.h
-index 0cf0856b484a..840b7ca8b91f 100644
+index b1635c4020dc..95c58c7fbdff 100644
 --- a/include/linux/mmzone.h
 +++ b/include/linux/mmzone.h
-@@ -384,6 +384,13 @@ enum {
+@@ -387,6 +387,13 @@ enum {
  	LRU_GEN_FILE,
  };
  
@@ -152,9 +177,9 @@ index 0cf0856b484a..840b7ca8b91f 100644
 +};
 +
  #define MIN_LRU_BATCH		BITS_PER_LONG
- #define MAX_LRU_BATCH		(MIN_LRU_BATCH * 128)
+ #define MAX_LRU_BATCH		(MIN_LRU_BATCH * 64)
  
-@@ -425,6 +432,8 @@ struct lru_gen_struct {
+@@ -428,6 +435,8 @@ struct lru_gen_struct {
  	/* can be modified without holding the LRU lock */
  	atomic_long_t evicted[NR_HIST_GENS][ANON_AND_FILE][MAX_NR_TIERS];
  	atomic_long_t refaulted[NR_HIST_GENS][ANON_AND_FILE][MAX_NR_TIERS];
@@ -164,7 +189,7 @@ index 0cf0856b484a..840b7ca8b91f 100644
  
  enum {
 diff --git a/kernel/cgroup/cgroup-internal.h b/kernel/cgroup/cgroup-internal.h
-index 5da09c74228d..c966e55cab29 100644
+index 36b740cb3d59..63dc3e82be4f 100644
 --- a/kernel/cgroup/cgroup-internal.h
 +++ b/kernel/cgroup/cgroup-internal.h
 @@ -164,7 +164,6 @@ struct cgroup_mgctx {
@@ -176,10 +201,10 @@ index 5da09c74228d..c966e55cab29 100644
  extern struct cgroup_subsys *cgroup_subsys[];
  extern struct list_head cgroup_roots;
 diff --git a/mm/Kconfig b/mm/Kconfig
-index a93478acf341..0c2ef0af0036 100644
+index 5c5dcbdcfe34..ab6ef5115eb8 100644
 --- a/mm/Kconfig
 +++ b/mm/Kconfig
-@@ -1139,6 +1139,12 @@ config LRU_GEN
+@@ -1127,6 +1127,12 @@ config LRU_GEN
  	help
  	  A high performance LRU implementation to overcommit memory.
  
@@ -193,10 +218,10 @@ index a93478acf341..0c2ef0af0036 100644
  	bool "Full stats for debugging"
  	depends on LRU_GEN
 diff --git a/mm/vmscan.c b/mm/vmscan.c
-index f469a2740835..4c8b475429ed 100644
+index 3f83325fdc71..10f31f3c5054 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
-@@ -52,6 +52,7 @@
+@@ -51,6 +51,7 @@
  #include <linux/psi.h>
  #include <linux/pagewalk.h>
  #include <linux/shmem_fs.h>
@@ -204,7 +229,7 @@ index f469a2740835..4c8b475429ed 100644
  
  #include <asm/tlbflush.h>
  #include <asm/div64.h>
-@@ -3013,6 +3014,14 @@ static bool can_age_anon_pages(struct pglist_data *pgdat,
+@@ -3070,6 +3071,14 @@ static bool can_age_anon_pages(struct pglist_data *pgdat,
  
  #ifdef CONFIG_LRU_GEN
  
@@ -219,7 +244,7 @@ index f469a2740835..4c8b475429ed 100644
  /******************************************************************************
   *                          shorthand helpers
   ******************************************************************************/
-@@ -3890,7 +3899,8 @@ static void walk_pmd_range_locked(pud_t *pud, unsigned long next, struct vm_area
+@@ -3946,7 +3955,8 @@ static void walk_pmd_range_locked(pud_t *pud, unsigned long next, struct vm_area
  			goto next;
  
  		if (!pmd_trans_huge(pmd[i])) {
@@ -229,7 +254,7 @@ index f469a2740835..4c8b475429ed 100644
  				pmdp_test_and_clear_young(vma, addr, pmd + i);
  			goto next;
  		}
-@@ -3988,10 +3998,12 @@ static void walk_pmd_range(pud_t *pud, unsigned long start, unsigned long end,
+@@ -4044,10 +4054,12 @@ static void walk_pmd_range(pud_t *pud, unsigned long start, unsigned long end,
  		walk->mm_stats[MM_NONLEAF_TOTAL]++;
  
  #ifdef CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG
@@ -245,7 +270,7 @@ index f469a2740835..4c8b475429ed 100644
  #endif
  		if (!walk->force_scan && !test_bloom_filter(walk->lruvec, walk->max_seq, pmd + i))
  			continue;
-@@ -4249,7 +4261,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
+@@ -4309,7 +4321,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
  	 * handful of PTEs. Spreading the work out over a period of time usually
  	 * is less efficient, but it avoids bursty page faults.
  	 */
@@ -254,7 +279,7 @@ index f469a2740835..4c8b475429ed 100644
  		success = iterate_mm_list_nowalk(lruvec, max_seq);
  		goto done;
  	}
-@@ -4975,6 +4987,211 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
+@@ -5074,6 +5086,208 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
  	blk_finish_plug(&plug);
  }
  
@@ -279,9 +304,6 @@ index f469a2740835..4c8b475429ed 100644
 +		for_each_gen_type_zone(gen, type, zone) {
 +			if (!list_empty(&lrugen->lists[gen][type][zone]))
 +				return false;
-+
-+			/* unlikely but not a bug when reset_batch_size() is pending */
-+			VM_WARN_ON_ONCE(lrugen->nr_pages[gen][type][zone]);
 +		}
 +	}
 +
@@ -466,7 +488,7 @@ index f469a2740835..4c8b475429ed 100644
  /******************************************************************************
   *                          initialization
   ******************************************************************************/
-@@ -4985,6 +5202,7 @@ void lru_gen_init_lruvec(struct lruvec *lruvec)
+@@ -5084,6 +5298,7 @@ void lru_gen_init_lruvec(struct lruvec *lruvec)
  	struct lru_gen_struct *lrugen = &lruvec->lrugen;
  
  	lrugen->max_seq = MIN_NR_GENS + 1;
@@ -474,7 +496,7 @@ index f469a2740835..4c8b475429ed 100644
  
  	for_each_gen_type_zone(gen, type, zone)
  		INIT_LIST_HEAD(&lrugen->lists[gen][type][zone]);
-@@ -5024,6 +5242,9 @@ static int __init init_lru_gen(void)
+@@ -5123,6 +5338,9 @@ static int __init init_lru_gen(void)
  	BUILD_BUG_ON(MIN_NR_GENS + 1 >= MAX_NR_GENS);
  	BUILD_BUG_ON(BIT(LRU_GEN_WIDTH) <= MAX_NR_GENS);
  

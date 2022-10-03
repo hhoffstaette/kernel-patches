@@ -22,11 +22,12 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Series: 5.19**
+**Series: 6.0**
 
-- btrfs: fixes from 5.20, enable forced chunk allocation via sysfs
+- block: fixes from 6.1
+- btrfs: fixes from 6.1
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
-- mm: [Multigenerational LRU v13](https://lore.kernel.org/linux-mm/20220706220022.968789-1-yuzhao@google.com/)
+- mm: [Multigenerational LRU v15](https://lore.kernel.org/lkml/20220918080010.2920238-1-yuzhao@google.com/)
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
 - xattr: user.pax.* namespace support on tmpfs (thanks to [Gentoo-sources](https://gitweb.gentoo.org/proj/linux-patches.git/))
 
