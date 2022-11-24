@@ -1,0 +1,35 @@
+From: Chuck Lever <chuck.lever@oracle.com>
+Date: Wed, 23 Nov 2022 14:14:32 -0500
+Subject: NFSD: Fix reads with a non-zero offset that don't end on a page boundary
+
+This was found when virtual machines with nfs-mounted qcow2 disks
+failed to boot properly.
+
+Reported-by: Anders Blomdell <anders.blomdell@control.lth.se>
+Suggested-by: Al Viro <viro@zeniv.linux.org.uk>
+Link: https://bugzilla.redhat.com/show_bug.cgi?id=2142132
+Fixes: bfbfb6182ad1 ("nfsd_splice_actor(): handle compound pages")
+Signed-off-by: Chuck Lever <chuck.lever@oracle.com>
+---
+ fs/nfsd/vfs.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/fs/nfsd/vfs.c b/fs/nfsd/vfs.c
+index 83be89905cbf2..31bc7cc82439c 100644
+--- a/fs/nfsd/vfs.c
++++ b/fs/nfsd/vfs.c
+@@ -871,10 +871,11 @@ nfsd_splice_actor(struct pipe_inode_info *pipe, struct pipe_buffer *buf,
+ 	struct svc_rqst *rqstp = sd->u.data;
+ 	struct page *page = buf->page;	// may be a compound one
+ 	unsigned offset = buf->offset;
++	struct page *last_page;
+ 
+-	page += offset / PAGE_SIZE;
+-	for (int i = sd->len; i > 0; i -= PAGE_SIZE)
+-		svc_rqst_replace_page(rqstp, page++);
++	last_page = page + (offset + sd->len - 1) / PAGE_SIZE;
++	for (page += offset / PAGE_SIZE; page <= last_page; page++)
++		svc_rqst_replace_page(rqstp, page);
+ 	if (rqstp->rq_res.page_len == 0)	// first call
+ 		rqstp->rq_res.page_base = offset % PAGE_SIZE;
+ 	rqstp->rq_res.page_len += sd->len;
