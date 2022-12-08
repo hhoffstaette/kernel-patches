@@ -1,0 +1,35 @@
+From:   Benjamin Segall <bsegall@google.com>
+To:     Alexander Viro <viro@zeniv.linux.org.uk>
+Cc:     linux-fsdevel@vger.kernel.org, linux-kernel@vger.kernel.org,
+        stable@vger.kernel.org
+Subject: [PATCH] epoll: ep_autoremove_wake_function should use list_del_init_careful
+Date:   Tue, 06 Dec 2022 13:59:55 -0800
+
+autoremove_wake_function uses list_del_init_careful, so should epoll's
+more aggressive variant. It only doesn't because it was copied from an
+older wait.c rather than the most recent.
+
+Fixes: a16ceb139610 ("epoll: autoremove wakers even more aggressively")
+Signed-off-by: Ben Segall <bsegall@google.com>
+Cc: stable@vger.kernel.org
+---
+ fs/eventpoll.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/eventpoll.c b/fs/eventpoll.c
+index 52954d4637b5..081df056398a 100644
+--- a/fs/eventpoll.c
++++ b/fs/eventpoll.c
+@@ -1756,11 +1756,11 @@ static struct timespec64 *ep_timeout_to_timespec(struct timespec64 *to, long ms)
+ static int ep_autoremove_wake_function(struct wait_queue_entry *wq_entry,
+ 				       unsigned int mode, int sync, void *key)
+ {
+ 	int ret = default_wake_function(wq_entry, mode, sync, key);
+ 
+-	list_del_init(&wq_entry->entry);
++	list_del_init_careful(&wq_entry->entry);
+ 	return ret;
+ }
+ 
+ /**
+  * ep_poll - Retrieves ready events, and delivers them to the caller-supplied
