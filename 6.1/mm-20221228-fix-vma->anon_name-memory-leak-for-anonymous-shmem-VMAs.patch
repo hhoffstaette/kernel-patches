@@ -1,0 +1,30 @@
+From: Suren Baghdasaryan <surenb@google.com>
+To: akpm@linux-foundation.org
+Cc: hughd@google.com, hannes@cmpxchg.org, david@redhat.com, vincent.whitchurch@axis.com, seanjc@google.com, rppt@kernel.org, shy828301@gmail.com, pasha.tatashin@soleen.com, paul.gortmaker@windriver.com, peterx@redhat.com, vbabka@suse.cz, Liam.Howlett@Oracle.com, ccross@google.com, willy@infradead.org, arnd@arndb.de, cgel.zte@gmail.com, yuzhao@google.com, bagasdotme@gmail.com, suleiman@google.com, steven@liquorix.net, heftig@archlinux.org, cuigaosheng1@huawei.com, kirill@shutemov.name, linux-kernel@vger.kernel.org, linux-fsdevel@vger.kernel.org, linux-mm@kvack.org, surenb@google.com, syzbot+91edf9178386a07d06a7@syzkaller.appspotmail.com
+Subject: [PATCH 1/1] mm: fix vma->anon_name memory leak for anonymous shmem VMAs
+Date: Wed, 28 Dec 2022 11:42:49 -0800
+
+free_anon_vma_name() is missing a check for anonymous shmem VMA which
+leads to a memory leak due to refcount not being dropped. Fix this by
+adding the missing check.
+
+Fixes: d09e8ca6cb93 ("mm: anonymous shared memory naming")
+Reported-by: syzbot+91edf9178386a07d06a7@syzkaller.appspotmail.com
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ include/linux/mm_inline.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/linux/mm_inline.h b/include/linux/mm_inline.h
+index e8ed225d8f7c..d650ca2c5d29 100644
+--- a/include/linux/mm_inline.h
++++ b/include/linux/mm_inline.h
+@@ -413,7 +413,7 @@ static inline void free_anon_vma_name(struct vm_area_struct *vma)
+ 	 * Not using anon_vma_name because it generates a warning if mmap_lock
+ 	 * is not held, which might be the case here.
+ 	 */
+-	if (!vma->vm_file)
++	if (!vma->vm_file || vma_is_anon_shmem(vma))
+ 		anon_vma_name_put(vma->anon_name);
+ }
+ 
