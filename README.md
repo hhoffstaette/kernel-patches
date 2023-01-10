@@ -27,5 +27,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - block: fixes from 6.2
 - btrfs: fixes from 6.2
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
+- mm: fixes from 6.2
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
+- xfs: fixes from 6.2
 
