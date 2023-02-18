@@ -1,0 +1,37 @@
+From: "Darrick J. Wong" <djwong@kernel.org>
+Date: Mon, 26 Dec 2022 10:11:17 -0800
+Subject: xfs: don't assert if cmap covers imap after cycling lock
+
+In xfs_reflink_fill_cow_hole, there's a debugging assertion that trips
+if (after cycling the ILOCK to get a transaction) the requeried cow
+mapping overlaps the start of the area being written.  IOWs, it trips if
+the hole in the cow fork that it's supposed to fill has been filled.
+
+This is trivially possible since we cycled ILOCK_EXCL.  If we trip the
+assertion, then we know that cmap is a delalloc extent because @found is
+false.  Fortunately, the bmapi_write call below will convert the
+delalloc extent to a real unwritten cow fork extent, so all we need to
+do here is remove the assertion.
+
+It turns out that generic/095 trips this pretty regularly with alwayscow
+mode enabled.
+
+Signed-off-by: Darrick J. Wong <djwong@kernel.org>
+Reviewed-by: Dave Chinner <dchinner@redhat.com>
+---
+ fs/xfs/xfs_reflink.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/fs/xfs/xfs_reflink.c b/fs/xfs/xfs_reflink.c
+index fe46bce8cae63..5535778a98f92 100644
+--- a/fs/xfs/xfs_reflink.c
++++ b/fs/xfs/xfs_reflink.c
+@@ -416,8 +416,6 @@ xfs_reflink_fill_cow_hole(
+ 		goto convert;
+ 	}
+ 
+-	ASSERT(cmap->br_startoff > imap->br_startoff);
+-
+ 	/* Allocate the entire reservation as unwritten blocks. */
+ 	nimaps = 1;
+ 	error = xfs_bmapi_write(tp, ip, imap->br_startoff, imap->br_blockcount,
