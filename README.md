@@ -22,12 +22,11 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Series: 6.1**
+**Series: 6.2**
 
-- block: fixes from 6.2
-- btrfs: fixes from 6.2
+- btrfs: fixes from 6.3
+- ext4: fixes from 6.3
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
-- mm: fixes from 6.2
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
-- xfs: fixes from 6.2
+- xfs: fixes from 6.3
 
