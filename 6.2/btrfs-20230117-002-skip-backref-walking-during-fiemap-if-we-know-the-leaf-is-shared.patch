@@ -129,8 +129,8 @@ index f846fec08c86b..90e40d5ceccd1 100644
  	ULIST_ITER_INIT(&uiter);
 -	ctx->use_path_cache = true;
  	while (1) {
- 		bool is_shared;
- 		bool cached;
+ 		const unsigned long prev_ref_count = ctx->refs.nnodes;
+ 
 @@ -1972,6 +1990,7 @@ int btrfs_is_data_extent_shared(struct btrfs_inode *inode, u64 bytenr,
  		ctx->prev_extents_cache_slot = slot;
  	}
