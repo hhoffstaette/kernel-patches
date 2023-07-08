@@ -1,0 +1,36 @@
+From: Suren Baghdasaryan <surenb@google.com>
+To: akpm@linux-foundation.org
+Cc: willy@infradead.org, liam.howlett@oracle.com, david@redhat.com, peterx@redhat.com, vbabka@suse.cz, michel@lespinasse.org, jglisse@google.com, mhocko@suse.com, hannes@cmpxchg.org, dave@stgolabs.net, ldufour@linux.ibm.com, hughd@google.com, punit.agrawal@bytedance.com, lstoakes@gmail.com, rientjes@google.com, axelrasmussen@google.com, jannh@google.com, shakeelb@google.com, tatashin@google.com, gthelen@google.com, linux-mm@kvack.org, linux-kernel@vger.kernel.org, stable@vger.kernel.org, kernel-team@android.com, surenb@google.com
+Subject: [PATCH 2/2] mm: lock newly mapped VMA which can be modified after it becomes visible
+Date: Thu,  6 Jul 2023 21:32:11 -0700
+
+mmap_region adds a newly created VMA into VMA tree and might modify it
+afterwards before dropping the mmap_lock. This poses a problem for page
+faults handled under per-VMA locks because they don't take the mmap_lock
+and can stumble on this VMA while it's still being modified. Currently
+this does not pose a problem since post-addition modifications are done
+only for file-backed VMAs, which are not handled under per-VMA lock.
+However, once support for handling file-backed page faults with per-VMA
+locks is added, this will become a race.
+Fix this by write-locking the VMA before inserting it into the VMA tree.
+Other places where a new VMA is added into VMA tree do not modify it
+after the insertion, so do not need the same locking.
+
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ mm/mmap.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/mm/mmap.c b/mm/mmap.c
+index c66e4622a557..84c71431a527 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -2812,6 +2812,8 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
+ 	if (vma->vm_file)
+ 		i_mmap_lock_write(vma->vm_file->f_mapping);
+ 
++	/* Lock the VMA since it is modified after insertion into VMA tree */
++	vma_start_write(vma);
+ 	vma_iter_store(&vmi, vma);
+ 	mm->map_count++;
+ 	if (vma->vm_file) {
