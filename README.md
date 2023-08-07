@@ -26,6 +26,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - btrfs: fixes from 6.5
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
+- net: [BBRv3](https://github.com/google/bbr/tree/v3) is back! 
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
 - xfs: fixes from 6.5
 
