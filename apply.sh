@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# use consistent options for patch
-PATCHOPTS="-F0 -p1 -s"
-
 # help
 if [[ $1 == "-h" ]] || [[ $1 == "--help" ]] ; then
 	echo
@@ -40,21 +37,34 @@ if [[ $1 != "-f" ]] && [[ $1 != "--force" ]] ; then
 		&& exit 1
 fi
 
-# find the list of patches to apply
-PATCHES=$(\ls -1 ${PATCHDIR}/*.patch)
+apply() {
+	[[ -z ${APPLYOPTS} ]] && echo && echo "Error: APPLYOPTS not set?!" && exit 1
+	for p in ${PATCHES}
+	do
+		# first a test run
+		patch --dry-run ${APPLYOPTS} < ${p}
+		if [[ $? == "0" ]] ; then
+			# looks good: now apply
+			patch ${APPLYOPTS} < ${p}
+		else
+			echo && echo "Error: could not apply ${p}" && exit 1
+		fi
+	done
+}
 
 echo -n "Applying patches from: "${PATCHDIR}".."
 
-for p in ${PATCHES}
-do
-	# first a test run
-	patch --dry-run ${PATCHOPTS} < ${p} >/dev/null
-	if [[ $? == "0" ]] ; then
-		# looks good: now apply
-		patch ${PATCHOPTS} < ${p} >/dev/null
-	else
-		echo && echo "ERROR: could not apply ${p}" && exit 1
-	fi
-done
+# use consistent options for patch
+PATCHOPTS="-F0 -p1 -s"
+
+# first find & apply any reverts
+PATCHES=$(find ${PATCHDIR} -type f -name "revert-*.patch" | sort)
+APPLYOPTS="${PATCHOPTS} --reverse"
+apply
+
+# now find & apply the actual patches
+PATCHES=$(find ${PATCHDIR} -type f -not -name "revert-*.patch" | sort)
+APPLYOPTS=${PATCHOPTS}
+apply
 
 echo "done! :)"
