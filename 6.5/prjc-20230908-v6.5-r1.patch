@@ -760,7 +760,7 @@ index 000000000000..35d634c208cf
 +#define sched_feat(x)	(0)
 +#endif /* CONFIG_SCHED_DEBUG */
 +
-+#define ALT_SCHED_VERSION "v6.5-r0"
++#define ALT_SCHED_VERSION "v6.5-r1"
 +
 +/*
 + * Compile time debug macro
