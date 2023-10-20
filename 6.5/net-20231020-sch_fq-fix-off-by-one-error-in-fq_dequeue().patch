@@ -1,0 +1,35 @@
+From: Eric Dumazet <edumazet@google.com>
+To: David S . Miller <davem@davemloft.net>, Jakub Kicinski <kuba@kernel.org>, Paolo Abeni <pabeni@redhat.com>
+Cc: netdev@vger.kernel.org, eric.dumazet@gmail.com, Eric Dumazet <edumazet@google.com>, kernel test robot <oliver.sang@intel.com>, Willem de Bruijn <willemb@google.com>, Soheil Hassas Yeganeh <soheil@google.com>, Dave Taht <dave.taht@gmail.com>, Toke Høiland-Jørgensen <toke@redhat.com>
+Subject: [PATCH net-next] net_sched: sch_fq: fix off-by-one error in fq_dequeue()
+Date: Fri, 20 Oct 2023 20:00:53 +0000
+
+A last minute change went wrong.
+
+We need to look for a packet in all 3 bands, not only two.
+
+Fixes: 29f834aa326e ("net_sched: sch_fq: add 3 bands and WRR scheduling")
+Reported-by: kernel test robot <oliver.sang@intel.com>
+Closes: https://lore.kernel.org/oe-lkp/202310201422.a22b0999-oliver.sang@intel.com
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Cc: Willem de Bruijn <willemb@google.com>
+Cc: Soheil Hassas Yeganeh <soheil@google.com>
+Cc: Dave Taht <dave.taht@gmail.com>
+Cc: Toke Høiland-Jørgensen <toke@redhat.com>
+---
+ net/sched/sch_fq.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/sched/sch_fq.c b/net/sched/sch_fq.c
+index 8eacdb54e72f4412af1834bfdb2c387d41516349..f6fd0de293e583ad6ba505060ce12c74f349a1a2 100644
+--- a/net/sched/sch_fq.c
++++ b/net/sched/sch_fq.c
+@@ -651,7 +651,7 @@ static struct sk_buff *fq_dequeue(struct Qdisc *sch)
+ begin:
+ 	head = fq_pband_head_select(pband);
+ 	if (!head) {
+-		while (++retry < FQ_BANDS) {
++		while (++retry <= FQ_BANDS) {
+ 			if (++q->band_nr == FQ_BANDS)
+ 				q->band_nr = 0;
+ 			pband = &q->band_flows[q->band_nr];
