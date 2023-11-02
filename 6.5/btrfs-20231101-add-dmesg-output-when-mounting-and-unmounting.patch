@@ -1,0 +1,70 @@
+From:   Qu Wenruo <wqu@suse.com>
+To:     linux-btrfs@vger.kernel.org
+Subject: [PATCH] btrfs: add dmesg output when mounting and unmounting
+Date:   Thu,  2 Nov 2023 07:54:50 +1030
+
+There is a feature request to add dmesg output when unmounting a btrfs.
+
+There are several alternative methods to do the same thing, but with
+their problems:
+
+- Use eBPF to watch btrfs_put_super()/open_ctree()
+  Not end user friendly, they have to dip their head into the source
+  code.
+
+- Watch for /sys/fs/<uuid>/
+  This is way more simpler, but still requires some simple device -> uuid
+  lookups.
+  And a script needs to use inotify to watch /sys/fs/.
+
+Compared to all these, directly outputting the information into dmesg
+would be the most simple one, with both device and UUID included.
+
+And since we're here, also add the output when mounting a btrfs, to keep
+the dmesg paired.
+
+Now mounting a btrfs with all default mkfs options would look like this:
+
+[   81.906566] BTRFS info (device dm-8): mounting filesystem 633b5c16-afe3-4b79-b195-138fe145e4f2
+[   81.907494] BTRFS info (device dm-8): using crc32c (crc32c-intel) checksum algorithm
+[   81.908258] BTRFS info (device dm-8): using free space tree
+[   81.912644] BTRFS info (device dm-8): auto enabling async discard
+[   81.913277] BTRFS info (device dm-8): checking UUID tree
+[   91.668256] BTRFS info (device dm-8): unmounting filesystem 633b5c16-afe3-4b79-b195-138fe145e4f2
+
+Link: https://github.com/kdave/btrfs-progs/issues/689
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+---
+ fs/btrfs/disk-io.c | 1 +
+ fs/btrfs/super.c   | 6 +++++-
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c
+index 350e1b02cc8e..2fef94bfa2ff 100644
+--- a/fs/btrfs/disk-io.c
++++ b/fs/btrfs/disk-io.c
+@@ -3209,6 +3209,7 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
+ 		goto fail_alloc;
+ 	}
+ 
++	btrfs_info(fs_info, "mounting filesystem %pU", disk_super->fsid);
+ 	/*
+ 	 * Verify the type first, if that or the checksum value are
+ 	 * corrupted, we'll find out
+diff --git a/fs/btrfs/super.c b/fs/btrfs/super.c
+index 6ecf78d09694..fbcd8c8d23dc 100644
+--- a/fs/btrfs/super.c
++++ b/fs/btrfs/super.c
+@@ -80,7 +80,11 @@ static int btrfs_remount(struct super_block *sb, int *flags, char *data);
+ 
+ static void btrfs_put_super(struct super_block *sb)
+ {
+-	close_ctree(btrfs_sb(sb));
++	struct btrfs_fs_info *fs_info = btrfs_sb(sb);
++
++	btrfs_info(fs_info, "unmounting filesystem %pU",
++		   fs_info->fs_devices->fsid);
++	close_ctree(fs_info);
+ }
+ 
+ enum {
