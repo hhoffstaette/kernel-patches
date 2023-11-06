@@ -1,0 +1,26 @@
+
+Disable some legacy XFS features by default.
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+diff -rup a/fs/xfs/Kconfig b/fs/xfs/Kconfig
+--- a/fs/xfs/Kconfig	2023-10-30 03:31:08.000000000 +0100
++++ b/fs/xfs/Kconfig	2023-11-05 19:26:55.672784898 +0100
+@@ -25,7 +25,7 @@ config XFS_FS
+ config XFS_SUPPORT_V4
+ 	bool "Support deprecated V4 (crc=0) format"
+ 	depends on XFS_FS
+-	default y
++	default n
+ 	help
+ 	  The V4 filesystem format lacks certain features that are supported
+ 	  by the V5 format, such as metadata checksumming, strengthened
+@@ -50,7 +50,7 @@ config XFS_SUPPORT_V4
+ config XFS_SUPPORT_ASCII_CI
+ 	bool "Support deprecated case-insensitive ascii (ascii-ci=1) format"
+ 	depends on XFS_FS
+-	default y
++	default n
+ 	help
+ 	  The ASCII case insensitivity filesystem feature only works correctly
+ 	  on systems that have been coerced into using ISO 8859-1, and it does
