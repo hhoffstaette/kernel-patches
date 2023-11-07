@@ -1,0 +1,93 @@
+From: Eric Dumazet <edumazet@google.com>
+To: David S . Miller <davem@davemloft.net>, Jakub Kicinski <kuba@kernel.org>, Paolo Abeni <pabeni@redhat.com>
+Cc: Willem de Bruijn <willemb@google.com>, Jamal Hadi Salim <jhs@mojatatu.com>, Cong Wang <xiyou.wangcong@gmail.com>, Toke Høiland-Jørgensen <toke@redhat.com>, Jiri Pirko <jiri@resnulli.us>, netdev@vger.kernel.org, eric.dumazet@gmail.com, Eric Dumazet <edumazet@google.com>, syzbot <syzkaller@googlegroups.com>
+Subject: [PATCH net] net_sched: sch_fq: better validate TCA_FQ_WEIGHTS and TCA_FQ_PRIOMAP
+Date: Tue,  7 Nov 2023 16:04:40 +0000
+
+syzbot was able to trigger the following report while providing
+too small TCA_FQ_WEIGHTS attribute [1]
+
+Fix is to use NLA_POLICY_EXACT_LEN() to ensure user space
+provided correct sizes.
+
+Apply the same fix to TCA_FQ_PRIOMAP.
+
+[1]
+BUG: KMSAN: uninit-value in fq_load_weights net/sched/sch_fq.c:960 [inline]
+BUG: KMSAN: uninit-value in fq_change+0x1348/0x2fe0 net/sched/sch_fq.c:1071
+fq_load_weights net/sched/sch_fq.c:960 [inline]
+fq_change+0x1348/0x2fe0 net/sched/sch_fq.c:1071
+fq_init+0x68e/0x780 net/sched/sch_fq.c:1159
+qdisc_create+0x12f3/0x1be0 net/sched/sch_api.c:1326
+tc_modify_qdisc+0x11ef/0x2c20
+rtnetlink_rcv_msg+0x16a6/0x1840 net/core/rtnetlink.c:6558
+netlink_rcv_skb+0x371/0x650 net/netlink/af_netlink.c:2545
+rtnetlink_rcv+0x34/0x40 net/core/rtnetlink.c:6576
+netlink_unicast_kernel net/netlink/af_netlink.c:1342 [inline]
+netlink_unicast+0xf47/0x1250 net/netlink/af_netlink.c:1368
+netlink_sendmsg+0x1238/0x13d0 net/netlink/af_netlink.c:1910
+sock_sendmsg_nosec net/socket.c:730 [inline]
+__sock_sendmsg net/socket.c:745 [inline]
+____sys_sendmsg+0x9c2/0xd60 net/socket.c:2588
+___sys_sendmsg+0x28d/0x3c0 net/socket.c:2642
+__sys_sendmsg net/socket.c:2671 [inline]
+__do_sys_sendmsg net/socket.c:2680 [inline]
+__se_sys_sendmsg net/socket.c:2678 [inline]
+__x64_sys_sendmsg+0x307/0x490 net/socket.c:2678
+do_syscall_x64 arch/x86/entry/common.c:51 [inline]
+do_syscall_64+0x44/0x110 arch/x86/entry/common.c:82
+entry_SYSCALL_64_after_hwframe+0x63/0x6b
+
+Uninit was created at:
+slab_post_alloc_hook+0x129/0xa70 mm/slab.h:768
+slab_alloc_node mm/slub.c:3478 [inline]
+kmem_cache_alloc_node+0x5e9/0xb10 mm/slub.c:3523
+kmalloc_reserve+0x13d/0x4a0 net/core/skbuff.c:560
+__alloc_skb+0x318/0x740 net/core/skbuff.c:651
+alloc_skb include/linux/skbuff.h:1286 [inline]
+netlink_alloc_large_skb net/netlink/af_netlink.c:1214 [inline]
+netlink_sendmsg+0xb34/0x13d0 net/netlink/af_netlink.c:1885
+sock_sendmsg_nosec net/socket.c:730 [inline]
+__sock_sendmsg net/socket.c:745 [inline]
+____sys_sendmsg+0x9c2/0xd60 net/socket.c:2588
+___sys_sendmsg+0x28d/0x3c0 net/socket.c:2642
+__sys_sendmsg net/socket.c:2671 [inline]
+__do_sys_sendmsg net/socket.c:2680 [inline]
+__se_sys_sendmsg net/socket.c:2678 [inline]
+__x64_sys_sendmsg+0x307/0x490 net/socket.c:2678
+do_syscall_x64 arch/x86/entry/common.c:51 [inline]
+do_syscall_64+0x44/0x110 arch/x86/entry/common.c:82
+entry_SYSCALL_64_after_hwframe+0x63/0x6b
+
+CPU: 1 PID: 5001 Comm: syz-executor300 Not tainted 6.6.0-syzkaller-12401-g8f6f76a6a29f #0
+Hardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 10/09/2023
+
+Fixes: 29f834aa326e ("net_sched: sch_fq: add 3 bands and WRR scheduling")
+Fixes: 49e7265fd098 ("net_sched: sch_fq: add TCA_FQ_WEIGHTS attribute")
+Reported-by: syzbot <syzkaller@googlegroups.com>
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/sched/sch_fq.c | 10 ++--------
+ 1 file changed, 2 insertions(+), 8 deletions(-)
+
+diff --git a/net/sched/sch_fq.c b/net/sched/sch_fq.c
+index 0fd18c344ab5ae6d53e12fc764c0506a2979b4c8..3a31c47fea9bd97d815f2624d926bf7be62387cd 100644
+--- a/net/sched/sch_fq.c
++++ b/net/sched/sch_fq.c
+@@ -919,14 +919,8 @@ static const struct nla_policy fq_policy[TCA_FQ_MAX + 1] = {
+ 	[TCA_FQ_TIMER_SLACK]		= { .type = NLA_U32 },
+ 	[TCA_FQ_HORIZON]		= { .type = NLA_U32 },
+ 	[TCA_FQ_HORIZON_DROP]		= { .type = NLA_U8 },
+-	[TCA_FQ_PRIOMAP]		= {
+-			.type = NLA_BINARY,
+-			.len = sizeof(struct tc_prio_qopt),
+-		},
+-	[TCA_FQ_WEIGHTS]		= {
+-			.type = NLA_BINARY,
+-			.len = FQ_BANDS * sizeof(s32),
+-		},
++	[TCA_FQ_PRIOMAP]		= NLA_POLICY_EXACT_LEN(sizeof(struct tc_prio_qopt)),
++	[TCA_FQ_WEIGHTS]		= NLA_POLICY_EXACT_LEN(FQ_BANDS * sizeof(s32)),
+ };
+ 
+ /* compress a u8 array with all elems <= 3 to an array of 2-bit fields */
