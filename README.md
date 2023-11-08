@@ -24,11 +24,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2023-10-30)**
+**Current status (2023-11-08)**
 
-- 6.6.0 is available for testing. No BMQ yet.
+- 6.6.x is my current production branch.
 
-- 6.5.x is my current production branch.
-
-- all other branches < 6.5 are EOL for me.
+- all other branches < 6.6 are EOL for me.
 
