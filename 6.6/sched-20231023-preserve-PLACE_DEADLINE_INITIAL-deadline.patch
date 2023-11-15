@@ -1,0 +1,94 @@
+From:   Daniel Jordan <daniel.m.jordan@oracle.com>
+To:     mingo@redhat.com, peterz@infradead.org, vincent.guittot@linaro.org,
+        yu.c.chen@intel.com, kprateek.nayak@amd.com, bsegall@google.com,
+        dietmar.eggemann@arm.com, efault@gmx.de, wuyun.abel@bytedance.com,
+        youssefesmat@chromium.org
+Cc:     linux-kernel@vger.kernel.org, daniel.m.jordan@oracle.com
+Subject: [PATCH v3] sched/fair: Preserve PLACE_DEADLINE_INITIAL deadline
+Date:   Mon, 23 Oct 2023 11:43:19 -0400
+
+An entity is supposed to get an earlier deadline with
+PLACE_DEADLINE_INITIAL when it's forked, but the deadline gets
+overwritten soon after in enqueue_entity() the first time a forked
+entity is woken so that PLACE_DEADLINE_INITIAL is effectively a no-op.
+
+Placing in task_fork_fair() seems unnecessary since none of the values
+that get set (slice, vruntime, deadline) are used before they're set
+again at enqueue time, so get rid of that (and with it all of
+task_fork_fair()) and just pass ENQUEUE_INITIAL to enqueue_entity() via
+wake_up_new_task().
+
+[HH: context fix for 6.6 in hunk #1]
+Fixes: e8f331bcc270 ("sched/smp: Use lag to simplify cross-runqueue placement")
+Signed-off-by: Daniel Jordan <daniel.m.jordan@oracle.com>
+Reviewed-by: Chen Yu <yu.c.chen@intel.com>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+---
+
+v3
+ - Rebased on tip/sched/core and retested.  The "none of the values that
+   get set (slice, vruntime, deadline) are used" part was checked
+   without this patch by poisoning slice, vruntime, and deadline when
+   placing from task_fork_fair() and checking for the poisoned values
+   everywhere they're read until the entity is placed again in enqueue_entity().
+ - Added Chen Yu's R-b and Prateek's T-b
+
+ kernel/sched/core.c |  2 +-
+ kernel/sched/fair.c | 24 ------------------------
+ 2 files changed, 1 insertion(+), 25 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 264c2eb380d7f..bdfdd9598137c 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -4856,7 +4856,7 @@ void wake_up_new_task(struct task_struct *p)
+ 	update_rq_clock(rq);
+ 	post_init_entity_util_avg(p);
+ 
+-	activate_task(rq, p, ENQUEUE_NOCLOCK);
++	activate_task(rq, p, ENQUEUE_INITIAL | ENQUEUE_NOCLOCK);
+ 	trace_sched_wakeup_new(p);
+ 	check_preempt_curr(rq, p, WF_FORK);
+ #ifdef CONFIG_SMP
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 4b70b0d146987..544de3b43e146 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -12417,29 +12417,6 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+ 	task_tick_core(rq, curr);
+ }
+ 
+-/*
+- * called on fork with the child task as argument from the parent's context
+- *  - child not yet on the tasklist
+- *  - preemption disabled
+- */
+-static void task_fork_fair(struct task_struct *p)
+-{
+-	struct sched_entity *se = &p->se, *curr;
+-	struct cfs_rq *cfs_rq;
+-	struct rq *rq = this_rq();
+-	struct rq_flags rf;
+-
+-	rq_lock(rq, &rf);
+-	update_rq_clock(rq);
+-
+-	cfs_rq = task_cfs_rq(current);
+-	curr = cfs_rq->curr;
+-	if (curr)
+-		update_curr(cfs_rq);
+-	place_entity(cfs_rq, se, ENQUEUE_INITIAL);
+-	rq_unlock(rq, &rf);
+-}
+-
+ /*
+  * Priority of the task has changed. Check to see if we preempt
+  * the current task.
+@@ -12943,7 +12920,6 @@ DEFINE_SCHED_CLASS(fair) = {
+ #endif
+ 
+ 	.task_tick		= task_tick_fair,
+-	.task_fork		= task_fork_fair,
+ 
+ 	.prio_changed		= prio_changed_fair,
+ 	.switched_from		= switched_from_fair,
