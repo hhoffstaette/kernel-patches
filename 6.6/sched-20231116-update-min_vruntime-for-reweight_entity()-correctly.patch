@@ -1,0 +1,50 @@
+From: Yiwei Lin <s921975628@gmail.com>
+To: mingo@redhat.com, peterz@infradead.org
+Cc: vincent.guittot@linaro.org, dietmar.eggemann@arm.com,
+        wuyun.abel@bytedance.com, linux-kernel@vger.kernel.org,
+        s921975628@gmail.com
+Subject: [PATCH] sched/fair: Update min_vruntime for reweight_entity() correctly
+Date: Thu, 16 Nov 2023 19:42:17 +0800
+
+Since reweight_entity() may have chance to change the weight of
+cfs_rq->curr entity, we should also update_min_vruntime() if
+this is the case
+
+Fixes: eab03c23c2a1 ("sched/eevdf: Fix vruntime adjustment on reweight") 
+Signed-off-by: Yiwei Lin <s921975628@gmail.com>
+---
+ kernel/sched/fair.c | 20 ++++++++++----------
+ 1 file changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 07f555857..6fb89f4a3 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -3815,17 +3815,17 @@ static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
+ 	enqueue_load_avg(cfs_rq, se);
+ 	if (se->on_rq) {
+ 		update_load_add(&cfs_rq->load, se->load.weight);
+-		if (!curr) {
+-			/*
+-			 * The entity's vruntime has been adjusted, so let's check
+-			 * whether the rq-wide min_vruntime needs updated too. Since
+-			 * the calculations above require stable min_vruntime rather
+-			 * than up-to-date one, we do the update at the end of the
+-			 * reweight process.
+-			 */
++		if (!curr)
+ 			__enqueue_entity(cfs_rq, se);
+-			update_min_vruntime(cfs_rq);
+-		}
++
++		/*
++		 * The entity's vruntime has been adjusted, so let's check
++		 * whether the rq-wide min_vruntime needs updated too. Since
++		 * the calculations above require stable min_vruntime rather
++		 * than up-to-date one, we do the update at the end of the
++		 * reweight process.
++		 */
++		update_min_vruntime(cfs_rq);
+ 	}
+ }
+ 
