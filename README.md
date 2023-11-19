@@ -29,6 +29,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - net: [BBRv3](https://github.com/google/bbr/tree/v3)
 - net: sch_fq performance improvements
 - misc. other fixes
-- sched: fixes from 6.7
+- prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler (disabled by default)
+- sched: fixes for EEVDF from 6.7
 - xfs: fixes from 6.7
 
