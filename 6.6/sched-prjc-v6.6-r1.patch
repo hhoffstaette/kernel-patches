@@ -1,10 +1,13 @@
 
 From: https://gitlab.com/alfredchen/linux-prjc/-/issues/87
-
 Reverted prio-squeeze & zen-kernel specific changes, off by default.
 
+Additional fixes from zen-kernel:
+https://github.com/zen-kernel/zen-kernel/commit/a343b008e1bf155cdcfe9a46e38336032adeb65a
+https://github.com/zen-kernel/zen-kernel/commit/cd5cdcc083d7742287cac8eccee909e4b5a5c9e0
+
 diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
-index 0a1731a..d80f4a4 100644
+index 4164433..d92a843 100644
 --- a/Documentation/admin-guide/kernel-parameters.txt
 +++ b/Documentation/admin-guide/kernel-parameters.txt
 @@ -5630,6 +5630,12 @@
@@ -270,10 +273,10 @@ index 994c256..8c050a5 100644
  }
  
 diff --git a/include/linux/sched/topology.h b/include/linux/sched/topology.h
-index de545ba..941bb18 100644
+index 67b573d..93f45c8 100644
 --- a/include/linux/sched/topology.h
 +++ b/include/linux/sched/topology.h
-@@ -238,7 +238,8 @@ static inline bool cpus_share_resources(int this_cpu, int that_cpu)
+@@ -234,7 +234,8 @@ static inline bool cpus_share_cache(int this_cpu, int that_cpu)
  
  #endif	/* !CONFIG_SMP */
  
@@ -284,7 +287,7 @@ index de545ba..941bb18 100644
  #else
  static inline void rebuild_sched_domains_energy(void)
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index d671467..2c466f9 100644
+index 77f01ac..9bb9c09 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -768,8 +768,14 @@ struct task_struct {
@@ -687,10 +690,10 @@ index 976092b..31d587c 100644
  obj-y += build_utility.o
 diff --git b/kernel/sched/alt_core.c b/kernel/sched/alt_core.c
 new file mode 100644
-index 0000000..3e74f8b
+index 0000000..6b78835
 --- /dev/null
 +++ b/kernel/sched/alt_core.c
-@@ -0,0 +1,8733 @@
+@@ -0,0 +1,8738 @@
 +/*
 + *  kernel/sched/alt_core.c
 + *
@@ -4898,11 +4901,13 @@ index 0000000..3e74f8b
 +	if (res)
 +		rq->active_balance = 1;
 +
++	preempt_disable();
 +	raw_spin_unlock_irqrestore(&rq->lock, flags);
 +
 +	if (res)
 +		stop_one_cpu_nowait(cpu, sg_balance_cpu_stop, curr,
 +				    &rq->active_balance_work);
++	preempt_enable();
 +	return res;
 +}
 +
@@ -5006,6 +5011,7 @@ index 0000000..3e74f8b
 +
 +			calc_load_nohz_remote(rq);
 +		}
++	}
 +
 +	/*
 +	 * Run the remote tick once per second (1Hz). This arbitrary
@@ -7941,9 +7947,11 @@ index 0000000..3e74f8b
 +	 * Temporarily drop rq->lock such that we can wake-up the stop task.
 +	 * Both preemption and IRQs are still disabled.
 +	 */
++	preempt_disable();
 +	raw_spin_unlock(&rq->lock);
 +	stop_one_cpu_nowait(rq->cpu, __balance_push_cpu_stop, push_task,
 +			    this_cpu_ptr(&push_work));
++	preempt_enable();
 +	/*
 +	 * At this point need_resched() is true and we'll take the loop in
 +	 * schedule(). The next pick is obviously going to be the stop task
@@ -9463,7 +9471,7 @@ index 0000000..1212a03
 +{}
 diff --git b/kernel/sched/alt_sched.h b/kernel/sched/alt_sched.h
 new file mode 100644
-index 0000000..406501c
+index 0000000..2f21316
 --- /dev/null
 +++ b/kernel/sched/alt_sched.h
 @@ -0,0 +1,943 @@
@@ -10668,7 +10676,7 @@ index af7952f..6461cbb 100644
  
  	if (task_cputime(p, &cputime.utime, &cputime.stime))
 diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
-index e73d753..7683ded 100644
+index 4c3d0d9..10e67b0 100644
 --- a/kernel/sched/debug.c
 +++ b/kernel/sched/debug.c
 @@ -7,6 +7,7 @@
@@ -10733,7 +10741,7 @@ index e73d753..7683ded 100644
  #ifdef CONFIG_SMP
  
  static cpumask_var_t		sd_sysctl_cpus;
-@@ -1116,6 +1125,7 @@ void proc_sched_set_task(struct task_struct *p)
+@@ -1111,6 +1120,7 @@ void proc_sched_set_task(struct task_struct *p)
  	memset(&p->stats, 0, sizeof(p->stats));
  #endif
  }
@@ -10989,7 +10997,7 @@ index 3a0e0dc..e8a7d84 100644
  static inline int
  update_thermal_load_avg(u64 now, struct rq *rq, u64 capacity)
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 98eaa72..c4c5232 100644
+index 0484627..07f9730 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -5,6 +5,10 @@
@@ -11003,7 +11011,7 @@ index 98eaa72..c4c5232 100644
  #include <linux/sched/affinity.h>
  #include <linux/sched/autogroup.h>
  #include <linux/sched/cpufreq.h>
-@@ -3519,6 +3523,12 @@ static inline void task_tick_mm_cid(struct rq *rq, struct task_struct *curr) { }
+@@ -3525,6 +3529,12 @@ static inline void task_tick_mm_cid(struct rq *rq, struct task_struct *curr) { }
  static inline void init_sched_mm_cid(struct task_struct *t) { }
  #endif
  
@@ -11068,7 +11076,7 @@ index 38f3698..b9d5973 100644
  #ifdef CONFIG_PSI
  void psi_task_change(struct task_struct *task, int clear, int set);
 diff --git a/kernel/sched/topology.c b/kernel/sched/topology.c
-index f7f822b..e7ad3be 100644
+index 423d089..9d48e3a 100644
 --- a/kernel/sched/topology.c
 +++ b/kernel/sched/topology.c
 @@ -3,6 +3,7 @@
@@ -11079,7 +11087,7 @@ index f7f822b..e7ad3be 100644
  #include <linux/bsearch.h>
  
  DEFINE_MUTEX(sched_domains_mutex);
-@@ -1443,8 +1444,10 @@ static void asym_cpu_capacity_scan(void)
+@@ -1429,8 +1430,10 @@ static void asym_cpu_capacity_scan(void)
   */
  
  static int default_relax_domain_level = -1;
@@ -11090,7 +11098,7 @@ index f7f822b..e7ad3be 100644
  static int __init setup_relax_domain_level(char *str)
  {
  	if (kstrtoint(str, 0, &default_relax_domain_level))
-@@ -1678,6 +1681,7 @@ sd_init(struct sched_domain_topology_level *tl,
+@@ -1663,6 +1666,7 @@ sd_init(struct sched_domain_topology_level *tl,
  
  	return sd;
  }
@@ -11098,7 +11106,7 @@ index f7f822b..e7ad3be 100644
  
  /*
   * Topology list, bottom-up.
-@@ -1714,6 +1718,7 @@ void __init set_sched_topology(struct sched_domain_topology_level *tl)
+@@ -1699,6 +1703,7 @@ void __init set_sched_topology(struct sched_domain_topology_level *tl)
  	sched_domain_topology_saved = NULL;
  }
  
@@ -11106,7 +11114,7 @@ index f7f822b..e7ad3be 100644
  #ifdef CONFIG_NUMA
  
  static const struct cpumask *sd_numa_mask(int cpu)
-@@ -2786,3 +2791,20 @@ void partition_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
+@@ -2758,3 +2763,20 @@ void partition_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
  	partition_sched_domains_locked(ndoms_new, doms_new, dattr_new);
  	mutex_unlock(&sched_domains_mutex);
  }
@@ -11257,7 +11265,7 @@ index 5295904..d04bb99 100644
  	struct wakeup_test_data *x = data;
  
 diff --git a/kernel/workqueue.c b/kernel/workqueue.c
-index a3522b7..e4dbcbe 100644
+index 0f682da..eceb9dd 100644
 --- a/kernel/workqueue.c
 +++ b/kernel/workqueue.c
 @@ -1263,7 +1263,11 @@ void wq_worker_running(struct task_struct *task)
