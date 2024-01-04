@@ -1,0 +1,321 @@
+
+From: https://gitlab.com/alfredchen/linux-prjc/-/merge_requests/32
+
+From 856442e84bb0d427a6c594a4cd0c6f4a676b3852 Mon Sep 17 00:00:00 2001
+From: Steven Barrett <steven@liquorix.net>
+Date: Wed, 27 Dec 2023 13:04:06 -0600
+Subject: [PATCH 1/3] sched/alt: Implement cpu_(legacy_)files stubs
+
+---
+ kernel/sched/alt_core.c | 227 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 227 insertions(+)
+
+diff --git a/kernel/sched/alt_core.c b/kernel/sched/alt_core.c
+index 3725aaf4cf18..7e8cdabc34d1 100644
+--- a/kernel/sched/alt_core.c
++++ b/kernel/sched/alt_core.c
+@@ -8203,6 +8203,100 @@ static u64 cpu_shares_read_u64(struct cgroup_subsys_state *css,
+ }
+ #endif
+ 
++static s64 cpu_cfs_quota_read_s64(struct cgroup_subsys_state *css,
++				  struct cftype *cft)
++{
++	return 0;
++}
++
++static int cpu_cfs_quota_write_s64(struct cgroup_subsys_state *css,
++				   struct cftype *cftype, s64 cfs_quota_us)
++{
++	return 0;
++}
++
++static u64 cpu_cfs_period_read_u64(struct cgroup_subsys_state *css,
++				   struct cftype *cft)
++{
++	return 0;
++}
++
++static int cpu_cfs_period_write_u64(struct cgroup_subsys_state *css,
++				    struct cftype *cftype, u64 cfs_period_us)
++{
++	return 0;
++}
++
++static u64 cpu_cfs_burst_read_u64(struct cgroup_subsys_state *css,
++				  struct cftype *cft)
++{
++	return 0;
++}
++
++static int cpu_cfs_burst_write_u64(struct cgroup_subsys_state *css,
++				   struct cftype *cftype, u64 cfs_burst_us)
++{
++	return 0;
++}
++
++static int cpu_cfs_stat_show(struct seq_file *sf, void *v)
++{
++	return 0;
++}
++
++static int cpu_cfs_local_stat_show(struct seq_file *sf, void *v)
++{
++	return 0;
++}
++
++static int cpu_rt_runtime_write(struct cgroup_subsys_state *css,
++				struct cftype *cft, s64 val)
++{
++	return 0;
++}
++
++static s64 cpu_rt_runtime_read(struct cgroup_subsys_state *css,
++			       struct cftype *cft)
++{
++	return 0;
++}
++
++static int cpu_rt_period_write_uint(struct cgroup_subsys_state *css,
++				    struct cftype *cftype, u64 rt_period_us)
++{
++	return 0;
++}
++
++static u64 cpu_rt_period_read_uint(struct cgroup_subsys_state *css,
++				   struct cftype *cft)
++{
++	return 0;
++}
++
++static int cpu_uclamp_min_show(struct seq_file *sf, void *v)
++{
++	return 0;
++}
++
++static int cpu_uclamp_max_show(struct seq_file *sf, void *v)
++{
++	return 0;
++}
++
++static ssize_t cpu_uclamp_min_write(struct kernfs_open_file *of,
++				    char *buf, size_t nbytes,
++				    loff_t off)
++{
++	return nbytes;
++}
++
++static ssize_t cpu_uclamp_max_write(struct kernfs_open_file *of,
++				    char *buf, size_t nbytes,
++				    loff_t off)
++{
++	return nbytes;
++}
++
+ static struct cftype cpu_legacy_files[] = {
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 	{
+@@ -8211,11 +8305,144 @@ static struct cftype cpu_legacy_files[] = {
+ 		.write_u64 = cpu_shares_write_u64,
+ 	},
+ #endif
++	{
++		.name = "cfs_quota_us",
++		.read_s64 = cpu_cfs_quota_read_s64,
++		.write_s64 = cpu_cfs_quota_write_s64,
++	},
++	{
++		.name = "cfs_period_us",
++		.read_u64 = cpu_cfs_period_read_u64,
++		.write_u64 = cpu_cfs_period_write_u64,
++	},
++	{
++		.name = "cfs_burst_us",
++		.read_u64 = cpu_cfs_burst_read_u64,
++		.write_u64 = cpu_cfs_burst_write_u64,
++	},
++	{
++		.name = "stat",
++		.seq_show = cpu_cfs_stat_show,
++	},
++	{
++		.name = "stat.local",
++		.seq_show = cpu_cfs_local_stat_show,
++	},
++	{
++		.name = "rt_runtime_us",
++		.read_s64 = cpu_rt_runtime_read,
++		.write_s64 = cpu_rt_runtime_write,
++	},
++	{
++		.name = "rt_period_us",
++		.read_u64 = cpu_rt_period_read_uint,
++		.write_u64 = cpu_rt_period_write_uint,
++	},
++	{
++		.name = "uclamp.min",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.seq_show = cpu_uclamp_min_show,
++		.write = cpu_uclamp_min_write,
++	},
++	{
++		.name = "uclamp.max",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.seq_show = cpu_uclamp_max_show,
++		.write = cpu_uclamp_max_write,
++	},
+ 	{ }	/* Terminate */
+ };
+ 
++static u64 cpu_weight_read_u64(struct cgroup_subsys_state *css,
++			       struct cftype *cft)
++{
++	return 0;
++}
++
++static int cpu_weight_write_u64(struct cgroup_subsys_state *css,
++				struct cftype *cft, u64 weight)
++{
++	return 0;
++}
++
++static s64 cpu_weight_nice_read_s64(struct cgroup_subsys_state *css,
++				    struct cftype *cft)
++{
++	return 0;
++}
++
++static int cpu_weight_nice_write_s64(struct cgroup_subsys_state *css,
++				     struct cftype *cft, s64 nice)
++{
++	return 0;
++}
++
++static s64 cpu_idle_read_s64(struct cgroup_subsys_state *css,
++			       struct cftype *cft)
++{
++	return 0;
++}
++
++static int cpu_idle_write_s64(struct cgroup_subsys_state *css,
++				struct cftype *cft, s64 idle)
++{
++	return 0;
++}
++
++static int cpu_max_show(struct seq_file *sf, void *v)
++{
++	return 0;
++}
++
++static ssize_t cpu_max_write(struct kernfs_open_file *of,
++			     char *buf, size_t nbytes, loff_t off)
++{
++	return nbytes;
++}
+ 
+ static struct cftype cpu_files[] = {
++	{
++		.name = "weight",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.read_u64 = cpu_weight_read_u64,
++		.write_u64 = cpu_weight_write_u64,
++	},
++	{
++		.name = "weight.nice",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.read_s64 = cpu_weight_nice_read_s64,
++		.write_s64 = cpu_weight_nice_write_s64,
++	},
++	{
++		.name = "idle",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.read_s64 = cpu_idle_read_s64,
++		.write_s64 = cpu_idle_write_s64,
++	},
++	{
++		.name = "max",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.seq_show = cpu_max_show,
++		.write = cpu_max_write,
++	},
++	{
++		.name = "max.burst",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.read_u64 = cpu_cfs_burst_read_u64,
++		.write_u64 = cpu_cfs_burst_write_u64,
++	},
++	{
++		.name = "uclamp.min",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.seq_show = cpu_uclamp_min_show,
++		.write = cpu_uclamp_min_write,
++	},
++	{
++		.name = "uclamp.max",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.seq_show = cpu_uclamp_max_show,
++		.write = cpu_uclamp_max_write,
++	},
+ 	{ }	/* terminate */
+ };
+ 
+
+
+From d9b1977ed014e3d3dd157c0061631350037e6399 Mon Sep 17 00:00:00 2001
+From: Steven Barrett <steven@liquorix.net>
+Date: Wed, 27 Dec 2023 13:05:25 -0600
+Subject: [PATCH 2/3] sched/alt: Remove redundant "legacy_cftypes"
+ configuration
+
+---
+ kernel/sched/alt_core.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/kernel/sched/alt_core.c b/kernel/sched/alt_core.c
+index 7e8cdabc34d1..a6396819bc37 100644
+--- a/kernel/sched/alt_core.c
++++ b/kernel/sched/alt_core.c
+@@ -8462,7 +8462,6 @@ struct cgroup_subsys cpu_cgrp_subsys = {
+ 	.can_attach	= cpu_cgroup_can_attach,
+ #endif
+ 	.attach		= cpu_cgroup_attach,
+-	.legacy_cftypes	= cpu_files,
+ 	.legacy_cftypes	= cpu_legacy_files,
+ 	.dfl_cftypes	= cpu_files,
+ 	.early_init	= true,
+
+
+From b1169466b7a5d1186adc9379f878793942e5334f Mon Sep 17 00:00:00 2001
+From: Steven Barrett <steven@liquorix.net>
+Date: Wed, 27 Dec 2023 13:06:15 -0600
+Subject: [PATCH 3/3] sched/alt: Add missing stub of cpu_local_stat_show
+
+---
+ kernel/sched/alt_core.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/kernel/sched/alt_core.c b/kernel/sched/alt_core.c
+index a6396819bc37..8d6a41b5bb0b 100644
+--- a/kernel/sched/alt_core.c
++++ b/kernel/sched/alt_core.c
+@@ -8452,12 +8452,19 @@ static int cpu_extra_stat_show(struct seq_file *sf,
+ 	return 0;
+ }
+ 
++static int cpu_local_stat_show(struct seq_file *sf,
++			       struct cgroup_subsys_state *css)
++{
++	return 0;
++}
++
+ struct cgroup_subsys cpu_cgrp_subsys = {
+ 	.css_alloc	= cpu_cgroup_css_alloc,
+ 	.css_online	= cpu_cgroup_css_online,
+ 	.css_released	= cpu_cgroup_css_released,
+ 	.css_free	= cpu_cgroup_css_free,
+ 	.css_extra_stat_show = cpu_extra_stat_show,
++	.css_local_stat_show = cpu_local_stat_show,
+ #ifdef CONFIG_RT_GROUP_SCHED
+ 	.can_attach	= cpu_cgroup_can_attach,
+ #endif
