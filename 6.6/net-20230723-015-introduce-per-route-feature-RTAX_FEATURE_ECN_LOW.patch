@@ -18,6 +18,7 @@ This feature is appropriate for datacenter-style ECN marking, such as
 the ECN marking approach expected by DCTCP or BBR congestion control
 modules.
 
+[HH: small context fix in tcp.h hunk #2 for 6.6.11]
 Signed-off-by: David Morley <morleyd@google.com>
 Signed-off-by: Neal Cardwell <ncardwell@google.com>
 Signed-off-by: Yuchung Cheng <ycheng@google.com>
@@ -34,7 +35,7 @@ diff --git a/include/net/tcp.h b/include/net/tcp.h
 index 051e0f72281e..33c53e65bda4 100644
 --- a/include/net/tcp.h
 +++ b/include/net/tcp.h
-@@ -370,6 +370,7 @@ static inline void tcp_dec_quickack_mode(struct sock *sk,
+@@ -372,6 +372,7 @@ static inline void tcp_dec_quickack_mode(struct sock *sk,
  #define	TCP_ECN_QUEUE_CWR	2
  #define	TCP_ECN_DEMAND_CWR	4
  #define	TCP_ECN_SEEN		8
@@ -55,9 +56,9 @@ index 051e0f72281e..33c53e65bda4 100644
 +		tp->ecn_flags |= TCP_ECN_LOW;
 +}
 +
+ u32 tcp_delack_max(const struct sock *sk);
+
  /* Compute the actual rto_min value */
- static inline u32 tcp_rto_min(struct sock *sk)
- {
 diff --git a/include/uapi/linux/rtnetlink.h b/include/uapi/linux/rtnetlink.h
 index 51c13cf9c5ae..de8dcba26bec 100644
 --- a/include/uapi/linux/rtnetlink.h
