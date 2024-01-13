@@ -30,6 +30,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - net: sch_fq performance improvements
 - misc. other fixes
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler (disabled by default)
+- radeon: fixes from 6.7 & reverts to (hopefully) fix GPU ring lockups
 - sched: fixes for EEVDF from 6.7
 - xfs: fixes from 6.7
 
