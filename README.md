@@ -22,15 +22,12 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Series: 6.6**
+**Series: 6.7**
 
-- btrfs: fixes from 6.7
+- btrfs: fixes from 6.8
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
-- net: [BBRv3](https://github.com/google/bbr/tree/v3)
-- net: sch_fq performance improvements
-- misc. other fixes
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler (disabled by default)
-- radeon: fixes from 6.7 & reverts to (hopefully) fix GPU ring lockups
-- sched: fixes for EEVDF from 6.7
-- xfs: fixes from 6.7
+- radeon: fixes from 6.8
+- sched: fixes for EEVDF from 6.8
+- xfs: fixes from 6.8
 
