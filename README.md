@@ -26,7 +26,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - btrfs: fixes from 6.8
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
-- prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler (disabled by default)
+- prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
 - radeon: fixes from 6.8
 - sched: fixes for EEVDF from 6.8
 - xfs: fixes from 6.8
