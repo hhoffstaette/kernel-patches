@@ -24,13 +24,11 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2024-01-15)**
+**Current status (2024-01-24)**
 
-- 6.7.0 is available for testing.
+- 6.7.x is my current production branch
   BBRv3 has been removed again due to code divergence & remaining performance issues;
   just wait until it lands in mainline.
 
-- 6.6.x is my current production branch.
-
-- all other branches < 6.6 are EOL for me.
+- all other branches < 6.7 are EOL for me.
 
