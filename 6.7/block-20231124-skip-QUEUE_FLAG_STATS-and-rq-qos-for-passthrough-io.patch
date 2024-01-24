@@ -1,0 +1,49 @@
+From 847c5bcdfb41704e52930783b028302f415a3209 Mon Sep 17 00:00:00 2001
+From: Kundan Kumar <kundan.kumar@samsung.com>
+Date: Fri, 24 Nov 2023 00:33:31 +0530
+Subject: block: skip QUEUE_FLAG_STATS and rq-qos for passthrough io
+
+Write-back throttling (WBT) enables QUEUE_FLAG_STATS on the request
+queue. But WBT does not make sense for passthrough io, so skip
+QUEUE_FLAG_STATS processing.
+
+Also skip rq_qos_issue/done for passthrough io.
+
+Overall, the change gives ~11% hike in peak performance.
+
+Signed-off-by: Kundan Kumar <kundan.kumar@samsung.com>
+Signed-off-by: Kanchan Joshi <joshi.k@samsung.com>
+Link: https://lore.kernel.org/r/20231123190331.7934-1-kundan.kumar@samsung.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c     | 3 ++-
+ block/blk-rq-qos.h | 2 +-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 900c1be1fee18..fb29ff5cc281d 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1248,7 +1248,8 @@ void blk_mq_start_request(struct request *rq)
+ 
+ 	trace_block_rq_issue(rq);
+ 
+-	if (test_bit(QUEUE_FLAG_STATS, &q->queue_flags)) {
++	if (test_bit(QUEUE_FLAG_STATS, &q->queue_flags) &&
++	    !blk_rq_is_passthrough(rq)) {
+ 		rq->io_start_time_ns = ktime_get_ns();
+ 		rq->stats_sectors = blk_rq_sectors(rq);
+ 		rq->rq_flags |= RQF_STATS;
+diff --git a/block/blk-rq-qos.h b/block/blk-rq-qos.h
+index f48ee150d6673..37245c97ee615 100644
+--- a/block/blk-rq-qos.h
++++ b/block/blk-rq-qos.h
+@@ -118,7 +118,7 @@ static inline void rq_qos_cleanup(struct request_queue *q, struct bio *bio)
+ 
+ static inline void rq_qos_done(struct request_queue *q, struct request *rq)
+ {
+-	if (q->rq_qos)
++	if (q->rq_qos && !blk_rq_is_passthrough(rq))
+ 		__rq_qos_done(q->rq_qos, rq);
+ }
+ 
