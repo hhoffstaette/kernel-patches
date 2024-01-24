@@ -1,0 +1,108 @@
+From 4c0ec441717847859907c33159c0d4b0ed4cc5c9 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Tue, 16 Jan 2024 09:18:39 -0700
+Subject: block: update cached timestamp post schedule/preemption
+
+Mark the task as having a cached timestamp when set assign it, so we
+can efficiently check if it needs updating post being scheduled back in.
+This covers both the actual schedule out case, which would've flushed
+the plug, and the preemption case which doesn't touch the plugged
+requests (for many reasons, one of them being then we'd need to have
+preemption disabled around plug state manipulation).
+
+Reviewed-by: Johannes Thumshirn <johannes.thumshirn@wdc.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-core.c       |  2 ++
+ include/linux/blkdev.h | 20 +++++++++++++++++++-
+ include/linux/sched.h  |  2 +-
+ kernel/sched/core.c    |  4 +++-
+ 4 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index cc4db4d92c75b..71c6614a97fef 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -1173,6 +1173,8 @@ void __blk_flush_plug(struct blk_plug *plug, bool from_schedule)
+ 	 */
+ 	if (unlikely(!rq_list_empty(plug->cached_rq)))
+ 		blk_mq_free_plug_rqs(plug);
++
++	current->flags &= ~PF_BLOCK_TS;
+ }
+ 
+ /**
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index 26226afaeb91d..518c77d1f0c3c 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -977,6 +977,18 @@ static inline void blk_flush_plug(struct blk_plug *plug, bool async)
+ int blkdev_issue_flush(struct block_device *bdev);
+ long nr_blockdev_pages(void);
+ 
++/*
++ * tsk == current here
++ */
++static inline void blk_plug_invalidate_ts(struct task_struct *tsk)
++{
++	struct blk_plug *plug = tsk->plug;
++
++	if (plug)
++		plug->cur_ktime = 0;
++	current->flags &= ~PF_BLOCK_TS;
++}
++
+ static inline u64 blk_time_get_ns(void)
+ {
+ 	struct blk_plug *plug = current->plug;
+@@ -989,8 +1001,10 @@ static inline u64 blk_time_get_ns(void)
+ 	 * a valid timestamp" separately, just accept that we'll do an extra
+ 	 * ktime_get_ns() if we just happen to get 0 as the current time.
+ 	 */
+-	if (!plug->cur_ktime)
++	if (!plug->cur_ktime) {
+ 		plug->cur_ktime = ktime_get_ns();
++		current->flags |= PF_BLOCK_TS;
++	}
+ 	return plug->cur_ktime;
+ }
+ 
+@@ -1057,6 +1071,10 @@ static inline void blk_flush_plug(struct blk_plug *plug, bool async)
+ {
+ }
+ 
++static inline void blk_plug_invalidate_ts(struct task_struct *tsk)
++{
++}
++
+ static inline int blkdev_issue_flush(struct block_device *bdev)
+ {
+ 	return 0;
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 9a66147915b27..d8a073b064955 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1642,7 +1642,7 @@ extern struct pid *cad_pid;
+ #define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_mask */
+ #define PF_MCE_EARLY		0x08000000      /* Early kill for mce process policy */
+ #define PF_MEMALLOC_PIN		0x10000000	/* Allocation context constrained to zones which allow long term pinning. */
+-#define PF__HOLE__20000000	0x20000000
++#define PF_BLOCK_TS		0x20000000	/* plug has ts that needs updating */
+ #define PF__HOLE__40000000	0x40000000
+ #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
+ 
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 9116bcc903467..4675d59313ba7 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -6787,7 +6787,9 @@ static inline void sched_submit_work(struct task_struct *tsk)
+ 
+ static void sched_update_worker(struct task_struct *tsk)
+ {
+-	if (tsk->flags & (PF_WQ_WORKER | PF_IO_WORKER)) {
++	if (tsk->flags & (PF_WQ_WORKER | PF_IO_WORKER | PF_BLOCK_TS)) {
++		if (tsk->flags & PF_BLOCK_TS)
++			blk_plug_invalidate_ts(tsk);
+ 		if (tsk->flags & PF_WQ_WORKER)
+ 			wq_worker_running(tsk);
+ 		else

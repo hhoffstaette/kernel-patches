@@ -1,0 +1,128 @@
+From 10401da7c8d01e0562c29a9ade36ee8cc76b393f Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Tue, 16 Jan 2024 14:14:59 -0700
+Subject: block: move cgroup time handling code into blkdev.h
+
+In preparation for moving time keeping into blkdev.h, move the cgroup
+related code for timestamps in here too. This will help avoid a circular
+dependency.
+
+Leave struct bio_issue in blk_types.h as it's a proper time definition.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/linux/blk_types.h | 42 ------------------------------------------
+ include/linux/blkdev.h    | 43 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 43 insertions(+), 42 deletions(-)
+
+diff --git a/include/linux/blk_types.h b/include/linux/blk_types.h
+index f288c94374b30..1c07848dea7ec 100644
+--- a/include/linux/blk_types.h
++++ b/include/linux/blk_types.h
+@@ -206,52 +206,10 @@ static inline bool blk_path_error(blk_status_t error)
+ 	return true;
+ }
+ 
+-/*
+- * From most significant bit:
+- * 1 bit: reserved for other usage, see below
+- * 12 bits: original size of bio
+- * 51 bits: issue time of bio
+- */
+-#define BIO_ISSUE_RES_BITS      1
+-#define BIO_ISSUE_SIZE_BITS     12
+-#define BIO_ISSUE_RES_SHIFT     (64 - BIO_ISSUE_RES_BITS)
+-#define BIO_ISSUE_SIZE_SHIFT    (BIO_ISSUE_RES_SHIFT - BIO_ISSUE_SIZE_BITS)
+-#define BIO_ISSUE_TIME_MASK     ((1ULL << BIO_ISSUE_SIZE_SHIFT) - 1)
+-#define BIO_ISSUE_SIZE_MASK     \
+-	(((1ULL << BIO_ISSUE_SIZE_BITS) - 1) << BIO_ISSUE_SIZE_SHIFT)
+-#define BIO_ISSUE_RES_MASK      (~((1ULL << BIO_ISSUE_RES_SHIFT) - 1))
+-
+-/* Reserved bit for blk-throtl */
+-#define BIO_ISSUE_THROTL_SKIP_LATENCY (1ULL << 63)
+-
+ struct bio_issue {
+ 	u64 value;
+ };
+ 
+-static inline u64 __bio_issue_time(u64 time)
+-{
+-	return time & BIO_ISSUE_TIME_MASK;
+-}
+-
+-static inline u64 bio_issue_time(struct bio_issue *issue)
+-{
+-	return __bio_issue_time(issue->value);
+-}
+-
+-static inline sector_t bio_issue_size(struct bio_issue *issue)
+-{
+-	return ((issue->value & BIO_ISSUE_SIZE_MASK) >> BIO_ISSUE_SIZE_SHIFT);
+-}
+-
+-static inline void bio_issue_init(struct bio_issue *issue,
+-				       sector_t size)
+-{
+-	size &= (1ULL << BIO_ISSUE_SIZE_BITS) - 1;
+-	issue->value = ((issue->value & BIO_ISSUE_RES_MASK) |
+-			(ktime_get_ns() & BIO_ISSUE_TIME_MASK) |
+-			((u64)size << BIO_ISSUE_SIZE_SHIFT));
+-}
+-
+ typedef __u32 __bitwise blk_opf_t;
+ 
+ typedef unsigned int blk_qc_t;
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index 99e4f5e722132..da0f7e1caa5a1 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -974,6 +974,49 @@ static inline void blk_flush_plug(struct blk_plug *plug, bool async)
+ 
+ int blkdev_issue_flush(struct block_device *bdev);
+ long nr_blockdev_pages(void);
++
++/*
++ * From most significant bit:
++ * 1 bit: reserved for other usage, see below
++ * 12 bits: original size of bio
++ * 51 bits: issue time of bio
++ */
++#define BIO_ISSUE_RES_BITS      1
++#define BIO_ISSUE_SIZE_BITS     12
++#define BIO_ISSUE_RES_SHIFT     (64 - BIO_ISSUE_RES_BITS)
++#define BIO_ISSUE_SIZE_SHIFT    (BIO_ISSUE_RES_SHIFT - BIO_ISSUE_SIZE_BITS)
++#define BIO_ISSUE_TIME_MASK     ((1ULL << BIO_ISSUE_SIZE_SHIFT) - 1)
++#define BIO_ISSUE_SIZE_MASK     \
++	(((1ULL << BIO_ISSUE_SIZE_BITS) - 1) << BIO_ISSUE_SIZE_SHIFT)
++#define BIO_ISSUE_RES_MASK      (~((1ULL << BIO_ISSUE_RES_SHIFT) - 1))
++
++/* Reserved bit for blk-throtl */
++#define BIO_ISSUE_THROTL_SKIP_LATENCY (1ULL << 63)
++
++static inline u64 __bio_issue_time(u64 time)
++{
++	return time & BIO_ISSUE_TIME_MASK;
++}
++
++static inline u64 bio_issue_time(struct bio_issue *issue)
++{
++	return __bio_issue_time(issue->value);
++}
++
++static inline sector_t bio_issue_size(struct bio_issue *issue)
++{
++	return ((issue->value & BIO_ISSUE_SIZE_MASK) >> BIO_ISSUE_SIZE_SHIFT);
++}
++
++static inline void bio_issue_init(struct bio_issue *issue,
++				       sector_t size)
++{
++	size &= (1ULL << BIO_ISSUE_SIZE_BITS) - 1;
++	issue->value = ((issue->value & BIO_ISSUE_RES_MASK) |
++			(ktime_get_ns() & BIO_ISSUE_TIME_MASK) |
++			((u64)size << BIO_ISSUE_SIZE_SHIFT));
++}
++
+ #else /* CONFIG_BLOCK */
+ struct blk_plug {
+ };
