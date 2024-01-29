@@ -1,7 +1,7 @@
-From 4c0ec441717847859907c33159c0d4b0ed4cc5c9 Mon Sep 17 00:00:00 2001
+From 1a3d70bf0c0e9f711b1d653d05df201eee68ab5b Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@kernel.dk>
-Date: Tue, 16 Jan 2024 09:18:39 -0700
 Subject: block: update cached timestamp post schedule/preemption
+Date: Tue, 16 Jan 2024 09:18:39 -0700
 
 Mark the task as having a cached timestamp when set assign it, so we
 can efficiently check if it needs updating post being scheduled back in.
@@ -14,13 +14,14 @@ Reviewed-by: Johannes Thumshirn <johannes.thumshirn@wdc.com>
 Signed-off-by: Jens Axboe <axboe@kernel.dk>
 ---
  block/blk-core.c       |  2 ++
- include/linux/blkdev.h | 20 +++++++++++++++++++-
+ block/blk.h            |  4 +++-
+ include/linux/blkdev.h | 16 ++++++++++++++++
  include/linux/sched.h  |  2 +-
- kernel/sched/core.c    |  4 +++-
- 4 files changed, 25 insertions(+), 3 deletions(-)
+ kernel/sched/core.c    |  6 ++++--
+ 5 files changed, 26 insertions(+), 4 deletions(-)
 
 diff --git a/block/blk-core.c b/block/blk-core.c
-index cc4db4d92c75b..71c6614a97fef 100644
+index cc4db4d92c75..71c6614a97fe 100644
 --- a/block/blk-core.c
 +++ b/block/blk-core.c
 @@ -1173,6 +1173,8 @@ void __blk_flush_plug(struct blk_plug *plug, bool from_schedule)
@@ -32,13 +33,29 @@ index cc4db4d92c75b..71c6614a97fef 100644
  }
  
  /**
+diff --git a/block/blk.h b/block/blk.h
+index 14bbc4b780f2..913c93838a01 100644
+--- a/block/blk.h
++++ b/block/blk.h
+@@ -529,8 +529,10 @@ static inline u64 blk_time_get_ns(void)
+ 	 * a valid timestamp" separately, just accept that we'll do an extra
+ 	 * ktime_get_ns() if we just happen to get 0 as the current time.
+ 	 */
+-	if (!plug->cur_ktime)
++	if (!plug->cur_ktime) {
+ 		plug->cur_ktime = ktime_get_ns();
++		current->flags |= PF_BLOCK_TS;
++	}
+ 	return plug->cur_ktime;
+ }
+ 
 diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index 26226afaeb91d..518c77d1f0c3c 100644
+index 996d2ad756ff..d7cac3de65b3 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
-@@ -977,6 +977,18 @@ static inline void blk_flush_plug(struct blk_plug *plug, bool async)
- int blkdev_issue_flush(struct block_device *bdev);
- long nr_blockdev_pages(void);
+@@ -973,6 +973,18 @@ static inline void blk_flush_plug(struct blk_plug *plug, bool async)
+ 		__blk_flush_plug(plug, async);
+ }
  
 +/*
 + * tsk == current here
@@ -52,22 +69,10 @@ index 26226afaeb91d..518c77d1f0c3c 100644
 +	current->flags &= ~PF_BLOCK_TS;
 +}
 +
- static inline u64 blk_time_get_ns(void)
- {
- 	struct blk_plug *plug = current->plug;
-@@ -989,8 +1001,10 @@ static inline u64 blk_time_get_ns(void)
- 	 * a valid timestamp" separately, just accept that we'll do an extra
- 	 * ktime_get_ns() if we just happen to get 0 as the current time.
- 	 */
--	if (!plug->cur_ktime)
-+	if (!plug->cur_ktime) {
- 		plug->cur_ktime = ktime_get_ns();
-+		current->flags |= PF_BLOCK_TS;
-+	}
- 	return plug->cur_ktime;
- }
- 
-@@ -1057,6 +1071,10 @@ static inline void blk_flush_plug(struct blk_plug *plug, bool async)
+ int blkdev_issue_flush(struct block_device *bdev);
+ long nr_blockdev_pages(void);
+ #else /* CONFIG_BLOCK */
+@@ -996,6 +1008,10 @@ static inline void blk_flush_plug(struct blk_plug *plug, bool async)
  {
  }
  
@@ -79,7 +84,7 @@ index 26226afaeb91d..518c77d1f0c3c 100644
  {
  	return 0;
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 9a66147915b27..d8a073b064955 100644
+index cdb8ea53c365..801233cef2fc 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -1642,7 +1642,7 @@ extern struct pid *cad_pid;
@@ -92,10 +97,10 @@ index 9a66147915b27..d8a073b064955 100644
  #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
  
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 9116bcc903467..4675d59313ba7 100644
+index 9116bcc90346..083f2258182d 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -6787,7 +6787,9 @@ static inline void sched_submit_work(struct task_struct *tsk)
+@@ -6787,10 +6787,12 @@ static inline void sched_submit_work(struct task_struct *tsk)
  
  static void sched_update_worker(struct task_struct *tsk)
  {
@@ -105,4 +110,8 @@ index 9116bcc903467..4675d59313ba7 100644
 +			blk_plug_invalidate_ts(tsk);
  		if (tsk->flags & PF_WQ_WORKER)
  			wq_worker_running(tsk);
- 		else
+-		else
++		else if (tsk->flags & PF_IO_WORKER)
+ 			io_wq_worker_running(tsk);
+ 	}
+ }

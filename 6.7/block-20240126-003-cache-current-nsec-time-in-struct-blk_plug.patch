@@ -1,7 +1,7 @@
-From 381c4d2334a5634b7b2a77b7652f4f97bfed3548 Mon Sep 17 00:00:00 2001
+From 1ff288ab5cf42de6b12cbcdb1d0db1ea73723656 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@kernel.dk>
-Date: Mon, 15 Jan 2024 14:46:03 -0700
 Subject: block: cache current nsec time in struct blk_plug
+Date: Mon, 15 Jan 2024 14:46:03 -0700
 
 Querying the current time is the most costly thing we do in the block
 layer per IO, and depending on kernel config settings, we may do it
@@ -57,11 +57,12 @@ Reviewed-by: Johannes Thumshirn <johannes.thumshirn@wdc.com>
 Signed-off-by: Jens Axboe <axboe@kernel.dk>
 ---
  block/blk-core.c       |  1 +
- include/linux/blkdev.h | 15 ++++++++++++++-
- 2 files changed, 15 insertions(+), 1 deletion(-)
+ block/blk.h            | 14 +++++++++++++-
+ include/linux/blkdev.h |  1 +
+ 3 files changed, 15 insertions(+), 1 deletion(-)
 
 diff --git a/block/blk-core.c b/block/blk-core.c
-index 11342af420d0c..cc4db4d92c75b 100644
+index 11342af420d0..cc4db4d92c75 100644
 --- a/block/blk-core.c
 +++ b/block/blk-core.c
 @@ -1073,6 +1073,7 @@ void blk_start_plug_nr_ios(struct blk_plug *plug, unsigned short nr_ios)
@@ -72,19 +73,11 @@ index 11342af420d0c..cc4db4d92c75b 100644
  	plug->mq_list = NULL;
  	plug->cached_rq = NULL;
  	plug->nr_ios = min_t(unsigned short, nr_ios, BLK_MAX_REQUEST_COUNT);
-diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index 4495de020d9a7..26226afaeb91d 100644
---- a/include/linux/blkdev.h
-+++ b/include/linux/blkdev.h
-@@ -943,6 +943,7 @@ struct blk_plug {
- 
- 	/* if ios_left is > 1, we can batch tag/rq allocations */
- 	struct request *cached_rq;
-+	u64 cur_ktime;
- 	unsigned short nr_ios;
- 
- 	unsigned short rq_count;
-@@ -978,7 +979,19 @@ long nr_blockdev_pages(void);
+diff --git a/block/blk.h b/block/blk.h
+index 79ae533cdf02..14bbc4b780f2 100644
+--- a/block/blk.h
++++ b/block/blk.h
+@@ -519,7 +519,19 @@ static inline int req_ref_read(struct request *req)
  
  static inline u64 blk_time_get_ns(void)
  {
@@ -104,4 +97,16 @@ index 4495de020d9a7..26226afaeb91d 100644
 +	return plug->cur_ktime;
  }
  
- /*
+ static inline ktime_t blk_time_get(void)
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index 99e4f5e72213..996d2ad756ff 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -942,6 +942,7 @@ struct blk_plug {
+ 
+ 	/* if ios_left is > 1, we can batch tag/rq allocations */
+ 	struct request *cached_rq;
++	u64 cur_ktime;
+ 	unsigned short nr_ios;
+ 
+ 	unsigned short rq_count;

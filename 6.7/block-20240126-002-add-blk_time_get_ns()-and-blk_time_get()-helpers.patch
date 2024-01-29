@@ -1,31 +1,32 @@
-From ffcdbcd88d3e4b3bb4ce41d1c744030ee5912be3 Mon Sep 17 00:00:00 2001
+From 29bb740b66cc15175a119cd6fc59076580390116 Mon Sep 17 00:00:00 2001
 From: Jens Axboe <axboe@kernel.dk>
+Subject: block: add blk_time_get_ns() and blk_time_get() helpers
 Date: Mon, 15 Jan 2024 14:45:07 -0700
-Subject: block: add blk_time_get_ns() helper
 
-Convert any user of ktime_get_ns() to use blk_time_get_ns(), so we have
-a unified API for querying the current time in nanoseconds.
+Convert any user of ktime_get_ns() to use blk_time_get_ns(), and
+ktime_get() to blk_time_get(), so we have a unified API for querying the
+current time in nanoseconds or as ktime.
 
 No functional changes intended, this patch just wraps ktime_get_ns()
-with a block helper.
+and ktime_get() with a block helper.
 
 Reviewed-by: Johannes Thumshirn <johannes.thumshirn@wdc.com>
 Signed-off-by: Jens Axboe <axboe@kernel.dk>
 ---
- block/bfq-cgroup.c     | 14 +++++++-------
- block/bfq-iosched.c    | 22 +++++++++++-----------
- block/blk-cgroup.c     |  2 +-
- block/blk-flush.c      |  2 +-
- block/blk-iocost.c     |  6 +++---
- block/blk-iolatency.c  |  6 +++---
- block/blk-mq.c         | 16 ++++++++--------
- block/blk-throttle.c   |  6 +++---
- block/blk-wbt.c        |  5 ++---
- include/linux/blkdev.h |  8 +++++++-
- 10 files changed, 46 insertions(+), 41 deletions(-)
+ block/bfq-cgroup.c    | 14 +++++++-------
+ block/bfq-iosched.c   | 28 ++++++++++++++--------------
+ block/blk-cgroup.c    |  2 +-
+ block/blk-flush.c     |  2 +-
+ block/blk-iocost.c    |  8 ++++----
+ block/blk-iolatency.c |  6 +++---
+ block/blk-mq.c        | 16 ++++++++--------
+ block/blk-throttle.c  |  6 +++---
+ block/blk-wbt.c       |  6 +++---
+ block/blk.h           | 13 ++++++++++++-
+ 10 files changed, 56 insertions(+), 45 deletions(-)
 
 diff --git a/block/bfq-cgroup.c b/block/bfq-cgroup.c
-index 2c90e5de0acd9..d442ee358fc25 100644
+index 2c90e5de0acd..d442ee358fc2 100644
 --- a/block/bfq-cgroup.c
 +++ b/block/bfq-cgroup.c
 @@ -127,7 +127,7 @@ static void bfqg_stats_update_group_wait_time(struct bfqg_stats *stats)
@@ -92,7 +93,7 @@ index 2c90e5de0acd9..d442ee358fc25 100644
  	if (now > io_start_time_ns)
  		blkg_rwstat_add(&stats->service_time, opf,
 diff --git a/block/bfq-iosched.c b/block/bfq-iosched.c
-index 3cce6de464a7b..1922574e1c0d4 100644
+index 3cce6de464a7..4b88a54a9b76 100644
 --- a/block/bfq-iosched.c
 +++ b/block/bfq-iosched.c
 @@ -1005,7 +1005,7 @@ static struct request *bfq_check_fifo(struct bfq_queue *bfqq,
@@ -131,6 +132,24 @@ index 3cce6de464a7b..1922574e1c0d4 100644
  			/*
  			 * Start the state machine for measuring the
  			 * total service time of rq: setting
+@@ -3294,7 +3294,7 @@ static void bfq_set_budget_timeout(struct bfq_data *bfqd,
+ 	else
+ 		timeout_coeff = bfqq->entity.weight / bfqq->entity.orig_weight;
+ 
+-	bfqd->last_budget_start = ktime_get();
++	bfqd->last_budget_start = blk_time_get();
+ 
+ 	bfqq->budget_timeout = jiffies +
+ 		bfqd->bfq_timeout * timeout_coeff;
+@@ -3394,7 +3394,7 @@ static void bfq_arm_slice_timer(struct bfq_data *bfqd)
+ 	else if (bfqq->wr_coeff > 1)
+ 		sl = max_t(u32, sl, 20ULL * NSEC_PER_MSEC);
+ 
+-	bfqd->last_idling_start = ktime_get();
++	bfqd->last_idling_start = blk_time_get();
+ 	bfqd->last_idling_start_jiffies = jiffies;
+ 
+ 	hrtimer_start(&bfqd->idle_slice_timer, ns_to_ktime(sl),
 @@ -3433,7 +3433,7 @@ static void bfq_reset_rate_computation(struct bfq_data *bfqd,
  				       struct request *rq)
  {
@@ -149,6 +168,15 @@ index 3cce6de464a7b..1922574e1c0d4 100644
  
  	if (bfqd->peak_rate_samples == 0) { /* first dispatch */
  		bfq_log(bfqd, "update_peak_rate: goto reset, samples %d",
+@@ -4162,7 +4162,7 @@ static bool bfq_bfqq_is_slow(struct bfq_data *bfqd, struct bfq_queue *bfqq,
+ 	if (compensate)
+ 		delta_ktime = bfqd->last_idling_start;
+ 	else
+-		delta_ktime = ktime_get();
++		delta_ktime = blk_time_get();
+ 	delta_ktime = ktime_sub(delta_ktime, bfqd->last_budget_start);
+ 	delta_usecs = ktime_to_us(delta_ktime);
+ 
 @@ -5591,7 +5591,7 @@ static void bfq_init_bfqq(struct bfq_data *bfqd, struct bfq_queue *bfqq,
  			  struct bfq_io_cq *bic, pid_t pid, int is_sync,
  			  unsigned int act_idx)
@@ -195,7 +223,7 @@ index 3cce6de464a7b..1922574e1c0d4 100644
  
  	if (bfqq->last_serv_time_ns > 0 && bfqd->rqs_injected) {
 diff --git a/block/blk-cgroup.c b/block/blk-cgroup.c
-index ff93c385ba5af..bdbb557feb5a0 100644
+index ff93c385ba5a..bdbb557feb5a 100644
 --- a/block/blk-cgroup.c
 +++ b/block/blk-cgroup.c
 @@ -1846,7 +1846,7 @@ static void blkcg_maybe_throttle_blkg(struct blkcg_gq *blkg, bool use_memdelay)
@@ -208,7 +236,7 @@ index ff93c385ba5af..bdbb557feb5a0 100644
  	u64 delay_nsec = 0;
  	int tok;
 diff --git a/block/blk-flush.c b/block/blk-flush.c
-index 3f4d41952ef21..b0f314f4bc149 100644
+index 3f4d41952ef2..b0f314f4bc14 100644
 --- a/block/blk-flush.c
 +++ b/block/blk-flush.c
 @@ -143,7 +143,7 @@ static void blk_account_io_flush(struct request *rq)
@@ -221,7 +249,7 @@ index 3f4d41952ef21..b0f314f4bc149 100644
  }
  
 diff --git a/block/blk-iocost.c b/block/blk-iocost.c
-index c8beec6d7df08..e54b17261d966 100644
+index c8beec6d7df0..4b0b483a9693 100644
 --- a/block/blk-iocost.c
 +++ b/block/blk-iocost.c
 @@ -829,7 +829,7 @@ static int ioc_autop_idx(struct ioc *ioc, struct gendisk *disk)
@@ -251,8 +279,17 @@ index c8beec6d7df08..e54b17261d966 100644
  	rq_wait_ns = rq->start_time_ns - rq->alloc_time_ns;
  	size_nsec = div64_u64(calc_size_vtime_cost(rq, ioc), VTIME_PER_NSEC);
  
+@@ -2893,7 +2893,7 @@ static int blk_iocost_init(struct gendisk *disk)
+ 	ioc->vtime_base_rate = VTIME_PER_USEC;
+ 	atomic64_set(&ioc->vtime_rate, VTIME_PER_USEC);
+ 	seqcount_spinlock_init(&ioc->period_seqcount, &ioc->lock);
+-	ioc->period_at = ktime_to_us(ktime_get());
++	ioc->period_at = ktime_to_us(blk_time_get());
+ 	atomic64_set(&ioc->cur_period, 0);
+ 	atomic_set(&ioc->hweight_gen, 0);
+ 
 diff --git a/block/blk-iolatency.c b/block/blk-iolatency.c
-index c1a6aba1d59e4..ebb522788d978 100644
+index c1a6aba1d59e..ebb522788d97 100644
 --- a/block/blk-iolatency.c
 +++ b/block/blk-iolatency.c
 @@ -609,7 +609,7 @@ static void blkcg_iolatency_done_bio(struct rq_qos *rqos, struct bio *bio)
@@ -283,7 +320,7 @@ index c1a6aba1d59e4..ebb522788d978 100644
  
  	if (blk_queue_nonrot(blkg->q))
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index aa87fcfda1ecf..aff9e9492f59e 100644
+index aa87fcfda1ec..aff9e9492f59 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -323,7 +323,7 @@ void blk_rq_init(struct request_queue *q, struct request *rq)
@@ -359,7 +396,7 @@ index aa87fcfda1ecf..aff9e9492f59e 100644
  }
  EXPORT_SYMBOL_GPL(blk_insert_cloned_request);
 diff --git a/block/blk-throttle.c b/block/blk-throttle.c
-index 16f5766620a41..da9dc1f793c3b 100644
+index 16f5766620a4..da9dc1f793c3 100644
 --- a/block/blk-throttle.c
 +++ b/block/blk-throttle.c
 @@ -1815,7 +1815,7 @@ static bool throtl_tg_is_idle(struct throtl_grp *tg)
@@ -390,10 +427,18 @@ index 16f5766620a41..da9dc1f793c3b 100644
  
  	start_time = bio_issue_time(&bio->bi_issue) >> 10;
 diff --git a/block/blk-wbt.c b/block/blk-wbt.c
-index 5ba3cd574eacb..4c1c043450408 100644
+index 5ba3cd574eac..8cb53bf4c7b1 100644
 --- a/block/blk-wbt.c
 +++ b/block/blk-wbt.c
-@@ -274,13 +274,12 @@ static inline bool stat_sample_valid(struct blk_rq_stat *stat)
+@@ -29,6 +29,7 @@
+ #include "blk-wbt.h"
+ #include "blk-rq-qos.h"
+ #include "elevator.h"
++#include "blk.h"
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/wbt.h>
+@@ -274,13 +275,12 @@ static inline bool stat_sample_valid(struct blk_rq_stat *stat)
  
  static u64 rwb_sync_issue_lat(struct rq_wb *rwb)
  {
@@ -409,31 +454,36 @@ index 5ba3cd574eacb..4c1c043450408 100644
  }
  
  static inline unsigned int wbt_inflight(struct rq_wb *rwb)
-diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index da0f7e1caa5a1..4495de020d9a7 100644
---- a/include/linux/blkdev.h
-+++ b/include/linux/blkdev.h
-@@ -24,6 +24,7 @@
- #include <linux/sbitmap.h>
- #include <linux/uuid.h>
- #include <linux/xarray.h>
-+#include <linux/timekeeping.h>
+diff --git a/block/blk.h b/block/blk.h
+index 620e3a035da1..79ae533cdf02 100644
+--- a/block/blk.h
++++ b/block/blk.h
+@@ -4,6 +4,7 @@
  
- struct module;
- struct request_queue;
-@@ -975,6 +976,11 @@ static inline void blk_flush_plug(struct blk_plug *plug, bool async)
- int blkdev_issue_flush(struct block_device *bdev);
- long nr_blockdev_pages(void);
+ #include <linux/blk-crypto.h>
+ #include <linux/memblock.h>	/* for max_pfn/max_low_pfn */
++#include <linux/timekeeping.h>
+ #include <xen/xen.h>
+ #include "blk-crypto-internal.h"
+ 
+@@ -516,6 +517,16 @@ static inline int req_ref_read(struct request *req)
+ 	return atomic_read(&req->ref);
+ }
  
 +static inline u64 blk_time_get_ns(void)
 +{
 +	return ktime_get_ns();
 +}
 +
++static inline ktime_t blk_time_get(void)
++{
++	return ns_to_ktime(blk_time_get_ns());
++}
++
  /*
   * From most significant bit:
   * 1 bit: reserved for other usage, see below
-@@ -1013,7 +1019,7 @@ static inline void bio_issue_init(struct bio_issue *issue,
+@@ -554,7 +565,7 @@ static inline void bio_issue_init(struct bio_issue *issue,
  {
  	size &= (1ULL << BIO_ISSUE_SIZE_BITS) - 1;
  	issue->value = ((issue->value & BIO_ISSUE_RES_MASK) |
