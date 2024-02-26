@@ -1,0 +1,64 @@
+From 12fc0a963128b54b82e98b9909f463e784b90b07 Mon Sep 17 00:00:00 2001
+From: "Matthew Wilcox (Oracle)" <willy@infradead.org>
+Subject: nfs: Remove writepage
+Date: Fri, 15 Dec 2023 20:47:07 +0000
+
+NFS already has writepages and migrate_folio, so it does not need to
+implement writepage.  The writepage operation is deprecated as it leads
+to worse performance under high memory pressure due to folios being
+written out in LRU order rather than sequentially within a file.
+
+Signed-off-by: Matthew Wilcox (Oracle) <willy@infradead.org>
+Signed-off-by: Anna Schumaker <Anna.Schumaker@Netapp.com>
+---
+ fs/nfs/file.c          |  1 -
+ fs/nfs/write.c         | 11 -----------
+ include/linux/nfs_fs.h |  1 -
+ 3 files changed, 13 deletions(-)
+
+diff --git a/fs/nfs/file.c b/fs/nfs/file.c
+index 3f9768810427d..e437de2a5ad49 100644
+--- a/fs/nfs/file.c
++++ b/fs/nfs/file.c
+@@ -558,7 +558,6 @@ const struct address_space_operations nfs_file_aops = {
+ 	.read_folio = nfs_read_folio,
+ 	.readahead = nfs_readahead,
+ 	.dirty_folio = filemap_dirty_folio,
+-	.writepage = nfs_writepage,
+ 	.writepages = nfs_writepages,
+ 	.write_begin = nfs_write_begin,
+ 	.write_end = nfs_write_end,
+diff --git a/fs/nfs/write.c b/fs/nfs/write.c
+index b664caea8b4e6..0b4fdad511d92 100644
+--- a/fs/nfs/write.c
++++ b/fs/nfs/write.c
+@@ -680,17 +680,6 @@ static int nfs_writepage_locked(struct folio *folio,
+ 	return err;
+ }
+ 
+-int nfs_writepage(struct page *page, struct writeback_control *wbc)
+-{
+-	struct folio *folio = page_folio(page);
+-	int ret;
+-
+-	ret = nfs_writepage_locked(folio, wbc);
+-	if (ret != AOP_WRITEPAGE_ACTIVATE)
+-		unlock_page(page);
+-	return ret;
+-}
+-
+ static int nfs_writepages_callback(struct folio *folio,
+ 				   struct writeback_control *wbc, void *data)
+ {
+diff --git a/include/linux/nfs_fs.h b/include/linux/nfs_fs.h
+index 279262057a925..f5ce7b1011461 100644
+--- a/include/linux/nfs_fs.h
++++ b/include/linux/nfs_fs.h
+@@ -595,7 +595,6 @@ extern void nfs_complete_unlink(struct dentry *dentry, struct inode *);
+  * linux/fs/nfs/write.c
+  */
+ extern int  nfs_congestion_kb;
+-extern int  nfs_writepage(struct page *page, struct writeback_control *wbc);
+ extern int  nfs_writepages(struct address_space *, struct writeback_control *);
+ extern int  nfs_flush_incompatible(struct file *file, struct folio *folio);
+ extern int  nfs_update_folio(struct file *file, struct folio *folio,
