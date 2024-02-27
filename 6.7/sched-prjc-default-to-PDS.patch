@@ -1,0 +1,15 @@
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+diff -rup linux-6.7.6/init/Kconfig linux-6.7.6-pds/init/Kconfig
+--- linux-6.7.6/init/Kconfig	2024-02-26 14:49:24.037228225 +0100
++++ linux-6.7.6-pds/init/Kconfig	2024-02-26 14:49:57.870506445 +0100
+@@ -861,7 +861,7 @@ if SCHED_ALT
+ 
+ choice
+ 	prompt "Alternative CPU Scheduler"
+-	default SCHED_BMQ
++	default SCHED_PDS
+ 
+ config SCHED_BMQ
+ 	bool "BMQ CPU scheduler"
