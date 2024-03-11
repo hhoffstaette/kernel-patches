@@ -24,7 +24,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2024-01-24)**
+**Current status (2024-03-11)**
+
+- 6.8.0 is available for testing
 
 - 6.7.x is my current production branch
   BBRv3 has been removed again due to code divergence & remaining performance issues;
