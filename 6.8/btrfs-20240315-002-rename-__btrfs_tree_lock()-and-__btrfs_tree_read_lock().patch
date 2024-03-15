@@ -1,0 +1,151 @@
+From: fdmanana@kernel.org
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH 2/2] btrfs: rename __btrfs_tree_lock() and __btrfs_tree_read_lock()
+Date: Fri, 15 Mar 2024 12:55:53 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+The __btrfs_tree_lock() and __btrfs_tree_read_lock() are using a naming
+with a double underscore prefix, which is specially not proper for
+exported functions. Rename the double underscore from their name and add
+the "_nested" prefix.
+
+[HH: trivial context fix for 6.8.0 in locking.h]
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/ctree.c       | 12 ++++++------
+ fs/btrfs/extent-tree.c |  2 +-
+ fs/btrfs/locking.c     |  6 +++---
+ fs/btrfs/locking.h     |  8 ++++----
+ 4 files changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index aaf53fd84358..f6a98e7cf006 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -1003,7 +1003,7 @@ static noinline int balance_level(struct btrfs_trans_handle *trans,
+ 			goto out;
+ 		}
+ 
+-		__btrfs_tree_lock(left, BTRFS_NESTING_LEFT);
++		btrfs_tree_lock_nested(left, BTRFS_NESTING_LEFT);
+ 		wret = btrfs_cow_block(trans, root, left,
+ 				       parent, pslot - 1, &left,
+ 				       BTRFS_NESTING_LEFT_COW);
+@@ -1021,7 +1021,7 @@ static noinline int balance_level(struct btrfs_trans_handle *trans,
+ 			goto out;
+ 		}
+ 
+-		__btrfs_tree_lock(right, BTRFS_NESTING_RIGHT);
++		btrfs_tree_lock_nested(right, BTRFS_NESTING_RIGHT);
+ 		wret = btrfs_cow_block(trans, root, right,
+ 				       parent, pslot + 1, &right,
+ 				       BTRFS_NESTING_RIGHT_COW);
+@@ -1205,7 +1205,7 @@ static noinline int push_nodes_for_insert(struct btrfs_trans_handle *trans,
+ 		if (IS_ERR(left))
+ 			return PTR_ERR(left);
+ 
+-		__btrfs_tree_lock(left, BTRFS_NESTING_LEFT);
++		btrfs_tree_lock_nested(left, BTRFS_NESTING_LEFT);
+ 
+ 		left_nr = btrfs_header_nritems(left);
+ 		if (left_nr >= BTRFS_NODEPTRS_PER_BLOCK(fs_info) - 1) {
+@@ -1265,7 +1265,7 @@ static noinline int push_nodes_for_insert(struct btrfs_trans_handle *trans,
+ 		if (IS_ERR(right))
+ 			return PTR_ERR(right);
+ 
+-		__btrfs_tree_lock(right, BTRFS_NESTING_RIGHT);
++		btrfs_tree_lock_nested(right, BTRFS_NESTING_RIGHT);
+ 
+ 		right_nr = btrfs_header_nritems(right);
+ 		if (right_nr >= BTRFS_NODEPTRS_PER_BLOCK(fs_info) - 1) {
+@@ -3267,7 +3267,7 @@ static int push_leaf_right(struct btrfs_trans_handle *trans, struct btrfs_root
+ 	if (IS_ERR(right))
+ 		return PTR_ERR(right);
+ 
+-	__btrfs_tree_lock(right, BTRFS_NESTING_RIGHT);
++	btrfs_tree_lock_nested(right, BTRFS_NESTING_RIGHT);
+ 
+ 	free_space = btrfs_leaf_free_space(right);
+ 	if (free_space < data_size)
+@@ -3483,7 +3483,7 @@ static int push_leaf_left(struct btrfs_trans_handle *trans, struct btrfs_root
+ 	if (IS_ERR(left))
+ 		return PTR_ERR(left);
+ 
+-	__btrfs_tree_lock(left, BTRFS_NESTING_LEFT);
++	btrfs_tree_lock_nested(left, BTRFS_NESTING_LEFT);
+ 
+ 	free_space = btrfs_leaf_free_space(left);
+ 	if (free_space < data_size) {
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index beedd6ed64d3..1a1191efe59e 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -5093,7 +5093,7 @@ btrfs_init_new_buffer(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+ 	 */
+ 	btrfs_set_buffer_lockdep_class(lockdep_owner, buf, level);
+ 
+-	__btrfs_tree_lock(buf, nest);
++	btrfs_tree_lock_nested(buf, nest);
+ 	btrfs_clear_buffer_dirty(trans, buf);
+ 	clear_bit(EXTENT_BUFFER_STALE, &buf->bflags);
+ 	clear_bit(EXTENT_BUFFER_ZONED_ZEROOUT, &buf->bflags);
+diff --git a/fs/btrfs/locking.c b/fs/btrfs/locking.c
+index 1f355ca65910..508a3fdfcd58 100644
+--- a/fs/btrfs/locking.c
++++ b/fs/btrfs/locking.c
+@@ -129,14 +129,14 @@ static void btrfs_set_eb_lock_owner(struct extent_buffer *eb, pid_t owner) { }
+  */
+ 
+ /*
+- * __btrfs_tree_read_lock - lock extent buffer for read
++ * btrfs_tree_read_lock_nested - lock extent buffer for read
+  * @eb:		the eb to be locked
+  * @nest:	the nesting level to be used for lockdep
+  *
+  * This takes the read lock on the extent buffer, using the specified nesting
+  * level for lockdep purposes.
+  */
+-void __btrfs_tree_read_lock(struct extent_buffer *eb, enum btrfs_lock_nesting nest)
++void btrfs_tree_read_lock_nested(struct extent_buffer *eb, enum btrfs_lock_nesting nest)
+ {
+ 	u64 start_ns = 0;
+ 
+@@ -193,7 +193,7 @@ void btrfs_tree_read_unlock(struct extent_buffer *eb)
+  *
+  * Returns with the eb->lock write locked.
+  */
+-void __btrfs_tree_lock(struct extent_buffer *eb, enum btrfs_lock_nesting nest)
++void btrfs_tree_lock_nested(struct extent_buffer *eb, enum btrfs_lock_nesting nest)
+ 	__acquires(&eb->lock)
+ {
+ 	u64 start_ns = 0;
+diff --git a/fs/btrfs/locking.h b/fs/btrfs/locking.h
+index c30aff66e86f..1bc8e6738879 100644
+--- a/fs/btrfs/locking.h
++++ b/fs/btrfs/locking.h
+@@ -163,20 +163,20 @@ enum btrfs_lockdep_trans_states {
+ 
+ struct btrfs_path;
+ 
+-void __btrfs_tree_lock(struct extent_buffer *eb, enum btrfs_lock_nesting nest);
++void btrfs_tree_lock_nested(struct extent_buffer *eb, enum btrfs_lock_nesting nest);
+ 
+ static inline void btrfs_tree_lock(struct extent_buffer *eb)
+ {
+-	__btrfs_tree_lock(eb, BTRFS_NESTING_NORMAL);
++	btrfs_tree_lock_nested(eb, BTRFS_NESTING_NORMAL);
+ }
+ 
+ void btrfs_tree_unlock(struct extent_buffer *eb);
+ 
+-void __btrfs_tree_read_lock(struct extent_buffer *eb, enum btrfs_lock_nesting nest);
++void btrfs_tree_read_lock_nested(struct extent_buffer *eb, enum btrfs_lock_nesting nest);
+ 
+ static inline void btrfs_tree_read_lock(struct extent_buffer *eb)
+ {
+-	__btrfs_tree_read_lock(eb, BTRFS_NESTING_NORMAL);
++	btrfs_tree_read_lock_nested(eb, BTRFS_NESTING_NORMAL);
+ }
+ 
+ void btrfs_tree_read_unlock(struct extent_buffer *eb);

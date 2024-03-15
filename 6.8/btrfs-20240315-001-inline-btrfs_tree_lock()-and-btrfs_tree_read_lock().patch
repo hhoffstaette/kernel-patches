@@ -1,0 +1,135 @@
+From: fdmanana@kernel.org
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH 1/2] btrfs: inline btrfs_tree_lock() and btrfs_tree_read_lock()
+Date: Fri, 15 Mar 2024 12:55:52 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+The functions btrfs_tree_lock() and btrfs_tree_read_lock() are very
+trivial so that can be made inline and avoid call overhead, as they
+are very often called inside critical sections (when searching a btree
+for example, attempting to lock a child node/leaf while holding a lock
+on the parent).
+
+So make them static inline, which even reduces the size of the btrfs
+module a little bit.
+
+Before this change:
+
+   $ size fs/btrfs/btrfs.ko
+      text	   data	    bss	    dec	    hex	filename
+   1718786	 156276	  16920	1891982	 1cde8e	fs/btrfs/btrfs.ko
+
+After this change:
+
+   $ size fs/btrfs/btrfs.ko
+      text	   data	    bss	    dec	    hex	filename
+   1718650	 156260	  16920	1891830	 1cddf6	fs/btrfs/btrfs.ko
+
+Running fs_mark also showed a tiny improvement with this script:
+
+   $ cat test.sh
+   #!/bin/bash
+
+   DEV=/dev/nullb0
+   MNT=/mnt/nullb0
+   FILES=100000
+   THREADS=$(nproc --all)
+
+   echo "performance" | \
+       tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
+   umount $DEV &> /dev/null
+   mkfs.btrfs -f $DEV
+   mount $DEV $MNT
+
+   OPTS="-S 0 -L 5 -n $FILES -s 0 -t $THREADS -k"
+   for ((i = 1; i <= $THREADS; i++)); do
+        OPTS="$OPTS -d $MNT/d$i"
+   done
+
+   fs_mark $OPTS
+
+   umount $MNT
+
+Before this change:
+
+   FSUse%        Count         Size    Files/sec     App Overhead
+       10      1200000            0     180894.0         10705410
+       16      2400000            0     228211.4         10765738
+       23      3600000            0     215969.6         11011072
+       30      4800000            0     199077.1         11145587
+       46      6000000            0     176624.1         11658470
+
+After this change:
+
+   FSUse%        Count         Size    Files/sec     App Overhead
+       10      1200000            0     185312.3         10708377
+       16      2400000            0     229320.4         10858013
+       23      3600000            0     217958.7         11006167
+       30      4800000            0     205122.9         11112899
+       46      6000000            0     178039.1         11438852
+
+[HH: trivial context fix for 6.8.0 in locking.h]
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/locking.c | 10 ----------
+ fs/btrfs/locking.h | 14 ++++++++++++--
+ 2 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/fs/btrfs/locking.c b/fs/btrfs/locking.c
+index 99ccab86bb86..1f355ca65910 100644
+--- a/fs/btrfs/locking.c
++++ b/fs/btrfs/locking.c
+@@ -147,11 +147,6 @@ void __btrfs_tree_read_lock(struct extent_buffer *eb, enum btrfs_lock_nesting ne
+ 	trace_btrfs_tree_read_lock(eb, start_ns);
+ }
+ 
+-void btrfs_tree_read_lock(struct extent_buffer *eb)
+-{
+-	__btrfs_tree_read_lock(eb, BTRFS_NESTING_NORMAL);
+-}
+-
+ /*
+  * Try-lock for read.
+  *
+@@ -211,11 +206,6 @@ void __btrfs_tree_lock(struct extent_buffer *eb, enum btrfs_lock_nesting nest)
+ 	trace_btrfs_tree_lock(eb, start_ns);
+ }
+ 
+-void btrfs_tree_lock(struct extent_buffer *eb)
+-{
+-	__btrfs_tree_lock(eb, BTRFS_NESTING_NORMAL);
+-}
+-
+ /*
+  * Release the write lock.
+  */
+diff --git a/fs/btrfs/locking.h b/fs/btrfs/locking.h
+index 9576f485a300..c30aff66e86f 100644
+--- a/fs/btrfs/locking.h
++++ b/fs/btrfs/locking.h
+@@ -164,11 +164,21 @@ static_assert(BTRFS_NESTING_MAX <= MAX_LOCKDEP_SUBCLASSES,
+ struct btrfs_path;
+ 
+ void __btrfs_tree_lock(struct extent_buffer *eb, enum btrfs_lock_nesting nest);
+-void btrfs_tree_lock(struct extent_buffer *eb);
++
++static inline void btrfs_tree_lock(struct extent_buffer *eb)
++{
++	__btrfs_tree_lock(eb, BTRFS_NESTING_NORMAL);
++}
++
+ void btrfs_tree_unlock(struct extent_buffer *eb);
+ 
+ void __btrfs_tree_read_lock(struct extent_buffer *eb, enum btrfs_lock_nesting nest);
+-void btrfs_tree_read_lock(struct extent_buffer *eb);
++
++static inline void btrfs_tree_read_lock(struct extent_buffer *eb)
++{
++	__btrfs_tree_read_lock(eb, BTRFS_NESTING_NORMAL);
++}
++
+ void btrfs_tree_read_unlock(struct extent_buffer *eb);
+ int btrfs_try_tree_read_lock(struct extent_buffer *eb);
+ int btrfs_try_tree_write_lock(struct extent_buffer *eb);
