@@ -1,0 +1,22 @@
+commit 1aaf043482149931ac8250b96b7286ce51488c9e (HEAD -> linux-6.8.y-prjc)
+Author: Alfred Chen <cchalpha@gmail.com>
+Date:   Sun Mar 17 10:46:00 2024 +0000
+
+    sched/alt: Fix sched_group_set_shares() missing-prototypes error
+    
+    Isse#97, there is missing-prototypes error for sched_group_set_shares()
+    when enable CONFIG_FAIR_GROUP_SCHED.
+
+diff --git a/kernel/sched/alt_core.c b/kernel/sched/alt_core.c
+index a8ee1063097d..1d5f5fc0a475 100644
+--- a/kernel/sched/alt_core.c
++++ b/kernel/sched/alt_core.c
+@@ -8107,7 +8107,7 @@ static void cpu_cgroup_attach(struct cgroup_taskset *tset)
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ static DEFINE_MUTEX(shares_mutex);
+ 
+-int sched_group_set_shares(struct task_group *tg, unsigned long shares)
++static int sched_group_set_shares(struct task_group *tg, unsigned long shares)
+ {
+ 	/*
+ 	 * We can't change the weight of the root cgroup.
