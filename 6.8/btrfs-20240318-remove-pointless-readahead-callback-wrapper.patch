@@ -1,0 +1,62 @@
+From: fdmanana@kernel.org
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH 1/2] btrfs: remove pointless readahead callback wrapper
+Date: Mon, 18 Mar 2024 12:14:55 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+There's no point in having a static readahead callback in inode.c that
+does nothing besides calling extent_readahead() from extent_io.c.
+So just remove the callback at inode.c and rename extent_readahead()
+to btrfs_readahead().
+
+[HH: small context fix for 6.8.x]
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/extent_io.c | 2 +-
+ fs/btrfs/extent_io.h | 2 +-
+ fs/btrfs/inode.c     | 5 -----
+ 3 files changed, 2 insertions(+), 7 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 7441245b1ceb..47a299b0fa2d 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -2277,7 +2277,7 @@ int extent_writepages(struct address_space *mapping,
+ 	return ret;
+ }
+ 
+-void extent_readahead(struct readahead_control *rac)
++void btrfs_readahead(struct readahead_control *rac)
+ {
+ 	struct btrfs_bio_ctrl bio_ctrl = { .opf = REQ_OP_READ | REQ_RAHEAD };
+ 	struct page *pagepool[16];
+diff --git a/fs/btrfs/extent_io.h b/fs/btrfs/extent_io.h
+index e3530d427e1f..eb123b0499e1 100644
+--- a/fs/btrfs/extent_io.h
++++ b/fs/btrfs/extent_io.h
+@@ -241,7 +241,7 @@ int extent_writepages(struct address_space *mapping,
+ 		      struct writeback_control *wbc);
+ int btree_write_cache_pages(struct address_space *mapping,
+ 			    struct writeback_control *wbc);
+-void extent_readahead(struct readahead_control *rac);
++void btrfs_readahead(struct readahead_control *rac);
+ int extent_fiemap(struct btrfs_inode *inode, struct fiemap_extent_info *fieinfo,
+ 		  u64 start, u64 len);
+ int set_page_extent_mapped(struct page *page);
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 37701531eeb1..e447a4f1d926 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -7919,11 +7919,6 @@ static int btrfs_writepages(struct address_space *mapping,
+ 	return extent_writepages(mapping, wbc);
+ }
+ 
+-static void btrfs_readahead(struct readahead_control *rac)
+-{
+-	extent_readahead(rac);
+-}
+-
+ /*
+  * For release_folio() and invalidate_folio() we have a race window where
+  * folio_end_writeback() is called but the subpage spinlock is not yet released.
