@@ -1,0 +1,15 @@
+
+https://bugzilla.kernel.org/show_bug.cgi?id=215884
+
+diff -rup a/drivers/pci/pcie/pme.c b/drivers/pci/pcie/pme.c
+--- a/drivers/pci/pcie/pme.c	2024-03-15 19:19:29.000000000 +0100
++++ b/drivers/pci/pcie/pme.c	2024-03-21 23:30:02.781804353 +0100
+@@ -203,8 +203,6 @@ static void pcie_pme_handle_request(stru
+ 	}
+ 
+  out:
+-	if (!found)
+-		pci_info(port, "Spurious native interrupt!\n");
+ }
+ 
+ /**
