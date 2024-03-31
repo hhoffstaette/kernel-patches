@@ -1,0 +1,32 @@
+From b874d4aae58b92144ec2c8fa5dc0a27c98388fcc Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Tue, 12 Mar 2024 15:58:41 -0600
+Subject: block: limit block time caching to in_task() context
+
+We should not have any callers of this from non-task context, but Jakub
+ran [1] into one from blk-iocost. Rather than risk running into others,
+or future ones, just limit blk_time_get_ns() to when it is called from
+a task. Any other usage is invalid.
+
+[1] https://lore.kernel.org/lkml/CAHk-=wiOaBLqarS2uFhM1YdwOvCX4CZaWkeyNDY1zONpbYw2ig@mail.gmail.com/
+
+Fixes: da4c8c3d0975 ("block: cache current nsec time in struct blk_plug")
+Reported-by: Jakub Kicinski <kuba@kernel.org>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/block/blk.h b/block/blk.h
+index a19b7b42e6503..5cac4e29ae174 100644
+--- a/block/blk.h
++++ b/block/blk.h
+@@ -534,7 +534,7 @@ static inline u64 blk_time_get_ns(void)
+ {
+ 	struct blk_plug *plug = current->plug;
+ 
+-	if (!plug)
++	if (!plug || !in_task())
+ 		return ktime_get_ns();
+ 
+ 	/*
