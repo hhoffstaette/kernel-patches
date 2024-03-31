@@ -27,7 +27,7 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 - btrfs: fixes from 6.9+
 - block: fixes & performance improvements from 6.9+ ([timestamps](https://lore.kernel.org/linux-block/20240126213827.2757115-1-axboe@kernel.dk/), [schedulers](https://lore.kernel.org/linux-block/20240123174021.1967461-1-axboe@kernel.dk/))
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
-- prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
+- ~~prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler~~ removed due to never-ending problems. :(
 - sched: fixes for EEVDF from 6.9+
 - xfs: fixes from 6.9+
 
