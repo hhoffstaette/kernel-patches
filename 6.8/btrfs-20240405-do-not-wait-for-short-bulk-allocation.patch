@@ -2,8 +2,8 @@ From: Qu Wenruo <wqu@suse.com>
 To: linux-btrfs@vger.kernel.org
 Cc: Julian Taylor <julian.taylor@1und1.de>,
 	Filipe Manana <fdmanana@suse.com>
-Subject: [PATCH v2] btrfs: do not wait for short bulk allocation
-Date: Tue, 26 Mar 2024 09:16:46 +1030
+Subject: [PATCH] btrfs: do not wait for short bulk allocation
+Date: Fri,  5 Apr 2024 08:13:11 +1030
 
 [BUG]
 There is a recent report that when memory pressure is high (including
@@ -49,6 +49,11 @@ Reviewed-by: Filipe Manana <fdmanana@suse.com>
 Signed-off-by: Qu Wenruo <wqu@suse.com>
 ---
 Changelog:
+v3:
+- Remove wait part completely
+  For NOFAIL metadata allocation, the allocation itself should not fail.
+  For regular allocation, we can afford the failure anyway.
+
 v2:
 - Still use bulk allocation function
   Since alloc_pages_bulk_array() would fall back to single page
@@ -59,14 +64,14 @@ v2:
   In fact, they only call it when they need to retry hard and can not
   really fail.
 ---
- fs/btrfs/extent_io.c | 22 +++++++++-------------
- 1 file changed, 9 insertions(+), 13 deletions(-)
+ fs/btrfs/extent_io.c | 18 ++++--------------
+ 1 file changed, 4 insertions(+), 14 deletions(-)
 
 diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
-index 7441245b1ceb..c96089b6f388 100644
+index bbdcb7475cea..48476f8fcf79 100644
 --- a/fs/btrfs/extent_io.c
 +++ b/fs/btrfs/extent_io.c
-@@ -681,31 +681,27 @@ static void end_bbio_data_read(struct btrfs_bio *bbio)
+@@ -712,31 +712,21 @@ int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array,
  int btrfs_alloc_page_array(unsigned int nr_pages, struct page **page_array,
  			   gfp_t extra_gfp)
  {
@@ -78,14 +83,7 @@ index 7441245b1ceb..c96089b6f388 100644
  
 -		allocated = alloc_pages_bulk_array(GFP_NOFS | extra_gfp,
 -						   nr_pages, page_array);
-+		allocated = alloc_pages_bulk_array(gfp, nr_pages, page_array);
-+		if (unlikely(allocated == last)) {
-+			/* Can not fail, wait and retry. */
-+			if (extra_gfp & __GFP_NOFAIL) {
-+				memalloc_retry_wait(GFP_NOFS);
-+				continue;
-+			}
- 
+-
 -		if (allocated == nr_pages)
 -			return 0;
 -
@@ -95,7 +93,9 @@ index 7441245b1ceb..c96089b6f388 100644
 -		 * if  it could not bulk-allocate. So we must be out of memory.
 -		 */
 -		if (allocated == last) {
-+			/* Allowed to fail, error out. */
++		allocated = alloc_pages_bulk_array(gfp, nr_pages, page_array);
++		if (unlikely(allocated == last)) {
++			/* Fail and do cleanup. */
  			for (int i = 0; i < allocated; i++) {
  				__free_page(page_array[i]);
  				page_array[i] = NULL;
