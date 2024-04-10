@@ -1,0 +1,57 @@
+From: "tip-bot2 for Sean Christopherson" <tip-bot2@linutronix.de>
+To: linux-tip-commits@vger.kernel.org
+Cc: Sean Christopherson <seanjc@google.com>, Ingo Molnar <mingo@kernel.org>,
+ Daniel Sneddon <daniel.sneddon@linux.intel.com>, stable@vger.kernel.org,
+ Linus Torvalds <torvalds@linux-foundation.org>, x86@kernel.org,
+ linux-kernel@vger.kernel.org
+Subject: [tip: x86/urgent] x86/cpu: Disable BHI mitigation by default when SPECULATION_MITIGATIONS=n
+Date: Wed, 10 Apr 2024 14:31:18 -0000
+
+The following commit has been merged into the x86/urgent branch of tip:
+
+Commit-ID:     e8f2ec1cc10e86adfc2089fb93a1158e69989bbd
+Gitweb:        https://git.kernel.org/tip/e8f2ec1cc10e86adfc2089fb93a1158e69989bbd
+Author:        Sean Christopherson <seanjc@google.com>
+AuthorDate:    Tue, 09 Apr 2024 10:51:06 -07:00
+Committer:     Ingo Molnar <mingo@kernel.org>
+CommitterDate: Wed, 10 Apr 2024 16:22:56 +02:00
+
+x86/cpu: Disable BHI mitigation by default when SPECULATION_MITIGATIONS=n
+
+Rework the initialization of bhi_mitigation to use positive CONFIG tests
+for the ON/AUTO cases so that lack of *any* CONFIG_SPECTRE_BHI_* #define,
+i.e. when the kernel is built with CONFIG_SPECULATION_MITIGATIONS=n,
+results in the mitigation being OFF by default, not AUTO.
+
+Per the help text for SPECULATION_MITIGATIONS, the intent is that 'N'
+disables all mitigations.
+
+Fixes: ec9404e40e8f ("x86/bhi: Add BHI mitigation knob")
+Signed-off-by: Sean Christopherson <seanjc@google.com>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Reviewed-by: Daniel Sneddon <daniel.sneddon@linux.intel.com>
+Cc: stable@vger.kernel.org
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Link: https://lore.kernel.org/r/20240409175108.1512861-3-seanjc@google.com
+---
+ arch/x86/kernel/cpu/bugs.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/x86/kernel/cpu/bugs.c b/arch/x86/kernel/cpu/bugs.c
+index 27f5004..7e4a706 100644
+--- a/arch/x86/kernel/cpu/bugs.c
++++ b/arch/x86/kernel/cpu/bugs.c
+@@ -1630,9 +1630,9 @@ enum bhi_mitigations {
+ };
+ 
+ static enum bhi_mitigations bhi_mitigation __ro_after_init =
+-	IS_ENABLED(CONFIG_SPECTRE_BHI_ON)  ? BHI_MITIGATION_ON  :
+-	IS_ENABLED(CONFIG_SPECTRE_BHI_OFF) ? BHI_MITIGATION_OFF :
+-					     BHI_MITIGATION_AUTO;
++	IS_ENABLED(CONFIG_SPECTRE_BHI_ON)   ? BHI_MITIGATION_ON  :
++	IS_ENABLED(CONFIG_SPECTRE_BHI_AUTO) ? BHI_MITIGATION_AUTO :
++					      BHI_MITIGATION_OFF;
+ 
+ static int __init spectre_bhi_parse_cmdline(char *str)
+ {
+
