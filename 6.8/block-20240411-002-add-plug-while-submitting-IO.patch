@@ -1,0 +1,60 @@
+From: Yu Kuai <yukuai1@huaweicloud.com>
+To: axboe@kernel.dk, johannes.thumshirn@wdc.com
+Cc: linux-block@vger.kernel.org, linux-kernel@vger.kernel.org, yukuai3@huawei.com, yukuai1@huaweicloud.com, yi.zhang@huawei.com, yangerkun@huawei.com
+Subject: [PATCH -next 2/2] block: add plug while submitting IO
+Date: Thu, 11 Apr 2024 11:23:49 +0800
+
+From: Yu Kuai <yukuai3@huawei.com>
+
+So that if caller didn't use plug, for example, __blkdev_direct_IO_simple()
+and __blkdev_direct_IO_async(), block layer can still benefit from caching
+nsec time in the plug. And if caller already use plug, then there should be
+no affect.
+
+Signed-off-by: Yu Kuai <yukuai3@huawei.com>
+---
+ block/blk-core.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/block/blk-core.c b/block/blk-core.c
+index e317d7bc0696..c833bc875a61 100644
+--- a/block/blk-core.c
++++ b/block/blk-core.c
+@@ -647,11 +647,13 @@ static void __submit_bio(struct bio *bio)
+ static void __submit_bio_noacct(struct bio *bio)
+ {
+ 	struct bio_list bio_list_on_stack[2];
++	struct blk_plug plug;
+ 
+ 	BUG_ON(bio->bi_next);
+ 
+ 	bio_list_init(&bio_list_on_stack[0]);
+ 	current->bio_list = bio_list_on_stack;
++	blk_start_plug(&plug);
+ 
+ 	do {
+ 		struct request_queue *q = bdev_get_queue(bio->bi_bdev);
+@@ -685,19 +687,23 @@ static void __submit_bio_noacct(struct bio *bio)
+ 		bio_list_merge(&bio_list_on_stack[0], &bio_list_on_stack[1]);
+ 	} while ((bio = bio_list_pop(&bio_list_on_stack[0])));
+ 
++	blk_finish_plug(&plug);
+ 	current->bio_list = NULL;
+ }
+ 
+ static void __submit_bio_noacct_mq(struct bio *bio)
+ {
+ 	struct bio_list bio_list[2] = { };
++	struct blk_plug plug;
+ 
+ 	current->bio_list = bio_list;
++	blk_start_plug(&plug);
+ 
+ 	do {
+ 		__submit_bio(bio);
+ 	} while ((bio = bio_list_pop(&bio_list[0])));
+ 
++	blk_finish_plug(&plug);
+ 	current->bio_list = NULL;
+ }
+ 
