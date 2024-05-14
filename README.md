@@ -24,7 +24,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2024-03-25)**
+**Current status (2024-05-14)**
+
+- 6.9.0 is available for testing.
 
 - 6.8.x is my current production branch.
 
