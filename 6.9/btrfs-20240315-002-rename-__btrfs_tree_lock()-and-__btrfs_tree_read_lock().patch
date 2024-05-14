@@ -125,8 +125,8 @@ index c30aff66e86f..1bc8e6738879 100644
 --- a/fs/btrfs/locking.h
 +++ b/fs/btrfs/locking.h
 @@ -163,20 +163,20 @@ enum btrfs_lockdep_trans_states {
- 
- struct btrfs_path;
+ static_assert(BTRFS_NESTING_MAX <= MAX_LOCKDEP_SUBCLASSES,
+ 	      "too many lock subclasses defined");
  
 -void __btrfs_tree_lock(struct extent_buffer *eb, enum btrfs_lock_nesting nest);
 +void btrfs_tree_lock_nested(struct extent_buffer *eb, enum btrfs_lock_nesting nest);
