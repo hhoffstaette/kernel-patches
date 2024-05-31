@@ -1,0 +1,196 @@
+From: Qu Wenruo <wqu@suse.com>
+To: linux-btrfs@vger.kernel.org
+Cc: Linus Torvalds <torvalds@linux-foundation.org>,
+	Mikhail Gavrilov <mikhail.v.gavrilov@gmail.com>
+Subject: [PATCH RFC] btrfs: fix a possible race window when allocating new extent buffers
+Date: Fri, 31 May 2024 14:14:11 +0930
+
+[POSSIBLE RACE]
+Commit 09e6cef19c9f ("btrfs: refactor alloc_extent_buffer() to
+allocate-then-attach method") changes the sequence when allocating a new
+extent buffer.
+
+Previously we always call grab_extent_buffer() under
+mapping->i_private_lock, thus there is no chance for race to happen
+between extent buffer releasing and allocating.
+
+However that commit changed the behavior to call grab_extent_buffer()
+without holding that lock, making the following race possible:
+
+            Thread A            |          Thread B
+ -------------------------------+----------------------------------
+                                | btree_release_folio()
+ 			        | |- btrfs_release_extent_buffer_pages()
+ attach_eb_folio_to_filemap()   | |  |- detach_extent_buffer_folio()
+ |                              | \- return 1 so that this folio would be
+ |                              |    released from page cache
+ |-grab_extent_buffer()         |
+ | Now it returns no eb, we can |
+ | reuse the folio              |
+
+This would make the newly allocated extent buffer to point to a soon to
+be freed folio.
+The problem is not immediately triggered, as the we still hold one extra
+folio refcount from thread A.
+
+But later mostly at extent buffer release, if we put the last refcount
+of the folio (only hold by ourselves), then we can hit various problems.
+
+The most common one is the bad folio status:
+
+ BUG: Bad page state in process kswapd0  pfn:d6e840
+ page: refcount:0 mapcount:0 mapping:000000007512f4f2 index:0x2796c2c7c
+ pfn:0xd6e840
+ aops:btree_aops ino:1
+ flags: 0x17ffffe0000008(uptodate|node=0|zone=2|lastcpupid=0x3fffff)
+ page_type: 0xffffffff()
+ raw: 0017ffffe0000008 dead000000000100 dead000000000122 ffff88826d0be4c0
+ raw: 00000002796c2c7c 0000000000000000 00000000ffffffff 0000000000000000
+ page dumped because: non-NULL mapping
+
+[FIX]
+Move all the code requiring i_private_lock into
+attach_eb_folio_to_filemap(), so that everything is done with proper
+lock protection.
+
+Reported-by: Linus Torvalds <torvalds@linux-foundation.org>
+Link: https://lore.kernel.org/linux-btrfs/CAHk-=wgt362nGfScVOOii8cgKn2LVVHeOvOA7OBwg1OwbuJQcw@mail.gmail.com/
+Reported-by: Mikhail Gavrilov <mikhail.v.gavrilov@gmail.com>
+Link: https://lore.kernel.org/lkml/CABXGCsPktcHQOvKTbPaTwegMExije=Gpgci5NW=hqORo-s7diA@mail.gmail.com/
+Fixes: 09e6cef19c9f ("btrfs: refactor alloc_extent_buffer() to allocate-then-attach method")
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+---
+Reason for RFC:
+
+I do not have a reliable enough way to reproduce the bug, nor enough
+confidence on the btree_release_folio() race.
+
+But so far this is the most sounding possibility, any extra testing
+would be appreciated.
+---
+ fs/btrfs/extent_io.c | 53 ++++++++++++++++++++++----------------------
+ 1 file changed, 27 insertions(+), 26 deletions(-)
+
+diff --git a/fs/btrfs/extent_io.c b/fs/btrfs/extent_io.c
+index 0c74f7df2e8b..86d2714018a4 100644
+--- a/fs/btrfs/extent_io.c
++++ b/fs/btrfs/extent_io.c
+@@ -2980,13 +2980,14 @@ static int check_eb_alignment(struct btrfs_fs_info *fs_info, u64 start)
+  * The caller needs to free the existing folios and retry using the same order.
+  */
+ static int attach_eb_folio_to_filemap(struct extent_buffer *eb, int i,
++				      struct btrfs_subpage *prealloc,
+ 				      struct extent_buffer **found_eb_ret)
+ {
+ 
+ 	struct btrfs_fs_info *fs_info = eb->fs_info;
+ 	struct address_space *mapping = fs_info->btree_inode->i_mapping;
+ 	const unsigned long index = eb->start >> PAGE_SHIFT;
+-	struct folio *existing_folio;
++	struct folio *existing_folio = NULL;
+ 	int ret;
+ 
+ 	ASSERT(found_eb_ret);
+@@ -2998,7 +2999,7 @@ static int attach_eb_folio_to_filemap(struct extent_buffer *eb, int i,
+ 	ret = filemap_add_folio(mapping, eb->folios[i], index + i,
+ 				GFP_NOFS | __GFP_NOFAIL);
+ 	if (!ret)
+-		return 0;
++		goto finish;
+ 
+ 	existing_folio = filemap_lock_folio(mapping, index + i);
+ 	/* The page cache only exists for a very short time, just retry. */
+@@ -3014,14 +3015,16 @@ static int attach_eb_folio_to_filemap(struct extent_buffer *eb, int i,
+ 		return -EAGAIN;
+ 	}
+ 
+-	if (fs_info->nodesize < PAGE_SIZE) {
++finish:
++	spin_lock(&mapping->i_private_lock);
++	if (existing_folio && fs_info->nodesize < PAGE_SIZE) {
+ 		/*
+-		 * We're going to reuse the existing page, can drop our page
+-		 * and subpage structure now.
++		 * We're going to reuse the existing page, can drop our folio
++		 * now.
+ 		 */
+ 		__free_page(folio_page(eb->folios[i], 0));
+ 		eb->folios[i] = existing_folio;
+-	} else {
++	} else if (existing_folio) {
+ 		struct extent_buffer *existing_eb;
+ 
+ 		existing_eb = grab_extent_buffer(fs_info,
+@@ -3029,6 +3032,7 @@ static int attach_eb_folio_to_filemap(struct extent_buffer *eb, int i,
+ 		if (existing_eb) {
+ 			/* The extent buffer still exists, we can use it directly. */
+ 			*found_eb_ret = existing_eb;
++			spin_unlock(&mapping->i_private_lock);
+ 			folio_unlock(existing_folio);
+ 			folio_put(existing_folio);
+ 			return 1;
+@@ -3037,6 +3041,22 @@ static int attach_eb_folio_to_filemap(struct extent_buffer *eb, int i,
+ 		__free_page(folio_page(eb->folios[i], 0));
+ 		eb->folios[i] = existing_folio;
+ 	}
++	eb->folio_size = folio_size(eb->folios[i]);
++	eb->folio_shift = folio_shift(eb->folios[i]);
++	/* Should not fail, as we have preallocated the memory */
++	ret = attach_extent_buffer_folio(eb, eb->folios[i], prealloc);
++	ASSERT(!ret);
++	/*
++	 * To inform we have extra eb under allocation, so that
++	 * detach_extent_buffer_page() won't release the folio private
++	 * when the eb hasn't yet been inserted into radix tree.
++	 *
++	 * The ref will be decreased when the eb released the page, in
++	 * detach_extent_buffer_page().
++	 * Thus needs no special handling in error path.
++	 */
++	btrfs_folio_inc_eb_refs(fs_info, eb->folios[i]);
++	spin_unlock(&mapping->i_private_lock);
+ 	return 0;
+ }
+ 
+@@ -3048,7 +3068,6 @@ struct extent_buffer *alloc_extent_buffer(struct btrfs_fs_info *fs_info,
+ 	int attached = 0;
+ 	struct extent_buffer *eb;
+ 	struct extent_buffer *existing_eb = NULL;
+-	struct address_space *mapping = fs_info->btree_inode->i_mapping;
+ 	struct btrfs_subpage *prealloc = NULL;
+ 	u64 lockdep_owner = owner_root;
+ 	bool page_contig = true;
+@@ -3114,7 +3133,7 @@ struct extent_buffer *alloc_extent_buffer(struct btrfs_fs_info *fs_info,
+ 	for (int i = 0; i < num_folios; i++) {
+ 		struct folio *folio;
+ 
+-		ret = attach_eb_folio_to_filemap(eb, i, &existing_eb);
++		ret = attach_eb_folio_to_filemap(eb, i, prealloc, &existing_eb);
+ 		if (ret > 0) {
+ 			ASSERT(existing_eb);
+ 			goto out;
+@@ -3151,24 +3170,6 @@ struct extent_buffer *alloc_extent_buffer(struct btrfs_fs_info *fs_info,
+ 		 * and free the allocated page.
+ 		 */
+ 		folio = eb->folios[i];
+-		eb->folio_size = folio_size(folio);
+-		eb->folio_shift = folio_shift(folio);
+-		spin_lock(&mapping->i_private_lock);
+-		/* Should not fail, as we have preallocated the memory */
+-		ret = attach_extent_buffer_folio(eb, folio, prealloc);
+-		ASSERT(!ret);
+-		/*
+-		 * To inform we have extra eb under allocation, so that
+-		 * detach_extent_buffer_page() won't release the folio private
+-		 * when the eb hasn't yet been inserted into radix tree.
+-		 *
+-		 * The ref will be decreased when the eb released the page, in
+-		 * detach_extent_buffer_page().
+-		 * Thus needs no special handling in error path.
+-		 */
+-		btrfs_folio_inc_eb_refs(fs_info, folio);
+-		spin_unlock(&mapping->i_private_lock);
+-
+ 		WARN_ON(btrfs_folio_test_dirty(fs_info, folio, eb->start, eb->len));
+ 
+ 		/*
