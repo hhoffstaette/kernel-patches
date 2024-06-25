@@ -1,0 +1,19 @@
+
+My AMD RX 550 (Polaris) seems to have problems getting out of bed
+after suspend/resume, so do not spam the kernel log just because
+a scheduler is still sleepy.
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+diff -rup a/drivers/gpu/drm/scheduler/sched_main.c b/drivers/gpu/drm/scheduler/sched_main.c
+--- a/drivers/gpu/drm/scheduler/sched_main.c	2024-06-16 13:51:16.000000000 +0200
++++ b/drivers/gpu/drm/scheduler/sched_main.c	2024-06-20 19:07:47.305741754 +0200
+@@ -1128,8 +1128,6 @@ drm_sched_pick_best(struct drm_gpu_sched
+ 		sched = sched_list[i];
+ 
+ 		if (!sched->ready) {
+-			DRM_WARN("scheduler %s is not ready, skipping",
+-				 sched->name);
+ 			continue;
+ 		}
+ 
