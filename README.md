@@ -26,4 +26,5 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - block: performance improvements ([schedulers](https://lore.kernel.org/linux-block/20240123174021.1967461-1-axboe@kernel.dk/))
 - kconfig: support for `-march=native` ([repository](https://github.com/graysky2/kernel_compiler_patch))
+- prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
 
