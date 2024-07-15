@@ -14,6 +14,7 @@ lock contention reduction is just eating up by the same dd->lock now
 seeing increased insertion contention. But it's required work to be
 able to reduce the lock contention in general.
 
+[HH: small context fixes for 6.10]
 Reviewed-by: Bart Van Assche <bvanassche@acm.org>
 Tested-by: Oleksandr Natalenko <oleksandr@natalenko.name>
 Signed-off-by: Jens Axboe <axboe@kernel.dk>
@@ -46,13 +47,12 @@ index 9b7563e9d638ed..79bc3b6784b373 100644
  
  	struct dd_per_prio per_prio[DD_PRIO_COUNT];
  
-@@ -100,9 +110,6 @@ struct deadline_data {
+@@ -100,8 +110,6 @@ struct deadline_data {
  	int front_merges;
  	u32 async_depth;
  	int prio_aging_expire;
 -
 -	spinlock_t lock;
--	spinlock_t zone_lock;
  };
  
  /* Maps an I/O priority class to a deadline scheduler priority. */
@@ -93,12 +93,11 @@ index 9b7563e9d638ed..79bc3b6784b373 100644
  	for (prio = 0; prio <= DD_PRIO_MAX; prio++) {
  		struct dd_per_prio *per_prio = &dd->per_prio[prio];
  
-@@ -722,8 +745,6 @@ static int dd_init_sched(struct request_queue *q, struct elevator_type *e)
+@@ -722,7 +745,6 @@ static int dd_init_sched(struct request_queue *q, struct elevator_type *e)
  	dd->last_dir = DD_WRITE;
  	dd->fifo_batch = fifo_batch;
  	dd->prio_aging_expire = prio_aging_expire;
 -	spin_lock_init(&dd->lock);
--	spin_lock_init(&dd->zone_lock);
  
  	/* We dispatch from request queue wide instead of hw queue */
  	blk_queue_flag_set(QUEUE_FLAG_SQ_SCHED, q);
