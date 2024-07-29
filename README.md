@@ -24,11 +24,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2024-07-15)**
+**Current status (2024-07-29)**
 
-- 6.10.x is available for testing, with re-added ProjectC due to several requests.
+- 6.10.x is my current production branch.
 
-- 6.9.x is my current production branch.
-
-- all other branches < 6.9 are EOL for me.
+- all other branches < 6.10 are EOL for me.
 
