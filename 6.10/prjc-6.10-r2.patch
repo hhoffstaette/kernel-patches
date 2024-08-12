@@ -158,10 +158,10 @@ index 8874f681b056..59eb72bf7d5f 100644
  	[RLIMIT_RTTIME]		= {  RLIM_INFINITY,  RLIM_INFINITY },	\
  }
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index a5f4b48fca18..185915486068 100644
+index a5f4b48fca18..b775fc92142a 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -774,9 +774,16 @@ struct task_struct {
+@@ -774,9 +774,13 @@ struct task_struct {
  	struct alloc_tag		*alloc_tag;
  #endif
  
@@ -170,16 +170,13 @@ index a5f4b48fca18..185915486068 100644
  	int				on_cpu;
 +#endif
 +
-+#if defined(CONFIG_SMP) && defined(CONFIG_SCHED_ALT)
- 	struct __call_single_node	wake_entry;
-+#endif
-+
 +#ifdef CONFIG_SMP
+ 	struct __call_single_node	wake_entry;
 +#ifndef CONFIG_SCHED_ALT
  	unsigned int			wakee_flips;
  	unsigned long			wakee_flip_decay_ts;
  	struct task_struct		*last_wakee;
-@@ -790,6 +797,7 @@ struct task_struct {
+@@ -790,6 +794,7 @@ struct task_struct {
  	 */
  	int				recent_used_cpu;
  	int				wake_cpu;
@@ -187,7 +184,7 @@ index a5f4b48fca18..185915486068 100644
  #endif
  	int				on_rq;
  
-@@ -798,6 +806,19 @@ struct task_struct {
+@@ -798,6 +803,19 @@ struct task_struct {
  	int				normal_prio;
  	unsigned int			rt_priority;
  
@@ -207,7 +204,7 @@ index a5f4b48fca18..185915486068 100644
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
  	struct sched_dl_entity		dl;
-@@ -809,6 +830,7 @@ struct task_struct {
+@@ -809,6 +827,7 @@ struct task_struct {
  	unsigned long			core_cookie;
  	unsigned int			core_occupation;
  #endif
@@ -215,7 +212,7 @@ index a5f4b48fca18..185915486068 100644
  
  #ifdef CONFIG_CGROUP_SCHED
  	struct task_group		*sched_task_group;
-@@ -1571,6 +1593,15 @@ struct task_struct {
+@@ -1571,6 +1590,15 @@ struct task_struct {
  	 */
  };
  
@@ -661,7 +658,7 @@ index 976092b7bd45..31d587c16ec1 100644
  obj-y += build_utility.o
 diff --git a/kernel/sched/alt_core.c b/kernel/sched/alt_core.c
 new file mode 100644
-index 000000000000..e6e200e28f4e
+index 000000000000..6fa0058d2649
 --- /dev/null
 +++ b/kernel/sched/alt_core.c
 @@ -0,0 +1,8809 @@
@@ -743,7 +740,7 @@ index 000000000000..e6e200e28f4e
 +#define sched_feat(x)	(0)
 +#endif /* CONFIG_SCHED_DEBUG */
 +
-+#define ALT_SCHED_VERSION "v6.10-r1"
++#define ALT_SCHED_VERSION "v6.10-r2"
 +
 +/* rt_prio(prio) defined in include/linux/sched/rt.h */
 +#define rt_task(p)		rt_prio((p)->prio)
