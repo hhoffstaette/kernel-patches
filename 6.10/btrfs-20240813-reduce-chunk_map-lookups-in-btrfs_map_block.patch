@@ -1,0 +1,123 @@
+From: Johannes Thumshirn <jth@kernel.org>
+To: Chris Mason <clm@fb.com>,
+	Josef Bacik <josef@toxicpanda.com>,
+	David Sterba <dsterba@suse.com>,
+	linux-btrfs@vger.kernel.org (open list:BTRFS FILE SYSTEM),
+	linux-kernel@vger.kernel.org (open list)
+Cc: Johannes Thumshirn <johannes.thumshirn@wdc.com>,
+	Qu Wenruo <wqu@suse.com>
+Subject: [PATCH v3] btrfs: reduce chunk_map lookups in btrfs_map_block
+Date: Tue, 13 Aug 2024 13:36:40 +0200
+
+From: Johannes Thumshirn <johannes.thumshirn@wdc.com>
+
+Currently we're calling btrfs_num_copies() before btrfs_get_chunk_map() in
+btrfs_map_block(). But btrfs_num_copies() itself does a chunk map lookup
+to be able to calculate the number of copies.
+
+So split out the code getting the number of copies from btrfs_num_copies()
+into a helper called btrfs_chunk_map_num_copies() and directly call it
+from btrfs_map_block() and btrfs_num_copies().
+
+This saves us one rbtree lookup per btrfs_map_block() invocation.
+
+Reviewed-by: Qu Wenruo <wqu@suse.com>
+Signed-off-by: Johannes Thumshirn <johannes.thumshirn@wdc.com>
+---
+Changes in v2:
+- Added Reviewed-bys
+- Reflowed comments
+- Moved non RAID56 cases to the end without an if
+Link to v1:
+https://lore.kernel.org/all/20240812165931.9106-1-jth@kernel.org/
+
+Changes in v3:
+- constified btrfs_chunk_map_num_copies() parameter
+- fixed accidentially changed comment
+Link to v2:
+https://lore.kernel.org/all/bc73d318c7f24196cdc7305b6a6ce516fb4fc81d.1723546054.git.jth@kernel.org/
+
+ fs/btrfs/volumes.c | 49 +++++++++++++++++++++++++---------------------
+ 1 file changed, 27 insertions(+), 22 deletions(-)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index e07452207426..4b9b647a7e29 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -5781,11 +5781,31 @@ void btrfs_mapping_tree_free(struct btrfs_fs_info *fs_info)
+ 	write_unlock(&fs_info->mapping_tree_lock);
+ }
+ 
++static int btrfs_chunk_map_num_copies(const struct btrfs_chunk_map *map)
++{
++	enum btrfs_raid_types index = btrfs_bg_flags_to_raid_index(map->type);
++
++	if (map->type & BTRFS_BLOCK_GROUP_RAID5)
++		return 2;
++
++	/*
++	 * There could be two corrupted data stripes, we need to loop
++	 * retry in order to rebuild the correct data.
++	 *
++	 * Fail a stripe at a time on every retry except the stripe
++	 * under reconstruction.
++	 */
++	if (map->type & BTRFS_BLOCK_GROUP_RAID6)
++		return map->num_stripes;
++
++	/* Non-RAID56, use their ncopies from btrfs_raid_array. */
++	return btrfs_raid_array[index].ncopies;
++}
++
+ int btrfs_num_copies(struct btrfs_fs_info *fs_info, u64 logical, u64 len)
+ {
+ 	struct btrfs_chunk_map *map;
+-	enum btrfs_raid_types index;
+-	int ret = 1;
++	int ret;
+ 
+ 	map = btrfs_get_chunk_map(fs_info, logical, len);
+ 	if (IS_ERR(map))
+@@ -5797,22 +5817,7 @@ int btrfs_num_copies(struct btrfs_fs_info *fs_info, u64 logical, u64 len)
+ 		 */
+ 		return 1;
+ 
+-	index = btrfs_bg_flags_to_raid_index(map->type);
+-
+-	/* Non-RAID56, use their ncopies from btrfs_raid_array. */
+-	if (!(map->type & BTRFS_BLOCK_GROUP_RAID56_MASK))
+-		ret = btrfs_raid_array[index].ncopies;
+-	else if (map->type & BTRFS_BLOCK_GROUP_RAID5)
+-		ret = 2;
+-	else if (map->type & BTRFS_BLOCK_GROUP_RAID6)
+-		/*
+-		 * There could be two corrupted data stripes, we need
+-		 * to loop retry in order to rebuild the correct data.
+-		 *
+-		 * Fail a stripe at a time on every retry except the
+-		 * stripe under reconstruction.
+-		 */
+-		ret = map->num_stripes;
++	ret = btrfs_chunk_map_num_copies(map);
+ 	btrfs_free_chunk_map(map);
+ 	return ret;
+ }
+@@ -6462,14 +6467,14 @@ int btrfs_map_block(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
+ 	io_geom.stripe_index = 0;
+ 	io_geom.op = op;
+ 
+-	num_copies = btrfs_num_copies(fs_info, logical, fs_info->sectorsize);
+-	if (io_geom.mirror_num > num_copies)
+-		return -EINVAL;
+-
+ 	map = btrfs_get_chunk_map(fs_info, logical, *length);
+ 	if (IS_ERR(map))
+ 		return PTR_ERR(map);
+ 
++	num_copies = btrfs_chunk_map_num_copies(map);
++	if (io_geom.mirror_num > num_copies)
++		return -EINVAL;
++
+ 	map_offset = logical - map->start;
+ 	io_geom.raid56_full_stripe_start = (u64)-1;
+ 	max_len = btrfs_max_io_len(map, map_offset, &io_geom);
