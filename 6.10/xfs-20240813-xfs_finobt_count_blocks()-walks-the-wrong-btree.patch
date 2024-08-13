@@ -1,0 +1,128 @@
+From: Dave Chinner <david@fromorbit.com>
+To: Anders Blomdell <anders.blomdell@gmail.com>
+Cc: linux-xfs@vger.kernel.org,
+	"linux-kernel@vger.kernel.org" <linux-kernel@vger.kernel.org>,
+	Chandan Babu R <chandan.babu@oracle.com>,
+	"Darrick J. Wong" <djwong@kernel.org>,
+	Christoph Hellwig <hch@lst.de>
+Subject: Re: XFS mount timeout in linux-6.9.11
+Date: Tue, 13 Aug 2024 19:19:28 +1000
+
+On Mon, Aug 12, 2024 at 03:03:49PM +0200, Anders Blomdell wrote:
+> On 2024-08-12 02:04, Dave Chinner wrote:
+> > 
+> > Ok, can you run the same series of commands but this time in another
+> > shell run this command and leave it running for the entire
+> > mount/unmount/mount/unmount sequence:
+> > 
+> > # trace-cmd record -e xfs\* -e printk
+
+[snip location of trace]
+
+> > That will tell me what XFS is doing different at mount time on the
+> > different kernels.
+> Looks like a timing issue, a trylock fails and brings about a READ_AHEAD burst.
+
+Not timing - it is definitely a bug in the commit the bisect pointed
+at.
+
+However, it's almost impossible to actually see until someone or
+something (the trace) points it out directly.
+
+The trace confirmed what I suspected - the READ_AHEAD stuff you see
+is an inode btree being walked. I knew that we walk the free inode
+btrees during mount unless you have a specific feature bit set, but
+I didn't think your filesystem is new enough to have that feature
+set according to the xfs_info output.
+
+However, I couldn't work out why the free inode btrees would take
+that long to walk as the finobt generally tends towards empty on any
+filesystem that is frequently allocating inodes. The mount time on
+the old kernel indicates they are pretty much empty, because the
+mount time is under a second and it's walked all 8 finobts *twice*
+during mount.
+
+What the trace pointed out was that the finobt walk to calculate
+AG reserve space wasn't actually walking the finobt - it was walking
+the inobt. That indexes all allocated inodes, so mount was walking
+the btrees that index the ~30 million allocated inodes in the
+filesystem. That takes a lot of IO, and that's the 450s pause 
+to calculate reserves before we run log recovery, and then the
+second 450s pause occurs after log recovery because we have to
+recalculate the reserves once all the intents and unlinked inodes
+have been replayed.
+
+>From that observation, it was just a matter of tracking down the
+code that is triggering the walk and working out why it was running
+down the wrong inobt....
+
+In hindsight, this was a wholly avoidable bug - a single patch made
+two different API modifications that only differed by a single
+letter, and one of the 23 conversions missed a single letter. If
+that was two patches - one for the finobt conversion, the second for
+the inobt conversion, the bug would have been plainly obvious during
+review....
+
+Anders, can you try the patch below? It should fix your issue.
+
+-Dave.
+-- 
+Dave Chinner
+david@fromorbit.com
+
+xfs: xfs_finobt_count_blocks() walks the wrong btree
+
+From: Dave Chinner <dchinner@redhat.com>
+
+As a result of the factoring in commit 14dd46cf31f4 ("xfs: split
+xfs_inobt_init_cursor"), mount started taking a long time on a
+user's filesystem.  For Anders, this made mount times regress from
+under a second to over 15 minutes for a filesystem with only 30
+million inodes in it.
+
+Anders bisected it down to the above commit, but even then the bug
+was not obvious. In this commit, over 20 calls to
+xfs_inobt_init_cursor() were modified, and some we modified to call
+a new function named xfs_finobt_init_cursor().
+
+If that takes you a moment to reread those function names to see
+what the rename was, then you have realised why this bug wasn't
+spotted during review. And it wasn't spotted on inspection even
+after the bisect pointed at this commit - a single missing "f" isn't
+the easiest thing for a human eye to notice....
+
+The result is that xfs_finobt_count_blocks() now incorrectly calls
+xfs_inobt_init_cursor() so it is now walking the inobt instead of
+the finobt. Hence when there are lots of allocated inodes in a
+filesystem, mount takes a -long- time run because it now walks a
+massive allocated inode btrees instead of the small, nearly empty
+free inode btrees. It also means all the finobt space reservations
+are wrong, so mount could potentially given ENOSPC on kernel
+upgrade.
+
+In hindsight, commit 14dd46cf31f4 should have been two commits - the
+first to convert the finobt callers to the new API, the second to
+modify the xfs_inobt_init_cursor() API for the inobt callers. That
+would have made the bug very obvious during review.
+
+Fixes: 14dd46cf31f4 ("xfs: split xfs_inobt_init_cursor")
+Reported-by: Anders Blomdell <anders.blomdell@gmail.com>
+Signed-off-by: Dave Chinner <dchinner@redhat.com>
+---
+ fs/xfs/libxfs/xfs_ialloc_btree.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/xfs/libxfs/xfs_ialloc_btree.c b/fs/xfs/libxfs/xfs_ialloc_btree.c
+index 496e2f72a85b..797d5b5f7b72 100644
+--- a/fs/xfs/libxfs/xfs_ialloc_btree.c
++++ b/fs/xfs/libxfs/xfs_ialloc_btree.c
+@@ -749,7 +749,7 @@ xfs_finobt_count_blocks(
+ 	if (error)
+ 		return error;
+ 
+-	cur = xfs_inobt_init_cursor(pag, tp, agbp);
++	cur = xfs_finobt_init_cursor(pag, tp, agbp);
+ 	error = xfs_btree_count_blocks(cur, tree_blocks);
+ 	xfs_btree_del_cursor(cur, error);
+ 	xfs_trans_brelse(tp, agbp);
+
