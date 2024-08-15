@@ -1,0 +1,51 @@
+From: Mingrui Zhang <mrzhang97@gmail.com>
+To: edumazet@google.com,
+	davem@davemloft.net,
+	ncardwell@google.com,
+	netdev@vger.kernel.org
+Cc: Mingrui Zhang <mrzhang97@gmail.com>,
+	Lisong Xu <xu@unl.edu>
+Subject: [PATCH net v4 1/3] tcp_cubic: fix to run bictcp_update() at least once per RTT
+Date: Sat, 17 Aug 2024 11:33:58 -0500
+
+The original code bypasses bictcp_update() under certain conditions
+to reduce the CPU overhead. Intuitively, when last_cwnd==cwnd,
+bictcp_update() is executed 32 times per second. As a result, 
+it is possible that bictcp_update() is not executed for several 
+RTTs when RTT is short (specifically < 1/32 second = 31 ms and 
+last_cwnd==cwnd which may happen in small-BDP networks), 
+thus leading to low throughput in these RTTs.
+
+The patched code executes bictcp_update() 32 times per second
+if RTT > 31 ms or every RTT if RTT < 31 ms, when last_cwnd==cwnd.
+
+Fixes: df3271f3361b ("[TCP] BIC: CUBIC window growth (2.0)")
+Fixes: ac35f562203a ("tcp: bic, cubic: use tcp_jiffies32 instead of tcp_time_stamp")
+Signed-off-by: Mingrui Zhang <mrzhang97@gmail.com>
+Signed-off-by: Lisong Xu <xu@unl.edu>
+---
+v3->v4: Replace min() with min_t()
+v2->v3: Correct the "Fixes:" footer content
+v1->v2: Separate patches
+
+ net/ipv4/tcp_cubic.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp_cubic.c b/net/ipv4/tcp_cubic.c
+index 5dbed91c6178..00da7d592032 100644
+--- a/net/ipv4/tcp_cubic.c
++++ b/net/ipv4/tcp_cubic.c
+@@ -218,8 +218,12 @@ static inline void bictcp_update(struct bictcp *ca, u32 cwnd, u32 acked)
+ 
+ 	ca->ack_cnt += acked;	/* count the number of ACKed packets */
+ 
++	/* Update 32 times per second if RTT > 1/32 second,
++	 * or every RTT if RTT < 1/32 second even when last_cwnd == cwnd
++	 */
+ 	if (ca->last_cwnd == cwnd &&
+-	    (s32)(tcp_jiffies32 - ca->last_time) <= HZ / 32)
++	    (s32)(tcp_jiffies32 - ca->last_time) <=
++	    min_t(s32, HZ / 32, usecs_to_jiffies(ca->delay_min)))
+ 		return;
+ 
+ 	/* The CUBIC function can update ca->cnt at most once per jiffy.

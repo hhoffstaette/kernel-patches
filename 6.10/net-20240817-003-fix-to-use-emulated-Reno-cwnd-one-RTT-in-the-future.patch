@@ -1,0 +1,55 @@
+From: Mingrui Zhang <mrzhang97@gmail.com>
+To: edumazet@google.com,
+	davem@davemloft.net,
+	ncardwell@google.com,
+	netdev@vger.kernel.org
+Cc: Mingrui Zhang <mrzhang97@gmail.com>,
+	Lisong Xu <xu@unl.edu>
+Subject: [PATCH net v4 3/3] tcp_cubic: fix to use emulated Reno cwnd one RTT in the future
+Date: Sat, 17 Aug 2024 11:34:00 -0500
+
+The original code estimates RENO snd_cwnd using the estimated 
+RENO snd_cwnd at the current time (i.e., tcp_cwnd).
+
+The patched code estimates RENO snd_cwnd using the estimated 
+RENO snd_cwnd after one RTT (i.e., tcp_cwnd_next_rtt), 
+because ca->cnt is used to increase snd_cwnd for the next RTT.
+
+Fixes: 89b3d9aaf467 ("[TCP] cubic: precompute constants")
+Signed-off-by: Mingrui Zhang <mrzhang97@gmail.com>
+Signed-off-by: Lisong Xu <xu@unl.edu>
+---
+v3->v4: Separate declarations and code of tcp_cwnd_next_rtt
+v2->v3: Correct the "Fixes:" footer content
+v1->v2: Separate patches
+
+ net/ipv4/tcp_cubic.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/net/ipv4/tcp_cubic.c b/net/ipv4/tcp_cubic.c
+index 03cfbad37dab..2d7121ca789e 100644
+--- a/net/ipv4/tcp_cubic.c
++++ b/net/ipv4/tcp_cubic.c
+@@ -304,7 +304,7 @@ static inline void bictcp_update(struct bictcp *ca, u32 cwnd, u32 acked)
+ tcp_friendliness:
+ 	/* TCP Friendly */
+ 	if (tcp_friendliness) {
+-		u32 scale = beta_scale;
++		u32 scale = beta_scale, tcp_cwnd_next_rtt;
+ 
+ 		if (cwnd < ca->cwnd_prior)
+ 			delta = (cwnd * scale) >> 3;	/* CUBIC additive increment */
+@@ -315,8 +315,11 @@ static inline void bictcp_update(struct bictcp *ca, u32 cwnd, u32 acked)
+ 			ca->tcp_cwnd++;
+ 		}
+ 
+-		if (ca->tcp_cwnd > cwnd) {	/* if bic is slower than tcp */
+-			delta = ca->tcp_cwnd - cwnd;
++		/* Reno cwnd one RTT in the future */
++		tcp_cwnd_next_rtt = ca->tcp_cwnd + (ca->ack_cnt + cwnd) / delta;
++
++		if (tcp_cwnd_next_rtt > cwnd) {  /* if bic is slower than Reno */
++			delta = tcp_cwnd_next_rtt - cwnd;
+ 			max_cnt = cwnd / delta;
+ 			if (ca->cnt > max_cnt)
+ 				ca->cnt = max_cnt;

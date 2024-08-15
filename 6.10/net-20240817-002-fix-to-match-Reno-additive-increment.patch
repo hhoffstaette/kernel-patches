@@ -1,0 +1,64 @@
+From: Mingrui Zhang <mrzhang97@gmail.com>
+To: edumazet@google.com,
+	davem@davemloft.net,
+	ncardwell@google.com,
+	netdev@vger.kernel.org
+Cc: Mingrui Zhang <mrzhang97@gmail.com>,
+	Lisong Xu <xu@unl.edu>
+Subject: [PATCH net v4 2/3] tcp_cubic: fix to match Reno additive increment
+Date: Sat, 17 Aug 2024 11:33:59 -0500
+
+The original code follows RFC 8312 (obsoleted CUBIC RFC).
+
+The patched code follows RFC 9438 (new CUBIC RFC):
+"Once _W_est_ has grown to reach the _cwnd_ at the time of most
+recently setting _ssthresh_ -- that is, _W_est_ >= _cwnd_prior_ --
+the sender SHOULD set α__cubic_ to 1 to ensure that it can achieve
+the same congestion window increment rate as Reno, which uses AIMD
+(1,0.5)."
+
+Add new field 'cwnd_prior' in bictcp to hold cwnd before a loss event
+
+Fixes: 89b3d9aaf467 ("[TCP] cubic: precompute constants")
+Signed-off-by: Mingrui Zhang <mrzhang97@gmail.com>
+Signed-off-by: Lisong Xu <xu@unl.edu>
+---
+v2->v3: Correct the "Fixes:" footer content
+v1->v2: Add new field 'cwnd_prior' in bictcp to hold cwnd before a loss event
+v1->v2: Separate patches
+
+ net/ipv4/tcp_cubic.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/net/ipv4/tcp_cubic.c b/net/ipv4/tcp_cubic.c
+index 00da7d592032..03cfbad37dab 100644
+--- a/net/ipv4/tcp_cubic.c
++++ b/net/ipv4/tcp_cubic.c
+@@ -102,6 +102,7 @@ struct bictcp {
+ 	u32	end_seq;	/* end_seq of the round */
+ 	u32	last_ack;	/* last time when the ACK spacing is close */
+ 	u32	curr_rtt;	/* the minimum rtt of current round */
++	u32	cwnd_prior;	/* cwnd before a loss event */
+ };
+ 
+ static inline void bictcp_reset(struct bictcp *ca)
+@@ -305,7 +306,10 @@ static inline void bictcp_update(struct bictcp *ca, u32 cwnd, u32 acked)
+ 	if (tcp_friendliness) {
+ 		u32 scale = beta_scale;
+ 
+-		delta = (cwnd * scale) >> 3;
++		if (cwnd < ca->cwnd_prior)
++			delta = (cwnd * scale) >> 3;	/* CUBIC additive increment */
++		else
++			delta = cwnd;			/* Reno additive increment */
+ 		while (ca->ack_cnt > delta) {		/* update tcp cwnd */
+ 			ca->ack_cnt -= delta;
+ 			ca->tcp_cwnd++;
+@@ -355,6 +359,7 @@ __bpf_kfunc static u32 cubictcp_recalc_ssthresh(struct sock *sk)
+ 			/ (2 * BICTCP_BETA_SCALE);
+ 	else
+ 		ca->last_max_cwnd = tcp_snd_cwnd(tp);
++	ca->cwnd_prior = tcp_snd_cwnd(tp);
+ 
+ 	return max((tcp_snd_cwnd(tp) * beta) / BICTCP_BETA_SCALE, 2U);
+ }
