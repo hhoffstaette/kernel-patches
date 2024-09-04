@@ -1,0 +1,108 @@
+From: Muchun Song <songmuchun@bytedance.com>
+To: axboe@kernel.dk,
+	ming.lei@redhat.com,
+	yukuai1@huaweicloud.com
+Cc: linux-block@vger.kernel.org,
+	linux-kernel@vger.kernel.org,
+	muchun.song@linux.dev,
+	Muchun Song <songmuchun@bytedance.com>,
+	stable@vger.kernel.org
+Subject: [PATCH v2 3/3] block: fix ordering between checking BLK_MQ_S_STOPPED and adding requests
+Date: Tue,  3 Sep 2024 16:16:53 +0800
+
+Supposing first scenario with a virtio_blk driver.
+
+CPU0                                                                CPU1
+
+blk_mq_try_issue_directly()
+    __blk_mq_issue_directly()
+        q->mq_ops->queue_rq()
+            virtio_queue_rq()
+                blk_mq_stop_hw_queue()
+                                                                    virtblk_done()
+    blk_mq_request_bypass_insert()                                      blk_mq_start_stopped_hw_queues()
+        /* Add IO request to dispatch list */   1) store                    blk_mq_start_stopped_hw_queue()
+                                                                                clear_bit(BLK_MQ_S_STOPPED)                 3) store
+    blk_mq_run_hw_queue()                                                       blk_mq_run_hw_queue()
+        if (!blk_mq_hctx_has_pending())                                             if (!blk_mq_hctx_has_pending())         4) load
+            return                                                                      return
+        blk_mq_sched_dispatch_requests()                                            blk_mq_sched_dispatch_requests()
+            if (blk_mq_hctx_stopped())          2) load                                 if (blk_mq_hctx_stopped())
+                return                                                                      return
+            __blk_mq_sched_dispatch_requests()                                          __blk_mq_sched_dispatch_requests()
+
+Supposing another scenario.
+
+CPU0                                                                CPU1
+
+blk_mq_requeue_work()
+    /* Add IO request to dispatch list */       1) store            virtblk_done()
+    blk_mq_run_hw_queues()/blk_mq_delay_run_hw_queues()                 blk_mq_start_stopped_hw_queues()
+        if (blk_mq_hctx_stopped())              2) load                     blk_mq_start_stopped_hw_queue()
+            continue                                                            clear_bit(BLK_MQ_S_STOPPED)                 3) store
+        blk_mq_run_hw_queue()/blk_mq_delay_run_hw_queue()                       blk_mq_run_hw_queue()
+                                                                                    if (!blk_mq_hctx_has_pending())         4) load
+                                                                                        return
+                                                                                    blk_mq_sched_dispatch_requests()
+
+Both scenarios are similar, the full memory barrier should be inserted between
+1) and 2), as well as between 3) and 4) to make sure that either CPU0 sees
+BLK_MQ_S_STOPPED is cleared or CPU1 sees dispatch list. Otherwise, either CPU
+will not rerun the hardware queue causing starvation of the request.
+
+The easy way to fix it is to add the essential full memory barrier into helper
+of blk_mq_hctx_stopped(). In order to not affect the fast path (hardware queue
+is not stopped most of the time), we only insert the barrier into the slow path.
+Actually, only slow path needs to care about missing of dispatching the request
+to the low-level device driver.
+
+Fixes: 320ae51feed5c ("blk-mq: new multi-queue block IO queueing mechanism")
+Cc: stable@vger.kernel.org
+Cc: Muchun Song <muchun.song@linux.dev>
+Signed-off-by: Muchun Song <songmuchun@bytedance.com>
+---
+ block/blk-mq.c |  6 ++++++
+ block/blk-mq.h | 13 +++++++++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index ac39f2a346a52..48a6a437fba5e 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -2413,6 +2413,12 @@ void blk_mq_start_stopped_hw_queue(struct blk_mq_hw_ctx *hctx, bool async)
+ 		return;
+ 
+ 	clear_bit(BLK_MQ_S_STOPPED, &hctx->state);
++	/*
++	 * Pairs with the smp_mb() in blk_mq_hctx_stopped() to order the
++	 * clearing of BLK_MQ_S_STOPPED above and the checking of dispatch
++	 * list in the subsequent routine.
++	 */
++	smp_mb__after_atomic();
+ 	blk_mq_run_hw_queue(hctx, async);
+ }
+ EXPORT_SYMBOL_GPL(blk_mq_start_stopped_hw_queue);
+diff --git a/block/blk-mq.h b/block/blk-mq.h
+index 260beea8e332c..f36f3bff70d86 100644
+--- a/block/blk-mq.h
++++ b/block/blk-mq.h
+@@ -228,6 +228,19 @@ static inline struct blk_mq_tags *blk_mq_tags_from_data(struct blk_mq_alloc_data
+ 
+ static inline bool blk_mq_hctx_stopped(struct blk_mq_hw_ctx *hctx)
+ {
++	/* Fast path: hardware queue is not stopped most of the time. */
++	if (likely(!test_bit(BLK_MQ_S_STOPPED, &hctx->state)))
++		return false;
++
++	/*
++	 * This barrier is used to order adding of dispatch list before and
++	 * the test of BLK_MQ_S_STOPPED below. Pairs with the memory barrier
++	 * in blk_mq_start_stopped_hw_queue() so that dispatch code could
++	 * either see BLK_MQ_S_STOPPED is cleared or dispatch list is not
++	 * empty to avoid missing dispatching requests.
++	 */
++	smp_mb();
++
+ 	return test_bit(BLK_MQ_S_STOPPED, &hctx->state);
+ }
+ 
