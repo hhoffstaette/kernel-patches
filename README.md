@@ -5,7 +5,7 @@ Custom Linux kernel patches for vanilla upstream Linux, organized by major
 version similar to Greg KH's -stable queue.
 
 These patches were born out of an initial need to apply "just a few fixes"
-to [btrfs](https://btrfs.wiki.kernel.org/), and eventually grew to include both
+to [btrfs](https://btrfs.readthedocs.io/), and eventually grew to include both
 additional features and performance/scalability improvements to the entire kernel.
 
 To apply over a release:
