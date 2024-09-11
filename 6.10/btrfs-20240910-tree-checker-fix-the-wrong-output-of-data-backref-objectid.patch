@@ -1,0 +1,49 @@
+From: Qu Wenruo <wqu@suse.com>
+To: linux-btrfs@vger.kernel.org
+Cc: Neil Parton <njparton@gmail.com>,
+	Archange <archange@archlinux.org>
+Subject: [PATCH] btrfs: tree-checker: fix the wrong output of data backref objectid
+Date: Wed, 11 Sep 2024 07:06:45 +0930
+
+[BUG]
+There are some reports about bad data backref objectids, the report
+looks like this:
+
+[  195.128789] BTRFS critical (device sda): corrupt leaf: block=333654787489792 slot=110 extent bytenr=333413935558656 len=65536 invalid data ref objectid value 2543
+
+The data ref objectid is the inode number inside the subvolume.
+
+But in above case, the value is completely sane, not really showing the
+problem.
+
+[CAUSE]
+The output itself is using dref_root, which is the subvolume id of the
+backref.
+
+[FIX]
+Fix the output to use dref_objectid instead.
+
+The root cause of that invalid dref_objectid is still under
+investigation.
+
+Reported-by: Neil Parton <njparton@gmail.com>
+Reported-by: Archange <archange@archlinux.org>
+Fixes: f333a3c7e832 ("btrfs: tree-checker: validate dref root and objectid")
+Signed-off-by: Qu Wenruo <wqu@suse.com>
+---
+ fs/btrfs/tree-checker.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/tree-checker.c b/fs/btrfs/tree-checker.c
+index 634d69964fe4..7b50263723bc 100644
+--- a/fs/btrfs/tree-checker.c
++++ b/fs/btrfs/tree-checker.c
+@@ -1517,7 +1517,7 @@ static int check_extent_item(struct extent_buffer *leaf,
+ 				     dref_objectid > BTRFS_LAST_FREE_OBJECTID)) {
+ 				extent_err(leaf, slot,
+ 					   "invalid data ref objectid value %llu",
+-					   dref_root);
++					   dref_objectid);
+ 				return -EUCLEAN;
+ 			}
+ 			if (unlikely(!IS_ALIGNED(dref_offset,
