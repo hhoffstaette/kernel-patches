@@ -24,11 +24,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2024-09-16)**
+**Current status (2024-10-04)**
 
-- 6.11.x is available for testing.
+- 6.11.x is my current production branch.
 
-- 6.10.x is my current production branch.
-
-- all other branches < 6.10 are EOL for me.
+- all other branches < 6.11 are EOL for me.
 
