@@ -24,9 +24,12 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2024-10-04)**
+**Current status (2024-10-21)**
 
 - 6.11.x is my current production branch.
+
+- Starting with 6.11.5 I have switched from ProjectC to the BORE scheduler extension,
+  since it provides vastly better & actually correct behaviour under load.
 
 - all other branches < 6.11 are EOL for me.
 
