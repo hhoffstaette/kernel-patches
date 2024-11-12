@@ -1,0 +1,52 @@
+From: Chi Zhiling <chizhiling@kylinos.cn>
+Subject: xfs: Reduce unnecessary searches when searching for the best extents
+Date: Fri, 25 Oct 2024 10:33:20 +0800
+
+Recently, we found that the CPU spent a lot of time in
+xfs_alloc_ag_vextent_size when the filesystem has millions of fragmented
+spaces.
+
+The reason is that we conducted much extra searching for extents that
+could not yield a better result, and these searches would cost a lot of
+time when there were millions of extents to search through. Even if we
+get the same result length, we don't switch our choice to the new one,
+so we can definitely terminate the search early.
+
+Since the result length cannot exceed the found length, when the found
+length equals the best result length we already have, we can conclude
+the search.
+
+We did a test in that filesystem:
+[root@localhost ~]# xfs_db -c freesp /dev/vdb
+   from      to extents  blocks    pct
+      1       1     215     215   0.01
+      2       3  994476 1988952  99.99
+
+Before this patch:
+ 0)               |  xfs_alloc_ag_vextent_size [xfs]() {
+ 0) * 15597.94 us |  }
+
+After this patch:
+ 0)               |  xfs_alloc_ag_vextent_size [xfs]() {
+ 0)   19.176 us    |  }
+
+Signed-off-by: Chi Zhiling <chizhiling@kylinos.cn>
+Reviewed-by: Dave Chinner <dchinner@redhat.com>
+Signed-off-by: Carlos Maiolino <cem@kernel.org>
+---
+ fs/xfs/libxfs/xfs_alloc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/xfs/libxfs/xfs_alloc.c b/fs/xfs/libxfs/xfs_alloc.c
+index 04f64cf9777e21..22bdbb3e9980c4 100644
+--- a/fs/xfs/libxfs/xfs_alloc.c
++++ b/fs/xfs/libxfs/xfs_alloc.c
+@@ -1923,7 +1923,7 @@ xfs_alloc_ag_vextent_size(
+ 				error = -EFSCORRUPTED;
+ 				goto error0;
+ 			}
+-			if (flen < bestrlen)
++			if (flen <= bestrlen)
+ 				break;
+ 			busy = xfs_alloc_compute_aligned(args, fbno, flen,
+ 					&rbno, &rlen, &busy_gen);
