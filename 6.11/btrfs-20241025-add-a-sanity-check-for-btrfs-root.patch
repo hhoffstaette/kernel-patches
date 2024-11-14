@@ -1,0 +1,44 @@
+From: Lizhi Xu <lizhi.xu@windriver.com>
+To: <syzbot+3030e17bd57a73d39bd7@syzkaller.appspotmail.com>
+CC: <clm@fb.com>, <dsterba@suse.com>, <josef@toxicpanda.com>,
+        <linux-btrfs@vger.kernel.org>, <linux-kernel@vger.kernel.org>,
+        <syzkaller-bugs@googlegroups.com>
+Subject: [PATCH] btrfs: add a sanity check for btrfs root
+Date: Fri, 25 Oct 2024 12:55:53 +0800
+
+Syzbot report a null-ptr-deref in btrfs_search_slot.
+It use the input logical can't find the extent root in extent_from_logical,
+and triger the null-ptr-deref in btrfs_search_slot.
+Add sanity check for btrfs root before using it in btrfs_search_slot.
+
+Reported-by: syzbot+3030e17bd57a73d39bd7@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=3030e17bd57a73d39bd7
+Signed-off-by: Lizhi Xu <lizhi.xu@windriver.com>
+---
+ fs/btrfs/ctree.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index 0cc919d15b14..9c05cab473f5 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -2010,7 +2010,7 @@ int btrfs_search_slot(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+ 		      const struct btrfs_key *key, struct btrfs_path *p,
+ 		      int ins_len, int cow)
+ {
+-	struct btrfs_fs_info *fs_info = root->fs_info;
++	struct btrfs_fs_info *fs_info;
+ 	struct extent_buffer *b;
+ 	int slot;
+ 	int ret;
+@@ -2023,6 +2023,10 @@ int btrfs_search_slot(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+ 	int min_write_lock_level;
+ 	int prev_cmp;
+ 
++	if (!root)
++		return -EINVAL;
++
++	fs_info = root->fs_info;
+ 	might_sleep();
+ 
+ 	lowest_level = p->lowest_level;
