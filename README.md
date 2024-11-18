@@ -22,7 +22,7 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**Series: 6.11**
+**Series: 6.12**
 
 - block: performance improvements ([schedulers](https://lore.kernel.org/linux-block/20240123174021.1967461-1-axboe@kernel.dk/))
 - bore: [BORE](https://github.com/firelzrd/bore-scheduler) CPU scheduler tuning extension
