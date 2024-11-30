@@ -1,7 +1,7 @@
-From ddf0c4299fc8d40e7a0a5bf7a7528d1941c51def Mon Sep 17 00:00:00 2001
+From c4cfb8356de3acdfa1af3ddd7e0a343984f774c5 Mon Sep 17 00:00:00 2001
 From: Masahito S <firelzrd@gmail.com>
-Date: Thu, 7 Nov 2024 01:47:21 +0900
-Subject: [PATCH] linux6.12.y-bore5.7.3
+Date: Sat, 30 Nov 2024 17:35:57 +0900
+Subject: [PATCH] linux6.12.y-bore5.7.4
 
 ---
  include/linux/sched.h      |  17 ++
@@ -10,12 +10,12 @@ Subject: [PATCH] linux6.12.y-bore5.7.3
  kernel/Kconfig.hz          |  17 ++
  kernel/fork.c              |   5 +
  kernel/sched/Makefile      |   1 +
- kernel/sched/bore.c        | 381 +++++++++++++++++++++++++++++++++++++
+ kernel/sched/bore.c        | 388 +++++++++++++++++++++++++++++++++++++
  kernel/sched/core.c        |   7 +
  kernel/sched/debug.c       |  61 +++++-
- kernel/sched/fair.c        |  75 +++++++-
+ kernel/sched/fair.c        |  75 ++++++-
  kernel/sched/sched.h       |   9 +
- 11 files changed, 622 insertions(+), 5 deletions(-)
+ 11 files changed, 629 insertions(+), 5 deletions(-)
  create mode 100644 include/linux/sched/bore.h
  create mode 100644 kernel/sched/bore.c
 
@@ -186,10 +186,10 @@ index 976092b7bd..293aad6754 100644
 +obj-y += bore.o
 diff --git a/kernel/sched/bore.c b/kernel/sched/bore.c
 new file mode 100644
-index 0000000000..cd7e8a8d60
+index 0000000000..4b6ba38d18
 --- /dev/null
 +++ b/kernel/sched/bore.c
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,388 @@
 +/*
 + *  Burst-Oriented Response Enhancer (BORE) CPU Scheduler
 + *  Copyright (C) 2021-2024 Masahito Suzuki <firelzrd@gmail.com>
@@ -445,15 +445,22 @@ index 0000000000..cd7e8a8d60
 +
 +void sched_clone_bore(
 +	struct task_struct *p, struct task_struct *parent, u64 clone_flags) {
++	u64 now;
++	u8 penalty;
++
 +	if (!task_is_bore_eligible(p)) return;
 +
-+	u64 now = ktime_get_ns();
++	now = ktime_get_ns();
 +	read_lock(&tasklist_lock);
-+	u8 penalty = (clone_flags & CLONE_THREAD) ?
-+		inherit_burst_tg(parent, now) :
-+		likely(sched_burst_fork_atavistic) ?
++	if (clone_flags & CLONE_THREAD) {
++		penalty = inherit_burst_tg(parent, now);
++	} else {
++		if (clone_flags & CLONE_PARENT)
++			parent = parent->real_parent;
++		penalty = likely(sched_burst_fork_atavistic) ?
 +			inherit_burst_topological(parent, now):
 +			inherit_burst_direct(parent, now);
++	}
 +	read_unlock(&tasklist_lock);
 +
 +	struct sched_entity *se = &p->se;
@@ -572,7 +579,7 @@ index 0000000000..cd7e8a8d60
 +#endif // CONFIG_SYSCTL
 +#endif // CONFIG_SCHED_BORE
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 719e0ed1e9..02f8b49573 100644
+index a1c353a62c..ab853b3f36 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -97,6 +97,8 @@
@@ -584,12 +591,12 @@ index 719e0ed1e9..02f8b49573 100644
  EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpu);
  EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpumask);
  
-@@ -8377,6 +8379,11 @@ void __init sched_init(void)
+@@ -8380,6 +8382,11 @@ void __init sched_init(void)
  	BUG_ON(!sched_class_above(&ext_sched_class, &idle_sched_class));
  #endif
  
 +#ifdef CONFIG_SCHED_BORE
-+	printk(KERN_INFO "BORE (Burst-Oriented Response Enhancer) CPU Scheduler modification 5.7.3 by Masahito Suzuki");
++	printk(KERN_INFO "BORE (Burst-Oriented Response Enhancer) CPU Scheduler modification 5.7.4 by Masahito Suzuki");
 +	init_task_bore(&init_task);
 +#endif // CONFIG_SCHED_BORE
 +
@@ -915,10 +922,10 @@ index 2d16c8545c..94c54154a1 100644
  }
  
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 6c54a57275..4100562c8e 100644
+index c03b3d7b32..bbe2f77aa4 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -2074,7 +2074,11 @@ static inline void update_sched_domain_debugfs(void) { }
+@@ -2075,7 +2075,11 @@ static inline void update_sched_domain_debugfs(void) { }
  static inline void dirty_sched_domain_sysctl(int cpu) { }
  #endif
  
@@ -930,7 +937,7 @@ index 6c54a57275..4100562c8e 100644
  
  static inline const struct cpumask *task_user_cpus(struct task_struct *p)
  {
-@@ -2824,7 +2828,12 @@ extern void wakeup_preempt(struct rq *rq, struct task_struct *p, int flags);
+@@ -2825,7 +2829,12 @@ extern void wakeup_preempt(struct rq *rq, struct task_struct *p, int flags);
  extern const_debug unsigned int sysctl_sched_nr_migrate;
  extern const_debug unsigned int sysctl_sched_migration_cost;
  
