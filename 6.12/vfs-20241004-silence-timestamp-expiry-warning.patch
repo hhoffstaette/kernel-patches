@@ -1,11 +1,18 @@
 
 These timestamp warnings are well-intended but totally unhelpful in reality.
 
-diff --git a/fs/namespace.c~ b/fs/namespace.c
-index a6675c2..19e2cd4 100644
---- a/fs/namespace.c~
-+++ b/fs/namespace.c
-@@ -2855,8 +2855,6 @@ static int do_reconfigure_mnt(struct path *path, unsigned int mnt_flags)
+diff -rup a/fs/namespace.c b/fs/namespace.c
+--- a/fs/namespace.c	2024-12-09 10:41:16.000000000 +0100
++++ b/fs/namespace.c	2024-12-14 16:45:32.000899975 +0100
+@@ -2941,6 +2941,7 @@ static void set_mount_attributes(struct
+ 	touch_mnt_namespace(mnt->mnt_ns);
+ }
+ 
++__attribute__((unused))
+ static void mnt_warn_timestamp_expiry(struct path *mountpoint, struct vfsmount *mnt)
+ {
+ 	struct super_block *sb = mnt->mnt_sb;
+@@ -3002,8 +3003,6 @@ static int do_reconfigure_mnt(struct pat
  	unlock_mount_hash();
  	up_read(&sb->s_umount);
  
@@ -14,7 +21,7 @@ index a6675c2..19e2cd4 100644
  	return ret;
  }
  
-@@ -2907,8 +2905,6 @@ static int do_remount(struct path *path, int ms_flags, int sb_flags,
+@@ -3054,8 +3053,6 @@ static int do_remount(struct path *path,
  		up_write(&sb->s_umount);
  	}
  
@@ -23,7 +30,7 @@ index a6675c2..19e2cd4 100644
  	put_fs_context(fc);
  	return err;
  }
-@@ -3292,8 +3288,6 @@ static int do_new_mount_fc(struct fs_context *fc, struct path *mountpoint,
+@@ -3439,8 +3436,6 @@ static int do_new_mount_fc(struct fs_con
  	if (IS_ERR(mnt))
  		return PTR_ERR(mnt);
  
