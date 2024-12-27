@@ -898,9 +898,9 @@ index 2d16c8545c..94c54154a1 100644
  	 * When joining the competition; the existing tasks will be,
  	 * on average, halfway through their slice, as such start tasks
 @@ -7097,6 +7140,14 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
- 		p = task_of(se);
- 		h_nr_running = 1;
  		idle_h_nr_running = task_has_idle_policy(p);
+ 		if (!task_sleep && !task_delayed)
+ 			h_nr_delayed = !!se->sched_delayed;
 +#ifdef CONFIG_SCHED_BORE
 +		if (task_sleep) {
 +			cfs_rq = cfs_rq_of(se);
