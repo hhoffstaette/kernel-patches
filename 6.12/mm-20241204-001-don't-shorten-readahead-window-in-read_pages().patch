@@ -1,0 +1,63 @@
+From: Jan Kara <jack@suse.cz>
+Subject: readahead: don't shorten readahead window in read_pages()
+Date: Wed, 4 Dec 2024 19:10:15 +0100
+
+Patch series "readahead: Reintroduce fix for improper RA window sizing".
+
+This small patch series reintroduces a fix of readahead window confusion
+(and thus read throughput reduction) when page_cache_ra_order() ends up
+failing due to folios already present in the page cache.  After thinking
+about this for a while I have ended up with a dumb fix that just rechecks
+if we have something to read before calling do_page_cache_ra().  This
+fixes the problem reported in [1].  I still think it doesn't make much
+sense to update readahead window size in read_pages() so patch 1 removes
+that but the real fix in patch 2 does not depend on it.
+
+[1] https://lore.kernel.org/all/49648605-d800-4859-be49-624bbe60519d@gmail.com
+
+
+This patch (of 2):
+
+When ->readahead callback doesn't read all requested pages, read_pages()
+shortens the readahead window (ra->size).  However we don't know why pages
+were not read and what appropriate window size is.  So don't try to
+secondguess the filesystem.  If it needs different readahead window, it
+should set it manually similarly as during expansion the filesystem can
+use readahead_expand().
+
+Link: https://lkml.kernel.org/r/20241204181016.15273-1-jack@suse.cz
+Link: https://lkml.kernel.org/r/20241204181016.15273-2-jack@suse.cz
+Signed-off-by: Jan Kara <jack@suse.cz>
+Cc: Matthew Wilcox <willy@infradead.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/readahead.c | 14 ++------------
+ 1 file changed, 2 insertions(+), 12 deletions(-)
+
+diff --git a/mm/readahead.c b/mm/readahead.c
+index e151f4b13ca4bd..50a64d8e06b0ad 100644
+--- a/mm/readahead.c
++++ b/mm/readahead.c
+@@ -158,20 +158,10 @@ static void read_pages(struct readahead_control *rac)
+ 
+ 	if (aops->readahead) {
+ 		aops->readahead(rac);
+-		/*
+-		 * Clean up the remaining folios.  The sizes in ->ra
+-		 * may be used to size the next readahead, so make sure
+-		 * they accurately reflect what happened.
+-		 */
++		/* Clean up the remaining folios. */
+ 		while ((folio = readahead_folio(rac)) != NULL) {
+-			unsigned long nr = folio_nr_pages(folio);
+-
+ 			folio_get(folio);
+-			rac->ra->size -= nr;
+-			if (rac->ra->async_size >= nr) {
+-				rac->ra->async_size -= nr;
+-				filemap_remove_folio(folio);
+-			}
++			filemap_remove_folio(folio);
+ 			folio_unlock(folio);
+ 			folio_put(folio);
+ 		}
