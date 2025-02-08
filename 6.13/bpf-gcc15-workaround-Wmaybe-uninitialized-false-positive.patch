@@ -1,0 +1,90 @@
+From: Sam James <sam@gentoo.org>
+Subject: [PATCH v2] libbpf: workaround -Wmaybe-uninitialized false positive
+Date: Fri, 09 Aug 2024 18:26:41 +0100
+
+In `elf_close`, we get this with GCC 15 -O3 (at least):
+```
+In function ‘elf_close’,
+    inlined from ‘elf_close’ at elf.c:53:6,
+    inlined from ‘elf_find_func_offset_from_file’ at elf.c:384:2:
+elf.c:57:9: warning: ‘elf_fd.elf’ may be used uninitialized [-Wmaybe-uninitialized]
+   57 |         elf_end(elf_fd->elf);
+      |         ^~~~~~~~~~~~~~~~~~~~
+elf.c: In function ‘elf_find_func_offset_from_file’:
+elf.c:377:23: note: ‘elf_fd.elf’ was declared here
+  377 |         struct elf_fd elf_fd;
+      |                       ^~~~~~
+In function ‘elf_close’,
+    inlined from ‘elf_close’ at elf.c:53:6,
+    inlined from ‘elf_find_func_offset_from_file’ at elf.c:384:2:
+elf.c:58:9: warning: ‘elf_fd.fd’ may be used uninitialized [-Wmaybe-uninitialized]
+   58 |         close(elf_fd->fd);
+      |         ^~~~~~~~~~~~~~~~~
+elf.c: In function ‘elf_find_func_offset_from_file’:
+elf.c:377:23: note: ‘elf_fd.fd’ was declared here
+  377 |         struct elf_fd elf_fd;
+      |                       ^~~~~~
+```
+
+In reality, our use is fine, it's just that GCC doesn't model errno
+here (see linked GCC bug). Suppress -Wmaybe-uninitialized accordingly.
+
+Link: https://gcc.gnu.org/PR114952
+Signed-off-by: Sam James <sam@gentoo.org>
+---
+v2: Fix Clang build.
+
+Range-diff against v1:
+1:  3ebbe7a4e93a ! 1:  8f5c3b173e4c libbpf: workaround -Wmaybe-uninitialized false positive
+    @@ tools/lib/bpf/elf.c: long elf_find_func_offset(Elf *elf, const char *binary_path
+      	return ret;
+      }
+      
+    ++#if !defined(__clang__)
+     +#pragma GCC diagnostic push
+     +/* https://gcc.gnu.org/PR114952 */
+     +#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+    ++#endif
+      /* Find offset of function name in ELF object specified by path. "name" matches
+       * symbol name or name@@LIB for library functions.
+       */
+    @@ tools/lib/bpf/elf.c: long elf_find_func_offset_from_file(const char *binary_path
+      	elf_close(&elf_fd);
+      	return ret;
+      }
+    ++#if !defined(__clang__)
+     +#pragma GCC diagnostic pop
+    ++#endif
+      
+      struct symbol {
+      	const char *name;
+
+ tools/lib/bpf/elf.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/tools/lib/bpf/elf.c b/tools/lib/bpf/elf.c
+index c92e02394159..7058425ca85b 100644
+--- a/tools/lib/bpf/elf.c
++++ b/tools/lib/bpf/elf.c
+@@ -369,6 +369,11 @@ long elf_find_func_offset(Elf *elf, const char *binary_path, const char *name)
+ 	return ret;
+ }
+ 
++#if !defined(__clang__)
++#pragma GCC diagnostic push
++/* https://gcc.gnu.org/PR114952 */
++#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
++#endif
+ /* Find offset of function name in ELF object specified by path. "name" matches
+  * symbol name or name@@LIB for library functions.
+  */
+@@ -384,6 +389,9 @@ long elf_find_func_offset_from_file(const char *binary_path, const char *name)
+ 	elf_close(&elf_fd);
+ 	return ret;
+ }
++#if !defined(__clang__)
++#pragma GCC diagnostic pop
++#endif
+ 
+ struct symbol {
+ 	const char *name;
