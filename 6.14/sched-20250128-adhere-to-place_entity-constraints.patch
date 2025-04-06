@@ -12,19 +12,18 @@ definition -- the average of one element matches the value of that
 element. Therefore place_entity() will match the condition skipping
 the lag adjustment:
 
-  if (sched_feat(PLACE_LAG) && cfs_rq->nr_running && se->vlag) {
+  if (sched_feat(PLACE_LAG) && cfs_rq->nr_queued && se->vlag) {
 
 Without the 'se->vlag' condition -- it will attempt to adjust the zero
 lag even though we're inserting into an empty tree.
 
-Notably, we should have failed the 'cfs_rq->nr_running' condition, but
+Notably, we should have failed the 'cfs_rq->nr_queued' condition, but
 don't because they didn't get updated.
 
 Additionally, move update_load_add() after placement() as is
 consistent with other place_entity() users -- this change is
 non-functional, place_entity() does not use cfs_rq->load.
 
-[HH: backported to6.13]
 Fixes: 6d71a9c61604 ("sched/fair: Fix EEVDF entity placement bug causing scheduling lag")
 Reported-by: Mike Galbraith <efault@gmx.de>
 Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
@@ -40,7 +39,7 @@ Link: https://lkml.kernel.org/r/20250128143949.GD7145@noisy.programming.kicks-as
  		update_entity_lag(cfs_rq, se);
  		se->deadline -= se->vruntime;
  		se->rel_deadline = 1;
-+		cfs_rq->nr_running--;
++		cfs_rq->nr_queued--;
  		if (!curr)
  			__dequeue_entity(cfs_rq, se);
  		update_load_sub(&cfs_rq->load, se->load.weight);
@@ -53,7 +52,7 @@ Link: https://lkml.kernel.org/r/20250128143949.GD7145@noisy.programming.kicks-as
 +		update_load_add(&cfs_rq->load, se->load.weight);
  		if (!curr)
  			__enqueue_entity(cfs_rq, se);
-+		cfs_rq->nr_running++;
++		cfs_rq->nr_queued++;
  
  		/*
  		 * The entity's vruntime has been adjusted, so let's check
