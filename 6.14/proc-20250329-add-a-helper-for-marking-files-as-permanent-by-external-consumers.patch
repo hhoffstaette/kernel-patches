@@ -1,0 +1,44 @@
+From: Mateusz Guzik <mjguzik@gmail.com>
+Date: Sat, 29 Mar 2025 20:28:20 +0100
+Subject: proc: add a helper for marking files as permanent by external consumers
+
+This avoids refing trips on use, added with VFS in mind but should be
+helpful elsewhere as well.
+
+Signed-off-by: Mateusz Guzik <mjguzik@gmail.com>
+Link: https://lore.kernel.org/r/20250329192821.822253-2-mjguzik@gmail.com
+Signed-off-by: Christian Brauner <brauner@kernel.org>
+---
+ fs/proc/generic.c       | 6 ++++++
+ include/linux/proc_fs.h | 1 +
+ 2 files changed, 7 insertions(+)
+
+diff --git a/fs/proc/generic.c b/fs/proc/generic.c
+index a3e22803cddf2d..ae86554bb2717a 100644
+--- a/fs/proc/generic.c
++++ b/fs/proc/generic.c
+@@ -668,6 +668,12 @@ struct proc_dir_entry *proc_create_single_data(const char *name, umode_t mode,
+ }
+ EXPORT_SYMBOL(proc_create_single_data);
+ 
++void proc_make_permanent(struct proc_dir_entry *de)
++{
++	pde_make_permanent(de);
++}
++EXPORT_SYMBOL(proc_make_permanent);
++
+ void proc_set_size(struct proc_dir_entry *de, loff_t size)
+ {
+ 	de->size = size;
+diff --git a/include/linux/proc_fs.h b/include/linux/proc_fs.h
+index ea62201c74c402..0b6fcef4099aa3 100644
+--- a/include/linux/proc_fs.h
++++ b/include/linux/proc_fs.h
+@@ -105,6 +105,7 @@ struct proc_dir_entry *proc_create_single_data(const char *name, umode_t mode,
+ 		int (*show)(struct seq_file *, void *), void *data);
+ #define proc_create_single(name, mode, parent, show) \
+ 	proc_create_single_data(name, mode, parent, show, NULL)
++void proc_make_permanent(struct proc_dir_entry *);
+  
+ extern struct proc_dir_entry *proc_create_data(const char *, umode_t,
+ 					       struct proc_dir_entry *,
