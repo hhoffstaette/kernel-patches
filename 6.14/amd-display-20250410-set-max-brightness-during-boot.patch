@@ -1,0 +1,27 @@
+On my Zen2 ("Renoir") Thinkpad the ACPI-retrieved default value for
+display brightnessis too low; it starts out fine, but the display dims
+to barely readable levels as soon as DRM starts:
+
+  [  +0.000788] amdgpu: [drm] ac level: props.brightness=100
+
+Fix this by setting maximum display brightness by default during boot.
+
+Another "fix" could be to write the desired brightness value (0-255)
+into /sys/class/backlight/amdgpu_bl0/brightness, but all this should
+really work without intrusive system or userspace hacks.
+
+Fixes:
+https://web.git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=2fe87f54abdc5c29bd2ebc301964926ea27b3d89
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2025-04-10 14:44:49.000000000 +0200
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c	2025-04-10 20:17:28.377266814 +0200
+@@ -4913,6 +4913,7 @@ amdgpu_dm_register_backlight_device(stru
+ 		props.brightness = AMDGPU_MAX_BL_LEVEL;
+ 
+ 	props.max_brightness = AMDGPU_MAX_BL_LEVEL;
++	props.brightness = AMDGPU_MAX_BL_LEVEL;
+ 	props.type = BACKLIGHT_RAW;
+ 
+ 	snprintf(bl_name, sizeof(bl_name), "amdgpu_bl%d",
