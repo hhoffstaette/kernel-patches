@@ -1,8 +1,23 @@
 From: Nam Cao <namcao@linutronix.de>
-To: Alexander Viro <viro@zeniv.linux.org.uk>, Christian Brauner <brauner@kernel.org>, Jan Kara <jack@suse.cz>, Sebastian Andrzej Siewior <bigeasy@linutronix.de>, John Ogness <john.ogness@linutronix.de>, Clark Williams <clrkwllms@kernel.org>, Steven Rostedt <rostedt@goodmis.org>, linux-fsdevel@vger.kernel.org, linux-kernel@vger.kernel.org, linux-rt-devel@lists.linux.dev, linux-rt-users@vger.kernel.org, Joe Damato <jdamato@fastly.com>, Martin Karsten <mkarsten@uwaterloo.ca>, Jens Axboe <axboe@kernel.dk>
-Cc: Nam Cao <namcao@linutronix.de>, Frederic Weisbecker <frederic@kernel.org>, Valentin Schneider <vschneid@redhat.com>
-Subject: [PATCH] eventpoll: Fix priority inversion problem
-Date: Mon, 19 May 2025 09:40:16 +0200
+To: Alexander Viro <viro@zeniv.linux.org.uk>,
+	Christian Brauner <brauner@kernel.org>,
+	Jan Kara <jack@suse.cz>,
+	Sebastian Andrzej Siewior <bigeasy@linutronix.de>,
+	John Ogness <john.ogness@linutronix.de>,
+	Clark Williams <clrkwllms@kernel.org>,
+	Steven Rostedt <rostedt@goodmis.org>,
+	linux-fsdevel@vger.kernel.org,
+	linux-kernel@vger.kernel.org,
+	linux-rt-devel@lists.linux.dev,
+	linux-rt-users@vger.kernel.org,
+	Joe Damato <jdamato@fastly.com>,
+	Martin Karsten <mkarsten@uwaterloo.ca>,
+	Jens Axboe <axboe@kernel.dk>
+Cc: Nam Cao <namcao@linutronix.de>,
+	Frederic Weisbecker <frederic@kernel.org>,
+	Valentin Schneider <vschneid@redhat.com>
+Subject: [PATCH v2] eventpoll: Fix priority inversion problem
+Date: Fri, 23 May 2025 08:11:04 +0200
 
 The ready event list of an epoll object is protected by read-write
 semaphore:
@@ -62,37 +77,44 @@ Reported-by: Valentin Schneider <vschneid@redhat.com>
 Closes: https://lore.kernel.org/linux-rt-users/xhsmhttqvnall.mognet@vschneid.remote.csb/ [2]
 Signed-off-by: Nam Cao <namcao@linutronix.de>
 ---
- fs/eventpoll.c | 443 +++++++++++++++++++++----------------------------
- 1 file changed, 187 insertions(+), 256 deletions(-)
+v2:
+  - rename link_locked -> link_used
+  - replace xchg() with smp_store_release() when applicable
+  - make sure llist_node is in clean state when not on a list
+  - remove now-unused list_add_tail_lockless()
+---
+ fs/eventpoll.c | 498 +++++++++++++++++++------------------------------
+ 1 file changed, 189 insertions(+), 309 deletions(-)
 
 diff --git a/fs/eventpoll.c b/fs/eventpoll.c
-index d4dbffdedd08..a1e8e206f5f2 100644
+index d4dbffdedd08e..483a5b217fad4 100644
 --- a/fs/eventpoll.c
 +++ b/fs/eventpoll.c
-@@ -136,14 +136,28 @@ struct epitem {
+@@ -136,14 +136,29 @@ struct epitem {
  		struct rcu_head rcu;
  	};
  
 -	/* List header used to link this structure to the eventpoll ready list */
 -	struct list_head rdllink;
 +	/*
-+	 * Whether this item can be added to the eventpoll ready list. Adding to the list can be
-+	 * blocked for two reasons:
++	 * Whether epitem.rdllink is currently used in a list. When used, it cannot be detached or
++	 * inserted elsewhere.
 +	 *
-+	 *  1. This item is already on the list.
-+	 *  2. A waiter is consuming the ready list and has consumed this item. The waiter therefore
-+	 *     is blocking this item from being added again, preventing seeing the same item twice.
-+	 *     If adding is blocked due to this reason, the waiter will add this item to the list
-+	 *     once consuming is done.
++	 * It may be in use for two reasons:
++	 *
++	 * 1. This item is on the eventpoll ready list.
++	 * 2. This item is being consumed by a waiter and stashed on a temporary list. If inserting
++	 *    is blocked due to this reason, the waiter will add this item to the list once
++	 *    consuming is done.
 +	 */
-+	bool link_locked;
++	bool link_used;
  
  	/*
 -	 * Works together "struct eventpoll"->ovflist in keeping the
 -	 * single linked chain of items.
 +	 * Indicate whether this item is ready for consumption. All items on the ready list has this
 +	 * flag set. Item that should be on the ready list, but cannot be added because of
-+	 * link_locked (in other words, a waiter is consuming the ready list), also has this flag
++	 * link_used (in other words, a waiter is consuming the ready list), also has this flag
 +	 * set. When a waiter is done consuming, the waiter will add ready items to the ready list.
  	 */
 -	struct epitem *next;
@@ -103,7 +125,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  
  	/* The file descriptor information this item refers to */
  	struct epoll_filefd ffd;
-@@ -191,22 +205,15 @@ struct eventpoll {
+@@ -191,22 +206,15 @@ struct eventpoll {
  	/* Wait queue used by file->poll() */
  	wait_queue_head_t poll_wait;
  
@@ -131,7 +153,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	/* wakeup_source used when ep_send_events or __ep_eventpoll_poll is running */
  	struct wakeup_source *ws;
  
-@@ -361,10 +368,27 @@ static inline int ep_cmp_ffd(struct epoll_filefd *p1,
+@@ -361,10 +369,27 @@ static inline int ep_cmp_ffd(struct epoll_filefd *p1,
  	        (p1->file < p2->file ? -1 : p1->fd - p2->fd));
  }
  
@@ -145,7 +167,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
 +	 * list. This will tell the waiter to add this item to the ready list, after the waiter is
 +	 * finished.
 +	 */
-+	xchg(&epi->ready, true);
++	smp_store_release(&epi->ready, true);
 +
 +	/*
 +	 * If this item is not blocked, add it to the ready list. This item could be blocked for two
@@ -156,13 +178,13 @@ index d4dbffdedd08..a1e8e206f5f2 100644
 +	 *    blocking this item, so that this item won't be seen twice. In this case, the waiter
 +	 *    will add this item to the ready list after the waiter is finished.
 +	 */
-+	if (!cmpxchg(&epi->link_locked, false, true))
++	if (!cmpxchg(&epi->link_used, false, true))
 +		llist_add(&epi->rdllink, &epi->ep->rdllist);
 +
  }
  
  static inline struct eppoll_entry *ep_pwq_from_wait(wait_queue_entry_t *p)
-@@ -383,13 +407,27 @@ static inline struct epitem *ep_item_from_wait(wait_queue_entry_t *p)
+@@ -383,13 +408,27 @@ static inline struct epitem *ep_item_from_wait(wait_queue_entry_t *p)
   *
   * @ep: Pointer to the eventpoll context.
   *
@@ -195,7 +217,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  }
  
  #ifdef CONFIG_NET_RX_BUSY_POLL
-@@ -724,77 +762,6 @@ static inline void ep_pm_stay_awake_rcu(struct epitem *epi)
+@@ -724,77 +763,6 @@ static inline void ep_pm_stay_awake_rcu(struct epitem *epi)
  	rcu_read_unlock();
  }
  
@@ -273,7 +295,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  static void ep_get(struct eventpoll *ep)
  {
  	refcount_inc(&ep->refcount);
-@@ -832,8 +799,10 @@ static void ep_free(struct eventpoll *ep)
+@@ -832,8 +800,10 @@ static void ep_free(struct eventpoll *ep)
  static bool __ep_remove(struct eventpoll *ep, struct epitem *epi, bool force)
  {
  	struct file *file = epi->ffd.file;
@@ -284,7 +306,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  
  	lockdep_assert_irqs_enabled();
  
-@@ -867,10 +836,25 @@ static bool __ep_remove(struct eventpoll *ep, struct epitem *epi, bool force)
+@@ -867,10 +837,25 @@ static bool __ep_remove(struct eventpoll *ep, struct epitem *epi, bool force)
  
  	rb_erase_cached(&epi->rbn, &ep->rbr);
  
@@ -314,7 +336,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  
  	wakeup_source_unregister(ep_wakeup_source(epi));
  	/*
-@@ -974,8 +958,9 @@ static __poll_t ep_item_poll(const struct epitem *epi, poll_table *pt, int depth
+@@ -974,8 +959,9 @@ static __poll_t ep_item_poll(const struct epitem *epi, poll_table *pt, int depth
  static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int depth)
  {
  	struct eventpoll *ep = file->private_data;
@@ -326,14 +348,14 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	poll_table pt;
  	__poll_t res = 0;
  
-@@ -989,22 +974,58 @@ static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int dep
+@@ -989,22 +975,58 @@ static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int dep
  	 * the ready list.
  	 */
  	mutex_lock_nested(&ep->mtx, depth);
 -	ep_start_scan(ep, &txlist);
 -	list_for_each_entry_safe(epi, tmp, &txlist, rdllink) {
 +	while (true) {
-+		n = llist_del_first(&ep->rdllist);
++		n = llist_del_first_init(&ep->rdllist);
 +		if (!n)
 +			break;
 +
@@ -345,13 +367,13 @@ index d4dbffdedd08..a1e8e206f5f2 100644
 +		 * However, if it is not ready now, it could become ready after ep_item_poll() and
 +		 * before we release list_locked this item, and it wouldn't be added to the ready
 +		 * list. To detect that case, we look at this flag again after releasing
-+		 * link_locked, so that it can be added to the ready list if required.
++		 * link_used, so that it can be added to the ready list if required.
 +		 */
-+		xchg(&epi->ready, false);
++		smp_store_release(&epi->ready, false);
 +
  		if (ep_item_poll(epi, &pt, depth + 1)) {
  			res = EPOLLIN | EPOLLRDNORM;
-+			xchg(&epi->ready, true);
++			smp_store_release(&epi->ready, true);
 +			llist_add(n, &ep->rdllist);
  			break;
  		} else {
@@ -373,11 +395,11 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  			__pm_relax(ep_wakeup_source(epi));
 -			list_del_init(&epi->rdllink);
 +
-+			xchg(&epi->link_locked, false);
++			smp_store_release(&epi->link_used, false);
 +
 +			/*
 +			 * Check the ready flag, just in case the item becomes ready after
-+			 * ep_item_poll() but before releasing link_locked above. The item was
++			 * ep_item_poll() but before releasing link_used above. The item was
 +			 * blocked from being added, so we add it now.
 +			 */
 +			if (smp_load_acquire(&epi->ready)) {
@@ -392,7 +414,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	mutex_unlock(&ep->mtx);
  	return res;
  }
-@@ -1153,12 +1174,10 @@ static int ep_alloc(struct eventpoll **pep)
+@@ -1153,12 +1175,10 @@ static int ep_alloc(struct eventpoll **pep)
  		return -ENOMEM;
  
  	mutex_init(&ep->mtx);
@@ -406,10 +428,63 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	ep->user = get_current_user();
  	refcount_set(&ep->refcount, 1);
  
-@@ -1293,41 +1312,11 @@ static inline bool list_add_tail_lockless(struct list_head *new,
- 	return true;
+@@ -1240,94 +1260,11 @@ struct file *get_epoll_tfile_raw_ptr(struct file *file, int tfd,
  }
+ #endif /* CONFIG_KCMP */
  
+-/*
+- * Adds a new entry to the tail of the list in a lockless way, i.e.
+- * multiple CPUs are allowed to call this function concurrently.
+- *
+- * Beware: it is necessary to prevent any other modifications of the
+- *         existing list until all changes are completed, in other words
+- *         concurrent list_add_tail_lockless() calls should be protected
+- *         with a read lock, where write lock acts as a barrier which
+- *         makes sure all list_add_tail_lockless() calls are fully
+- *         completed.
+- *
+- *        Also an element can be locklessly added to the list only in one
+- *        direction i.e. either to the tail or to the head, otherwise
+- *        concurrent access will corrupt the list.
+- *
+- * Return: %false if element has been already added to the list, %true
+- * otherwise.
+- */
+-static inline bool list_add_tail_lockless(struct list_head *new,
+-					  struct list_head *head)
+-{
+-	struct list_head *prev;
+-
+-	/*
+-	 * This is simple 'new->next = head' operation, but cmpxchg()
+-	 * is used in order to detect that same element has been just
+-	 * added to the list from another CPU: the winner observes
+-	 * new->next == new.
+-	 */
+-	if (!try_cmpxchg(&new->next, &new, head))
+-		return false;
+-
+-	/*
+-	 * Initially ->next of a new element must be updated with the head
+-	 * (we are inserting to the tail) and only then pointers are atomically
+-	 * exchanged.  XCHG guarantees memory ordering, thus ->next should be
+-	 * updated before pointers are actually swapped and pointers are
+-	 * swapped before prev->next is updated.
+-	 */
+-
+-	prev = xchg(&head->prev, new);
+-
+-	/*
+-	 * It is safe to modify prev->next and new->prev, because a new element
+-	 * is added only to the tail and new->next is updated before XCHG.
+-	 */
+-
+-	prev->next = new;
+-	new->prev = prev;
+-
+-	return true;
+-}
+-
 -/*
 - * Chains a new epi entry to the tail of the ep->ovflist in a lockless way,
 - * i.e. multiple CPUs are allowed to call this function concurrently.
@@ -448,7 +523,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
   * Another thing worth to mention is that ep_poll_callback() can be called
   * concurrently for the same @epi from different CPUs if poll table was inited
   * with several wait queues entries.  Plural wakeup from different CPUs of a
-@@ -1337,15 +1326,11 @@ static inline bool chain_epi_lockless(struct epitem *epi)
+@@ -1337,15 +1274,11 @@ static inline bool chain_epi_lockless(struct epitem *epi)
   */
  static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, void *key)
  {
@@ -464,7 +539,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	ep_set_busy_poll_napi_id(epi);
  
  	/*
-@@ -1355,7 +1340,7 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
+@@ -1355,7 +1288,7 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
  	 * until the next EPOLL_CTL_MOD will be issued.
  	 */
  	if (!(epi->event.events & ~EP_PRIVATE_BITS))
@@ -473,7 +548,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  
  	/*
  	 * Check the events coming with the callback. At this stage, not
-@@ -1364,22 +1349,10 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
+@@ -1364,22 +1297,10 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
  	 * test for "key" != NULL before the event match test.
  	 */
  	if (pollflags && !(pollflags & epi->event.events))
@@ -499,7 +574,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  
  	/*
  	 * Wake up ( if active ) both the eventpoll wait list and the ->poll()
-@@ -1408,15 +1381,9 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
+@@ -1408,15 +1329,9 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
  			wake_up(&ep->wq);
  	}
  	if (waitqueue_active(&ep->poll_wait))
@@ -516,7 +591,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	if (!(epi->event.events & EPOLLEXCLUSIVE))
  		ewake = 1;
  
-@@ -1674,11 +1641,10 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
+@@ -1674,11 +1589,10 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
  	}
  
  	/* Item initialization follow here ... */
@@ -529,7 +604,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  
  	if (tep)
  		mutex_lock_nested(&tep->mtx, 1);
-@@ -1745,16 +1711,13 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
+@@ -1745,16 +1659,13 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
  		return -ENOMEM;
  	}
  
@@ -548,7 +623,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  
  		/* Notify waiting tasks that events are available */
  		if (waitqueue_active(&ep->wq))
-@@ -1763,8 +1726,6 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
+@@ -1763,8 +1674,6 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
  			pwake++;
  	}
  
@@ -557,7 +632,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	/* We have to call this outside the lock */
  	if (pwake)
  		ep_poll_safewake(ep, NULL, 0);
-@@ -1779,7 +1740,6 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
+@@ -1779,7 +1688,6 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
  static int ep_modify(struct eventpoll *ep, struct epitem *epi,
  		     const struct epoll_event *event)
  {
@@ -565,7 +640,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	poll_table pt;
  
  	lockdep_assert_irqs_enabled();
-@@ -1827,24 +1787,16 @@ static int ep_modify(struct eventpoll *ep, struct epitem *epi,
+@@ -1827,24 +1735,16 @@ static int ep_modify(struct eventpoll *ep, struct epitem *epi,
  	 * list, push it inside.
  	 */
  	if (ep_item_poll(epi, &pt, 1)) {
@@ -597,7 +672,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	return 0;
  }
  
-@@ -1852,7 +1804,7 @@ static int ep_send_events(struct eventpoll *ep,
+@@ -1852,7 +1752,7 @@ static int ep_send_events(struct eventpoll *ep,
  			  struct epoll_event __user *events, int maxevents)
  {
  	struct epitem *epi, *tmp;
@@ -606,7 +681,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	poll_table pt;
  	int res = 0;
  
-@@ -1867,19 +1819,20 @@ static int ep_send_events(struct eventpoll *ep,
+@@ -1867,19 +1767,20 @@ static int ep_send_events(struct eventpoll *ep,
  	init_poll_funcptr(&pt, NULL);
  
  	mutex_lock(&ep->mtx);
@@ -629,12 +704,12 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  
 +		epi = llist_entry(n, struct epitem, rdllink);
 +		llist_add(n, &txlist);
-+		xchg(&epi->ready, false);
++		smp_store_release(&epi->ready, false);
 +
  		/*
  		 * Activate ep->ws before deactivating epi->ws to prevent
  		 * triggering auto-suspend here (in case we reactive epi->ws
-@@ -1896,8 +1849,6 @@ static int ep_send_events(struct eventpoll *ep,
+@@ -1896,8 +1797,6 @@ static int ep_send_events(struct eventpoll *ep,
  			__pm_relax(ws);
  		}
  
@@ -643,17 +718,17 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  		/*
  		 * If the event mask intersect the caller-requested one,
  		 * deliver the event to userspace. Again, we are holding ep->mtx,
-@@ -1909,8 +1860,7 @@ static int ep_send_events(struct eventpoll *ep,
+@@ -1909,8 +1808,7 @@ static int ep_send_events(struct eventpoll *ep,
  
  		events = epoll_put_uevent(revents, epi->event.data, events);
  		if (!events) {
 -			list_add(&epi->rdllink, &txlist);
 -			ep_pm_stay_awake(epi);
-+			xchg(&epi->ready, true);
++			smp_store_release(&epi->ready, true);
  			if (!res)
  				res = -EFAULT;
  			break;
-@@ -1924,19 +1874,39 @@ static int ep_send_events(struct eventpoll *ep,
+@@ -1924,19 +1822,40 @@ static int ep_send_events(struct eventpoll *ep,
  			 * Trigger mode, we need to insert back inside
  			 * the ready list, so that the next call to
  			 * epoll_wait() will check again the events
@@ -665,7 +740,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
 +			 * availability.
  			 */
 -			list_add_tail(&epi->rdllink, &ep->rdllist);
-+			xchg(&epi->ready, true);
++			smp_store_release(&epi->ready, true);
 +		}
 +	}
 +
@@ -674,7 +749,8 @@ index d4dbffdedd08..a1e8e206f5f2 100644
 +		 * We are done iterating. Allow the items we took to be added back to the ready
 +		 * list.
 +		 */
-+		xchg(&epi->link_locked, false);
++		init_llist_node(&epi->rdllink);
++		smp_store_release(&epi->link_used, false);
 +
 +		/*
 +		 * In the loop above, we may mark some items ready, and they should be added back.
@@ -700,7 +776,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	return res;
  }
  
-@@ -2090,54 +2060,15 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
+@@ -2090,54 +2009,15 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
  		init_wait(&wait);
  		wait.func = ep_autoremove_wake_function;
  
@@ -711,8 +787,7 @@ index d4dbffdedd08..a1e8e206f5f2 100644
 -		 * is safe to avoid an explicit barrier.
 -		 */
 -		__set_current_state(TASK_INTERRUPTIBLE);
-+		prepare_to_wait_exclusive(&ep->wq, &wait, TASK_INTERRUPTIBLE);
- 
+-
 -		/*
 -		 * Do the final check under the lock. ep_start/done_scan()
 -		 * plays with two lists (->rdllist and ->ovflist) and there
@@ -723,7 +798,8 @@ index d4dbffdedd08..a1e8e206f5f2 100644
 -		eavail = ep_events_available(ep);
 -		if (!eavail)
 -			__add_wait_queue_exclusive(&ep->wq, &wait);
--
++		prepare_to_wait_exclusive(&ep->wq, &wait, TASK_INTERRUPTIBLE);
+ 
 -		write_unlock_irq(&ep->lock);
 -
 -		if (!eavail)
@@ -732,14 +808,14 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  				!schedule_hrtimeout_range(to, slack,
  							  HRTIMER_MODE_ABS);
 -		__set_current_state(TASK_RUNNING);
--
+ 
 -		/*
 -		 * We were woken up, thus go and try to harvest some events.
 -		 * If timed out and still on the wait queue, recheck eavail
 -		 * carefully under lock, below.
 -		 */
 -		eavail = 1;
- 
+-
 -		if (!list_empty_careful(&wait.entry)) {
 -			write_lock_irq(&ep->lock);
 -			/*
@@ -759,4 +835,3 @@ index d4dbffdedd08..a1e8e206f5f2 100644
  	}
  }
  
-
