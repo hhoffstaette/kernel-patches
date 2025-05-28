@@ -26,5 +26,5 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 - block: performance improvements ([schedulers](https://lore.kernel.org/linux-block/20240123174021.1967461-1-axboe@kernel.dk/))
 - bore: [BORE](https://github.com/firelzrd/bore-scheduler) CPU scheduler tuning extension
-- kconfig: support for `-march=native` ([link](https://git.kernel.org/pub/scm/linux/kernel/git/tip/tip.git/commit/?h=x86/kconfig&id=ea1dcca1de129dfdf145338a868648bc0e24717c))
+- kconfig: support for `-march=native` ([link](https://web.git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=ea1dcca1de129dfdf145338a868648bc0e24717c))
 
