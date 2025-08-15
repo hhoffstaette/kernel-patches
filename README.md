@@ -24,9 +24,9 @@ a bug here on Github. Older release series will only see sporadic updates, if an
 
 Enjoy!
 
-**Current status (2025-06-04)**
+**Current status (2025-08-15)**
 
-- 6.15.x is my current production branch.
+- 6.16.x is my current production branch.
 
-- all other branches < 6.15 are EOL for me.
+- all other branches < 6.16 are EOL for me.
 
