@@ -1,0 +1,154 @@
+From: Omar Sandoval <osandov@osandov.com>
+To: linux-btrfs@vger.kernel.org
+Cc: kernel-team@fb.com,
+	Filipe Manana <fdmanana@suse.com>,
+	Leo Martins <loemra.dev@gmail.com>,
+	Boris Burkov <boris@bur.io>
+Subject: [PATCH] btrfs: fix subvolume deletion lockup caused by inodes xarray race
+Date: Tue, 26 Aug 2025 13:01:38 -0700
+
+From: Omar Sandoval <osandov@fb.com>
+
+There is a race condition between inode eviction and inode caching that
+can cause a live struct btrfs_inode to be missing from the root->inodes
+xarray. Specifically, there is a window during evict() between the inode
+being unhashed and deleted from the xarray. If btrfs_iget() is called
+for the same inode in that window, it will be recreated and inserted
+into the xarray, but then eviction will delete the new entry, leaving
+nothing in the xarray:
+
+Thread 1                          Thread 2
+---------------------------------------------------------------
+evict()
+  remove_inode_hash()
+                                  btrfs_iget_path()
+                                    btrfs_iget_locked()
+                                    btrfs_read_locked_inode()
+                                      btrfs_add_inode_to_root()
+  destroy_inode()
+    btrfs_destroy_inode()
+      btrfs_del_inode_from_root()
+        __xa_erase
+
+In turn, this can cause issues for subvolume deletion. Specifically, if
+an inode is in this lost state, and all other inodes are evicted, then
+btrfs_del_inode_from_root() will call btrfs_add_dead_root() prematurely.
+If the lost inode has a delayed_node attached to it, then when
+btrfs_clean_one_deleted_snapshot() calls btrfs_kill_all_delayed_nodes(),
+it will loop forever because the delayed_nodes xarray will never become
+empty (unless memory pressure forces the inode out). We saw this
+manifest as soft lockups in production.
+
+Fix it by only deleting the xarray entry if it matches the given inode
+(using __xa_cmpxchg()).
+
+Fixes: 310b2f5d5a94 ("btrfs: use an xarray to track open inodes in a root")
+Cc: stable@vger.kernel.org # 6.11+
+Co-authored-by: Leo Martins <loemra.dev@gmail.com>
+Signed-off-by: Leo Martins <loemra.dev@gmail.com>
+Signed-off-by: Omar Sandoval <osandov@fb.com>
+---
+Based on for-next. This reproduces the soft lockup on a kernel with
+CONFIG_PREEMPT_NONE=y:
+
+	#!/bin/bash
+
+	set -e
+
+	dev=/dev/vdb
+
+	mkfs.btrfs -f "$dev"
+	tmp="$(mktemp -d)"
+	trap 'umount "$dev"; rm -rf "$tmp"' EXIT
+	mnt="$tmp/mnt"
+	mkdir "$mnt"
+	mount "$dev" "$mnt"
+	cleaner_pid="$(pgrep -n btrfs-cleaner)"
+
+	subvol="$mnt/subvol"
+
+	while true; do
+		echo -n .
+
+		btrfs -q subvolume create "$subvol"
+
+		# Stat hard links of the same inode repeatedly.
+		touch "$subvol/file"
+		for ((i = 0; i < 4; i++)); do
+			mkdir "$subvol/dir$i"
+			ln "$subvol/file" "$subvol/dir$i/file"
+			while [ -f "$subvol/dir$i/file" ]; do
+				:
+			done &
+		done
+
+		# Drop dentry and inode caches. Along with the parallel
+		# stats, this may trigger the race when the inode is
+		# recached.
+		echo 2 > /proc/sys/vm/drop_caches
+
+		# Hold a reference on the inode (but not any of its
+		# dentries) by creating an inotify watch.
+		inotifywatch -e unmount "$subvol/file" > "$tmp/log" 2>&1 &
+		inotifypid=$!
+		tail -f "$tmp/log" | grep -q "Finished establishing watches"
+
+		# Hold a reference on another file.
+		exec 3> "$subvol/dummy"
+
+		btrfs -q subvolume delete "$subvol"
+
+		echo 2 > /proc/sys/vm/drop_caches
+
+		# After deleting the subvolume and dropping caches, only
+		# the lost inode and the dummy file should be cached,
+		# and only the dummy file is in the inodes xarray.
+
+		# Closing the dummy file will mark the subvolume as dead
+		# even though the lost inode is still cached.
+		exec 3>&-
+
+		# Remounting kicks the cleaner thread.
+		mount -o remount,rw "$mnt"
+		# Loop until the cleaner thread stops running. If we
+		# reproduced the race, it will never stop. Otherwise, we
+		# will clean up and try again.
+		while true; do
+			if ! grep 'State:\s*R' "/proc/$cleaner_pid/status"; then
+				kill "$inotifypid"
+				mount -o remount,rw "$mnt"
+			fi
+			if ! btrfs subvolume list -d "$mnt" | grep -q .; then
+				break
+			fi
+			sleep 1
+		done
+	done
+
+ fs/btrfs/inode.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index f91c62146982..3cd9b505bd25 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -5697,7 +5697,17 @@ static void btrfs_del_inode_from_root(struct btrfs_inode *inode)
+ 	bool empty = false;
+ 
+ 	xa_lock(&root->inodes);
+-	entry = __xa_erase(&root->inodes, btrfs_ino(inode));
++	/*
++	 * This btrfs_inode is being freed and has already been unhashed at this
++	 * point. It's possible that another btrfs_inode has already been
++	 * allocated for the same inode and inserted itself into the root, so
++	 * don't delete it in that case.
++	 *
++	 * Note that this shouldn't need to allocate memory, so the gfp flags
++	 * don't really matter.
++	 */
++	entry = __xa_cmpxchg(&root->inodes, btrfs_ino(inode), inode, NULL,
++			     GFP_ATOMIC);
+ 	if (entry == inode)
+ 		empty = xa_empty(&root->inodes);
+ 	xa_unlock(&root->inodes);
+
