@@ -22,11 +22,8 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Github. Older release series will only see sporadic updates, if any.
 
-**NOTE:** This branch will no longer receive updates!
------------------------------------------------------
+**Series: 6.17**
 
-**Series: 6.16**
-
-- btrfs: fixes from 6.17
+- btrfs: fixes from 6.18
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
 
