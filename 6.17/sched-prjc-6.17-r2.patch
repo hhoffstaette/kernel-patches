@@ -1,3 +1,7 @@
+
+r2 for:
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=661f951e371cc134ea31c84238dbdc9a898b8403
+
 diff --git a/Documentation/admin-guide/sysctl/kernel.rst b/Documentation/admin-guide/sysctl/kernel.rst
 index 8b49eab937d0..c5d4901a9608 100644
 --- a/Documentation/admin-guide/sysctl/kernel.rst
@@ -11233,7 +11237,7 @@ index 6e2f54169e66..5a5031761477 100644
  static int __init setup_relax_domain_level(char *str)
  {
  	if (kstrtoint(str, 0, &default_relax_domain_level))
-@@ -1731,6 +1734,7 @@ sd_init(struct sched_domain_topology_level *tl,
+@@ -1723,6 +1726,7 @@ sd_init(struct sched_domain_topology_level *tl,
  
  	return sd;
  }
@@ -11241,15 +11245,15 @@ index 6e2f54169e66..5a5031761477 100644
  
  /*
   * Topology list, bottom-up.
-@@ -1767,6 +1771,7 @@ void __init set_sched_topology(struct sched_domain_topology_level *tl)
+@@ -1759,6 +1763,7 @@ void __init set_sched_topology(struct sched_domain_topology_level *tl)
  	sched_domain_topology_saved = NULL;
  }
  
 +#ifndef CONFIG_SCHED_ALT
  #ifdef CONFIG_NUMA
  
- static const struct cpumask *sd_numa_mask(int cpu)
-@@ -2833,3 +2838,31 @@ void partition_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
+ static const struct cpumask *sd_numa_mask(struct sched_domain_topology_level *tl, int cpu)
+@@ -2825,3 +2830,31 @@ void partition_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
  	partition_sched_domains_locked(ndoms_new, doms_new, dattr_new);
  	sched_domains_mutex_unlock();
  }
