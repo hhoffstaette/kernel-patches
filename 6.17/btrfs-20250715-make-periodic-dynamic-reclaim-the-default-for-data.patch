@@ -1,0 +1,56 @@
+From: Boris Burkov <boris@bur.io>
+To: linux-btrfs@vger.kernel.org, kernel-team@fb.com
+Subject: [PATCH] btrfs: make periodic dynamic reclaim the default for data
+Date: Tue, 15 Jul 2025 11:58:24 -0700
+
+The explanation of the feature is linked via the original patches.
+But tl;dr: dynamic periodic reclaim for data is a way to get a lot of
+extra protection from block group mis-allocation ENOSPC without
+incurring a lot of reclaims in the happy, steady state case.
+
+We have tested it extensively in production at Meta and are quite
+satisfied with its behavior as opposed to an edge triggered
+bg_reclaim_threshold set to 25. The latter did well in reducing our
+ENOSPCs but at the cost of a LOT of reclaiming. And often excessive
+seemingly unbounded reclaiming.
+
+With dynamic periodic reclaim, if the system is below 10G unallocated
+space, then the cleaner thread will identify the best block groups to
+reclaim to get us back to 10G. It will get progressively more aggressive
+as unallocated trends towards 0. It will perform no reclaims when
+unallocated is above 10G.
+
+With its by-design conservative approach to reclaiming and good track
+record in datacenter testing, I think it is time to introduce automatic
+data block group reclaim to btrfs. This does not conflict with the use
+of the tools in btrfs_maintenance. One thing to look out for is that the
+bg_reclaim_threshold setting is no longer writeable once the dynamic
+threshold is enabled, and instead is a read-only file representing the
+current snapshot of the dynamic threshold.
+
+To disable either of these features, simply write a 0 to
+/sys/fs/btrfs/<uuid>/allocation/data/(dynamic_reclaim|periodic_reclaim)
+
+Link: https://lore.kernel.org/linux-btrfs/cover.1718665689.git.boris@bur.io/#t
+Signed-off-by: Boris Burkov <boris@bur.io>
+---
+ fs/btrfs/space-info.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
+index 0481c693ac2e..8005483fbfe2 100644
+--- a/fs/btrfs/space-info.c
++++ b/fs/btrfs/space-info.c
+@@ -306,6 +306,12 @@ static int create_space_info(struct btrfs_fs_info *info, u64 flags)
+ 
+ 		if (ret)
+ 			return ret;
++	} else {
++		if ((flags & BTRFS_BLOCK_GROUP_DATA) &&
++		    !(flags & BTRFS_BLOCK_GROUP_METADATA)) {
++			space_info->dynamic_reclaim = 1;
++			space_info->periodic_reclaim = 1;
++		}
+ 	}
+ 
+ 	ret = btrfs_sysfs_add_space_info_type(info, space_info);
