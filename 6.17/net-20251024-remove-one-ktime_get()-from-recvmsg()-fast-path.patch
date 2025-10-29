@@ -1,0 +1,65 @@
+From: Eric Dumazet <edumazet@google.com>
+To: David S . Miller <davem@davemloft.net>, Jakub Kicinski <kuba@kernel.org>, Paolo Abeni <pabeni@redhat.com>
+Cc: Simon Horman <horms@kernel.org>, Neal Cardwell <ncardwell@google.com>, Kuniyuki Iwashima <kuniyu@google.com>, netdev@vger.kernel.org, eric.dumazet@gmail.com, Eric Dumazet <edumazet@google.com>
+Subject: [PATCH net-next] tcp: remove one ktime_get() from recvmsg() fast path
+Date: Fri, 24 Oct 2025 12:07:07 +0000
+
+Each time some payload is consumed by user space (recvmsg() and friends),
+TCP calls tcp_rcv_space_adjust() to run DRS algorithm to check
+if an increase of sk->sk_rcvbuf is needed.
+
+This function is based on time sampling, and currently calls
+tcp_mstamp_refresh(tp), which is a wrapper around ktime_get_ns().
+
+ktime_get_ns() has a high cost on some platforms.
+100+ cycles for rdtscp on AMD EPYC Turin for instance.
+
+We do not have to refresh tp->tcp_mpstamp, using the last cached value
+is enough. We only need to refresh it from __tcp_cleanup_rbuf()
+if an ACK must be sent (this is a rare event).
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/ipv4/tcp.c       |  4 +++-
+ net/ipv4/tcp_input.c | 10 ++++++++--
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index b79da6d39392751e189f1f65969b15c904a6792a..a9345aa5a2e5f4a2ca7ca599e7523d017ffa64ee 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -1556,8 +1556,10 @@ void __tcp_cleanup_rbuf(struct sock *sk, int copied)
+ 				time_to_ack = true;
+ 		}
+ 	}
+-	if (time_to_ack)
++	if (time_to_ack) {
++		tcp_mstamp_refresh(tp);
+ 		tcp_send_ack(sk);
++	}
+ }
+ 
+ void tcp_cleanup_rbuf(struct sock *sk, int copied)
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 8fc97f4d8a6b2f8e39cabf6c9b3e6cdae294a5f5..ff19f6e54d55cb63f04c2da0b241e3d7d2f946a0 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -928,9 +928,15 @@ void tcp_rcv_space_adjust(struct sock *sk)
+ 
+ 	trace_tcp_rcv_space_adjust(sk);
+ 
+-	tcp_mstamp_refresh(tp);
++	if (unlikely(!tp->rcv_rtt_est.rtt_us))
++		return;
++
++	/* We do not refresh tp->tcp_mstamp here.
++	 * Some platforms have expensive ktime_get() implementations.
++	 * Using the last cached value is enough for DRS.
++	 */
+ 	time = tcp_stamp_us_delta(tp->tcp_mstamp, tp->rcvq_space.time);
+-	if (time < (tp->rcv_rtt_est.rtt_us >> 3) || tp->rcv_rtt_est.rtt_us == 0)
++	if (time < (tp->rcv_rtt_est.rtt_us >> 3))
+ 		return;
+ 
+ 	/* Number of bytes copied to user in last RTT */
+
