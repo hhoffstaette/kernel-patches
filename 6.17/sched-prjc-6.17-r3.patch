@@ -2,6 +2,9 @@
 r2 for:
 https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=661f951e371cc134ea31c84238dbdc9a898b8403
 
+r3 for:
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0c2b8356e430229efef42b03bd765a2a7ecf73fd
+
 diff --git a/Documentation/admin-guide/sysctl/kernel.rst b/Documentation/admin-guide/sysctl/kernel.rst
 index 8b49eab937d0..c5d4901a9608 100644
 --- a/Documentation/admin-guide/sysctl/kernel.rst
@@ -10157,7 +10160,7 @@ index c4a488e67aa7..42575d419e28 100644
 +#endif
  
  #ifdef CONFIG_SCHED_CLASS_EXT
- # include "ext.c"
+ # include "ext_internal.h"
 diff --git a/kernel/sched/build_utility.c b/kernel/sched/build_utility.c
 index e2cf3b08d4e9..a64bf71a6c69 100644
 --- a/kernel/sched/build_utility.c
