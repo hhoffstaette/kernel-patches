@@ -1,0 +1,80 @@
+From: Eric Dumazet <edumazet@google.com>
+To: Andrew Morton <akpm@linux-foundation.org>, Jakub Kicinski <kuba@kernel.org>, Paolo Abeni <pabeni@redhat.com>
+Cc: linux-kernel <linux-kernel@vger.kernel.org>, netdev@vger.kernel.org, Neal Cardwell <ncardwell@google.com>, Kuniyuki Iwashima <kuniyu@google.com>, Eric Dumazet <eric.dumazet@gmail.com>, Eric Dumazet <edumazet@google.com>
+Subject: [PATCH 2/2] rbtree: inline rb_last()
+Date: Fri, 14 Nov 2025 14:06:46 +0000
+
+This is a very small function, inlining it save cpu cycles in TCP
+by reducing register pressure and removing call/ret overhead.
+
+It also reduces vmlinux text size by 122 bytes on a typical x86_64 build.
+
+Before:
+
+size vmlinux
+   text    data     bss     dec     hex filename
+34811781        22177365        5685248 62674394        3bc55da vmlinux
+
+After:
+
+size vmlinux
+   text	   data	    bss	    dec	    hex	filename
+34811659	22177365	5685248	62674272	3bc5560	vmlinux
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ include/linux/rbtree.h | 16 +++++++++++++++-
+ lib/rbtree.c           | 13 -------------
+ 2 files changed, 15 insertions(+), 14 deletions(-)
+
+diff --git a/include/linux/rbtree.h b/include/linux/rbtree.h
+index 484554900f7d3201d41fb29e04fb65fe331eee79..4091e978aef2404b56d7643d9385727c69796678 100644
+--- a/include/linux/rbtree.h
++++ b/include/linux/rbtree.h
+@@ -58,7 +58,21 @@ static inline struct rb_node *rb_first(const struct rb_root *root)
+ 		n = n->rb_left;
+ 	return n;
+ }
+-extern struct rb_node *rb_last(const struct rb_root *);
++
++/*
++ * This function returns the last node (in sort order) of the tree.
++ */
++static inline struct rb_node *rb_last(const struct rb_root *root)
++{
++	struct rb_node	*n;
++
++	n = root->rb_node;
++	if (!n)
++		return NULL;
++	while (n->rb_right)
++		n = n->rb_right;
++	return n;
++}
+ 
+ /* Postorder iteration - always visit the parent after its children */
+ extern struct rb_node *rb_first_postorder(const struct rb_root *);
+diff --git a/lib/rbtree.c b/lib/rbtree.c
+index b946eb4b759d3b65f5bc5d54d0377348962bdc56..18d42bcf4ec9d581807179f34561f4561900206d 100644
+--- a/lib/rbtree.c
++++ b/lib/rbtree.c
+@@ -460,19 +460,6 @@ void __rb_insert_augmented(struct rb_node *node, struct rb_root *root,
+ }
+ EXPORT_SYMBOL(__rb_insert_augmented);
+ 
+-struct rb_node *rb_last(const struct rb_root *root)
+-{
+-	struct rb_node	*n;
+-
+-	n = root->rb_node;
+-	if (!n)
+-		return NULL;
+-	while (n->rb_right)
+-		n = n->rb_right;
+-	return n;
+-}
+-EXPORT_SYMBOL(rb_last);
+-
+ struct rb_node *rb_next(const struct rb_node *node)
+ {
+ 	struct rb_node *parent;

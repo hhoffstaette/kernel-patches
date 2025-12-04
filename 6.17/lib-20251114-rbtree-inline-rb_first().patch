@@ -1,0 +1,83 @@
+From: Eric Dumazet <edumazet@google.com>
+To: Andrew Morton <akpm@linux-foundation.org>, Jakub Kicinski <kuba@kernel.org>, Paolo Abeni <pabeni@redhat.com>
+Cc: linux-kernel <linux-kernel@vger.kernel.org>, netdev@vger.kernel.org, Neal Cardwell <ncardwell@google.com>, Kuniyuki Iwashima <kuniyu@google.com>, Eric Dumazet <eric.dumazet@gmail.com>, Eric Dumazet <edumazet@google.com>
+Subject: [PATCH 1/2] rbtree: inline rb_first()
+Date: Fri, 14 Nov 2025 14:06:45 +0000
+
+This is a very small function, inlining it save cpu cycles
+by reducing register pressure and removing call/ret overhead.
+
+It also reduces vmlinux text size by 744 bytes on a typical x86_64 build.
+
+Before:
+
+size vmlinux
+   text	   data	    bss	    dec	    hex	filename
+34812525	22177365	5685248	62675138	3bc58c2	vmlinux
+
+After:
+
+size vmlinux
+   text	   data	    bss	    dec	    hex	filename
+34811781	22177365	5685248	62674394	3bc55da	vmlinux
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ include/linux/rbtree.h | 16 +++++++++++++++-
+ lib/rbtree.c           | 16 ----------------
+ 2 files changed, 15 insertions(+), 17 deletions(-)
+
+diff --git a/include/linux/rbtree.h b/include/linux/rbtree.h
+index 8d2ba3749866f500a492d267e5e13556f6aa3f55..484554900f7d3201d41fb29e04fb65fe331eee79 100644
+--- a/include/linux/rbtree.h
++++ b/include/linux/rbtree.h
+@@ -43,7 +43,21 @@ extern void rb_erase(struct rb_node *, struct rb_root *);
+ /* Find logical next and previous nodes in a tree */
+ extern struct rb_node *rb_next(const struct rb_node *);
+ extern struct rb_node *rb_prev(const struct rb_node *);
+-extern struct rb_node *rb_first(const struct rb_root *);
++
++/*
++ * This function returns the first node (in sort order) of the tree.
++ */
++static inline struct rb_node *rb_first(const struct rb_root *root)
++{
++	struct rb_node	*n;
++
++	n = root->rb_node;
++	if (!n)
++		return NULL;
++	while (n->rb_left)
++		n = n->rb_left;
++	return n;
++}
+ extern struct rb_node *rb_last(const struct rb_root *);
+ 
+ /* Postorder iteration - always visit the parent after its children */
+diff --git a/lib/rbtree.c b/lib/rbtree.c
+index 5114eda6309c9d867a3e1ed9358bf9b3b275eb71..b946eb4b759d3b65f5bc5d54d0377348962bdc56 100644
+--- a/lib/rbtree.c
++++ b/lib/rbtree.c
+@@ -460,22 +460,6 @@ void __rb_insert_augmented(struct rb_node *node, struct rb_root *root,
+ }
+ EXPORT_SYMBOL(__rb_insert_augmented);
+ 
+-/*
+- * This function returns the first node (in sort order) of the tree.
+- */
+-struct rb_node *rb_first(const struct rb_root *root)
+-{
+-	struct rb_node	*n;
+-
+-	n = root->rb_node;
+-	if (!n)
+-		return NULL;
+-	while (n->rb_left)
+-		n = n->rb_left;
+-	return n;
+-}
+-EXPORT_SYMBOL(rb_first);
+-
+ struct rb_node *rb_last(const struct rb_root *root)
+ {
+ 	struct rb_node	*n;
