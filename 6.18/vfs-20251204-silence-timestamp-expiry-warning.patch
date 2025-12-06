@@ -3,12 +3,14 @@ These timestamp warnings are well-intended but totally unhelpful in reality.
 
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
-@@ -3218,33 +3218,8 @@ static void set_mount_attributes(struct
+@@ -3163,34 +3163,9 @@ static void set_mount_attributes(struct
  	touch_mnt_namespace(mnt->mnt_ns);
  }
  
--static void mnt_warn_timestamp_expiry(struct path *mountpoint, struct vfsmount *mnt)
-+static void mnt_warn_timestamp_expiry(__always_unused struct path *mountpoint, __always_unused struct vfsmount *mnt)
+-static void mnt_warn_timestamp_expiry(const struct path *mountpoint,
+-				      struct vfsmount *mnt)
++static void mnt_warn_timestamp_expiry(__always_unused const struct path *mountpoint,
++				      __always_unused struct vfsmount *mnt)
  {
 -	struct super_block *sb = mnt->mnt_sb;
 -
