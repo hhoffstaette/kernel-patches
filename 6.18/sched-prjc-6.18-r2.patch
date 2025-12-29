@@ -1,3 +1,7 @@
+
+-r2 for mainline commit "sched/proxy: Yield the donor task":
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=127b90315ca07ccad2618db7ba950a63e3b32d22
+
 diff --git a/Documentation/admin-guide/sysctl/kernel.rst b/Documentation/admin-guide/sysctl/kernel.rst
 index f3ee807b5d8b..db0b47159259 100644
 --- a/Documentation/admin-guide/sysctl/kernel.rst
@@ -11103,7 +11107,7 @@ index 77ae87f36e84..a2b06eba44e7 100644
 +	rq = this_rq_lock_irq(&rf);
 +
  	schedstat_inc(rq->yld_count);
- 	current->sched_class->yield_task(rq);
+ 	rq->donor->sched_class->yield_task(rq);
 +#endif /* !CONFIG_SCHED_ALT */
  
  	preempt_disable();
@@ -11115,7 +11119,7 @@ index 77ae87f36e84..a2b06eba44e7 100644
 +#ifdef CONFIG_SCHED_ALT
 +	return 0;
 +#else /* !CONFIG_SCHED_ALT */
- 	struct task_struct *curr = current;
+ 	struct task_struct *curr;
  	struct rq *rq, *p_rq;
  	int yielded = 0;
 @@ -1465,6 +1725,7 @@ int __sched yield_to(struct task_struct *p, bool preempt)
