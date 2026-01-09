@@ -1,6 +1,9 @@
 
--r2 for mainline commit "sched/proxy: Yield the donor task":
+r2 for mainline commit "sched/proxy: Yield the donor task":
 https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=127b90315ca07ccad2618db7ba950a63e3b32d22
+
+r3 for mainline commit "sched/fair: Proportional newidle balance":
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=33cf66d88306663d16e4759e9d24766b0aaa2e17
 
 diff --git a/Documentation/admin-guide/sysctl/kernel.rst b/Documentation/admin-guide/sysctl/kernel.rst
 index f3ee807b5d8b..db0b47159259 100644
@@ -10598,9 +10601,9 @@ index adfb6e3409d7..a51dcdd4d7cf 100644
 +#include "alt_sched.h"
 +#else
 +
+ #include <linux/prandom.h>
  #include <linux/sched/affinity.h>
  #include <linux/sched/autogroup.h>
- #include <linux/sched/cpufreq.h>
 @@ -3904,4 +3908,9 @@ void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx);
  
  #include "ext.h"
