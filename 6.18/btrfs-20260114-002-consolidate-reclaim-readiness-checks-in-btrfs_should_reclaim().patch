@@ -1,0 +1,48 @@
+From: Sun YangKai <sunk67188@gmail.com>
+To: linux-btrfs@vger.kernel.org
+Cc: Sun YangKai <sunk67188@gmail.com>,
+	Boris Burkov <boris@bur.io>
+Subject: [PATCH v4 2/2] btrfs: consolidate reclaim readiness checks in btrfs_should_reclaim()
+Date: Wed, 14 Jan 2026 11:47:03 +0800
+
+Move the filesystem state validation from btrfs_reclaim_bgs_work() into
+btrfs_should_reclaim() to centralize the reclaim eligibility logic.
+Since it is the only caller of btrfs_should_reclaim(), there's no
+functional change.
+
+Reviewed-by: Boris Burkov <boris@bur.io>
+Signed-off-by: Sun YangKai <sunk67188@gmail.com>
+---
+ fs/btrfs/block-group.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/block-group.c b/fs/btrfs/block-group.c
+index 79d86b233dda..1594d58304b9 100644
+--- a/fs/btrfs/block-group.c
++++ b/fs/btrfs/block-group.c
+@@ -1804,6 +1804,12 @@ static int reclaim_bgs_cmp(void *unused, const struct list_head *a,
+ 
+ static inline bool btrfs_should_reclaim(const struct btrfs_fs_info *fs_info)
+ {
++	if (!test_bit(BTRFS_FS_OPEN, &fs_info->flags))
++		return false;
++
++	if (btrfs_fs_closing(fs_info))
++		return false;
++
+ 	if (btrfs_is_zoned(fs_info))
+ 		return btrfs_zoned_should_reclaim(fs_info);
+ 	return true;
+@@ -1838,12 +1844,6 @@ void btrfs_reclaim_bgs_work(struct work_struct *work)
+ 	struct btrfs_space_info *space_info;
+ 	LIST_HEAD(retry_list);
+ 
+-	if (!test_bit(BTRFS_FS_OPEN, &fs_info->flags))
+-		return;
+-
+-	if (btrfs_fs_closing(fs_info))
+-		return;
+-
+ 	if (!btrfs_should_reclaim(fs_info))
+ 		return;
+ 
