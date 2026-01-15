@@ -1,0 +1,95 @@
+From: Jiasheng Jiang <jiashengjiangcool@gmail.com>
+To: boris@bur.io
+Cc: clm@fb.com,
+	dsterba@suse.com,
+	fdmanana@kernel.org,
+	jiashengjiangcool@gmail.com,
+	linux-btrfs@vger.kernel.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH v5] btrfs: reset block group size class when it becomes empty
+Date: Wed, 14 Jan 2026 01:13:38 +0000
+
+Differential analysis of block-group.c shows an inconsistency in how
+block group size classes are managed.
+
+Currently, btrfs_use_block_group_size_class() sets a block group's size
+class to specialize it for a specific allocation size. However, this
+size class remains "stale" even if the block group becomes completely
+empty (both used and reserved bytes reach zero).
+
+This happens in two scenarios:
+1. When space reservations are freed (e.g., due to errors or transaction
+   aborts) via btrfs_free_reserved_bytes().
+2. When the last extent in a block group is freed via
+   btrfs_update_block_group().
+
+While size classes are advisory, a stale size class can cause
+find_free_extent to unnecessarily skip candidate block groups during
+initial search loops. This undermines the purpose of size classes—to
+reduce fragmentation—by keeping block groups restricted to a specific
+size class when they could be reused for any size.
+
+Fix this by resetting the size class to BTRFS_BG_SZ_NONE whenever a
+block group's used and reserved counts both reach zero. This ensures
+that empty block groups are fully available for any allocation size in
+the next cycle.
+
+Signed-off-by: Jiasheng Jiang <jiashengjiangcool@gmail.com>
+---
+Changelog:
+
+v4 -> v5:
+1. Remove the Fixes tag.
+
+v3 -> v4:
+1. Introduced btrfs_maybe_reset_size_class() helper to unify the logic.
+2. Expanded the fix to include btrfs_update_block_group() to handle cases where the last extent in a block group is freed.
+3. Refined the commit message to clarify that size classes are advisory and their stale state impacts allocation efficiency rather than causing absolute allocation failures.
+
+v2 -> v3:
+1. Corrected the "Fixes" tag to 52bb7a2166af.
+2. Updated the commit message to reflect that the performance impact is workload-dependent.
+3. Added mention that the issue can lead to unnecessary allocation of new block groups.
+
+v1 -> v2:
+1. Inlined btrfs_maybe_reset_size_class() function.
+2. Moved check below the reserved bytes decrement in btrfs_free_reserved_bytes().
+---
+ fs/btrfs/block-group.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/fs/btrfs/block-group.c b/fs/btrfs/block-group.c
+index 08b14449fabe..343d7724939f 100644
+--- a/fs/btrfs/block-group.c
++++ b/fs/btrfs/block-group.c
+@@ -3675,6 +3675,14 @@ int btrfs_write_dirty_block_groups(struct btrfs_trans_handle *trans)
+ 	return ret;
+ }
+ 
++static void btrfs_maybe_reset_size_class(struct btrfs_block_group *cache)
++{
++	lockdep_assert_held(&cache->lock);
++	if (btrfs_block_group_should_use_size_class(cache) &&
++	    cache->used == 0 && cache->reserved == 0)
++		cache->size_class = BTRFS_BG_SZ_NONE;
++}
++
+ int btrfs_update_block_group(struct btrfs_trans_handle *trans,
+ 			     u64 bytenr, u64 num_bytes, bool alloc)
+ {
+@@ -3739,6 +3747,7 @@ int btrfs_update_block_group(struct btrfs_trans_handle *trans,
+ 		old_val -= num_bytes;
+ 		cache->used = old_val;
+ 		cache->pinned += num_bytes;
++		btrfs_maybe_reset_size_class(cache);
+ 		btrfs_space_info_update_bytes_pinned(space_info, num_bytes);
+ 		space_info->bytes_used -= num_bytes;
+ 		space_info->disk_used -= num_bytes * factor;
+@@ -3867,6 +3876,7 @@ void btrfs_free_reserved_bytes(struct btrfs_block_group *cache, u64 num_bytes,
+ 	cache->reserved -= num_bytes;
+ 	space_info->bytes_reserved -= num_bytes;
+ 	space_info->max_extent_size = 0;
++	btrfs_maybe_reset_size_class(cache);
+ 
+ 	if (is_delalloc)
+ 		cache->delalloc_bytes -= num_bytes;
