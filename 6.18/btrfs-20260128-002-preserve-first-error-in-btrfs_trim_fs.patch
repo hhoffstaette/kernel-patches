@@ -1,0 +1,72 @@
+From: jinbaohong <jinbaohong@synology.com>
+To: linux-btrfs@vger.kernel.org
+Cc: fdmanana@kernel.org,
+	dsterba@suse.com,
+	jinbaohong <jinbaohong@synology.com>,
+	Robbie Ko <robbieko@synology.com>
+Subject: [PATCH v4 2/4] btrfs: preserve first error in btrfs_trim_fs
+Date: Wed, 28 Jan 2026 07:06:39 +0000
+
+When multiple block groups or devices fail during trim, preserve the
+first error encountered rather than the last one. The first error is
+typically more useful for debugging as it represents the original
+failure, while subsequent errors may be cascading effects.
+
+Signed-off-by: Robbie Ko <robbieko@synology.com>
+Signed-off-by: jinbaohong <jinbaohong@synology.com>
+---
+ fs/btrfs/extent-tree.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index bd167466b770..6c49465c0632 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -6653,7 +6653,8 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 				ret = btrfs_cache_block_group(cache, true);
+ 				if (ret) {
+ 					bg_failed++;
+-					bg_ret = ret;
++					if (!bg_ret)
++						bg_ret = ret;
+ 					continue;
+ 				}
+ 			}
+@@ -6666,7 +6667,8 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 			trimmed += group_trimmed;
+ 			if (ret) {
+ 				bg_failed++;
+-				bg_ret = ret;
++				if (!bg_ret)
++					bg_ret = ret;
+ 				continue;
+ 			}
+ 		}
+@@ -6674,7 +6676,7 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 
+ 	if (bg_failed)
+ 		btrfs_warn(fs_info,
+-			"failed to trim %llu block group(s), last error %d",
++			"failed to trim %llu block group(s), first error %d",
+ 			bg_failed, bg_ret);
+ 
+ 	mutex_lock(&fs_devices->device_list_mutex);
+@@ -6687,7 +6689,8 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 		trimmed += group_trimmed;
+ 		if (ret) {
+ 			dev_failed++;
+-			dev_ret = ret;
++			if (!dev_ret)
++				dev_ret = ret;
+ 			continue;
+ 		}
+ 	}
+@@ -6695,7 +6698,7 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 
+ 	if (dev_failed)
+ 		btrfs_warn(fs_info,
+-			"failed to trim %llu device(s), last error %d",
++			"failed to trim %llu device(s), first error %d",
+ 			dev_failed, dev_ret);
+ 	range->len = trimmed;
+ 	if (bg_ret)

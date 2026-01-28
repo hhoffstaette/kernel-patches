@@ -1,0 +1,37 @@
+From: jinbaohong <jinbaohong@synology.com>
+To: linux-btrfs@vger.kernel.org
+Cc: fdmanana@kernel.org,
+	dsterba@suse.com,
+	jinbaohong <jinbaohong@synology.com>,
+	Robbie Ko <robbieko@synology.com>
+Subject: [PATCH v4 1/4] btrfs: continue trimming remaining devices on failure
+Date: Wed, 28 Jan 2026 07:06:38 +0000
+
+Commit 93bba24d4b5a ("btrfs: Enhance btrfs_trim_fs function to handle
+error better") intended to make device trimming continue even if one
+device fails, tracking failures and reporting them at the end. However,
+it used 'break' instead of 'continue', causing the loop to exit on the
+first device failure.
+
+Fix this by replacing 'break' with 'continue'.
+
+Fixes: 93bba24d4b5a ("btrfs: Enhance btrfs_trim_fs function to handle error better")
+Signed-off-by: Robbie Ko <robbieko@synology.com>
+Signed-off-by: jinbaohong <jinbaohong@synology.com>
+---
+ fs/btrfs/extent-tree.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 0ce2a7def0f3..bd167466b770 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -6688,7 +6688,7 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 		if (ret) {
+ 			dev_failed++;
+ 			dev_ret = ret;
+-			break;
++			continue;
+ 		}
+ 	}
+ 	mutex_unlock(&fs_devices->device_list_mutex);

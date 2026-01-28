@@ -1,0 +1,67 @@
+From: jinbaohong <jinbaohong@synology.com>
+To: linux-btrfs@vger.kernel.org
+Cc: fdmanana@kernel.org,
+	dsterba@suse.com,
+	jinbaohong <jinbaohong@synology.com>,
+	Robbie Ko <robbieko@synology.com>
+Subject: [PATCH v4 3/4] btrfs: handle user interrupt properly in btrfs_trim_fs
+Date: Wed, 28 Jan 2026 07:06:40 +0000
+
+When a fatal signal is pending or the process is freezing,
+btrfs_trim_block_group and btrfs_trim_free_extents return -ERESTARTSYS.
+Currently this is treated as a regular error: the loops continue to the
+next iteration and count it as a block group or device failure.
+
+Instead, break out of the loops immediately and return -ERESTARTSYS to
+userspace without counting it as a failure. Also skip the device loop
+entirely if the block group loop was interrupted.
+
+Signed-off-by: Robbie Ko <robbieko@synology.com>
+Signed-off-by: jinbaohong <jinbaohong@synology.com>
+---
+ fs/btrfs/extent-tree.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/fs/btrfs/extent-tree.c b/fs/btrfs/extent-tree.c
+index 6c49465c0632..633c7c0f9d92 100644
+--- a/fs/btrfs/extent-tree.c
++++ b/fs/btrfs/extent-tree.c
+@@ -6665,6 +6665,10 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 						     range->minlen);
+ 
+ 			trimmed += group_trimmed;
++			if (ret == -ERESTARTSYS || ret == -EINTR) {
++				btrfs_put_block_group(cache);
++				break;
++			}
+ 			if (ret) {
+ 				bg_failed++;
+ 				if (!bg_ret)
+@@ -6679,6 +6683,9 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 			"failed to trim %llu block group(s), first error %d",
+ 			bg_failed, bg_ret);
+ 
++	if (ret == -ERESTARTSYS || ret == -EINTR)
++		return ret;
++
+ 	mutex_lock(&fs_devices->device_list_mutex);
+ 	list_for_each_entry(device, &fs_devices->devices, dev_list) {
+ 		if (test_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state))
+@@ -6687,6 +6694,8 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 		ret = btrfs_trim_free_extents(device, &group_trimmed);
+ 
+ 		trimmed += group_trimmed;
++		if (ret == -ERESTARTSYS || ret == -EINTR)
++			break;
+ 		if (ret) {
+ 			dev_failed++;
+ 			if (!dev_ret)
+@@ -6701,6 +6710,8 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
+ 			"failed to trim %llu device(s), first error %d",
+ 			dev_failed, dev_ret);
+ 	range->len = trimmed;
++	if (ret == -ERESTARTSYS || ret == -EINTR)
++		return ret;
+ 	if (bg_ret)
+ 		return bg_ret;
+ 	return dev_ret;
