@@ -1,0 +1,39 @@
+From: Sun YangKai <sunk67188@gmail.com>
+To: linux-btrfs@vger.kernel.org
+Cc: Sun YangKai <sunk67188@gmail.com>,
+	Boris Burkov <boris@bur.io>
+Subject: [PATCH] btrfs: initialize periodic_reclaim_ready to true
+Date: Mon, 26 Jan 2026 19:30:52 +0800
+
+The periodic_reclaim_ready flag determines whether the background reclaim
+worker should process a specific space_info. Previously, this flag
+defaulted to false because space_info structures are zero-initialized.
+
+According to the original design, periodic reclaim should be active from
+the start and only disable itself (set to false) if it fails to find
+reclaimable block groups.
+
+Now that the reclaim condition has been fixed in a previous patch to
+properly handle reclaim_bytes, it is necessary to enable this by default.
+This ensures background reclaim logic kicks in as soon as the thresholds
+are met after mount.
+
+Fixes: 862dd2fd93540 ("btrfs: fix periodic reclaim condition")
+CC: Boris Burkov <boris@bur.io>
+Signed-off-by: Sun YangKai <sunk67188@gmail.com>
+---
+ fs/btrfs/space-info.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
+index bb5aac7ee9d2..1530c30cacc9 100644
+--- a/fs/btrfs/space-info.c
++++ b/fs/btrfs/space-info.c
+@@ -250,6 +250,7 @@ static void init_space_info(struct btrfs_fs_info *info,
+ 	space_info->clamp = 1;
+ 	btrfs_update_space_info_chunk_size(space_info, calc_chunk_size(info, flags));
+ 	space_info->subgroup_id = BTRFS_SUB_GROUP_PRIMARY;
++	space_info->periodic_reclaim_ready = true;
+ 
+ 	if (btrfs_is_zoned(info))
+ 		space_info->bg_reclaim_threshold = BTRFS_DEFAULT_ZONED_RECLAIM_THRESH;
