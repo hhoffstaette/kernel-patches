@@ -1,0 +1,65 @@
+From: fdmanana@kernel.org
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH v2 2/3] btrfs: don't allow log trees to consume global reserve or overcommit metadata
+Date: Tue,  3 Feb 2026 23:39:00 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+For a fsync we never reserve space in advance, we just start a transaction
+without reserving space and we use an empty block reserve for a log tree.
+We reserve space as we need while updating a log tree, we end up in
+btrfs_use_block_rsv() when reserving space for the allocation of a log
+tree extent buffer and we attempt first to reserve without flushing,
+and if that fails we attempt to consume from the global reserve or
+overcommit metadata. This makes us consume space that may be the last
+resort for a transaction commit to succeed, therefore increasing the
+chances for a transaction abort with -ENOSPC.
+
+So make btrfs_use_block_rsv() fail if we can't reserve metadata space for
+a log tree exent buffer allocation without flushing, making the fsync
+fallback to a transaction commit and avoid using critical space that could
+be the only resort for a transaction commit to succeed when we are in a
+critical space situation.
+
+Reviewed-by: Leo Martins <loemra.dev@gmail.com>
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/block-rsv.c | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/fs/btrfs/block-rsv.c b/fs/btrfs/block-rsv.c
+index e823230c09b7..fe81d9e9f08c 100644
+--- a/fs/btrfs/block-rsv.c
++++ b/fs/btrfs/block-rsv.c
+@@ -540,6 +540,31 @@ struct btrfs_block_rsv *btrfs_use_block_rsv(struct btrfs_trans_handle *trans,
+ 					   blocksize, BTRFS_RESERVE_NO_FLUSH);
+ 	if (!ret)
+ 		return block_rsv;
++
++	/*
++	 * If we are being used for updating a log tree, fail immediately, which
++	 * makes the fsync fallback to a transaction commit.
++	 *
++	 * We don't want to consume from the global block reserve, as that is
++	 * precious space that may be needed to do updates to some trees for
++	 * which we don't reserve space during a transaction commit (update root
++	 * items in the root tree, device stat items in the device tree and
++	 * quota tree updates, see btrfs_init_root_block_rsv()), or to fallback
++	 * to in case we did not reserve enough space to run delayed items,
++	 * delayed references, or anything else we need in order to avoid a
++	 * transaction abort.
++	 *
++	 * We also don't want to do a reservation in flush emergency mode, as
++	 * we end up using metadata that could be critical to allow a
++	 * transaction to complete successfully and therefore increase the
++	 * chances for a transaction abort.
++	 *
++	 * Log trees are an optimization and should never consume from the
++	 * global reserve or be allowed overcommitting metadata.
++	 */
++	if (btrfs_root_id(root) == BTRFS_TREE_LOG_OBJECTID)
++		return ERR_PTR(ret);
++
+ 	/*
+ 	 * If we couldn't reserve metadata bytes try and use some from
+ 	 * the global reserve if its space type is the same as the global
