@@ -1,0 +1,46 @@
+From: fdmanana@kernel.org
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH v2 3/3] btrfs: update comment for BTRFS_RESERVE_NO_FLUSH
+Date: Tue,  3 Feb 2026 23:39:01 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+The comment is incomplete as BTRFS_RESERVE_NO_FLUSH is used for more
+reasons than currently holding a transaction handle open. Update the
+comment with all the other reasons and give some details.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/space-info.h | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/space-info.h b/fs/btrfs/space-info.h
+index 0703f24b23f7..6f96cf48d7da 100644
+--- a/fs/btrfs/space-info.h
++++ b/fs/btrfs/space-info.h
+@@ -21,7 +21,24 @@ struct btrfs_block_group;
+  * The higher the level, the more methods we try to reclaim space.
+  */
+ enum btrfs_reserve_flush_enum {
+-	/* If we are in the transaction, we can't flush anything.*/
++	/*
++	 * Used when we can't flush or don't need:
++	 *
++	 * 1) We are holding a transaction handle open, so we can't flush as
++	 *    that could deadlock.
++	 *
++	 * 2) For a nowait write we don't want to block when reserving delalloc.
++	 *
++	 * 3) Joining a transaction or attaching a transaction, we don't want
++	 *    to wait and we don't need to reserve anything (any needed space
++	 *    was reserved before in a dedicated block reserve, or we rely on
++	 *    the global block reserve, see btrfs_init_root_block_rsv()).
++	 *
++	 * 4) Starting a transaction when we don't need to reserve space, as
++	 *    we don't need it because we previously reserved in a dedicated
++	 *    block reserve or rely on the global block reserve, like the above
++	 *    case.
++	 */
+ 	BTRFS_RESERVE_NO_FLUSH,
+ 
+ 	/*
