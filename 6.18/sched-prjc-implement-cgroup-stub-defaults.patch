@@ -1,0 +1,85 @@
+https://gitlab.com/alfredchen/linux-prjc/-/merge_requests/46
+
+From: Steven Barrett <steven@liquorix.net>
+Subject: [PATCH] sched/alt: Implement cgroup stub defaults
+Date: Fri, 30 Jan 2026 17:55:12 -0600
+
+The original cgroup stub implementation was targeted at Kubernetes and
+Pterodactyl.  Implementing the stubs with simple returns was good
+enough to make both happy.
+
+However, some newer software like Conan expect output from `seq_puts`
+and interpret default values to configure itself live while running
+inside a container.
+
+Implement the remaining stubs so software believes default values are in
+place.
+
+Links:
+ - https://github.com/damentz/liquorix-package/issues/213
+---
+ kernel/sched/alt_core.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/sched/alt_core.c b/kernel/sched/alt_core.c
+index 4ebe535c623f..c5e1dbce89eb 100644
+--- a/kernel/sched/alt_core.c
++++ b/kernel/sched/alt_core.c
+@@ -6703,7 +6703,7 @@ static int cpu_shares_write_u64(struct cgroup_subsys_state *css,
+ static u64 cpu_shares_read_u64(struct cgroup_subsys_state *css,
+ 			       struct cftype *cft)
+ {
+-	return 0;
++	return 1024;
+ }
+ 
+ static s64 cpu_idle_read_s64(struct cgroup_subsys_state *css,
+@@ -6723,7 +6723,7 @@ static int cpu_idle_write_s64(struct cgroup_subsys_state *css,
+ static s64 cpu_cfs_quota_read_s64(struct cgroup_subsys_state *css,
+ 				  struct cftype *cft)
+ {
+-	return 0;
++	return -1;
+ }
+ 
+ static int cpu_cfs_quota_write_s64(struct cgroup_subsys_state *css,
+@@ -6735,7 +6735,7 @@ static int cpu_cfs_quota_write_s64(struct cgroup_subsys_state *css,
+ static u64 cpu_cfs_period_read_u64(struct cgroup_subsys_state *css,
+ 				   struct cftype *cft)
+ {
+-	return 0;
++	return 100000ULL;
+ }
+ 
+ static int cpu_cfs_period_write_u64(struct cgroup_subsys_state *css,
+@@ -6796,11 +6796,13 @@ static u64 cpu_rt_period_read_uint(struct cgroup_subsys_state *css,
+ #ifdef CONFIG_UCLAMP_TASK_GROUP
+ static int cpu_uclamp_min_show(struct seq_file *sf, void *v)
+ {
++	seq_puts(sf, "0\n");
+ 	return 0;
+ }
+ 
+ static int cpu_uclamp_max_show(struct seq_file *sf, void *v)
+ {
++	seq_puts(sf, "max\n");
+ 	return 0;
+ }
+ 
+@@ -6890,7 +6892,7 @@ static struct cftype cpu_legacy_files[] = {
+ static u64 cpu_weight_read_u64(struct cgroup_subsys_state *css,
+ 			       struct cftype *cft)
+ {
+-	return 0;
++	return 100;
+ }
+ 
+ static int cpu_weight_write_u64(struct cgroup_subsys_state *css,
+@@ -6915,6 +6917,7 @@ static int cpu_weight_nice_write_s64(struct cgroup_subsys_state *css,
+ #ifdef CONFIG_CFS_BANDWIDTH
+ static int cpu_max_show(struct seq_file *sf, void *v)
+ {
++	seq_puts(sf, "max 100000\n");
+ 	return 0;
+ }
+ 
