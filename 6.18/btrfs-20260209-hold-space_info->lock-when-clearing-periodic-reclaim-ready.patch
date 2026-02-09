@@ -1,0 +1,40 @@
+From: Sun YangKai <sunk67188@gmail.com>
+To: linux-btrfs@vger.kernel.org
+Cc: Sun YangKai <sunk67188@gmail.com>,
+	Chris Mason <clm@meta.com>
+Subject: [PATCH] btrfs: hold space_info->lock when clearing periodic reclaim ready
+Date: Mon,  9 Feb 2026 20:53:39 +0800
+
+btrfs_set_periodic_reclaim_ready() requires space_info->lock to be held,
+as enforced by lockdep_assert_held(). However, btrfs_reclaim_sweep() was
+calling it after do_reclaim_sweep() returns, at which point
+space_info->lock is no longer held.
+
+Fix this by explicitly acquiring space_info->lock before clearing the
+periodic reclaim ready flag in btrfs_reclaim_sweep().
+
+Fixes: 19eff93dc738 ("btrfs: fix periodic reclaim condition")
+Reported-by: Chris Mason <clm@meta.com>
+Closes: https://lore.kernel.org/linux-btrfs/20260208182556.891815-1-clm@meta.com/
+Signed-off-by: Sun YangKai <sunk67188@gmail.com>
+---
+ fs/btrfs/space-info.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
+index 1dd65fae6349..931f0dc02b95 100644
+--- a/fs/btrfs/space-info.c
++++ b/fs/btrfs/space-info.c
+@@ -2205,8 +2205,11 @@ void btrfs_reclaim_sweep(const struct btrfs_fs_info *fs_info)
+ 		if (!btrfs_should_periodic_reclaim(space_info))
+ 			continue;
+ 		for (raid = 0; raid < BTRFS_NR_RAID_TYPES; raid++) {
+-			if (do_reclaim_sweep(space_info, raid))
++			if (do_reclaim_sweep(space_info, raid)) {
++				spin_lock(&space_info->lock);
+ 				btrfs_set_periodic_reclaim_ready(space_info, false);
++				spin_unlock(&space_info->lock);
++			}
+ 		}
+ 	}
+ }
