@@ -1,0 +1,20 @@
+Change minimum per-inode writeback size to 64 MB, see
+https://lore.kernel.org/all/20251017034611.651385-1-hch@lst.de/
+for motivation. The "reduced fairness" between inodes is overrated,
+since writeback is asynchronous; in exchange this massively increases
+throughput for large files esp. on rotational devices.
+
+--- a/fs/fs-writeback.c
++++ b/fs/fs-writeback.c
+@@ -32,9 +32,9 @@
+ #include "internal.h"
+ 
+ /*
+- * 4MB minimal write chunk size
++ * 64MB minimal write chunk size
+  */
+-#define MIN_WRITEBACK_PAGES	(4096UL >> (PAGE_SHIFT - 10))
++#define MIN_WRITEBACK_PAGES	(65536UL >> (PAGE_SHIFT - 10))
+ 
+ /*
+  * Passed into wb_writeback(), essentially a subset of writeback_control
