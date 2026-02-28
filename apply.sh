@@ -31,7 +31,7 @@ PATCHDIR=$(dirname $0)/${VERSION}.${PATCHLEVEL}
 
 # check release version against patch series tag
 if [[ $1 != "-f" ]] && [[ $1 != "--force" ]] ; then
-	RELEASE=$(git -C $(dirname $0) describe --exact-match --tags)
+	RELEASE=$(git -C $(dirname $0) tag --points-at | sort --version-sort | tail -n 1)
 	[[ ${RELEASE} != ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} ]] \
 		&& echo "Error: patchset ${RELEASE} does not match kernel release" ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} \
 		&& exit 1
