@@ -1,0 +1,822 @@
+From: Tim Fuechsel <t.fuechsel@gmx.de>
+To: "David S. Miller" <davem@davemloft.net>,
+	David Ahern <dsahern@kernel.org>,
+	Eric Dumazet <edumazet@google.com>,
+	Jakub Kicinski <kuba@kernel.org>, Paolo Abeni <pabeni@redhat.com>,
+	Simon Horman <horms@kernel.org>,
+	Neal Cardwell <ncardwell@google.com>,
+	Kuniyuki Iwashima <kuniyu@google.com>, linux-kernel@vger.kernel.org,
+	netdev@vger.kernel.org, lukas.prause@ikt.uni-hannover.de,
+	t.fuechsel@gmx.de
+Subject: [RFC v2] tcp: Add TCP ROCCET congestion control module.
+Date: Tue, 10 Feb 2026 14:10:54 +0100
+
+TCP ROCCET is an extension of TCP CUBIC that improves its overall
+performance. By its mode of function, CUBIC causes bufferbloat while
+it tries to detect the available throughput of a network path. This is
+particularly a problem with large buffers in mobile networks. A more
+detailed description and analysis of this problem caused by TCP CUBIC
+can be found in [1]. TCP ROCCET addresses this problem by adding two
+additional metrics to detect congestion (queueing and bufferbloat)
+on a network path. TCP ROCCET achieves better performance than CUBIC
+and BBRv3, by maintaining similar throughput while reducing the latency.
+In addition, TCP ROCCET does not have fairness issues when sharing a
+link with TCP CUBIC and BBRv3. A paper that evaluates the performance
+and function of TCP ROCCET has already been peer-reviewed and will be
+presented at the WONS 2026 conference. A draft of this paper can be
+found here [2].
+
+[1] https://doi.org/10.1109/VTC2023-Fall60731.2023.10333357
+[2] https://arxiv.org/abs/2510.25281
+
+Signed-off-by: Lukas Prause <lukas.prause@ikt.uni-hannover.de>
+Signed-off-by: Tim Fuechsel <t.fuechsel@gmx.de>
+
+---
+
+Changes since v1:
+	- Removes bug in ECN handling.
+	- Received ECE bit is handled as ROCCET congestion event.
+---
+ net/ipv4/Kconfig      |  12 +
+ net/ipv4/Makefile     |   1 +
+ net/ipv4/tcp_roccet.c | 671 ++++++++++++++++++++++++++++++++++++++++++
+ net/ipv4/tcp_roccet.h |  56 ++++
+ 4 files changed, 740 insertions(+)
+ create mode 100644 net/ipv4/tcp_roccet.c
+ create mode 100644 net/ipv4/tcp_roccet.h
+
+diff --git a/net/ipv4/Kconfig b/net/ipv4/Kconfig
+index b71c22475c51..781a0db37309 100644
+--- a/net/ipv4/Kconfig
++++ b/net/ipv4/Kconfig
+@@ -664,6 +664,18 @@ config TCP_CONG_CDG
+ 	    delay gradients." In Networking 2011. Preprint:
+ 	    http://caia.swin.edu.au/cv/dahayes/content/networking2011-cdg-preprint.pdf
+ 
++config TCP_CONG_ROCCET
++	tristate "ROCCET TCP"
++	default n
++	help
++      TCP ROCCET is a sender-side only modification of the TCP CUBIC
++      protocol stack that optimizes the performance of TCP congestion
++      control. Especially for networks with large buffers (wireless,
++      cellular networks), TCP ROCCET has improved performance by maintaining
++      similar throughput as CUBIC while reducing the latency.
++       For more information, see: https://arxiv.org/abs/2510.25281
++
++
+ config TCP_CONG_BBR
+ 	tristate "BBR TCP"
+ 	default n
+diff --git a/net/ipv4/Makefile b/net/ipv4/Makefile
+index ec36d2ec059e..35fa62b6d07f 100644
+--- a/net/ipv4/Makefile
++++ b/net/ipv4/Makefile
+@@ -45,6 +45,7 @@ obj-$(CONFIG_INET_TCP_DIAG) += tcp_diag.o
+ obj-$(CONFIG_INET_UDP_DIAG) += udp_diag.o
+ obj-$(CONFIG_INET_RAW_DIAG) += raw_diag.o
+ obj-$(CONFIG_TCP_CONG_BBR) += tcp_bbr.o
++obj-$(CONFIG_TCP_CONG_ROCCET) += tcp_roccet.o
+ obj-$(CONFIG_TCP_CONG_BIC) += tcp_bic.o
+ obj-$(CONFIG_TCP_CONG_CDG) += tcp_cdg.o
+ obj-$(CONFIG_TCP_CONG_CUBIC) += tcp_cubic.o
+diff --git a/net/ipv4/tcp_roccet.c b/net/ipv4/tcp_roccet.c
+new file mode 100644
+index 000000000000..892faf907edb
+--- /dev/null
++++ b/net/ipv4/tcp_roccet.c
+@@ -0,0 +1,671 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * TCP ROCCET: An RTT-Oriented CUBIC Congestion Control
++ * Extension for 5G and Beyond Networks
++ *
++ * TCP ROCCET is a new TCP congestion control
++ * algorithm suited for current cellular 5G NR beyond networks.
++ * It extends the kernel default congestion control CUBIC
++ * and improves its performance, and additionally solves an
++ * unwanted side effects of CUBIC’s implementation.
++ * ROCCET uses its own Slow Start, called LAUNCH, where loss
++ * is not considered as a congestion event.
++ * The congestion avoidance phase, called ORBITER, uses
++ * CUBIC's window growth function and adds, based on RTT
++ * and ACK rate, congestion events.
++ *
++ * A peer-reviewed paper on TCP ROCCET will be presented at the WONS 2026 conference.
++ * A draft of the paper is available here:
++ *		https://arxiv.org/abs/2510.25281
++ *
++ *
++ * Further information about CUBIC:
++ * TCP CUBIC: Binary Increase Congestion control for TCP v2.3
++ * Home page:
++ *	http://netsrv.csc.ncsu.edu/twiki/bin/view/Main/BIC
++ * This is from the implementation of CUBIC TCP in
++ * Sangtae Ha, Injong Rhee and Lisong Xu,
++ *  "CUBIC: A New TCP-Friendly High-Speed TCP Variant"
++ *  in ACM SIGOPS Operating System Review, July 2008.
++ * Available from:
++ *  http://netsrv.csc.ncsu.edu/export/cubic_a_new_tcp_2008.pdf
++ *
++ * CUBIC integrates a new slow start algorithm, called HyStart.
++ * The details of HyStart are presented in
++ *  Sangtae Ha and Injong Rhee,
++ *  "Taming the Elephants: New TCP Slow Start", NCSU TechReport 2008.
++ * Available from:
++ *  http://netsrv.csc.ncsu.edu/export/hystart_techreport_2008.pdf
++ *
++ * All testing results are available from:
++ * http://netsrv.csc.ncsu.edu/wiki/index.php/TCP_Testing
++ *
++ * Unless CUBIC is enabled and congestion window is large
++ * this behaves the same as the original Reno.
++ */
++
++#include "tcp_roccet.h"
++#include "linux/printk.h"
++#include <linux/btf.h>
++#include <linux/btf_ids.h>
++#include <linux/math64.h>
++#include <linux/mm.h>
++#include <linux/module.h>
++#include <net/tcp.h>
++
++/* Scale factor beta calculation (max_cwnd = snd_cwnd * beta) */
++#define BICTCP_BETA_SCALE 1024
++
++#define BICTCP_HZ 10 /* BIC HZ 2^10 = 1024 */
++
++/* Alpha value for the sRrTT  multiplied by 100.
++ * Here 20 represents a value of 0.2
++ */
++#define ROCCET_ALPHA_TIMES_100 20
++
++/* The amount of seconds ROCCET stores a minRTT.
++ * Enable "calculate_min_rtt" first.
++ */
++#define ROCCET_RTT_LOOKBACK_S 10
++
++/* Parameters that are specific to the ROCCET-Algorithm */
++static int sr_rtt_upper_bound __read_mostly = 100;
++static int ack_rate_diff_ss __read_mostly = 10;
++static int ack_rate_diff_ca __read_mostly = 200;
++static bool calculate_min_rtt __read_mostly;
++static bool ignore_loss __read_mostly;
++static int roccet_min_rtt_interpolation_factor __read_mostly = 70;
++
++module_param(sr_rtt_upper_bound, int, 0644);
++MODULE_PARM_DESC(sr_rtt_upper_bound, "ROCCET's upper bound for srRTT.");
++module_param(ack_rate_diff_ss, int, 0644);
++MODULE_PARM_DESC(ack_rate_diff_ss,
++		 "ROCCET's threshold to exit slow start if ACK-rate defer by given amount of segments.");
++module_param(ack_rate_diff_ca, int, 0644);
++MODULE_PARM_DESC(ack_rate_diff_ca,
++		 "ROCCET's threshold for ack-rate and cum_cwnd, in percantage of the current cwnd.");
++module_param(calculate_min_rtt, bool, 0644);
++MODULE_PARM_DESC(calculate_min_rtt,
++		 "Calculate min RTT if no lower RTT occurs after 10 sec.");
++module_param(ignore_loss, bool, 0644);
++MODULE_PARM_DESC(ignore_loss, "Ignore loss as a congestion event.");
++module_param(roccet_min_rtt_interpolation_factor, int, 0644);
++MODULE_PARM_DESC(roccet_min_rtt_interpolation_factor,
++		 "ROCCET factor for interpolating the current RTT with the last minRTT (minRTT = (factor * currRTT + (100-factor) * minRTT) / 100)");
++
++static int fast_convergence __read_mostly = 1;
++static int beta __read_mostly = 717; /* = 717/1024 (BICTCP_BETA_SCALE) */
++static int initial_ssthresh __read_mostly;
++static int bic_scale __read_mostly = 41;
++static int tcp_friendliness __read_mostly = 1;
++
++static u32 cube_rtt_scale __read_mostly;
++static u32 beta_scale __read_mostly;
++static u64 cube_factor __read_mostly;
++
++/* Note parameters that are used for precomputing scale factors are read-only */
++module_param(fast_convergence, int, 0644);
++MODULE_PARM_DESC(fast_convergence, "turn on/off fast convergence");
++module_param(beta, int, 0644);
++MODULE_PARM_DESC(beta, "beta for multiplicative increase");
++module_param(initial_ssthresh, int, 0644);
++MODULE_PARM_DESC(initial_ssthresh, "initial value of slow start threshold");
++module_param(bic_scale, int, 0444);
++MODULE_PARM_DESC(bic_scale,
++		 "scale (scaled by 1024) value for bic function (bic_scale/1024)");
++module_param(tcp_friendliness, int, 0644);
++MODULE_PARM_DESC(tcp_friendliness, "turn on/off tcp friendliness");
++
++static inline void roccettcp_reset(struct roccettcp *ca)
++{
++	memset(ca, 0, offsetof(struct roccettcp, curr_rtt));
++	ca->bw_limit.sum_cwnd = 1;
++	ca->bw_limit.sum_acked = 1;
++	ca->bw_limit.next_check = 0;
++	ca->curr_min_rtt_timed.rtt = ~0U;
++	ca->curr_min_rtt_timed.time = ~0U;
++	ca->last_rtt = 0;
++	ca->ece_received = false;
++}
++
++static inline void update_min_rtt(struct sock *sk)
++{
++	struct roccettcp *ca = inet_csk_ca(sk);
++	u32 now = jiffies_to_usecs(tcp_jiffies32);
++
++	if (now - ca->curr_min_rtt_timed.time >
++		    ROCCET_RTT_LOOKBACK_S * USEC_PER_SEC &&
++	    calculate_min_rtt) {
++		u32 new_min_rtt = max(ca->curr_rtt, 1);
++		u32 old_min_rtt = ca->curr_min_rtt_timed.rtt;
++
++		u32 interpolated_min_rtt =
++			(new_min_rtt * roccet_min_rtt_interpolation_factor +
++			 old_min_rtt *
++				 (100 - roccet_min_rtt_interpolation_factor)) /
++			100;
++
++		ca->curr_min_rtt_timed.rtt = interpolated_min_rtt;
++		ca->curr_min_rtt_timed.time = now;
++	}
++
++	/* Check if new lower min RTT was found. If so, set it directly */
++	if (ca->curr_rtt < ca->curr_min_rtt_timed.rtt) {
++		ca->curr_min_rtt_timed.rtt = max(ca->curr_rtt, 1);
++		ca->curr_min_rtt_timed.time = now;
++	}
++}
++
++/* Return difference between last and current ack rate.
++ */
++static inline int get_ack_rate_diff(struct roccettcp *ca)
++{
++	return ca->ack_rate.last_rate - ca->ack_rate.curr_rate;
++}
++
++/* Update ack rate sampled by 100ms.
++ */
++static inline void update_ack_rate(struct sock *sk)
++{
++	struct roccettcp *ca = inet_csk_ca(sk);
++	u32 now = jiffies_to_usecs(tcp_jiffies32);
++	u32 interval = USEC_PER_MSEC * 100;
++
++	if ((u32)(now - ca->ack_rate.last_rate_time) >= interval) {
++		ca->ack_rate.last_rate_time = now;
++		ca->ack_rate.last_rate = ca->ack_rate.curr_rate;
++		ca->ack_rate.curr_rate = ca->ack_rate.cnt;
++		ca->ack_rate.cnt = 0;
++	} else {
++		ca->ack_rate.cnt += 1;
++	}
++}
++
++/* Compute srRTT.
++ */
++static inline void update_srrtt(struct sock *sk)
++{
++	struct roccettcp *ca = inet_csk_ca(sk);
++
++	if (ca->curr_min_rtt_timed.rtt == 0)
++		return;
++
++	/* Calculate the new rRTT (Scaled by 100).
++	 * 100 * ((sRTT - sRTT_min) / sRTT_min)
++	 */
++	u32 rrtt = (100 * (ca->curr_rtt - ca->curr_min_rtt_timed.rtt)) /
++		   ca->curr_min_rtt_timed.rtt;
++
++	// (1 - alpha) * srRTT + alpha * rRTT
++	ca->curr_srrtt = ((100 - ROCCET_ALPHA_TIMES_100) * ca->curr_srrtt +
++			  ROCCET_ALPHA_TIMES_100 * rrtt) / 100;
++}
++
++__bpf_kfunc static void roccettcp_init(struct sock *sk)
++{
++	struct roccettcp *ca = inet_csk_ca(sk);
++
++	roccettcp_reset(ca);
++
++	if (initial_ssthresh)
++		tcp_sk(sk)->snd_ssthresh = initial_ssthresh;
++
++	/* Initial roccet parameters */
++	ca->roccet_last_event_time_us = 0;
++	ca->curr_min_rtt = ~0U;
++	ca->ack_rate.last_rate = 0;
++	ca->ack_rate.last_rate_time = 0;
++	ca->ack_rate.curr_rate = 0;
++	ca->ack_rate.cnt = 0;
++}
++
++__bpf_kfunc static void roccettcp_cwnd_event(struct sock *sk,
++					     enum tcp_ca_event event)
++{
++	if (event == CA_EVENT_TX_START) {
++		struct roccettcp *ca = inet_csk_ca(sk);
++		u32 now = tcp_jiffies32;
++		s32 delta;
++
++		delta = now - tcp_sk(sk)->lsndtime;
++
++		/* We were application limited (idle) for a while.
++		 * Shift epoch_start to keep cwnd growth to cubic curve.
++		 */
++		if (ca->epoch_start && delta > 0) {
++			ca->epoch_start += delta;
++			if (after(ca->epoch_start, now))
++				ca->epoch_start = now;
++		}
++		return;
++	}
++}
++
++/* calculate the cubic root of x using a table lookup followed by one
++ * Newton-Raphson iteration.
++ * Avg err ~= 0.195%
++ */
++static u32 cubic_root(u64 a)
++{
++	u32 x, b, shift;
++	/* cbrt(x) MSB values for x MSB values in [0..63].
++	 * Precomputed then refined by hand - Willy Tarreau
++	 *
++	 * For x in [0..63],
++	 *   v = cbrt(x << 18) - 1
++	 *   cbrt(x) = (v[x] + 10) >> 6
++	 */
++	static const u8 v[] = {
++		/* 0x00 */ 0,	54,  54,  54,  118, 118, 118, 118,
++		/* 0x08 */ 123, 129, 134, 138, 143, 147, 151, 156,
++		/* 0x10 */ 157, 161, 164, 168, 170, 173, 176, 179,
++		/* 0x18 */ 181, 185, 187, 190, 192, 194, 197, 199,
++		/* 0x20 */ 200, 202, 204, 206, 209, 211, 213, 215,
++		/* 0x28 */ 217, 219, 221, 222, 224, 225, 227, 229,
++		/* 0x30 */ 231, 232, 234, 236, 237, 239, 240, 242,
++		/* 0x38 */ 244, 245, 246, 248, 250, 251, 252, 254,
++	};
++
++	b = fls64(a);
++	if (b < 7) {
++		/* a in [0..63] */
++		return ((u32)v[(u32)a] + 35) >> 6;
++	}
++
++	b = ((b * 84) >> 8) - 1;
++	shift = (a >> (b * 3));
++
++	x = ((u32)(((u32)v[shift] + 10) << b)) >> 6;
++
++	/* Newton-Raphson iteration
++	 *                         2
++	 * x    = ( 2 * x  +  a / x  ) / 3
++	 *  k+1          k         k
++	 */
++	x = (2 * x + (u32)div64_u64(a, (u64)x * (u64)(x - 1)));
++	x = ((x * 341) >> 10);
++	return x;
++}
++
++/* Compute congestion window to use.
++ */
++static inline void bictcp_update(struct roccettcp *ca, u32 cwnd, u32 acked)
++{
++	u32 delta, bic_target, max_cnt;
++	u64 offs, t;
++
++	ca->ack_cnt += acked; /* count the number of ACKed packets */
++
++	if (ca->last_cwnd == cwnd &&
++	    (s32)(tcp_jiffies32 - ca->last_time) <= HZ / 32)
++		return;
++
++	/* The CUBIC function can update ca->cnt at most once per jiffy.
++	 * On all cwnd reduction events, ca->epoch_start is set to 0,
++	 * which will force a recalculation of ca->cnt.
++	 */
++	if (ca->epoch_start && tcp_jiffies32 == ca->last_time)
++		goto tcp_friendliness;
++
++	ca->last_cwnd = cwnd;
++	ca->last_time = tcp_jiffies32;
++
++	if (ca->epoch_start == 0) {
++		ca->epoch_start = tcp_jiffies32; /* record beginning */
++		ca->ack_cnt = acked; /* start counting */
++		ca->tcp_cwnd = cwnd; /* syn with cubic */
++
++		if (ca->last_max_cwnd <= cwnd) {
++			ca->bic_K = 0;
++			ca->bic_origin_point = cwnd;
++		} else {
++			/* Compute new K based on
++			 * (wmax-cwnd) * (srtt>>3 / HZ) / c * 2^(3*bictcp_HZ)
++			 */
++			ca->bic_K = cubic_root(cube_factor *
++					       (ca->last_max_cwnd - cwnd));
++			ca->bic_origin_point = ca->last_max_cwnd;
++		}
++	}
++
++	/* cubic function - calc */
++	/* calculate c * time^3 / rtt,
++	 *  while considering overflow in calculation of time^3
++	 * (so time^3 is done by using 64 bit)
++	 * and without the support of division of 64bit numbers
++	 * (so all divisions are done by using 32 bit)
++	 *  also NOTE the unit of those variables
++	 *	  time  = (t - K) / 2^bictcp_HZ
++	 *	  c = bic_scale >> 10
++	 * rtt  = (srtt >> 3) / HZ
++	 * !!! The following code does not have overflow problems,
++	 * if the cwnd < 1 million packets !!!
++	 */
++
++	t = (s32)(tcp_jiffies32 - ca->epoch_start);
++	t += usecs_to_jiffies(ca->delay_min);
++
++	/* change the unit from HZ to bictcp_HZ */
++	t <<= BICTCP_HZ;
++	do_div(t, HZ);
++
++	if (t < ca->bic_K) /* t - K */
++		offs = ca->bic_K - t;
++	else
++		offs = t - ca->bic_K;
++
++	/* c/rtt * (t-K)^3 */
++	delta = (cube_rtt_scale * offs * offs * offs) >> (10 + 3 * BICTCP_HZ);
++	if (t < ca->bic_K) /* below origin*/
++		bic_target = ca->bic_origin_point - delta;
++	else /* above origin*/
++		bic_target = ca->bic_origin_point + delta;
++
++	/* cubic function - calc bictcp_cnt*/
++	if (bic_target > cwnd)
++		ca->cnt = cwnd / (bic_target - cwnd);
++	else
++		ca->cnt = 100 * cwnd; /* very small increment*/
++
++	/* The initial growth of cubic function may be too conservative
++	 * when the available bandwidth is still unknown.
++	 */
++	if (ca->last_max_cwnd == 0 && ca->cnt > 20)
++		ca->cnt = 20; /* increase cwnd 5% per RTT */
++
++tcp_friendliness:
++	/* TCP Friendly */
++	if (tcp_friendliness) {
++		u32 scale = beta_scale;
++
++		delta = (cwnd * scale) >> 3;
++		while (ca->ack_cnt > delta) { /* update tcp cwnd */
++			ca->ack_cnt -= delta;
++			ca->tcp_cwnd++;
++		}
++
++		if (ca->tcp_cwnd > cwnd) { /* if bic is slower than tcp */
++			delta = ca->tcp_cwnd - cwnd;
++			max_cnt = cwnd / delta;
++			if (ca->cnt > max_cnt)
++				ca->cnt = max_cnt;
++		}
++	}
++
++	/* The maximum rate of cwnd increase CUBIC allows is 1 packet per
++	 * 2 packets ACKed, meaning cwnd grows at 1.5x per RTT.
++	 */
++	ca->cnt = max(ca->cnt, 2U);
++}
++
++__bpf_kfunc static void roccettcp_cong_avoid(struct sock *sk, u32 ack,
++					     u32 acked)
++{
++	struct tcp_sock *tp = tcp_sk(sk);
++	struct roccettcp *ca = inet_csk_ca(sk);
++
++	u32 now = jiffies_to_usecs(tcp_jiffies32);
++	u32 bw_limit_detect = 0;
++	u32 roccet_xj;
++	u32 jitter;
++
++	if (ca->last_rtt > ca->curr_rtt)
++		jitter = ca->last_rtt - ca->curr_rtt;
++	else
++		jitter = ca->curr_rtt - ca->last_rtt;
++
++	/* Update roccet parameters */
++	update_ack_rate(sk);
++	update_min_rtt(sk);
++	update_srrtt(sk);
++
++	/* ROCCET drain.
++	 * Do not increase the cwnd for 100ms after a roccet congestion event
++	 */
++	if (now - ca->roccet_last_event_time_us <= 100 * USEC_PER_MSEC)
++		return;
++
++	/* LAUNCH: Detect an exit point for tcp slow start
++	 * in networks with large buffers of multiple BDP
++	 * Like in cellular networks (5G, ...).
++	 * Or exit LAUNCH if cwnd is too large for application layer
++	 * data rate.
++	 */
++
++	if ((tcp_in_slow_start(tp) && ca->curr_srrtt > sr_rtt_upper_bound &&
++	     get_ack_rate_diff(ca) >= ack_rate_diff_ss) ||
++	    (!tcp_is_cwnd_limited(sk) && tcp_in_slow_start(tp))) {
++		ca->epoch_start = 0;
++
++		/* Handle initial slow start. Here we observe the most problems */
++		if (tp->snd_ssthresh == TCP_INFINITE_SSTHRESH) {
++			tcp_sk(sk)->snd_ssthresh = tcp_snd_cwnd(tp) / 2;
++			tcp_snd_cwnd_set(tp, tcp_snd_cwnd(tp) / 2);
++		} else {
++			tcp_sk(sk)->snd_ssthresh =
++				tcp_snd_cwnd(tp) - (tcp_snd_cwnd(tp) / 3);
++			tcp_snd_cwnd_set(tp, tcp_snd_cwnd(tp) -
++						     (tcp_snd_cwnd(tp) / 3));
++		}
++		ca->roccet_last_event_time_us = now;
++		return;
++	}
++
++	if (tcp_in_slow_start(tp)) {
++		acked = tcp_slow_start(tp, acked);
++		if (!acked)
++			return;
++	}
++
++	if (ca->bw_limit.next_check == 0)
++		ca->bw_limit.next_check = now + 5 * ca->curr_rtt;
++
++	ca->bw_limit.sum_cwnd += tcp_snd_cwnd(tp);
++	ca->bw_limit.sum_acked += acked;
++
++	if (ca->bw_limit.next_check < now) {
++		/* We send more data as we got acked in the last 5 RTTs */
++		if ((ca->bw_limit.sum_cwnd * 100) / ca->bw_limit.sum_acked >=
++		    ack_rate_diff_ca)
++			bw_limit_detect = 1;
++
++		/* reset struct and set next end of period */
++		ca->bw_limit.sum_cwnd = 1;
++
++		/* set to 1 to avoid division by zero */
++		ca->bw_limit.sum_acked = 1;
++		ca->bw_limit.next_check = now + 5 * ca->curr_rtt;
++	}
++
++	/* Respects the jitter of the connection and add it on top of the upper bound
++	 * for the srRTT
++	 */
++	roccet_xj = ((jitter * 100) / ca->curr_min_rtt_timed.rtt) +
++		    sr_rtt_upper_bound;
++	if (roccet_xj < sr_rtt_upper_bound)
++		roccet_xj = sr_rtt_upper_bound;
++
++	if (ca->curr_srrtt > roccet_xj && (bw_limit_detect || ca->ece_received)) {
++		if (ca->ece_received)
++			ca->ece_received = false;
++		ca->epoch_start = 0;
++		ca->roccet_last_event_time_us = now;
++		ca->cnt = 100 * tcp_snd_cwnd(tp);
++
++		/* Set Wmax if cwnd is larger than the old Wmax */
++		if (tcp_snd_cwnd(tp) > ca->last_max_cwnd)
++			ca->last_max_cwnd = tcp_snd_cwnd(tp);
++
++		tcp_snd_cwnd_set(tp, min(tp->snd_cwnd_clamp,
++					 max((tcp_snd_cwnd(tp) * beta) / BICTCP_BETA_SCALE, 2U)));
++		tp->snd_ssthresh = tcp_snd_cwnd(tp);
++		return;
++	}
++
++	/* Terminates this function if cwnd is not fully utilized.
++	 * In mobile networks like 5G, this termination causes the cwnd to be frozen at
++	 * an excessively high value. This is because slow start or HyStart massively
++	 * exceed the available bandwidth and leave the cwnd at an excessively high
++	 * value. The cwnd cannot therefore be fully utilized because it is limited by
++	 * the connection capacity.
++	 */
++	if (!tcp_is_cwnd_limited(sk))
++		return;
++
++	bictcp_update(ca, tcp_snd_cwnd(tp), acked);
++	tcp_cong_avoid_ai(tp, max(1, ca->cnt), acked);
++}
++
++__bpf_kfunc static u32 roccettcp_recalc_ssthresh(struct sock *sk)
++{
++	const struct tcp_sock *tp = tcp_sk(sk);
++	struct roccettcp *ca = inet_csk_ca(sk);
++
++	if (ignore_loss)
++		return tcp_snd_cwnd(tp);
++
++	/* Don't exit slow start if loss occurs. */
++	if (tcp_in_slow_start(tp))
++		return tcp_snd_cwnd(tp);
++
++	ca->epoch_start = 0; /* end of epoch */
++
++	/* Wmax and fast convergence */
++	if (tcp_snd_cwnd(tp) < ca->last_max_cwnd && fast_convergence)
++		ca->last_max_cwnd =
++			(tcp_snd_cwnd(tp) * (BICTCP_BETA_SCALE + beta)) /
++			(2 * BICTCP_BETA_SCALE);
++	else
++		ca->last_max_cwnd = tcp_snd_cwnd(tp);
++
++	return max((tcp_snd_cwnd(tp) * beta) / BICTCP_BETA_SCALE, 2U);
++}
++
++__bpf_kfunc static void roccettcp_state(struct sock *sk, u8 new_state)
++{
++	struct roccettcp *ca = inet_csk_ca(sk);
++
++	if (new_state == TCP_CA_Loss)
++		roccettcp_reset(ca);
++}
++
++__bpf_kfunc static void roccettcp_acked(struct sock *sk,
++					const struct ack_sample *sample)
++{
++	struct roccettcp *ca = inet_csk_ca(sk);
++
++	/* Some calls are for duplicates without timestamps */
++	if (sample->rtt_us < 0)
++		return;
++
++	/* Discard delay samples right after fast recovery */
++	if (ca->epoch_start && (s32)(tcp_jiffies32 - ca->epoch_start) < HZ)
++		return;
++
++	u32 delay = sample->rtt_us;
++
++	if (delay == 0)
++		delay = 1;
++
++	/* first time call or link delay decreases */
++	if (ca->delay_min == 0 || ca->delay_min > delay)
++		ca->delay_min = delay;
++
++	/* Get valid sample for roccet */
++	if (sample->rtt_us > 0) {
++		ca->last_rtt = ca->curr_rtt;
++		ca->curr_rtt = sample->rtt_us;
++	}
++}
++
++__bpf_kfunc static void roccet_in_ack_event(struct sock *sk, u32 flags)
++{
++	struct roccettcp *ca = inet_csk_ca(sk);
++
++	/* Handle ECE bit.
++	 * Processing of ECE events is done in roccettcp_cong_avoid()
++	 */
++	if (flags & CA_ACK_ECE)
++		ca->ece_received = true;
++}
++
++static struct tcp_congestion_ops roccet_tcp __read_mostly = {
++	.init = roccettcp_init,
++	.ssthresh = roccettcp_recalc_ssthresh,
++	.cong_avoid = roccettcp_cong_avoid,
++	.set_state = roccettcp_state,
++	.undo_cwnd = tcp_reno_undo_cwnd,
++	.cwnd_event = roccettcp_cwnd_event,
++	.pkts_acked = roccettcp_acked,
++	.in_ack_event   = roccet_in_ack_event,
++	.owner = THIS_MODULE,
++	.name = "roccet",
++};
++
++BTF_KFUNCS_START(tcp_roccet_check_kfunc_ids)
++BTF_ID_FLAGS(func, roccettcp_init)
++BTF_ID_FLAGS(func, roccettcp_recalc_ssthresh)
++BTF_ID_FLAGS(func, roccettcp_cong_avoid)
++BTF_ID_FLAGS(func, roccettcp_state)
++BTF_ID_FLAGS(func, roccettcp_cwnd_event)
++BTF_ID_FLAGS(func, roccettcp_acked)
++BTF_KFUNCS_END(tcp_roccet_check_kfunc_ids)
++
++static const struct btf_kfunc_id_set tcp_roccet_kfunc_set = {
++	.owner = THIS_MODULE,
++	.set = &tcp_roccet_check_kfunc_ids,
++};
++
++static int __init roccettcp_register(void)
++{
++	int ret;
++
++	BUILD_BUG_ON(sizeof(struct roccettcp) > ICSK_CA_PRIV_SIZE);
++
++	/* Precompute a bunch of the scaling factors that are used per-packet
++	 * based on SRTT of 100ms
++	 */
++
++	beta_scale =
++		8 * (BICTCP_BETA_SCALE + beta) / 3 / (BICTCP_BETA_SCALE - beta);
++
++	cube_rtt_scale = (bic_scale * 10); /* 1024*c/rtt */
++
++	/* calculate the "K" for (wmax-cwnd) = c/rtt * K^3
++	 *  so K = cubic_root( (wmax-cwnd)*rtt/c )
++	 * the unit of K is bictcp_HZ=2^10, not HZ
++	 *
++	 *  c = bic_scale >> 10
++	 *  rtt = 100ms
++	 *
++	 * the following code has been designed and tested for
++	 * cwnd < 1 million packets
++	 * RTT < 100 seconds
++	 * HZ < 1,000,00  (corresponding to 10 nano-second)
++	 */
++
++	/* 1/c * 2^2*bictcp_HZ * srtt */
++	cube_factor = 1ull << (10 + 3 * BICTCP_HZ); /* 2^40 */
++
++	/* divide by bic_scale and by constant Srtt (100ms) */
++	do_div(cube_factor, bic_scale * 10);
++
++	ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_STRUCT_OPS,
++					&tcp_roccet_kfunc_set);
++	if (ret < 0)
++		return ret;
++	return tcp_register_congestion_control(&roccet_tcp);
++}
++
++static void __exit roccettcp_unregister(void)
++{
++	tcp_unregister_congestion_control(&roccet_tcp);
++}
++
++module_init(roccettcp_register);
++module_exit(roccettcp_unregister);
++
++MODULE_AUTHOR("Lukas Prause, Tim Füchsel");
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("ROCCET TCP");
++MODULE_VERSION("1.0");
+diff --git a/net/ipv4/tcp_roccet.h b/net/ipv4/tcp_roccet.h
+new file mode 100644
+index 000000000000..a7201866d5ac
+--- /dev/null
++++ b/net/ipv4/tcp_roccet.h
+@@ -0,0 +1,56 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * TCP ROCCET congestion control interface
++ */
++#ifndef __TCP_ROCCET_H
++#define __TCP_ROCCET_H 1
++
++#include <linux/math64.h>
++
++struct ack_rate {
++	u16 last_rate;	/* Last ACK-rate */
++	u32 last_rate_time;	/* Timestamp of the last ACK-rate */
++	u16 curr_rate;	/* Current ACK-rate */
++	u16 cnt;	/* Used for counting acks */
++};
++
++struct bandwidth_limit_detect {
++	u32 sum_cwnd;	/* sum of cwnd during time interval */
++	u32 sum_acked;	/* sum of received acks during time interval */
++	u32 next_check;	/* end/upper bound of time interval */
++};
++
++struct timed_rtt {
++	u32 time;	/* Time of recording */
++	u32 rtt;	/* Measured RTT */
++};
++
++/* Based on the BICTCP struct with additions specific for the ROCCET-Algorithm */
++struct roccettcp {
++	u32 cnt;		/* increase cwnd by 1 after ACKs */
++	u32 last_max_cwnd;	/* last maximum snd_cwnd */
++	u32 last_cwnd;		/* the last snd_cwnd */
++	u32 last_time;		/* time when updated last_cwnd */
++	u32 bic_origin_point;	/* origin point of bic function */
++	u32 bic_K;		/* time to origin point from the
++				 * beginning of the current epoch
++				 */
++	u32 delay_min;		/* min delay (usec) */
++	u32 epoch_start;	/* beginning of an epoch */
++	u32 ack_cnt;		/* number of acks */
++	u32 tcp_cwnd;		/* estimated tcp cwnd */
++	u32 curr_rtt;		/* the minimum rtt of current round */
++
++	u32 roccet_last_event_time_us;	/* The last time ROCCET was triggered */
++	bool ece_received;	/* Set to true if an ECE bit was received */
++	u32 curr_min_rtt;		/* The current observed minRTT */
++	struct timed_rtt curr_min_rtt_timed;	/* The current observed minRTT with
++						 * the timestamp when it was observed
++						 */
++	u32 curr_srrtt;			/* The srRTT calculated based on the latest ACK */
++	struct ack_rate ack_rate;	/* The last and the current ACK rate */
++	struct bandwidth_limit_detect bw_limit;
++	u32 last_rtt;			/* Used for jitter calculation */
++};
++
++#endif /* __TCP_ROCCET_H */
