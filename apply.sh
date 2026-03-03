@@ -23,18 +23,22 @@ PATCHLEVEL=$(grep \^PATCHLEVEL Makefile | cut -d ' ' -f 3)
 SUBLEVEL=$(grep \^SUBLEVEL Makefile | cut -d ' ' -f 3)
 [[ -z ${SUBLEVEL} ]] && echo "Error: no SUBLEVEL found in Makefile." && exit 1
 
+# keep full version
+RELEASE=${VERSION}.${PATCHLEVEL}.${SUBLEVEL}
+
 # check kernel series againt patchset branch
 PATCHDIR=$(dirname $0)/${VERSION}.${PATCHLEVEL}
 [[ ! -d ${PATCHDIR} ]] \
 	&& echo "Error: patchset does not match kernel series" ${VERSION}.${PATCHLEVEL} \
 	&& exit 1
 
-# check release version against patch series tag
+# check release version against patch series tag(s)
 if [[ $1 != "-f" ]] && [[ $1 != "--force" ]] ; then
-	RELEASE=$(git -C $(dirname $0) tag --points-at | sort --version-sort | tail -n 1)
-	[[ ${RELEASE} != ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} ]] \
-		&& echo "Error: patchset ${RELEASE} does not match kernel release" ${VERSION}.${PATCHLEVEL}.${SUBLEVEL} \
-		&& exit 1
+	TAGS=$(git -C $(dirname $0) tag --points-at | sort --version-sort | sed '{:q;N;s/\n/\//g;t q}')
+	if [[ ! $(echo ${TAGS} | grep ${RELEASE}) ]]; then
+		echo "Error: patchset ${TAGS} does not match kernel release" ${RELEASE}
+		exit 1
+	fi
 fi
 
 apply() {
