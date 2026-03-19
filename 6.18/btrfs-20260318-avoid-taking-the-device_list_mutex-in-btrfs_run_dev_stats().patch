@@ -1,0 +1,71 @@
+From: fdmanana@kernel.org
+To: linux-btrfs@vger.kernel.org
+Subject: [PATCH] btrfs: avoid taking the device_list_mutex in btrfs_run_dev_stats()
+Date: Wed, 18 Mar 2026 13:39:51 +0000
+
+From: Filipe Manana <fdmanana@suse.com>
+
+btrfs_run_dev_stats() is called during the critical section of a
+transaction commit and it takes the device_list_mutex, which is also
+acquired by fitrim, which does discard operations while holding that
+mutex. Most of the time, if we are on a healthy filesystem, we don't have
+new stat updates to persist in the device tree, so blocking on the
+device_list_mutex is just wasting time and making any tasks that need to
+start a new transaction wait longer that necessary.
+
+Since the device list is RCU safe/protected, make btrfs_run_dev_stats()
+do an initial check for device stat updates using RCU and quit without
+taking the device_list_mutex in case there are no new device stats that
+need to be persisted in the device tree.
+
+Also note that adding/removing devices also requires starting a
+transaction, and since btrfs_run_dev_stats() is called from the critical
+section of a transaction commit, no one can be concurrently adding or
+removing a device while btrfs_run_dev_stats() is called.
+
+Signed-off-by: Filipe Manana <fdmanana@suse.com>
+---
+ fs/btrfs/volumes.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index b5bc30dbb3ad..8353ddbec243 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -8250,6 +8250,36 @@ int btrfs_run_dev_stats(struct btrfs_trans_handle *trans)
+ 	struct btrfs_device *device;
+ 	int stats_cnt;
+ 	int ret = 0;
++	bool need_update_dev_stats = false;
++
++	/*
++	 * Do an initial pass using RCU to see if we need to update any dev
++	 * stats item. This is to avoid taking the device_list_mutex which is
++	 * acquired by the fitrim operation and can take a while since it does
++	 * discard operations while holding that mutex. Most of the time, if
++	 * we are on a healthy filesystem, we don't have new stat updates, so
++	 * this avoids blocking on that mutex, which is specially important
++	 * because we are called during the critical section of a transaction
++	 * commit, therefore blocking new transactions from starting while
++	 * discard is running.
++	 *
++	 * Also note that adding/removing devices also requires starting a
++	 * transaction, and since we are called from the critical section of a
++	 * transaction commit, no one can be concurrently adding or removing a
++	 * device.
++	 */
++	rcu_read_lock();
++	list_for_each_entry_rcu(device, &fs_devices->devices, dev_list) {
++		if (device->dev_stats_valid &&
++		    atomic_read(&device->dev_stats_ccnt) != 0) {
++			need_update_dev_stats = true;
++			break;
++		}
++	}
++	rcu_read_unlock();
++
++	if (!need_update_dev_stats)
++		return 0;
+ 
+ 	mutex_lock(&fs_devices->device_list_mutex);
+ 	list_for_each_entry(device, &fs_devices->devices, dev_list) {
