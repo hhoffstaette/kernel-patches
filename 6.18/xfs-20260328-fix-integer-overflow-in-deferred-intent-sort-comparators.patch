@@ -1,0 +1,65 @@
+From: Yuto Ohnuki <ytohnuki@amazon.com>
+To: Carlos Maiolino <cem@kernel.org>
+CC: Dave Chinner <dchinner@redhat.com>, "Darrick J . Wong"
+	<djwong@kernel.org>, <linux-xfs@vger.kernel.org>,
+	<linux-kernel@vger.kernel.org>, Yuto Ohnuki <ytohnuki@amazon.com>
+Subject: [PATCH 1/2] xfs: fix integer overflow in deferred intent sort comparators
+Date: Sat, 28 Mar 2026 17:34:09 +0000
+
+xfs_extent_free_diff_items(), xfs_refcount_update_diff_items(), and
+xfs_rmap_update_diff_items() subtract two uint32_t group numbers
+and return the result as int, which can overflow when the difference
+exceeds INT_MAX.
+
+Use cmp_int() instead, as was done in commit 362c49098086 ("xfs:
+fix integer overflow in bmap intent sort comparator").
+
+Fixes: c13418e8eb37 ("xfs: give xfs_rmap_intent its own perag reference")
+Fixes: f6b384631e1e ("xfs: give xfs_extfree_intent its own perag reference")
+Fixes: 00e7b3bac1dc ("xfs: give xfs_refcount_intent its own perag reference")
+Signed-off-by: Yuto Ohnuki <ytohnuki@amazon.com>
+---
+ fs/xfs/xfs_extfree_item.c  | 2 +-
+ fs/xfs/xfs_refcount_item.c | 2 +-
+ fs/xfs/xfs_rmap_item.c     | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/xfs/xfs_extfree_item.c b/fs/xfs/xfs_extfree_item.c
+index 749a4eb9793c..2266d56e37dc 100644
+--- a/fs/xfs/xfs_extfree_item.c
++++ b/fs/xfs/xfs_extfree_item.c
+@@ -387,7 +387,7 @@ xfs_extent_free_diff_items(
+ 	struct xfs_extent_free_item	*ra = xefi_entry(a);
+ 	struct xfs_extent_free_item	*rb = xefi_entry(b);
+ 
+-	return ra->xefi_group->xg_gno - rb->xefi_group->xg_gno;
++	return cmp_int(ra->xefi_group->xg_gno, rb->xefi_group->xg_gno);
+ }
+ 
+ /* Log a free extent to the intent item. */
+diff --git a/fs/xfs/xfs_refcount_item.c b/fs/xfs/xfs_refcount_item.c
+index 881c3f3a6a24..8bccf89a7766 100644
+--- a/fs/xfs/xfs_refcount_item.c
++++ b/fs/xfs/xfs_refcount_item.c
+@@ -266,7 +266,7 @@ xfs_refcount_update_diff_items(
+ 	struct xfs_refcount_intent	*ra = ci_entry(a);
+ 	struct xfs_refcount_intent	*rb = ci_entry(b);
+ 
+-	return ra->ri_group->xg_gno - rb->ri_group->xg_gno;
++	return cmp_int(ra->ri_group->xg_gno, rb->ri_group->xg_gno);
+ }
+ 
+ /* Log refcount updates in the intent item. */
+diff --git a/fs/xfs/xfs_rmap_item.c b/fs/xfs/xfs_rmap_item.c
+index a39fe08dcd8f..2a3a73a8566d 100644
+--- a/fs/xfs/xfs_rmap_item.c
++++ b/fs/xfs/xfs_rmap_item.c
+@@ -267,7 +267,7 @@ xfs_rmap_update_diff_items(
+ 	struct xfs_rmap_intent		*ra = ri_entry(a);
+ 	struct xfs_rmap_intent		*rb = ri_entry(b);
+ 
+-	return ra->ri_group->xg_gno - rb->ri_group->xg_gno;
++	return cmp_int(ra->ri_group->xg_gno, rb->ri_group->xg_gno);
+ }
+ 
+ /* Log rmap updates in the intent item. */
