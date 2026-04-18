@@ -1,0 +1,15 @@
+Silence annoying debug spam from the HID core driver.
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
+
+--- a/drivers/hid/hid-core.c
++++ b/drivers/hid/hid-core.c
+@@ -2057,8 +2057,6 @@ int hid_report_raw_event(struct hid_devi
+ 		rsize = max_buffer_size;
+ 
+ 	if (csize < rsize) {
+-		hid_warn_ratelimited(hid, "Event data for report %d was too short (%d vs %d)\n",
+-				     report->id, rsize, csize);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
