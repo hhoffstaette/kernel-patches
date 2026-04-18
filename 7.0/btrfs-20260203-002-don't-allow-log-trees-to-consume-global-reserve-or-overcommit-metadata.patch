@@ -21,6 +21,7 @@ fallback to a transaction commit and avoid using critical space that could
 be the only resort for a transaction commit to succeed when we are in a
 critical space situation.
 
+[HH: minimal context fix for 7.0]
 Reviewed-by: Leo Martins <loemra.dev@gmail.com>
 Signed-off-by: Filipe Manana <fdmanana@suse.com>
 ---
@@ -31,8 +32,8 @@ diff --git a/fs/btrfs/block-rsv.c b/fs/btrfs/block-rsv.c
 index e823230c09b7..fe81d9e9f08c 100644
 --- a/fs/btrfs/block-rsv.c
 +++ b/fs/btrfs/block-rsv.c
-@@ -540,6 +540,31 @@ struct btrfs_block_rsv *btrfs_use_block_rsv(struct btrfs_trans_handle *trans,
- 					   blocksize, BTRFS_RESERVE_NO_FLUSH);
+@@ -541,6 +541,31 @@ try_reserve:
+ 					   BTRFS_RESERVE_NO_FLUSH);
  	if (!ret)
  		return block_rsv;
 +

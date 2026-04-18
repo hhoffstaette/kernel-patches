@@ -1,5 +1,6 @@
-
 https://bugzilla.kernel.org/show_bug.cgi?id=215884
+
+Signed-off-by: Holger Hoffstätte <holger@applied-asynchrony.com>
 
 diff -rup a/drivers/pci/pcie/pme.c b/drivers/pci/pcie/pme.c
 --- a/drivers/pci/pcie/pme.c	2024-03-15 19:19:29.000000000 +0100

@@ -1,4 +1,3 @@
-
 My AMD RX 550 (Polaris) seems to have problems getting out of bed
 after suspend/resume, so do not spam the kernel log just because
 a scheduler is still sleepy.

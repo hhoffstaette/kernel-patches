@@ -4,10 +4,10 @@ for motivation. The "reduced fairness" between inodes is overrated,
 since writeback is asynchronous; in exchange this massively increases
 throughput for large files esp. on rotational devices.
 
---- a/fs/fs-writeback.c
-+++ b/fs/fs-writeback.c
-@@ -32,9 +32,9 @@
- #include "internal.h"
+--- a/include/linux/writeback.h
++++ b/include/linux/writeback.h
+@@ -371,8 +371,8 @@ void sb_mark_inode_writeback(struct inod
+ void sb_clear_inode_writeback(struct inode *inode);
  
  /*
 - * 4MB minimal write chunk size
@@ -16,5 +16,4 @@ throughput for large files esp. on rotational devices.
 -#define MIN_WRITEBACK_PAGES	(4096UL >> (PAGE_SHIFT - 10))
 +#define MIN_WRITEBACK_PAGES	(65536UL >> (PAGE_SHIFT - 10))
  
- /*
-  * Passed into wb_writeback(), essentially a subset of writeback_control
+ #endif		/* WRITEBACK_H */

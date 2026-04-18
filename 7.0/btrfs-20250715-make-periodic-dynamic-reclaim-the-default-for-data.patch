@@ -31,6 +31,7 @@ current snapshot of the dynamic threshold.
 To disable either of these features, simply write a 0 to
 /sys/fs/btrfs/<uuid>/allocation/data/(dynamic_reclaim|periodic_reclaim)
 
+[HH: trivial context fix for 7.0]
 Link: https://lore.kernel.org/linux-btrfs/cover.1718665689.git.boris@bur.io/#t
 Signed-off-by: Boris Burkov <boris@bur.io>
 ---
@@ -41,7 +42,7 @@ diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
 index 0481c693ac2e..8005483fbfe2 100644
 --- a/fs/btrfs/space-info.c
 +++ b/fs/btrfs/space-info.c
-@@ -306,6 +306,12 @@ static int create_space_info(struct btrfs_fs_info *info, u64 flags)
+@@ -307,6 +307,12 @@ static int create_space_info(struct btrfs_fs_info *info, u64 flags)
  
  		if (ret)
  			goto out_free;
@@ -53,4 +54,4 @@ index 0481c693ac2e..8005483fbfe2 100644
 +		}
  	}
  
- 	ret = btrfs_sysfs_add_space_info_type(info, space_info);
+ 	ret = btrfs_sysfs_add_space_info_type(space_info);

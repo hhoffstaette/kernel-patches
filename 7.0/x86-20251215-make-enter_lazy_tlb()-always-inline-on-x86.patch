@@ -9,6 +9,7 @@ switching, which is the hot code path.
 
 Make enter_lazy_tlb() always inline on x86 to optimize performance.
 
+[HH: trivial context fix for 7.0]
 Signed-off-by: Xie Yuanbin <qq570070308@gmail.com>
 Reviewed-by: Rik van Riel <riel@surriel.com>
 Reported-by: kernel test robot <lkp@intel.com>
@@ -55,8 +56,8 @@ index 73bf3b1b44e8..ecd134dcfb34 100644
 +}
 +#endif
  
- #define mm_init_global_asid mm_init_global_asid
  extern void mm_init_global_asid(struct mm_struct *mm);
+ extern void mm_free_global_asid(struct mm_struct *mm);
 diff --git a/arch/x86/mm/tlb.c b/arch/x86/mm/tlb.c
 index f5b93e01e347..71abaf0bdb91 100644
 --- a/arch/x86/mm/tlb.c
