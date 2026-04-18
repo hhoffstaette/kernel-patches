@@ -1,0 +1,62 @@
+From: Josh Law <hlcj1234567@gmail.com>
+To: Liam Howlett <liam.howlett@oracle.com>,
+	Matthew Wilcox <willy@infradead.org>
+Cc: Alice Ryhl <aliceryhl@google.com>,
+	Andrew Ballance <andrewjballance@gmail.com>,
+	Andrew Morton <akpm@linux-foundation.org>,
+	stable@vger.kernel.org,
+	linux-kernel@vger.kernel.org,
+	Josh Law <objecting@objecting.org>
+Subject: [PATCH v3] lib/maple_tree: fix swapped arguments in mas_safe_pivot() call
+Date: Fri,  6 Mar 2026 22:58:49 +0000
+
+From: Josh Law <objecting@objecting.org>
+
+The call to mas_safe_pivot() in mas_wr_extend_null() has the pivot index
+and maple type arguments swapped. The function signature expects
+(mas, pivots, piv, type) but the call passes (mas, pivots, type, piv).
+
+This causes the pivot index to be interpreted as a maple node type and
+vice versa, leading to incorrect pivot lookups. In practice, this means
+a null-extending store into a maple tree node can read the wrong pivot
+value, potentially corrupting the range tracked by the maple state. For
+a VMA maple tree, this could cause an incorrect vm_area_struct range to
+be returned during operations like mmap or munmap, leading to silent
+memory mapping corruption.
+
+Every other mas_safe_pivot() call site in the file passes the arguments
+in the correct (piv, type) order; this is the only one with them
+reversed.
+
+Link: https://lkml.kernel.org/r/20260306200820.2819999-1-objecting@objecting.org
+Fixes: 54a611b60590 ("Maple Tree: add new data structure")
+Signed-off-by: Josh Law <objecting@objecting.org>
+Cc: stable@vger.kernel.org
+Cc: Alice Ryhl <aliceryhl@google.com>
+Cc: Andrew Ballance <andrewjballance@gmail.com>
+Cc: Liam Howlett <liam.howlett@oracle.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+Changes in v3:
+- Included a changelog detailing modifications since v1.
+
+Changes in v2:
+- Added Link, Fixes, and Cc tags (including stable@vger.kernel.org) to the commit message.
+- Appended Andrew Morton's Signed-off-by to expedite merging.
+
+ lib/maple_tree.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/maple_tree.c b/lib/maple_tree.c
+index 5aa4c9500018..f82000821293 100644
+--- a/lib/maple_tree.c
++++ b/lib/maple_tree.c
+@@ -3279,7 +3279,7 @@ static inline void mas_extend_spanning_null(struct ma_wr_state *l_wr_mas,
+ 	    (r_mas->last < r_mas->max) &&
+ 	    !mas_slot_locked(r_mas, r_wr_mas->slots, r_mas->offset + 1)) {
+ 		r_mas->last = mas_safe_pivot(r_mas, r_wr_mas->pivots,
+-					     r_wr_mas->type, r_mas->offset + 1);
++					     r_mas->offset + 1, r_wr_mas->type);
+ 		r_mas->offset++;
+ 	}
+ }
