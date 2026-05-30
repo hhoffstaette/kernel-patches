@@ -1,5 +1,6 @@
 
 r3 for 7.0.10/kernel/cgroup/cpuset.c
+r4 for unused variable after r3 (https://bugs.gentoo.org/976365)
 
 diff --git a/Documentation/admin-guide/sysctl/kernel.rst b/Documentation/admin-guide/sysctl/kernel.rst
 index 9aed74e65cf4..fd9c827f43c0 100644
@@ -612,6 +613,18 @@ index 1335e437098e..ac66026ceb9e 100644
  void rebuild_sched_domains_locked(void)
  {
  }
+@@ -2994,7 +2994,10 @@ static int cpuset_can_attach(struct cgroup_taskset *tset)
+ 	struct cpuset *cs, *oldcs;
+ 	struct task_struct *task;
+ 	bool setsched_check;
+-	int cpu, ret;
++	int ret;
++#ifndef CONFIG_SCHED_ALT
++	int cpu;
++#endif
+ 
+ 	/* used later by cpuset_attach() */
+ 	cpuset_attach_old_cs = task_cs(cgroup_taskset_first(tset, &css));
 @@ -3038,18 +3038,21 @@ static int cpuset_can_attach(struct cgroup_taskset *tset)
  				goto out_unlock;
  		}
