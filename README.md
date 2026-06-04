@@ -26,6 +26,5 @@ a bug here on Codeberg. Older release series will only see sporadic updates, if 
 
 - btrfs: fixes from 7.1+
 - net: fixes from 7.1+
-- net: add [TCP ROCCET](https://arxiv.org/abs/2510.25281) congestion control
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
 
