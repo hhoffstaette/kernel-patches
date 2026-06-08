@@ -1,0 +1,58 @@
+From: Gou Hao <gouhao@uniontech.com>
+To: cem@kernel.org,
+	djwong@kernel.org,
+	dchinner@redhat.com
+Cc: linux-xfs@vger.kernel.org,
+	linux-kernel@vger.kernel.org,
+	niecheng1@uniontech.com,
+	zhanjun@uniontech.com,
+	gouhaojake@163.com,
+	gouhao@unionntech.com
+Subject: [PATCH] xfs: fix use-after-free of buf_log_item in xlog_cil_build_lv_chain
+Date: Thu,  4 Jun 2026 17:42:33 +0800
+
+xfs_buf_item_done() frees the buf_item via xfs_buf_item_relse() but
+does not remove the item from the CIL log_items list (li_cil). When the
+item is freed through an error/shutdown/abort path before the CIL push
+worker processes it, the freed memory remains linked in ctx->log_items.
+
+The CIL push worker in xlog_cil_build_lv_chain() then dereferences
+the freed object via item->li_lv, triggering a KASAN slab-use-after-free.
+For details, see Link[1].
+
+Add down_read() on xc_ctx_lock before list_del_init() in
+xfs_buf_item_done() to safely remove the item from the CIL list.  This
+uses the same lock that protects CIL list operations: insertions are
+done under xc_ctx_lock read-side (xlog_cil_insert_items) and removals
+under write-side (xlog_cil_build_lv_chain).  The read lock is safe here
+because xfs_buf_item_done() is always called in process context (workqueue
+or direct I/O wait) and cannot deadlock with the CIL push worker which
+holds the write lock during xlog_cil_build_lv_chain - the worker does not
+trigger metadata buffer I/O that would call xfs_buf_item_done().
+
+Reported-by: syzbot+598a791b31c498b63c6b@syzkaller.appspotmail.com
+Closes: https://lore.kernel.org/all/6a069a95.050a0220.2921a.0006.GAE@google.com/T/ [1]
+Fixes: 816c330b605c ("xfs: factor out stale buffer item completion")
+Cc: stable@vger.kernel.org
+Suggested-by: Zhan Jun <zhanjun@uniontech.com>
+Signed-off-by: Gou Hao <gouhao@uniontech.com>
+---
+ fs/xfs/xfs_buf_item.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/fs/xfs/xfs_buf_item.c b/fs/xfs/xfs_buf_item.c
+index 8487635579e5..75529dfd1170 100644
+--- a/fs/xfs/xfs_buf_item.c
++++ b/fs/xfs/xfs_buf_item.c
+@@ -1067,6 +1067,11 @@ void
+ xfs_buf_item_done(
+ 	struct xfs_buf		*bp)
+ {
++	if (bp->b_log_item->bli_item.li_log->l_cilp) {
++		down_read(&bp->b_log_item->bli_item.li_log->l_cilp->xc_ctx_lock);
++		list_del_init(&bp->b_log_item->bli_item.li_cil);
++		up_read(&bp->b_log_item->bli_item.li_log->l_cilp->xc_ctx_lock);
++	}
+ 	/*
+ 	 * If we are forcibly shutting down, this may well be off the AIL
+ 	 * already. That's because we simulate the log-committed callbacks to
