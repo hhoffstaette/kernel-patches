@@ -1,0 +1,37 @@
+https://lore.kernel.org/linux-block/CAGis_TVSAPjYwVjUyur0_NFsDi9jmJ_oWhBHrJ-bEknG-nJO9Q@mail.gmail.com/
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index ae8494d88897..37197502147e 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1128,7 +1128,9 @@ static inline void blk_account_io_start(struct request *req)
+ 		return;
+ 
+ 	req->rq_flags |= RQF_IO_STAT;
+-	req->start_time_ns = blk_time_get_ns();
++
++	if (!current->plug)
++		req->start_time_ns = blk_time_get_ns();
+ 
+ 	/*
+ 	 * All non-passthrough requests are created from a bio with one
+@@ -2969,6 +2969,8 @@ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
+ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
+ {
+ 	unsigned int depth;
++	struct request *rq;
++	u64 now;
+ 
+ 	/*
+ 	 * We may have been called recursively midway through handling
+@@ -2982,6 +2982,10 @@ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
+ 	depth = plug->rq_count;
+ 	plug->rq_count = 0;
+ 
++	now = ktime_get_ns();
++	rq_list_for_each(&plug->mq_list, rq)
++		rq->start_time_ns = now;
++
+ 	if (!plug->has_elevator && !from_schedule) {
+ 		if (plug->multiple_queues) {
+ 			blk_mq_dispatch_multiple_queue_requests(&plug->mq_list);
