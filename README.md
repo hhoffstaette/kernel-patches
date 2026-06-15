@@ -22,9 +22,8 @@ A patch series should apply cleanly to the *latest* version of the respective -s
 release on [kernel.org](https://www.kernel.org/); if it does not then **please** file
 a bug here on Codeberg. Older release series will only see sporadic updates, if any.
 
-**Series: 7.0**
+**Series: 7.1**
 
-- btrfs: fixes from 7.1+
-- net: fixes from 7.1+
+- block/btrfs/net/vfs/xfs: fixes from 7.2+
 - prjc: [ProjectC](https://gitlab.com/alfredchen/projectc) CPU scheduler
 

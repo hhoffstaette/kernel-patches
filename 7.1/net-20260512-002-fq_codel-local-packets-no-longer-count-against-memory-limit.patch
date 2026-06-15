@@ -1,0 +1,36 @@
+From: Eric Dumazet <edumazet@google.com>
+To: "David S . Miller" <davem@davemloft.net>, Jakub Kicinski <kuba@kernel.org>, 
+	Paolo Abeni <pabeni@redhat.com>
+Cc: Simon Horman <horms@kernel.org>, Jamal Hadi Salim <jhs@mojatatu.com>, Jiri Pirko <jiri@resnulli.us>, 
+	"=?UTF-8?q?Toke=20H=C3=B8iland-J=C3=B8rgensen?=" <toke@toke.dk>, netdev@vger.kernel.org, eric.dumazet@gmail.com, 
+	Eric Dumazet <edumazet@google.com>
+Subject: [PATCH net-next 2/2] net/sched: fq_codel: local packets no longer count against memory limit
+Date: Tue, 12 May 2026 09:48:59 +0000
+
+Commit 95b58430abe7 ("fq_codel: add memory limitation per queue")
+claimed that the 32Mb default was "reasonable even for heavy duty usages."
+
+In practice, this is not the case.
+
+Packets that are associated with local sockets sk_wmem_alloc
+do not really need additional memory control.
+
+[HH: context fix for 7.1]
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/sched/sch_fq_codel.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/sched/sch_fq_codel.c b/net/sched/sch_fq_codel.c
+index 1b1de693d4c64a1f5f4e9e788371829dea91740e..71107dc52be799a14f370f2ad74d2eadd93992c1 100644
+--- a/net/sched/sch_fq_codel.c
++++ b/net/sched/sch_fq_codel.c
+@@ -212,7 +212,7 @@ static int fq_codel_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+ 		q->new_flow_count++;
+ 		WRITE_ONCE(flow->deficit, q->quantum);
+ 	}
+-	get_codel_cb(skb)->mem_usage = skb->truesize;
++	get_codel_cb(skb)->mem_usage = is_skb_wmem(skb) ? 0 : skb->truesize;
+ 	q->memory_usage += get_codel_cb(skb)->mem_usage;
+ 	memory_limited = q->memory_usage > q->memory_limit;
+ 	if (++sch->q.qlen <= sch->limit && !memory_limited)

@@ -1,0 +1,101 @@
+From: Eric Dumazet <edumazet@google.com>
+To: "David S . Miller" <davem@davemloft.net>, Jakub Kicinski <kuba@kernel.org>, 
+	Paolo Abeni <pabeni@redhat.com>
+Cc: Simon Horman <horms@kernel.org>, Neal Cardwell <ncardwell@google.com>, 
+	Kuniyuki Iwashima <kuniyu@google.com>, netdev@vger.kernel.org, eric.dumazet@gmail.com, 
+	Eric Dumazet <edumazet@google.com>
+Subject: [PATCH net-next] tcp: add tcp_mstamp_refresh_inline()
+Date: Wed, 29 Apr 2026 01:08:09 +0000
+
+We want to inline tcp_mstamp_refresh() in fast path only:
+
+- tcp_rcv_established()
+- tcp_write_xmit()
+
+Add tcp_mstamp_refresh_inline() for this purpose.
+
+Add noinline qualifier on tcp_mstamp_refresh() for the other paths,
+to reduce bloat.
+
+$ scripts/bloat-o-meter -t vmlinux.old vmlinux.new
+add/remove: 0/0 grow/shrink: 1/4 up/down: 26/-123 (-97)
+Function                                     old     new   delta
+tcp_rcv_established                         2238    2264     +26
+tcp_connect                                 4027    4003     -24
+tcp_tsq_write                                152     120     -32
+tcp_send_active_reset                        476     444     -32
+tcp_send_window_probe                        235     200     -35
+Total: Before=25316710, After=25316613, chg -0.00%
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ include/net/tcp.h     | 10 ++++++++++
+ net/ipv4/tcp_input.c  |  2 +-
+ net/ipv4/tcp_output.c | 12 +++---------
+ 3 files changed, 14 insertions(+), 10 deletions(-)
+
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index ecbadcb3a7446cb18c245e670ba49ff574dfaff7..fb2bc9edc7de01bfc494afa828428723a352c02b 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -1015,6 +1015,16 @@ static inline u32 tcp_time_stamp_ts(const struct tcp_sock *tp)
+ 	return tcp_time_stamp_ms(tp);
+ }
+ 
++/* Refresh clocks of a TCP socket,
++ * ensuring monotically increasing values.
++ */
++static inline void tcp_mstamp_refresh_inline(struct tcp_sock *tp)
++{
++	u64 val = tcp_clock_ns();
++
++	tp->tcp_clock_cache = val;
++	tp->tcp_mstamp = div_u64(val, NSEC_PER_USEC);
++}
+ void tcp_mstamp_refresh(struct tcp_sock *tp);
+ 
+ static inline u32 tcp_stamp_us_delta(u64 t1, u64 t0)
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index d5c9e65d97606d8eb57aba8ebc2373adf1bed62b..7995a89bafc9d1d997b936eeac3964cdd7e7741a 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -6474,7 +6474,7 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
+ 	/* TCP congestion window tracking */
+ 	trace_tcp_probe(sk, skb);
+ 
+-	tcp_mstamp_refresh(tp);
++	tcp_mstamp_refresh_inline(tp);
+ 	if (unlikely(!rcu_access_pointer(sk->sk_rx_dst)))
+ 		inet_csk(sk)->icsk_af_ops->sk_rx_dst_set(sk, skb);
+ 	/*
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index f9d8755705f762fe4da3064d2b1bfce4828ec0c1..c8d7b5d20d1874bb7840e1c480195076830f1058 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -52,15 +52,9 @@
+ 
+ #include <trace/events/tcp.h>
+ 
+-/* Refresh clocks of a TCP socket,
+- * ensuring monotically increasing values.
+- */
+-void tcp_mstamp_refresh(struct tcp_sock *tp)
++void noinline tcp_mstamp_refresh(struct tcp_sock *tp)
+ {
+-	u64 val = tcp_clock_ns();
+-
+-	tp->tcp_clock_cache = val;
+-	tp->tcp_mstamp = div_u64(val, NSEC_PER_USEC);
++	tcp_mstamp_refresh_inline(tp);
+ }
+ 
+ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
+@@ -2971,7 +2965,7 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
+ 
+ 	sent_pkts = 0;
+ 
+-	tcp_mstamp_refresh(tp);
++	tcp_mstamp_refresh_inline(tp);
+ 
+ 	/* AccECN option beacon depends on mstamp, it may change mss */
+ 	if (tcp_ecn_mode_accecn(tp) && tcp_accecn_option_beacon_check(sk))
