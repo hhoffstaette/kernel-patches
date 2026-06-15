@@ -24,7 +24,9 @@ a bug here on Codeberg. Older release series will only see sporadic updates, if 
 
 Enjoy!
 
-**Current status (2026-04-27)**
+**Current status (2026-06-15)**
+
+- 7.1.0 is ready for testing.
 
 - 7.0.x is my current production branch.
 
