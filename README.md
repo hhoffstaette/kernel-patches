@@ -24,11 +24,9 @@ a bug here on Codeberg. Older release series will only see sporadic updates, if 
 
 Enjoy!
 
-**Current status (2026-06-15)**
+**Current status (2026-06-28)**
 
-- 7.1.0 is ready for testing.
+- 7.1.x is my current production branch.
 
-- 7.0.x is my current production branch.
-
-- all other branches < 7.0.x are EOL for me.
+- all other branches < 7.1.x are EOL for me.
 
