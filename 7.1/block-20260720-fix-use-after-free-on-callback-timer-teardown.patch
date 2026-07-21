@@ -1,0 +1,48 @@
+From: Tao Cui <cui.tao@linux.dev>
+To: Jens Axboe <axboe@kernel.dk>
+Cc: Tejun Heo <tj@kernel.org>, Josef Bacik <josef@toxicpanda.com>, Omar Sandoval <osandov@fb.com>, Bart Van Assche <bvanassche@acm.org>, linux-block@vger.kernel.org, cgroups@vger.kernel.org, linux-kernel@vger.kernel.org, cui.tao@linux.dev, Tao Cui <cuitao@kylinos.cn>, stable@vger.kernel.org
+Subject: [PATCH] block/blk-stat: fix use-after-free on callback timer teardown
+Date: Mon, 20 Jul 2026 21:36:22 +0800
+
+From: Tao Cui <cuitao@kylinos.cn>
+
+blk_stat_remove_callback() cancels a callback's timer with
+timer_delete_sync(), and its callers free the timer's data right after:
+wbt_exit() does blk_stat_remove_callback() then wbt_free(), which
+kfree()s struct rq_wb -- the very object the timer callback dereferences
+as cb->data.
+
+The blk-stat timer callback invokes the consumer's callback (wb_timer_fn
+for WBT), which re-arms the timer via mod_timer() while there is
+in-flight IO or an active scale_step.  By the timer API contract,
+timer_delete_sync() is only meaningful when the caller guarantees the
+timer is not restarted; with no shutdown guard in the callback, the
+re-arm can win the race -- the callback re-arms the timer,
+timer_delete_sync() returns, the data is freed, and the re-armed timer
+later fires and dereferences freed memory.
+
+Use timer_shutdown_sync(), which makes any later mod_timer() a no-op and
+guarantees the timer cannot be queued or fire again once it returns.
+blk_stat_remove_callback() is the generic teardown path for every
+blk-stat callback, so this is safe for all users.
+
+Fixes: 34dbad5d26e2 ("blk-stat: convert to callback-based statistics reporting")
+Cc: stable@vger.kernel.org
+Signed-off-by: Tao Cui <cuitao@kylinos.cn>
+---
+ block/blk-stat.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/block/blk-stat.c b/block/blk-stat.c
+index d57c2fc6bf06..e7f8a9b0c1d2 100644
+--- a/block/blk-stat.c
++++ b/block/blk-stat.c
+@@ -161,7 +161,7 @@ void blk_stat_remove_callback(struct request_queue *q, struct blk_stat_callback *cb)
+ 		blk_queue_flag_clear(QUEUE_FLAG_STATS, q);
+ 	spin_unlock_irqrestore(&q->stats->lock, flags);
+
+-	timer_delete_sync(&cb->timer);
++	timer_shutdown_sync(&cb->timer);
+ }
+
+ static void blk_stat_free_callback_rcu(struct rcu_head *head)
