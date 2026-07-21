@@ -15,7 +15,7 @@ In practice, this is not the case.
 Packets that are associated with local sockets sk_wmem_alloc
 do not really need additional memory control.
 
-[HH: context fix for 7.1]
+[HH: context fix for 7.1.5]
 Signed-off-by: Eric Dumazet <edumazet@google.com>
 ---
  net/sched/sch_fq_codel.c | 2 +-
@@ -31,6 +31,6 @@ index 1b1de693d4c64a1f5f4e9e788371829dea91740e..71107dc52be799a14f370f2ad74d2ead
  	}
 -	get_codel_cb(skb)->mem_usage = skb->truesize;
 +	get_codel_cb(skb)->mem_usage = is_skb_wmem(skb) ? 0 : skb->truesize;
- 	q->memory_usage += get_codel_cb(skb)->mem_usage;
- 	memory_limited = q->memory_usage > q->memory_limit;
- 	if (++sch->q.qlen <= sch->limit && !memory_limited)
+	q->memory_usage += get_codel_cb(skb)->mem_usage;
+	memory_limited = q->memory_usage > q->memory_limit;
+	qdisc_qlen_inc(sch);
