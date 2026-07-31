@@ -1,0 +1,81 @@
+From: Usama Arif <usama.arif@linux.dev>
+To: brauner@kernel.org, jack@suse.cz, linux-fsdevel@vger.kernel.org, linux-kernel@vger.kernel.org, Al Viro <viro@zeniv.linux.org.uk>, d@ilvokhin.com, shakeel.butt@linux.dev, hannes@cmpxchg.org, riel@surriel.com, kernel-team@meta.com
+Cc: Usama Arif <usama.arif@linux.dev>
+Subject: [PATCH] eventpoll: compute timer slack lazily in ep_poll()
+Date: Tue,  7 Jul 2026 12:02:38 -0700
+
+ep_poll() computes the timer slack via select_estimate_accuracy() up front,
+before checking whether events are already available.
+select_estimate_accuracy() reads the clock (ktime_get_ts64()), and the
+resulting slack is only consumed by the schedule_hrtimeout_range() call on
+the blocking path.
+
+A busy poller such as an L7 proxy event loop calls epoll_wait() at a very
+high rate and often finds events already pending, returning via
+ep_try_send_events() without ever blocking.  In that case the up-front
+slack estimation - including its clock read - is pure overhead.  read_tsc()
+attributable to select_estimate_accuracy() sometimes shows up in perf profiles
+of such a workload via the epoll_wait() path.
+
+Move the slack estimation to the point where the thread is actually about
+to sleep.  The timeout passed to ep_poll() is already an absolute deadline
+(ep_timeout_to_timespec()), so deferring the estimate does not change the
+wakeup time; taken closer to the sleep it is, if anything, marginally more
+accurate.  On the common non-blocking path the clock read is skipped
+entirely.
+
+Measured on a host running a Meta production workload with the following
+bpftrace script:
+
+  #!/usr/bin/bpftrace
+  fentry:__x64_sys_epoll_wait,
+  fentry:__x64_sys_epoll_pwait   { @in[tid] = 1; }
+  fexit:__x64_sys_epoll_wait,
+  fexit:__x64_sys_epoll_pwait    { delete(@in, tid); }
+  fentry:select_estimate_accuracy /@in[tid]/ { @sea++; }
+  fentry:schedule_hrtimeout_range /@in[tid]/ { @shr++; }
+  interval:s:30 {
+      printf("sea=%lld shr=%lld wasted=%lld (%d%%)\n",
+             @sea, @shr, @sea - @shr, (@sea - @shr) * 100 / @sea);
+      exit();
+  }
+
+Over a 30s window:
+
+sea=3,587,704 shr=3,003,920 wasted=583,784 (16%)
+
+So ~16% of ep_poll invocations of select_estimate_accuracy have no
+consumer.
+
+Signed-off-by: Usama Arif <usama.arif@linux.dev>
+---
+ fs/eventpoll.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/eventpoll.c b/fs/eventpoll.c
+index 0e65c7431dfc..128d7fd3d0ea 100644
+--- a/fs/eventpoll.c
++++ b/fs/eventpoll.c
+@@ -2248,7 +2248,6 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
+ 	lockdep_assert_irqs_enabled();
+ 
+ 	if (timeout && (timeout->tv_sec | timeout->tv_nsec)) {
+-		slack = select_estimate_accuracy(timeout);
+ 		to = &expires;
+ 		*to = timespec64_to_ktime(*timeout);
+ 	} else if (timeout) {
+@@ -2327,10 +2326,13 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
+ 
+ 		spin_unlock_irq(&ep->lock);
+ 
+-		if (!eavail)
++		if (!eavail) {
++			if (to)
++				slack = select_estimate_accuracy(timeout);
+ 			timed_out = !ep_schedule_timeout(to) ||
+ 				!schedule_hrtimeout_range(to, slack,
+ 							  HRTIMER_MODE_ABS);
++		}
+ 		__set_current_state(TASK_RUNNING);
+ 
+ 		/*
