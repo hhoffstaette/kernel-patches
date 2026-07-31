@@ -1,0 +1,73 @@
+From: Yun Zhou <yun.zhou@windriver.com>
+To: cem@kernel.org, djwong@kernel.org
+Cc: hch@lst.de, willy@infradead.org, akpm@linux-foundation.org, hwenwur@gmail.com, linux-xfs@vger.kernel.org, linux-kernel@vger.kernel.org, yun.zhou@windriver.com
+Subject: [PATCH v2 2/2] xfs: restore nofs context unconditionally in xfs_trans_roll
+Date: Sun, 19 Jul 2026 17:57:32 +0800
+
+When __xfs_trans_commit() fails in xfs_trans_roll(), the NOFS context
+is cleared but only restored in the success path.  This leaves the
+error path without nofs protection, causing a circular lock dependency
+between xfs_nondir_ilock_class and fs_reclaim:
+
+       CPU0                    CPU1
+       ----                    ----
+  lock(&xfs_nondir_ilock_class);
+                               lock(fs_reclaim);
+                               lock(&xfs_nondir_ilock_class);
+  lock(fs_reclaim);
+
+Fix this by transferring the nofs context from the old transaction to
+the new one in xfs_trans_dup() via memalloc_flags_move(), so it remains
+active throughout the entire roll sequence regardless of commit success
+or failure.
+
+Reported-by: syzbot+59178abfeb0ea3f0ab20@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=59178abfeb0ea3f0ab20
+Fixes: a1ca658d649a ("xfs: fix incorrect context handling in xfs_trans_roll")
+Suggested-by: Darrick J. Wong <djwong@kernel.org>
+Signed-off-by: Yun Zhou <yun.zhou@windriver.com>
+---
+ fs/xfs/xfs_trans.c | 9 +++------
+ fs/xfs/xfs_trans.h | 2 +-
+ 2 files changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/fs/xfs/xfs_trans.c b/fs/xfs/xfs_trans.c
+index 7bfbd9f6f0df..89818c67b64f 100644
+--- a/fs/xfs/xfs_trans.c
++++ b/fs/xfs/xfs_trans.c
+@@ -127,6 +127,9 @@ xfs_trans_dup(
+ 	/* move deferred ops over to the new tp */
+ 	xfs_defer_move(ntp, tp);
+ 
++	/* move the nofs context to the new transaction */
++	ntp->t_pflags = memalloc_flags_move(&tp->t_pflags);
++
+ 	xfs_trans_dup_dqinfo(tp, ntp);
+ 	return ntp;
+ }
+@@ -1041,12 +1044,6 @@ xfs_trans_roll(
+ 	 * locked be logged in the prior and the next transactions.
+ 	 */
+ 	tp = *tpp;
+-	/*
+-	 * __xfs_trans_commit cleared the NOFS flag by calling into
+-	 * xfs_trans_free.  Set it again here before doing memory
+-	 * allocations.
+-	 */
+-	xfs_trans_set_context(tp);
+ 	error = xfs_log_regrant(tp->t_mountp, tp->t_ticket);
+ 	if (error)
+ 		return error;
+diff --git a/fs/xfs/xfs_trans.h b/fs/xfs/xfs_trans.h
+index eb83c5dac032..fd792584275a 100644
+--- a/fs/xfs/xfs_trans.h
++++ b/fs/xfs/xfs_trans.h
+@@ -152,7 +152,7 @@ typedef struct xfs_trans {
+ 	struct list_head	t_items;	/* log item descriptors */
+ 	struct list_head	t_busy;		/* list of busy extents */
+ 	struct list_head	t_dfops;	/* deferred operations */
+-	unsigned long		t_pflags;	/* saved process flags state */
++	unsigned int		t_pflags;	/* saved process flags state */
+ } xfs_trans_t;
+ 
+ /*

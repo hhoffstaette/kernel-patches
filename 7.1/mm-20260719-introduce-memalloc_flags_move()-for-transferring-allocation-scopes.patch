@@ -1,0 +1,50 @@
+From: Yun Zhou <yun.zhou@windriver.com>
+To: cem@kernel.org, djwong@kernel.org
+Cc: hch@lst.de, willy@infradead.org, akpm@linux-foundation.org, hwenwur@gmail.com, linux-xfs@vger.kernel.org, linux-kernel@vger.kernel.org, yun.zhou@windriver.com
+Subject: [PATCH v2 1/2] mm: introduce memalloc_flags_move() for transferring allocation scopes
+Date: Sun, 19 Jul 2026 17:57:31 +0800
+
+Add memalloc_flags_move() to transfer a saved memalloc scope from one
+tracking variable to another.  The source is zeroed so that a
+subsequent memalloc_flags_restore() on it becomes a no-op, effectively
+transferring ownership of the scope to the destination.
+
+This is needed when a subsystem hands off an allocation context from
+one structure to another (e.g. during transaction rolling in
+filesystems), and needs to ensure the scope remains active without an
+extra save/restore cycle.
+
+Suggested-by: Darrick J. Wong <djwong@kernel.org>
+Signed-off-by: Yun Zhou <yun.zhou@windriver.com>
+---
+ include/linux/sched/mm.h | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/include/linux/sched/mm.h b/include/linux/sched/mm.h
+index 95d0040df584..a6de84b70c0a 100644
+--- a/include/linux/sched/mm.h
++++ b/include/linux/sched/mm.h
+@@ -342,6 +342,23 @@ static inline void memalloc_flags_restore(unsigned flags)
+ 	current->flags &= ~flags;
+ }
+ 
++/**
++ * memalloc_flags_move - transfer a memalloc scope from one tracking
++ * variable to another.
++ * @old_flags: pointer to the source flags (will be zeroed)
++ *
++ * Returns the flags value to store in the destination.  The source is
++ * set to zero so that a subsequent memalloc_flags_restore() on it is
++ * a no-op.
++ */
++static inline unsigned int memalloc_flags_move(unsigned int *old_flags)
++{
++	unsigned int ret = *old_flags;
++
++	*old_flags = 0;
++	return ret;
++}
++
+ /**
+  * memalloc_noio_save - Marks implicit GFP_NOIO allocation scope.
+  *
