@@ -1,3 +1,7 @@
+Changes in -r1 for:
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=912edebe8501a36c6bedcef03bd238ab90a7e060
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=524ab50763af33d65e6e042cf7034cd8f82d437b
+
 --- a/Documentation/admin-guide/sysctl/kernel.rst
 +++ b/Documentation/admin-guide/sysctl/kernel.rst
 @@ -1734,3 +1734,12 @@ is 10 seconds.
@@ -561,9 +565,9 @@
  	bool "Extensible Scheduling Class"
 -	depends on BPF_SYSCALL && BPF_JIT && DEBUG_INFO_BTF
 +	depends on BPF_SYSCALL && BPF_JIT && DEBUG_INFO_BTF && !SCHED_ALT
+ 	select GENERIC_ALLOCATOR
  	select STACKTRACE if STACKTRACE_SUPPORT
  	help
- 	  This option enables a new scheduler class sched_ext (SCX), which
 --- a/kernel/cgroup/cpuset.c
 +++ b/kernel/cgroup/cpuset.c
 @@ -767,7 +767,7 @@ out:
@@ -774,7 +778,7 @@
  obj-y += build_utility.o
 --- /dev/null
 +++ b/kernel/sched/alt_core.c
-@@ -0,0 +1,7694 @@
+@@ -0,0 +1,7710 @@
 +/*
 + *  kernel/sched/alt_core.c
 + *
@@ -5903,10 +5907,26 @@
 +	sched_submit_work(current);
 +}
 +
++/*
++ * Used within the futex syscall context, skips sched_submit_work() because none
++ * its work will be done. Asserts ensure that it is indeed the case.
++ */
++void rt_mutex_futex_pre_schedule(void)
++{
++	lockdep_assert(!(current->flags & (PF_WQ_WORKER | PF_IO_WORKER)));
++	lockdep_assert(!current->plug);
++	lockdep_assert(!fetch_and_set(current->sched_rt_mutex, 1));
++}
++
 +void rt_mutex_schedule(void)
 +{
 +	lockdep_assert(current->sched_rt_mutex);
 +	__schedule_loop(SM_NONE);
++}
++
++void rt_mutex_futex_post_schedule(void)
++{
++	lockdep_assert(fetch_and_set(current->sched_rt_mutex, 0));
 +}
 +
 +void rt_mutex_post_schedule(void)
