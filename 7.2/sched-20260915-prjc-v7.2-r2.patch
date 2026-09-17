@@ -1,3 +1,6 @@
+Changes in -r2 for:
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=cdd812d0683dee14ead02c9eded568685e61b23f
+
 diff --git a/Documentation/admin-guide/sysctl/kernel.rst b/Documentation/admin-guide/sysctl/kernel.rst
 index c6994e55d141..cf28e5f29109 100644
 --- a/Documentation/admin-guide/sysctl/kernel.rst
@@ -695,8 +698,8 @@ index 2c0b1c02920f..68e767fa2d4c 100644
  	__unhash_process(post, tsk, group_dead);
  	write_sequnlock(&sig->stats_lock);
 @@ -295,8 +295,8 @@ void release_task(struct task_struct *p)
- 	/* @thread_pid can't go away until free_pids() below */
  	proc_flush_pid(thread_pid);
+ 	put_pid(thread_pid);
  	exit_cred_namespaces(p);
 -	add_device_randomness(&p->se.sum_exec_runtime,
 -			      sizeof(p->se.sum_exec_runtime));
