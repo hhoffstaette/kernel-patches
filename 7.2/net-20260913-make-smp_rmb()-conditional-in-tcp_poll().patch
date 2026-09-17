@@ -1,0 +1,57 @@
+From: Eric Dumazet <edumazet@google.com>
+To: David S . Miller <davem@davemloft.net>, Jakub Kicinski <kuba@kernel.org>, Paolo Abeni <pabeni@redhat.com>
+Cc: Simon Horman <horms@kernel.org>, Neal Cardwell <ncardwell@google.com>, Kuniyuki Iwashima <kuniyu@google.com>, netdev@vger.kernel.org, eric.dumazet@gmail.com, Eric Dumazet <edumazet@google.com>
+Subject: [PATCH net-next] tcp: make smp_rmb() conditional in tcp_poll()
+Date: Sun, 13 Sep 2026 12:32:24 +0000
+
+Commit a4d258036ed9 ("tcp: Fix race in tcp_poll") added smp_rmb() in
+tcp_poll() and smp_wmb() in tcp_reset() (now tcp_done_with_error())
+to ensure that if tcp_poll() observed socket closure, it would also
+observe sk->sk_err.
+
+Currently, tcp_poll() unconditionally executes smp_rmb() at the end
+of every invocation, which on weakly-ordered architectures such as ARM64
+emits a memory barrier instruction (dmb ishld) on the poll fast path,
+even for healthy, active sockets.
+
+However, tcp_poll() only needs this barrier if socket closure has been
+observed, to ensure that the error code set by tcp_done_with_error()
+before socket closure is visible before returning EPOLLERR.
+
+Move smp_rmb() inside the conditional block handling socket closure
+(shutdown == SHUTDOWN_MASK || state == TCP_CLOSE). For healthy
+connected sockets in epoll, tcp_poll() avoids the barrier entirely.
+
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+---
+ net/ipv4/tcp.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 562752352afe4d7ab864c00b8562c8b8489a76f9..3ac4856852794736c5d49f042ecd08e4246bdd6d 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -578,8 +578,13 @@ __poll_t tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
+ 	 * blocking on fresh not-connected or disconnected socket. --ANK
+ 	 */
+ 	shutdown = READ_ONCE(sk->sk_shutdown);
+-	if (shutdown == SHUTDOWN_MASK || state == TCP_CLOSE)
++	if (shutdown == SHUTDOWN_MASK || state == TCP_CLOSE) {
+ 		mask |= EPOLLHUP;
++		/* Coupled with smp_wmb() in tcp_done_with_error() to ensure
++		 * sk->sk_err is visible if socket closure was observed.
++		 */
++		smp_rmb();
++	}
+ 	if (shutdown & RCV_SHUTDOWN)
+ 		mask |= EPOLLIN | EPOLLRDNORM | EPOLLRDHUP;
+ 
+@@ -626,8 +631,6 @@ __poll_t tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
+ 		 */
+ 		mask |= EPOLLOUT | EPOLLWRNORM;
+ 	}
+-	/* This barrier is coupled with smp_wmb() in tcp_done_with_error() */
+-	smp_rmb();
+ 	if (READ_ONCE(sk->sk_err) ||
+ 	    !skb_queue_empty_lockless(&sk->sk_error_queue))
+ 		mask |= EPOLLERR;
