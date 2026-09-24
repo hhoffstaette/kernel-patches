@@ -1,0 +1,57 @@
+From: Yilin Zhang <yilinzhang@moonshot.ai>
+To: David S. Miller <davem@davemloft.net>, Eric Dumazet <edumazet@google.com>, Neal Cardwell <ncardwell@google.com>
+Cc: Yilin Zhang <yilinzhang@moonshot.ai>, netdev@vger.kernel.org, linux-kernel@vger.kernel.org, Kimi Security Team <bug-report@moonshot.ai>, Weiming Shi <shiweiming@moonshot.ai>
+Subject: [PATCH] tcp: fix use-after-free of retransmit_skb_hint in tcp_send_synack()
+Date: Sun, 20 Sep 2026 14:34:19 +0800
+
+When tcp_send_synack() replaces the cloned SYN skb at the head of the
+retransmit queue with a copy, it frees the original with
+tcp_rtx_queue_unlink_and_free() and only repairs tp->highest_sack.
+tp->retransmit_skb_hint keeps pointing at the freed
+skbuff_fclone_cache object.
+
+The dangling hint is read in tcp_verify_retransmit_hint() and used as
+the root of the rbtree walk in tcp_xmit_retransmit_queue().  An
+unprivileged TFO client (sendmsg(MSG_FASTOPEN)) can arm the hint with
+an attacker-supplied ICMP fragmentation-needed message, after which a
+simultaneous open frees the armed SYN skb:
+
+  BUG: KASAN: slab-use-after-free in tcp_mark_skb_lost (net/ipv4/tcp_input.c:1316)
+  Read of size 4 at addr ffff88800604d928 by task swapper/1/0
+  Call Trace:
+   tcp_mark_skb_lost (net/ipv4/tcp_input.c:1316)
+   tcp_simple_retransmit (net/ipv4/tcp_input.c:3158)
+   tcp_v4_err (net/ipv4/tcp_ipv4.c:587)
+
+Sync the hint to the copy.
+
+[HH: fixed up context in hunk #2 to apply cleanly]
+Fixes: 75c119afe14f ("tcp: implement rb-tree based retransmit queue")
+Reported-by: Kimi Security Team <bug-report@moonshot.ai>
+Tested-by: Weiming Shi <shiweiming@moonshot.ai>
+Signed-off-by: Yilin Zhang <yilinzhang@moonshot.ai>
+---
+ net/ipv4/tcp_output.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 3b320ee77..498c9819a 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -3887,6 +3887,7 @@ void tcp_send_active_reset(struct sock *sk, gfp_t priority,
+ int tcp_send_synack(struct sock *sk)
+ {
+ 	struct sk_buff *skb;
++	struct tcp_sock *tp = tcp_sk(sk);
+ 
+ 	skb = tcp_rtx_queue_head(sk);
+ 	if (!skb || !(TCP_SKB_CB(skb)->tcp_flags & TCPHDR_SYN)) {
+@@ -3903,6 +3903,8 @@ int tcp_send_synack(struct sock *sk)
+ 			if (!nskb)
+ 				return -ENOMEM;
+ 			INIT_LIST_HEAD(&nskb->tcp_tsorted_anchor);
++			if (skb == tp->retransmit_skb_hint)
++				tp->retransmit_skb_hint = nskb;
+ 			tcp_highest_sack_replace(sk, skb, nskb);
+ 			tcp_rtx_queue_unlink_and_free(skb, sk);
+ 			__skb_header_release(nskb);
