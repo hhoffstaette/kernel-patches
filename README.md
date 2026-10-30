@@ -24,9 +24,9 @@ a bug here on Codeberg. Older release series will only see sporadic updates, if 
 
 Enjoy!
 
-**Current status (2026-09-02)**
+**Current status (2026-10-30)**
 
-- 7.2.x is my current production branch.
+- 7.3.x is my current production branch.
 
-- all other branches < 7.2.x are EOL for me.
+- all other branches < 7.3.x are EOL for me.
 
