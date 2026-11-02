@@ -1,0 +1,35 @@
+SCHED_ALT and FAIR_GROUP_SCHED conflict, causing a build error:
+
+In file included from kernel/sched/build_utility.c:75:
+kernel/sched/debug.c: In function 'sched_cgroup_write':
+kernel/sched/debug.c:682:9: error: implicit declaration of function '__sched_cgroup_mode_update'; did you mean 'sched_cgroup_mode'? [-Wimplicit-function-declar
+ation]
+  682 |         __sched_cgroup_mode_update(mode);
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~~
+      |         sched_cgroup_mode
+make[4]: *** [scripts/Makefile.build:290: kernel/sched/build_utility.o] Error 1
+make[3]: *** [scripts/Makefile.build:551: kernel/sched] Error 2
+make[2]: *** [scripts/Makefile.build:551: kernel] Error 2
+
+Exclude FAIR_GROUP_SCHED/RT_GROUP_SCHED when SCHED_ALT is enabled.
+
+--- a/init/Kconfig	2026-11-02 15:23:24.670726262 +0100
++++ b/init/Kconfig	2026-11-02 15:23:06.851751334 +0100
+@@ -1203,7 +1203,7 @@ config GROUP_SCHED_BANDWIDTH
+ 
+ config FAIR_GROUP_SCHED
+ 	bool "Group scheduling for SCHED_OTHER"
+-	depends on CGROUP_SCHED
++	depends on CGROUP_SCHED && !SCHED_ALT
+ 	select GROUP_SCHED_WEIGHT
+ 	default CGROUP_SCHED
+ 
+@@ -1221,7 +1221,7 @@ config CFS_BANDWIDTH
+ 
+ config RT_GROUP_SCHED
+ 	bool "Group scheduling for SCHED_RR/FIFO"
+-	depends on CGROUP_SCHED
++	depends on CGROUP_SCHED && !SCHED_ALT
+ 	default n
+ 	help
+ 	  This feature lets you explicitly allocate real CPU bandwidth
