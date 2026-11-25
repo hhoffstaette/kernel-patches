@@ -1,3 +1,7 @@
+r1 for:
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0965587d00b84f0a3b0fc94930d4a5f8ff011eda
+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=f7141257dd67d4936f906a6cfd1d0007721f6898
+
 diff --git a/Documentation/admin-guide/sysctl/kernel.rst b/Documentation/admin-guide/sysctl/kernel.rst
 index ffea61d448ebb..cdeb639d069ea 100644
 --- a/Documentation/admin-guide/sysctl/kernel.rst
@@ -184,12 +188,14 @@ index d35ae49a991f7..f2534316c92f7 100644
  	unsigned int			wakee_flips;
  	unsigned long			wakee_flip_decay_ts;
  	struct task_struct		*last_wakee;
-@@ -880,12 +881,26 @@ struct task_struct {
+@@ -880,14 +881,28 @@ struct task_struct {
  	 */
  	int				recent_used_cpu;
  	int				wake_cpu;
 +#endif /* !CONFIG_SCHED_ALT */
- 
+ 	/* CPU charged while is_blocked && in_iowait. */
+ 	int				iowait_cpu;
+
  	int				prio;
  	int				static_prio;
  	int				normal_prio;
@@ -916,7 +922,7 @@ index 0000000000000..a92eba316568f
 +__read_mostly int sysctl_resched_latency_warn_ms = 100;
 +__read_mostly int sysctl_resched_latency_warn_once = 1;
 +
-+#define ALT_SCHED_VERSION "v7.3-r0"
++#define ALT_SCHED_VERSION "v7.3-r1"
 +
 +#define STOP_PRIO		(MAX_RT_PRIO - 1)
 +
@@ -11277,7 +11283,7 @@ index b215b0ead9a60..1e736f2b0a776 100644
  	if (user) {
  #ifdef CONFIG_RT_GROUP_SCHED
  		/*
-@@ -635,16 +720,22 @@ int __sched_setscheduler(struct task_struct *p,
+@@ -635,11 +720,16 @@ int __sched_setscheduler(struct task_struct *p,
  			}
  		}
  	}
@@ -11291,8 +11297,10 @@ index b215b0ead9a60..1e736f2b0a776 100644
 +#else
  		task_rq_unlock(rq, p, &rf);
 +#endif /* !CONFIG_SCHED_ALT */
- 		if (cpuset_locked)
+ 		if (cpuset_locked) {
  			cpuset_unlock();
+ 			cpuset_locked = false;
+@@ -647,6 +737,7 @@ int __sched_setscheduler(struct task_struct *p,
  		goto recheck;
  	}
  
